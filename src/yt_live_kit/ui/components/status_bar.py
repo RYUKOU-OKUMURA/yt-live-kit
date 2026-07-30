@@ -13,12 +13,14 @@ from yt_live_kit.services.pipeline import load_result_from_disk
 from yt_live_kit.ui.state import (
     clear_active_job_id,
     clear_cut_result,
+    clear_job_error,
     get_active_job_id,
     get_last_job_id,
     is_job_handled,
     mark_job_handled,
     set_active_job_id,
     set_batch_summary,
+    set_job_error,
     set_last_job_id,
     set_result,
 )
@@ -110,7 +112,7 @@ def _handle_finished_job(job: JobState) -> None:
                 set_result(result)
                 clear_cut_result()
             else:
-                st.error(_RESULT_LOAD_ERROR)
+                set_job_error(_RESULT_LOAD_ERROR)
 
         _load_batch_summary_for_job(job, settings)
         clear_active_job_id()
@@ -120,7 +122,7 @@ def _handle_finished_job(job: JobState) -> None:
     if job.status in ("failed", "interrupted"):
         _load_batch_summary_for_job(job, settings)
         error_message = job.error or "処理に失敗しました。"
-        st.error(error_message)
+        set_job_error(error_message)
         clear_active_job_id()
         st.rerun(scope="app")
 
@@ -131,6 +133,7 @@ def render_status_bar() -> None:
     active = get_active_job(settings)
 
     if active is not None:
+        clear_job_error()
         set_active_job_id(active.job_id)
         set_last_job_id(active.job_id)
         _render_running_job(active)
@@ -144,6 +147,7 @@ def render_status_bar() -> None:
             return
 
         if job.status == "running":
+            clear_job_error()
             set_last_job_id(job.job_id)
             _render_running_job(job)
             return

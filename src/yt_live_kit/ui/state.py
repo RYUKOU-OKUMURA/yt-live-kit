@@ -15,6 +15,7 @@ SESSION_HANDLED_JOBS = "handled_job_ids"
 SESSION_INTERRUPTED_NOTICES = "interrupted_notices"
 SESSION_INTERRUPTED_SHOWN = "interrupted_notices_shown"
 SESSION_BATCH_SUMMARY = "batch_summary"
+SESSION_JOB_ERROR = "job_error"
 
 _orphans_initialized = False
 
@@ -112,6 +113,18 @@ def set_batch_summary(summary: dict[str, object] | None) -> None:
 
 def clear_batch_summary() -> None:
     st.session_state[SESSION_BATCH_SUMMARY] = None
+
+
+def get_job_error() -> str | None:
+    return st.session_state.get(SESSION_JOB_ERROR)
+
+
+def set_job_error(message: str | None) -> None:
+    st.session_state[SESSION_JOB_ERROR] = message
+
+
+def clear_job_error() -> None:
+    st.session_state[SESSION_JOB_ERROR] = None
 
 
 def init_orphans_once() -> list[str]:

@@ -142,12 +142,12 @@ def test_handle_finished_job_shows_error_on_failed() -> None:
         patch("yt_live_kit.ui.components.status_bar.is_job_handled", return_value=False),
         patch("yt_live_kit.ui.components.status_bar.mark_job_handled") as mark_handled,
         patch("yt_live_kit.ui.components.status_bar.clear_active_job_id") as clear_active,
-        patch("yt_live_kit.ui.components.status_bar.st.error") as show_error,
+        patch("yt_live_kit.ui.components.status_bar.set_job_error") as set_error,
         patch("yt_live_kit.ui.components.status_bar.st.rerun") as rerun,
     ):
         status_bar._handle_finished_job(job)
 
-    show_error.assert_called_once_with("字幕が見つかりません")
+    set_error.assert_called_once_with("字幕が見つかりません")
     clear_active.assert_called_once()
     mark_handled.assert_called_once_with("fail123")
     rerun.assert_called_once_with(scope="app")
@@ -169,12 +169,12 @@ def test_handle_finished_job_shows_error_when_result_missing() -> None:
         patch("yt_live_kit.ui.components.status_bar.load_result_from_disk", return_value=None),
         patch("yt_live_kit.ui.components.status_bar.set_result") as set_result,
         patch("yt_live_kit.ui.components.status_bar.clear_active_job_id") as clear_active,
-        patch("yt_live_kit.ui.components.status_bar.st.error") as show_error,
+        patch("yt_live_kit.ui.components.status_bar.set_job_error") as set_error,
         patch("yt_live_kit.ui.components.status_bar.st.rerun") as rerun,
     ):
         status_bar._handle_finished_job(job)
 
-    show_error.assert_called_once_with(
+    set_error.assert_called_once_with(
         "成果物を読み込めませんでした。処理済み一覧から開き直してください。"
     )
     set_result.assert_not_called()

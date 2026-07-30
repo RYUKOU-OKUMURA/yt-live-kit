@@ -11,7 +11,9 @@ from yt_live_kit.ui.components.status_bar import render_status_bar
 from yt_live_kit.ui.pages.history import render_history_page
 from yt_live_kit.ui.pages.run import render_run_page
 from yt_live_kit.ui.state import (
+    clear_job_error,
     get_interrupted_notices,
+    get_job_error,
     get_result,
     init_orphans_once,
     interrupted_notices_shown,
@@ -33,6 +35,11 @@ if not interrupted_notices_shown():
         mark_interrupted_notices_shown()
 
 render_status_bar()
+
+job_error = get_job_error()
+if job_error:
+    st.error(job_error)
+    clear_job_error()
 
 st.title("yt-live-kit")
 st.caption(f"v{__version__} — YouTube ライブアーカイブのタイムライン生成")
