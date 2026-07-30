@@ -20,6 +20,10 @@ class Settings(BaseSettings):
     sleep: float = Field(default=1.0, ge=0, description="URL 間のスリープ秒数")
     ytdlp_path: str = Field(default="yt-dlp", description="yt-dlp バイナリパス")
     ffmpeg_path: str = Field(default="ffmpeg", description="ffmpeg バイナリパス")
+    subtitle_font: str | None = Field(
+        default=None,
+        description="字幕焼き込み用フォント名（未指定時は自動検出）",
+    )
 
     def ensure_data_dir(self) -> Path:
         """data ディレクトリを作成して返す."""
