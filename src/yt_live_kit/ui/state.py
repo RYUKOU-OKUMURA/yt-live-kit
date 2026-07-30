@@ -14,6 +14,7 @@ SESSION_LAST_JOB = "last_job_id"
 SESSION_HANDLED_JOBS = "handled_job_ids"
 SESSION_INTERRUPTED_NOTICES = "interrupted_notices"
 SESSION_INTERRUPTED_SHOWN = "interrupted_notices_shown"
+SESSION_BATCH_SUMMARY = "batch_summary"
 
 _orphans_initialized = False
 
@@ -96,6 +97,21 @@ def interrupted_notices_shown() -> bool:
 
 def mark_interrupted_notices_shown() -> None:
     st.session_state[SESSION_INTERRUPTED_SHOWN] = True
+
+
+def get_batch_summary() -> dict[str, object] | None:
+    raw = st.session_state.get(SESSION_BATCH_SUMMARY)
+    if isinstance(raw, dict):
+        return raw
+    return None
+
+
+def set_batch_summary(summary: dict[str, object] | None) -> None:
+    st.session_state[SESSION_BATCH_SUMMARY] = summary
+
+
+def clear_batch_summary() -> None:
+    st.session_state[SESSION_BATCH_SUMMARY] = None
 
 
 def init_orphans_once() -> list[str]:

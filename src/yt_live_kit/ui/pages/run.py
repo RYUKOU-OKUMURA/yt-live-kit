@@ -2,43 +2,47 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
-
 import streamlit as st
 
 from yt_live_kit.services.batch import parse_urls, run_batch_job_target
-from yt_live_kit.services.jobs import JobBusyError, get_active_job, is_busy, start_job, update_job
-from yt_live_kit.services.pipeline import run
+from yt_live_kit.services.jobs import JobBusyError, is_busy, start_job
+from yt_live_kit.services.pipeline import run_single_job_target
 from yt_live_kit.ui.state import (
+    clear_batch_summary,
     clear_cut_result,
     clear_result,
+    get_batch_summary,
     set_active_job_id,
 )
 
 _BUSY_MESSAGE = "他の処理が実行中です。完了までお待ちください。"
 
 
-def _pipeline_progress_adapter(report) -> Callable[[str, str], None]:
-    def on_progress(stage: str, message: str) -> None:
-        report(stage=stage, message=message)
+def _render_batch_summary() -> None:
+    summary = get_batch_summary()
+    if not summary:
+        return
 
-    return on_progress
+    text = str(summary.get("summary", ""))
+    lines = summary.get("lines", [])
+    failed = int(summary.get("failed", 0) or 0)
+    success = int(summary.get("success", 0) or 0)
 
+    if failed > 0 and success > 0:
+        st.warning(text)
+    elif failed > 0 or success == 0:
+        st.error(text)
+    else:
+        st.success(text)
 
-def single_job_target(*, report, settings, url: str) -> None:
-    """start_job 用: 単本 URL を pipeline.run で処理する."""
-    result = run(url.strip(), settings, on_progress=_pipeline_progress_adapter(report))
-    active = get_active_job(settings)
-    if active is not None:
-        update_job(
-            active.job_id,
-            settings=settings,
-            video_id=result.video_id,
-            title=result.title,
-        )
+    if isinstance(lines, list) and lines:
+        with st.expander("URL 別ログ", expanded=False):
+            st.code("\n".join(str(line) for line in lines), language=None)
 
 
 def render_run_page() -> None:
+    _render_batch_summary()
+
     st.markdown(
         "YouTube **公開アーカイブ** の URL を貼り付けて「実行」を押すと、"
         "概要欄用のタイムライン（チャプター）、文字起こし全文、切り抜き候補が生成されます。"
@@ -71,10 +75,11 @@ def render_run_page() -> None:
         if run_clicked and url.strip() and not busy:
             clear_result()
             clear_cut_result()
+            clear_batch_summary()
             try:
                 job_id = start_job(
                     "single",
-                    single_job_target,
+                    run_single_job_target,
                     url=url.strip(),
                 )
                 set_active_job_id(job_id)
@@ -101,6 +106,7 @@ def render_run_page() -> None:
         if batch_clicked and urls and not busy:
             clear_result()
             clear_cut_result()
+            clear_batch_summary()
             try:
                 job_id = start_job(
                     "batch",

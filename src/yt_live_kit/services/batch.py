@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -224,6 +225,95 @@ def run_batch(
     return results
 
 
+def batch_summary_path(settings: Settings, job_id: str) -> Path:
+    return settings.data_dir / "_jobs" / f"{job_id}.batch_summary.json"
+
+
+def batch_log_path(settings: Settings, job_id: str) -> Path:
+    return settings.data_dir / "_jobs" / f"{job_id}.batch_log.txt"
+
+
+def _summarize_batch_results(
+    results: list[BatchItemResult],
+) -> tuple[int, int, int]:
+    success = sum(1 for item in results if item.status == "success")
+    skipped = sum(1 for item in results if item.status == "skipped")
+    failed = sum(1 for item in results if item.status == "failed")
+    return success, skipped, failed
+
+
+def _format_batch_summary(success: int, skipped: int, failed: int) -> str:
+    return f"一括処理完了: 成功 {success} / スキップ {skipped} / 失敗 {failed}"
+
+
+def _format_batch_line(item: BatchItemResult) -> str:
+    if item.status == "success":
+        return f"✅ {item.url}"
+    if item.status == "skipped":
+        return f"⏭️ {item.url}"
+    detail = f" — {item.error}" if item.error else ""
+    return f"❌ {item.url}{detail}"
+
+
+def write_batch_summary(
+    settings: Settings,
+    job_id: str,
+    *,
+    summary: str,
+    lines: list[str],
+    success: int,
+    skipped: int,
+    failed: int,
+) -> Path:
+    """バッチ完了サマリーを原子的に永続化する."""
+    settings.ensure_data_dir()
+    path = batch_summary_path(settings, job_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "summary": summary,
+        "lines": lines,
+        "success": success,
+        "skipped": skipped,
+        "failed": failed,
+    }
+    tmp_path = path.parent / f".{job_id}.batch_summary.tmp"
+    tmp_path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    os.replace(tmp_path, path)
+    return path
+
+
+def write_batch_log(settings: Settings, job_id: str, lines: list[str]) -> Path:
+    """URL 別ログをテキストで永続化する."""
+    settings.ensure_data_dir()
+    path = batch_log_path(settings, job_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.parent / f".{job_id}.batch_log.tmp"
+    tmp_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    os.replace(tmp_path, path)
+    return path
+
+
+def read_batch_summary(
+    settings: Settings | None,
+    job_id: str,
+) -> dict[str, object] | None:
+    """永続化済みバッチサマリーを読み込む."""
+    settings = settings or get_settings()
+    path = batch_summary_path(settings, job_id)
+    if not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    return data
+
+
 def run_batch_job_target(
     *,
     report,
@@ -247,6 +337,35 @@ def run_batch_job_target(
         on_progress=on_progress,
     )
 
+    success, skipped, failed = _summarize_batch_results(results)
+    summary = _format_batch_summary(success, skipped, failed)
+    lines = [_format_batch_line(item) for item in results]
+
+    active = get_active_job(settings)
+    job_id = active.job_id if active is not None else None
+
+    if job_id is not None:
+        write_batch_summary(
+            settings or get_settings(),
+            job_id,
+            summary=summary,
+            lines=lines,
+            success=success,
+            skipped=skipped,
+            failed=failed,
+        )
+        write_batch_log(settings or get_settings(), job_id, lines)
+
+    if success == 0 and failed >= 1:
+        raise PipelineError(
+            f"一括処理が完了しましたが、成功した動画がありません（失敗 {failed} 件）。"
+        )
+
+    if success == 0 and skipped >= 1 and failed == 0:
+        raise PipelineError(
+            f"すべてスキップされました（{skipped} 件）。処理対象がありませんでした。"
+        )
+
     last_result: PipelineResult | None = None
     for item in reversed(results):
         if item.status == "success" and item.result is not None:
@@ -254,13 +373,13 @@ def run_batch_job_target(
             break
 
     if last_result is None:
-        return
+        raise PipelineError("一括処理が完了しましたが、成功した動画がありません。")
 
-    active = get_active_job(settings)
     if active is not None:
         update_job(
             active.job_id,
             settings=settings,
             video_id=last_result.video_id,
             title=last_result.title,
+            message=summary,
         )
