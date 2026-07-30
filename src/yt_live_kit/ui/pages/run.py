@@ -16,6 +16,20 @@ from yt_live_kit.ui.state import (
 )
 
 _BUSY_MESSAGE = "他の処理が実行中です。完了までお待ちください。"
+_NO_TARGET_MESSAGE = (
+    "「チャプターを作る」「切り抜き候補を出す」のどちらかを選んでください。"
+)
+
+
+def single_run_disabled(
+    *,
+    busy: bool,
+    url: str,
+    do_chapters: bool,
+    do_clips: bool,
+) -> bool:
+    """単本実行ボタンを無効化するかどうか."""
+    return busy or not url.strip() or (not do_chapters and not do_clips)
 
 
 def batch_summary_severity(success: int, failed: int) -> str:
@@ -84,13 +98,29 @@ def render_run_page() -> None:
             placeholder="https://www.youtube.com/watch?v=...",
             help="公開アーカイブのみ対応しています。",
         )
+        col_chapters, col_clips = st.columns(2)
+        with col_chapters:
+            do_chapters = st.checkbox("チャプターを作る", value=True)
+        with col_clips:
+            do_clips = st.checkbox("切り抜き候補を出す", value=True)
+
+        nothing_selected = not do_chapters and not do_clips
+        if nothing_selected:
+            st.warning(_NO_TARGET_MESSAGE)
+
+        run_disabled = single_run_disabled(
+            busy=busy,
+            url=url,
+            do_chapters=do_chapters,
+            do_clips=do_clips,
+        )
         run_clicked = st.button(
             "実行",
             type="primary",
-            disabled=busy or not url.strip(),
+            disabled=run_disabled,
         )
 
-        if run_clicked and url.strip() and not busy:
+        if run_clicked and url.strip() and not run_disabled:
             clear_result()
             clear_cut_result()
             clear_batch_summary()
@@ -99,6 +129,8 @@ def render_run_page() -> None:
                     "single",
                     run_single_job_target,
                     url=url.strip(),
+                    do_chapters=do_chapters,
+                    do_clips=do_clips,
                 )
                 set_active_job_id(job_id)
                 st.rerun()
