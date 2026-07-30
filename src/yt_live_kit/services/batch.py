@@ -12,6 +12,7 @@ from typing import Literal
 
 from yt_live_kit.config import Settings, get_settings
 from yt_live_kit.services.history import is_video_processed
+from yt_live_kit.services.jobs import get_active_job, update_job
 from yt_live_kit.services.pipeline import PipelineError, PipelineResult, run
 from yt_live_kit.services.ytdlp import YtdlpError, extract_video_id
 
@@ -221,3 +222,45 @@ def run_batch(
         append_batch_status(status_entries, settings)
 
     return results
+
+
+def run_batch_job_target(
+    *,
+    report,
+    settings: Settings | None = None,
+    urls: list[str],
+    skip_existing: bool = False,
+) -> None:
+    """start_job 用: 一括処理を実行し、最後の成功結果をジョブに記録する."""
+
+    def on_progress(current: int, total: int, url: str, message: str) -> None:
+        report(
+            current=current,
+            total=total,
+            message=f"{current}/{total} — {url} — {message}",
+        )
+
+    results = run_batch(
+        urls,
+        settings,
+        skip_existing=skip_existing,
+        on_progress=on_progress,
+    )
+
+    last_result: PipelineResult | None = None
+    for item in reversed(results):
+        if item.status == "success" and item.result is not None:
+            last_result = item.result
+            break
+
+    if last_result is None:
+        return
+
+    active = get_active_job(settings)
+    if active is not None:
+        update_job(
+            active.job_id,
+            settings=settings,
+            video_id=last_result.video_id,
+            title=last_result.title,
+        )

@@ -1,12 +1,24 @@
 """UI ヘルパー関数のテスト（Streamlit 非依存部分）."""
 
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from unittest.mock import MagicMock, patch
+
+from yt_live_kit.services.jobs import JobState
 from yt_live_kit.services.pipeline import (
     STAGE_CHAPTERS,
     STAGE_CLIPS_SUGGEST,
     STAGE_FETCH,
     STAGE_TRANSCRIPT,
 )
-from yt_live_kit.ui.app import _mark_failed_stage, _render_progress
+from yt_live_kit.ui.components.progress import mark_failed_stage, render_progress
+from yt_live_kit.ui.components.status_bar import (
+    elapsed_seconds,
+    format_status_message,
+    kind_label,
+    should_show_running_bar,
+)
 
 _STAGE_ORDER = [STAGE_FETCH, STAGE_TRANSCRIPT, STAGE_CHAPTERS, STAGE_CLIPS_SUGGEST]
 
@@ -20,7 +32,7 @@ def test_render_progress_shows_error_state() -> None:
     }
     progress_ctx = {"message": "test"}
 
-    rendered = _render_progress(progress_state, progress_ctx)
+    rendered = render_progress(progress_state, progress_ctx)
 
     assert "✅" in rendered
     assert "❌" in rendered
@@ -36,7 +48,106 @@ def test_mark_failed_stage_marks_running_as_error() -> None:
         STAGE_CLIPS_SUGGEST: "pending",
     }
 
-    _mark_failed_stage(progress_state)
+    mark_failed_stage(progress_state)
 
     assert progress_state[STAGE_TRANSCRIPT] == "error"
     assert progress_state[STAGE_CHAPTERS] == "pending"
+
+
+def test_kind_label_returns_japanese_name() -> None:
+    assert kind_label("single") == "単本処理"
+    assert kind_label("batch") == "一括処理"
+    assert kind_label("unknown") == "unknown"
+
+
+def test_format_status_message_includes_elapsed_and_counts() -> None:
+    started = datetime(2026, 7, 30, 12, 0, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 7, 30, 12, 0, 45, tzinfo=timezone.utc)
+    job = JobState(
+        job_id="abc",
+        kind="batch",
+        status="running",
+        message="処理中",
+        current=2,
+        total=5,
+        started_at=started,
+    )
+
+    message = format_status_message(job, now=now)
+
+    assert "一括処理" in message
+    assert "処理中" in message
+    assert "45 秒" in message
+    assert "2/5" in message
+
+
+def test_should_show_running_bar_only_for_running_jobs() -> None:
+    running = JobState(job_id="a", kind="single", status="running")
+    done = JobState(job_id="b", kind="single", status="done")
+
+    assert should_show_running_bar(running) is True
+    assert should_show_running_bar(done) is False
+    assert should_show_running_bar(None) is False
+
+
+def test_elapsed_seconds_is_non_negative() -> None:
+    started = datetime(2026, 7, 30, 12, 0, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 7, 30, 12, 1, 30, tzinfo=timezone.utc)
+    job = JobState(job_id="a", kind="single", status="running", started_at=started)
+
+    assert elapsed_seconds(job, now=now) == 90
+
+
+def test_handle_finished_job_loads_result_on_done() -> None:
+    from yt_live_kit.ui.components import status_bar
+
+    job = JobState(
+        job_id="done123",
+        kind="single",
+        status="done",
+        result_ref="video1234567",
+    )
+    mock_result = MagicMock()
+
+    with (
+        patch("yt_live_kit.ui.components.status_bar.is_job_handled", return_value=False),
+        patch("yt_live_kit.ui.components.status_bar.mark_job_handled") as mark_handled,
+        patch("yt_live_kit.ui.components.status_bar.load_result_from_disk", return_value=mock_result) as load_result,
+        patch("yt_live_kit.ui.components.status_bar.set_result") as set_result,
+        patch("yt_live_kit.ui.components.status_bar.clear_cut_result") as clear_cut,
+        patch("yt_live_kit.ui.components.status_bar.clear_active_job_id") as clear_active,
+        patch("yt_live_kit.ui.components.status_bar.st.rerun") as rerun,
+    ):
+        status_bar._handle_finished_job(job)
+
+    load_result.assert_called_once_with("video1234567", status_bar.get_settings())
+    set_result.assert_called_once_with(mock_result)
+    clear_cut.assert_called_once()
+    clear_active.assert_called_once()
+    mark_handled.assert_called_once_with("done123")
+    rerun.assert_called_once_with(scope="app")
+
+
+def test_handle_finished_job_shows_error_on_failed() -> None:
+    from yt_live_kit.ui.components import status_bar
+
+    job = JobState(
+        job_id="fail123",
+        kind="single",
+        status="failed",
+        error="字幕が見つかりません",
+    )
+
+    with (
+        patch("yt_live_kit.ui.components.status_bar.is_job_handled", return_value=False),
+        patch("yt_live_kit.ui.components.status_bar.mark_job_handled") as mark_handled,
+        patch("yt_live_kit.ui.components.status_bar.clear_active_job_id") as clear_active,
+        patch("yt_live_kit.ui.components.status_bar.st.error") as show_error,
+        patch("yt_live_kit.ui.components.status_bar.st.rerun") as rerun,
+    ):
+        status_bar._handle_finished_job(job)
+
+    show_error.assert_called_once_with("字幕が見つかりません")
+    clear_active.assert_called_once()
+    mark_handled.assert_called_once_with("fail123")
+    rerun.assert_not_called()
