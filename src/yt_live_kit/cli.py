@@ -1,6 +1,9 @@
-"""上級者向け CLI エントリポイント（スタブ）."""
+"""上級者向け CLI エントリポイント."""
 
 import typer
+
+from yt_live_kit.commands.fetch import fetch_cmd
+from yt_live_kit.commands.transcript import transcript_cmd
 
 app = typer.Typer(
     name="yt-live-kit",
@@ -13,6 +16,10 @@ app = typer.Typer(
 def callback() -> None:
     """YouTube ライブアーカイブ処理ツール."""
     pass
+
+
+app.command("fetch")(fetch_cmd)
+app.command("transcript")(transcript_cmd)
 
 
 @app.command()

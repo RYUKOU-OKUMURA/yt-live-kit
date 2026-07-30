@@ -26,3 +26,7 @@ packages = ["src/yt_live_kit"]
 dev-dependencies = [
     "pytest>=8.0.0",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
