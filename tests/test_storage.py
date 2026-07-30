@@ -149,6 +149,41 @@ def test_purge_sources_older_than_boundary(tmp_path: Path):
     assert (tmp_path / recent_id / "clips" / "source").exists()
 
 
+def test_purge_sources_older_than_uses_directory_name_not_meta_id(tmp_path: Path):
+    """meta.id とディレクトリ名が不一致でも、走査中のディレクトリだけ削除する."""
+    settings = Settings(data_dir=tmp_path)
+    dir_name = "dirMismatch1"
+    meta_id = "metaIdDiff1"
+    other_id = "otherVideo1"
+    old_fetched_at = datetime(2020, 1, 1, tzinfo=timezone.utc)
+    recent_fetched_at = datetime.now(timezone.utc) - timedelta(days=3)
+
+    # ディレクトリ名 dirMismatch1 だが meta.id は metaIdDiff1（古い）
+    _build_video_tree(
+        tmp_path / dir_name,
+        meta_id,
+        fetched_at=old_fetched_at,
+    )
+    # meta.id と同名の別ディレクトリ（recent — 走査中 dirMismatch1 からは触らない）
+    _build_video_tree(
+        tmp_path / meta_id,
+        meta_id,
+        fetched_at=recent_fetched_at,
+    )
+    # 通常の recent 動画（削除対象外）
+    _build_video_tree(
+        tmp_path / other_id,
+        other_id,
+        fetched_at=recent_fetched_at,
+    )
+
+    results = purge_sources_older_than(7, settings)
+    assert results == [(dir_name, 1500)]
+    assert not (tmp_path / dir_name / "clips" / "source").exists()
+    assert (tmp_path / meta_id / "clips" / "source").exists()
+    assert (tmp_path / other_id / "clips" / "source").exists()
+
+
 def test_purge_sources_older_than_skips_unreadable_meta(tmp_path: Path):
     settings = Settings(data_dir=tmp_path)
     broken_id = "brokenMeta1"

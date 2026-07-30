@@ -223,8 +223,8 @@ def purge_sources_older_than(
         if fetched_at >= cutoff:
             continue
 
-        deleted = purge_source(meta.id, settings)
+        deleted = purge_source(entry.name, settings)
         if deleted > 0:
-            results.append((meta.id, deleted))
+            results.append((entry.name, deleted))
 
     return results
