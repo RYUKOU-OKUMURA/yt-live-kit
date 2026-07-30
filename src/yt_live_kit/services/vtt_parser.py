@@ -15,6 +15,16 @@ _VTT_C_TAG_RE = re.compile(r"<c>([^<]*)</c>")
 _VTT_OTHER_TAG_RE = re.compile(r"<[^>]+>")
 
 
+class EmptyVttError(Exception):
+    """VTT に有効な字幕キューが含まれていない."""
+
+    def __init__(self, path: Path | None = None) -> None:
+        message = "字幕ファイルに有効なテキストがありません。"
+        if path is not None:
+            message = f"字幕ファイルに有効なテキストがありません: {path}"
+        super().__init__(message)
+
+
 def _clean_vtt_text(text: str) -> str:
     """VTT インラインタグ（タイムスタンプ・c タグ等）を除去する."""
     cleaned = _VTT_TIMESTAMP_TAG_RE.sub("", text)
@@ -122,4 +132,6 @@ def parse_vtt_file(path: Path) -> list[str]:
     content = path.read_text(encoding="utf-8")
     cues = parse_vtt(content)
     deduped = deduplicate_progressive(cues)
+    if not deduped:
+        raise EmptyVttError(path)
     return cues_to_lines(deduped)

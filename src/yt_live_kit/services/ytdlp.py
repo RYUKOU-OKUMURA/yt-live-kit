@@ -101,7 +101,7 @@ def _find_subtitle_file(subtitles_dir: Path, video_id: str) -> tuple[Path, str]:
     """優先順: ja-orig > ja."""
     candidates = [
         (subtitles_dir / f"{video_id}.ja-orig.vtt", "ja-orig"),
-        (subtitles_dir / f"{video_id}.ja.vtt", "ja-orig"),
+        (subtitles_dir / f"{video_id}.ja.vtt", "ja"),
         (subtitles_dir / "ja-orig.vtt", "ja-orig"),
         (subtitles_dir / "ja.vtt", "ja"),
     ]

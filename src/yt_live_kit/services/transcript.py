@@ -6,7 +6,7 @@ from pathlib import Path
 
 from yt_live_kit.config import Settings, get_settings
 from yt_live_kit.services.compressor import compress_lines
-from yt_live_kit.services.vtt_parser import parse_vtt_file
+from yt_live_kit.services.vtt_parser import EmptyVttError, parse_vtt_file
 
 
 class TranscriptError(Exception):
@@ -42,7 +42,10 @@ def build_transcripts(video_id: str, settings: Settings | None = None) -> tuple[
         raise TranscriptError(f"動画ディレクトリが見つかりません: {video_dir}")
 
     vtt_path = _find_vtt_path(video_dir)
-    full_lines = parse_vtt_file(vtt_path)
+    try:
+        full_lines = parse_vtt_file(vtt_path)
+    except EmptyVttError as exc:
+        raise TranscriptError(str(exc)) from exc
     compressed_lines = compress_lines(full_lines)
 
     transcript_dir = video_dir / "transcript"

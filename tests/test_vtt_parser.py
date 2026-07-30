@@ -2,7 +2,10 @@
 
 from pathlib import Path
 
+import pytest
+
 from yt_live_kit.services.vtt_parser import (
+    EmptyVttError,
     cues_to_lines,
     deduplicate_progressive,
     parse_vtt,
@@ -72,3 +75,12 @@ def test_sample_fixture():
     assert any("こんにちは" in line for line in lines)
     assert any("Cursor" in line for line in lines)
     assert all(line.startswith("[") for line in lines)
+
+
+def test_parse_vtt_file_raises_on_empty_cues(tmp_path):
+    """有効キュー 0 件の VTT は EmptyVttError を投げる."""
+    empty_vtt = tmp_path / "empty.vtt"
+    empty_vtt.write_text("WEBVTT\n\n", encoding="utf-8")
+
+    with pytest.raises(EmptyVttError, match="有効なテキストがありません"):
+        parse_vtt_file(empty_vtt)
