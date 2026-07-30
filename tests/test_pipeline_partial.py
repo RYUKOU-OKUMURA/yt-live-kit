@@ -2,7 +2,7 @@
 
 from datetime import datetime, timezone
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -12,11 +12,15 @@ from yt_live_kit.models.meta import VideoMeta
 from yt_live_kit.services.ai_prompt import ChapterGenerationResult
 from yt_live_kit.services.clips import ClipSuggestResult
 from yt_live_kit.services.pipeline import (
+    STAGE_CHAPTERS,
     STAGE_FETCH,
     STAGE_TRANSCRIPT,
     PipelineError,
+    PipelineResult,
     regenerate,
+    regenerate_job_target,
     run,
+    run_single_job_target,
 )
 
 
@@ -325,3 +329,106 @@ def test_regenerate_missing_transcript_raises(tmp_path):
 
     with pytest.raises(PipelineError, match="先に字幕の取得と整形を実行してください"):
         regenerate(meta.id, target="chapters", settings=settings)
+
+
+def _sample_pipeline_result(tmp_path, meta: VideoMeta | None = None) -> PipelineResult:
+    meta = meta or _sample_meta()
+    return PipelineResult(
+        video_id=meta.id,
+        title=meta.title,
+        meta=meta,
+        chapters_text="0:00 開始\n5:00 本編\n10:00 終了\n",
+        chapters_path=tmp_path / meta.id / "chapters" / "chapters.md",
+        full_transcript_path=tmp_path / meta.id / "transcript" / "full.txt",
+        full_transcript_text="full",
+        clips_candidates=(),
+        clips_candidates_path=None,
+    )
+
+
+@patch("yt_live_kit.services.pipeline.run")
+def test_run_single_job_target_passes_do_chapters_and_do_clips(mock_run, tmp_path):
+    meta = _sample_meta()
+    mock_run.return_value = _sample_pipeline_result(tmp_path, meta)
+    settings = Settings(data_dir=tmp_path)
+    report = MagicMock()
+
+    run_single_job_target(
+        report=report,
+        settings=settings,
+        url="https://www.youtube.com/watch?v=test1234567",
+        do_chapters=False,
+        do_clips=True,
+    )
+
+    mock_run.assert_called_once()
+    _, kwargs = mock_run.call_args
+    assert kwargs["do_chapters"] is False
+    assert kwargs["do_clips"] is True
+
+
+@patch("yt_live_kit.services.pipeline.run")
+def test_run_single_job_target_defaults_do_chapters_and_do_clips_true(mock_run, tmp_path):
+    meta = _sample_meta()
+    mock_run.return_value = _sample_pipeline_result(tmp_path, meta)
+    settings = Settings(data_dir=tmp_path)
+    report = MagicMock()
+
+    run_single_job_target(
+        report=report,
+        settings=settings,
+        url="https://www.youtube.com/watch?v=test1234567",
+    )
+
+    mock_run.assert_called_once()
+    _, kwargs = mock_run.call_args
+    assert kwargs["do_chapters"] is True
+    assert kwargs["do_clips"] is True
+
+
+@patch("yt_live_kit.services.pipeline.regenerate")
+def test_regenerate_job_target_calls_regenerate(mock_regenerate, tmp_path):
+    meta = _sample_meta()
+    mock_regenerate.return_value = _sample_pipeline_result(tmp_path, meta)
+    settings = Settings(data_dir=tmp_path)
+    report = MagicMock()
+
+    regenerate_job_target(
+        report=report,
+        settings=settings,
+        video_id=meta.id,
+        target="chapters",
+    )
+
+    mock_regenerate.assert_called_once()
+    args, kwargs = mock_regenerate.call_args
+    assert args[0] == meta.id
+    assert kwargs["target"] == "chapters"
+    assert kwargs["settings"] is settings
+    assert callable(kwargs["on_progress"])
+
+
+@patch("yt_live_kit.services.pipeline.regenerate")
+def test_regenerate_job_target_reports_progress(mock_regenerate, tmp_path):
+    meta = _sample_meta()
+    mock_regenerate.return_value = _sample_pipeline_result(tmp_path, meta)
+    settings = Settings(data_dir=tmp_path)
+    report = MagicMock()
+
+    def _regenerate_side_effect(video_id, *, target, settings, on_progress):
+        on_progress(STAGE_CHAPTERS, "チャプターを生成しています…")
+        return _sample_pipeline_result(tmp_path, meta)
+
+    mock_regenerate.side_effect = _regenerate_side_effect
+
+    regenerate_job_target(
+        report=report,
+        settings=settings,
+        video_id=meta.id,
+        target="chapters",
+    )
+
+    report.assert_called_once_with(
+        stage=STAGE_CHAPTERS,
+        message="チャプターを生成しています…",
+    )
