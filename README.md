@@ -10,6 +10,7 @@ YouTube 公開ライブアーカイブから字幕を取得し、AI でチャプ
 | **[uv](https://github.com/astral-sh/uv)** | 依存管理・実行 | `curl -LsSf https://astral.sh/uv/install.sh \| sh` |
 | **yt-dlp** | 字幕・動画取得 | **最新版推奨**（古い版では字幕取得失敗の実績あり） |
 | **ffmpeg** | 動画切り出し | システム PATH 上に配置 |
+| **Codex CLI**（任意） | チャプター自動生成 | 未導入時は Cursor 手動運用で代替可 |
 
 ## セットアップ
 
@@ -36,7 +37,20 @@ uv run streamlit run src/yt_live_kit/ui/app.py
 
 ```bash
 uv run yt-live-kit version
+uv run yt-live-kit fetch "https://www.youtube.com/watch?v=VIDEO_ID"
+uv run yt-live-kit transcript VIDEO_ID
+uv run yt-live-kit chapters VIDEO_ID          # Codex CLI で自動生成
+uv run yt-live-kit chapters VIDEO_ID --prompt-only  # プロンプトのみ（Cursor 手動用）
 ```
+
+### Codex CLI 未導入時（チャプター生成のフォールバック）
+
+1. `uv run yt-live-kit chapters VIDEO_ID --prompt-only` でプロンプトを生成
+2. 生成された `data/{video_id}/prompt_chapters.txt` を Cursor チャットに貼り付け
+3. 出力されたチャプター行をファイルに保存し、検証・取り込み:
+   ```bash
+   uv run yt-live-kit chapters VIDEO_ID --from-file /path/to/chapters.txt
+   ```
 
 ## 使い方（概要）
 
