@@ -1,7 +1,7 @@
 # yt-live-kit 実行計画書 v2
 
 **バージョン:** v2（機能拡張）
-**最終更新:** 2026-07-30
+**最終更新:** 2026-07-31
 **関連:** [要件定義書](./requirements.md) / [技術スタック定義書](./tech-stack.md) / [v1 実行計画](./execution-plan.md) / [AGENTS.md](../AGENTS.md)
 
 ---
@@ -17,8 +17,8 @@
 | V2 | 非同期実行とステータスバー | [x] 完了 |
 | V3 | チャンネルから URL 取得 | [~] 進行中 |
 | V4 | ストレージ管理 | [~] 進行中 |
-| V5 | ハイライトまとめ動画 | [ ] 未着手 |
-| V6 | 縦型ショート動画 | [ ] 未着手 |
+| V5 | ハイライトまとめ動画 | [~] 進行中 |
+| V6 | 縦型ショート動画 | [~] 進行中 |
 | V7 | 受け入れ・仕上げ | [ ] 未着手 |
 
 **状態の書き方:** `[ ] 未着手` / `[~] 進行中` / `[x] 完了`
@@ -373,16 +373,16 @@ data/{video_id}/ ...
 ### V5: ハイライトまとめ動画
 
 **目的:** 配信の見どころ区間を複数選び、1 本の動画に連結する。
-**フェーズ状態:** [ ] 未着手
+**フェーズ状態:** [~] 進行中
 
 **作業:**
 
-- [ ] V5-1. `prompts/highlights.md` を作成する
+- [x] V5-1. `prompts/highlights.md` を作成する（W4-A）
   - **`clips_suggest.md` との違いを明記する:** clips は「10〜15 分の一続き区間を 2 件以上」、highlights は「**30 秒〜3 分の山場を 5〜10 個**」
   - 出力 JSON スキーマは `candidates.json` と同形式にし、`models/clips.py` を再利用する
   - 区間は時系列順、重複しないこと、合計尺の目安（3〜10 分）をプロンプトに明記する
   - 出力ルール（半角 `<>` 禁止）は `chapters.md` と同じ文言を使う
-- [ ] V5-2. `services/highlights.py` を新規作成する
+- [x] V5-2. `services/highlights.py` を新規作成する（W4-A）
   → **大きめの実装のため、完了時にタスク単位コミット**
   - `suggest_highlights(video_id, settings) -> HighlightsResult`
   - [`ai_prompt.py`](../src/yt_live_kit/services/ai_prompt.py) と [`clips.py`](../src/yt_live_kit/services/clips.py) のパターンをそのまま踏襲する（テンプレート結合 → Codex CLI → JSON パース → バリデーション → 保存）
@@ -394,7 +394,8 @@ data/{video_id}/ ...
     - 半角 `<>` を含まない
   - 保存先: `data/{video_id}/highlights/segments.json`
   - Codex CLI 未導入時は `ai_prompt.py` と同じ日本語インストール案内を出す
-- [ ] V5-3. `services/ffmpeg.py` に連結処理を追加する
+  - `regenerate(target="highlights")` も追加済み（softfail）
+- [x] V5-3. `services/ffmpeg.py` に連結処理を追加する（W4-A）
   → **大きめの実装のため、完了時にタスク単位コミット**
   - `cut_and_concat(video_id, segments, settings, *, on_progress) -> ConcatResult`
   - **必ず再エンコードしてから連結する。`-c copy` で切ると繋ぎ目でフリーズ・音ズレが出る**（キーフレーム境界の問題）
@@ -417,7 +418,7 @@ data/{video_id}/ ...
   - 完成後は `st.video()` でその場再生 + 保存先パス表示
 - [ ] V5-5. CLI に `highlights` サブコマンドを追加する
   - `highlights suggest {video_id}` / `highlights build {video_id} --segments 1,3,5`
-- [ ] V5-6. ユニットテスト
+- [x] V5-6. ユニットテスト（W4-A）
   - `tests/test_highlights.py` — バリデータ（重複・逆順・尺超過・半角 `<>`）
   - `tests/test_ffmpeg_concat.py` — concat.txt の生成内容、コマンド組み立て（ffmpeg 実行はモック）
 - [ ] V5-7. 実機確認 — 2 時間配信 1 本で 5 区間・合計 5 分程度のハイライトを生成し、繋ぎ目を目視確認
@@ -428,7 +429,7 @@ data/{video_id}/ ...
 - [ ] AC-16 を満たす
 - [ ] 繋ぎ目で映像のフリーズ・音ズレが発生しない（実機目視）
 - [ ] 処理中もステータスバーに「区間 3/5 を処理中」が出る
-- [ ] Codex CLI 失敗時もチャプター・切り抜き候補は影響を受けない（softfail、[`pipeline.py:123-129`](../src/yt_live_kit/services/pipeline.py) と同じ方針）
+- [x] Codex CLI 失敗時もチャプター・切り抜き候補は影響を受けない（softfail、[`pipeline.py`](../src/yt_live_kit/services/pipeline.py) と同じ方針）
 - [ ] フェーズ完了コミット済み
 
 **リスクと対策:**
@@ -447,16 +448,15 @@ data/{video_id}/ ...
 ### V6: 縦型ショート動画
 
 **目的:** 選んだ区間を 9:16 の縦型に変換し、字幕を焼き込む。
-**フェーズ状態:** [ ] 未着手
+**フェーズ状態:** [~] 進行中
 
 **作業:**
 
-- [ ] V6-1. 字幕変換の準備
+- [x] V6-1. 字幕変換の準備（W4-B）
   - `services/subtitle_burn.py` — `data/{video_id}/subtitles/ja.vtt` から、**指定区間だけを切り出した ASS 字幕**を生成する
   - VTT のまま `subtitles=` フィルタに渡すこともできるが、**スタイル制御（フォント・サイズ・縁取り）のため ASS に変換する**
-  - 変換は ffmpeg で行う: `ffmpeg -i ja.vtt out.ass`
-  - 区間オフセット: 切り出し後の動画は 0 秒始まりになるため、**字幕タイムスタンプを `-start` 分ずらす**。ffmpeg の `-itsoffset` ではなく、ASS 生成後にタイムコードを再計算する（確実）
-- [ ] V6-2. `services/shorts.py` を新規作成する
+  - 区間オフセット: 切り出し後の動画は 0 秒始まりになるため、**字幕タイムスタンプを `start_sec` 分ずらす**。ffmpeg の `-itsoffset` ではなく、ASS 生成時にタイムコードを再計算する（確実）
+- [x] V6-2. `services/shorts.py` を新規作成する（W4-B）
   → **大きめの実装のため、完了時にタスク単位コミット**
   - `build_short(video_id, start, end, settings, *, layout, burn_subtitles, on_progress) -> ShortResult`
   - `layout` は 2 種類:
@@ -486,10 +486,10 @@ data/{video_id}/ ...
   - 完成後は `st.video()` でその場再生（縦動画も再生できる）+ 保存先パス表示
 - [ ] V6-4. CLI に `short` サブコマンドを追加する
   - `short {video_id} --start 00:12:30 --end 00:13:20 --layout blur --subtitles`
-- [ ] V6-5. フォント検出のフォールバック
+- [x] V6-5. フォント検出のフォールバック（W4-B）
   - 起動時または初回実行時に、指定フォントが利用可能か確認する
   - 見つからない場合は候補（Hiragino Sans → Noto Sans CJK JP → sans-serif）を順に試し、全滅なら日本語で警告を出す
-- [ ] V6-6. ユニットテスト
+- [x] V6-6. ユニットテスト（W4-B）
   - `tests/test_subtitle_burn.py` — 区間切り出しとタイムコードのオフセット計算
   - `tests/test_shorts.py` — フィルタグラフ文字列の生成、尺バリデーション（ffmpeg 実行はモック）
 - [ ] V6-7. 実機確認 — 60 秒のショートを 2 レイアウト × 字幕あり／なしの 4 パターンで生成し、日本語が正しく表示されることを目視確認
