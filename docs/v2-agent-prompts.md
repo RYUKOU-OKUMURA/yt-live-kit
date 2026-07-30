@@ -46,6 +46,7 @@ W6  受け入れ・仕上げ                 単独
 | | W3-C | 一覧・ストレージページ | `ui/pages/history.py` | ✅ |
 | **W4** | W4-A | ハイライト services | `services/highlights.py`(新), `prompts/highlights.md`(新), `services/ffmpeg.py` | ✅ |
 | | W4-B | ショート services | `services/shorts.py`(新), `services/subtitle_burn.py`(新) | ✅ |
+| | W4-C | W3 レビュー残件の UI クリーンアップ | `ui/pages/history.py`, `ui/pages/channel.py`, `ui/components/results.py` | ✅ |
 | **W5** | W5-A | ハイライト UI | `ui/pages/highlights.py`(新) | ✅ |
 | | W5-B | ショート UI | `ui/pages/shorts.py`(新) | ✅ |
 | | W5-C | CLI 追加分 | `commands/*.py`(新), `cli.py` | ✅ |
@@ -880,12 +881,46 @@ components/results.py は W3-A が触るため、**このタスクでは触ら�
 
 ---
 
-## 6. W4: V5/V6 の services 層（並列 2）
+## 6. W4: V5/V6 の services 層 + W3 残件（並列 3）
 
 **前提:** W3 マージ済み（正確には W1-E があれば着手可能。W3 と並行させてもよい）
 
 > **W1-E で公開された ffmpeg の API を使う。** 着手前に W1-E の報告にある
 > シグネチャ一覧を確認すること。
+
+> **W4-C は W4-A / W4-B と 1 ファイルも競合しない**（W4-A/B は `services/` のみ、
+> W4-C は `ui/` のみ）。3 本を同時に走らせてよい。
+
+### W4 着手前の確認事項（オーケストレーターがワーカーに伝えること）
+
+`docs/v2-agent-prompts.md` 執筆時点と実装で差異がある。**実コードを正とすること。**
+
+| 項目 | プロンプト本文の記述 | 実装（正） |
+|------|----------------------|------------|
+| `encode_segment` の引数名 | `source_path, output_path` | `source, output` |
+| `encode_segment` の秒数型 | `int` | `float` |
+| `regenerate` の target 追加 | 分岐を足すだけ | [`pipeline.py:55`](../src/yt_live_kit/services/pipeline.py) の `_REGENERATE_TARGETS` frozenset にも `"highlights"` を追加する必要がある |
+
+W1-E で公開済みの ffmpeg API（W4-A / W4-B が使う）:
+
+```python
+FFMPEG_DEFAULT = "ffmpeg"
+find_ffmpeg(ffmpeg_path: str = FFMPEG_DEFAULT) -> str
+load_meta(video_dir: Path) -> VideoMeta
+ensure_source_video(video_id: str, settings: Settings) -> Path
+save_command_log(...)  # 実装を読むこと
+encode_segment(source: Path, output: Path, start_sec: float, end_sec: float, *,
+               ffmpeg_path=FFMPEG_DEFAULT, scale: str | None = None,
+               extra_filters: list[str] | None = None,
+               preset: str = "medium", crf: int = 20) -> Path
+build_concat_list(segment_paths: list[Path], list_path: Path) -> Path
+concat_segments(segment_paths: list[Path], output_path: Path, *,
+                ffmpeg_path=FFMPEG_DEFAULT, log_dir: Path | None = None) -> Path
+cut_clip(...)  # 既存。変更しないこと
+```
+
+`models/clips.py` の `ClipCandidate`（W4-A が同形式で作る）:
+`id / title / start / end / duration_sec / reason`（すべて必須、start/end は文字列）
 
 ### W4-A: ハイライト services
 
@@ -1111,6 +1146,115 @@ subprocess はモックする。
 - uv run pytest が全件通る
 - 報告に build_short のシグネチャを明記すること（W5-B が使う）
 - 報告に、日本語フォントが見つからなかった場合の挙動を明記すること
+```
+
+### W4-C: W3 レビュー残件の UI クリーンアップ
+
+**ブランチ:** `v2/w4-c-ui-cleanup`
+
+```text
+【タスク W4-C】W3 のレビューで残した UI 側の指摘 6 件を直す
+
+対応: W3 レビュー指摘（V4-2 / V4-3 の精度改善と、V1-4 / V3-3 の細部）
+
+## 変更対象ファイル
+- src/yt_live_kit/ui/pages/history.py
+- src/yt_live_kit/ui/pages/channel.py
+- src/yt_live_kit/ui/components/results.py
+- tests/test_ui_history_page.py（追記）
+- tests/test_ui_run_page.py（追記）
+（services/ は 1 行も編集しない。ui/pages/run.py・ui/app.py も触らない。
+ W4-A / W4-B が services/ を同時に編集しているため、範囲外編集は競合する）
+
+## 前提
+main の HEAD は W3 マージ + V1-3 修正済みの状態で、uv run pytest は 205 件通る。
+着手前に uv run pytest を実行し、205 件通ることを確認してから始めること。
+
+## 修正1: 一括削除プレビューの件数が実際の削除と合わない ★最優先
+
+ui/pages/history.py の preview_purge_sources_older_than() は
+clips/source のバイト数（VideoStorage.source_bytes）だけを見て件数を数えている。
+一方 services.storage.purge_sources_older_than() は
+DELETABLE_REL_PATHS = (clips/source, highlights/segments) の両方を削除し、
+削除バイトが 1 でもあれば結果に含める。
+
+現在は highlights/segments が存在しないため実害が無いが、W4-A がこのディレクトリを
+作った時点で「対象 N 件・合計 X GB」の提示と実際の削除結果がズレ始める。
+**削除の確認ダイアログの数字なので、ズレたまま出荷してはいけない。**
+
+- プレビューの集計を source_bytes + intermediate_bytes に変える
+  （VideoStorage には intermediate_bytes が既にある。services 側は変更不要）
+- source_bytes_map() 相当の関数名・戻り値も実態に合わせて見直す
+  （「元動画のバイト数」ではなく「削除対象のバイト数」になるため）
+- 一覧の行バッジ「元動画: 3.2 GB」は元動画の容量表示なので source_bytes のまま変えない。
+  **集計用と表示用を混同しないこと。**
+- 確認文言も実態に合わせる。中間ファイルも消える旨を日本語で明記する
+  （「チャプター・全文・切り抜き候補・切り出し済み動画は残ります」は維持する）
+
+## 修正2: 元動画の個別削除後に画面が更新されない
+
+_render_row_actions() の「削除を実行」成功パスに st.rerun() が無いため、
+削除に成功しても確認用の警告ブロックが出たまま成功メッセージが並び、
+容量バッジも次の操作まで古い値のままになる。
+
+- 成功メッセージを session_state に退避してから st.rerun() する
+- rerun 後に一度だけ表示し、表示したら消す（同じメッセージが残り続けないこと）
+- 既存の _SESSION_PURGE_CONFIRM / _SESSION_BULK_PREVIEW と同じ書き方に合わせる
+
+## 修正3: 未使用の引数を消す
+
+_render_row_actions() の source_bytes 引数が本体で一度も使われていない。
+引数と呼び出し側の両方から削除する。
+
+## 修正4: 文字起こしが無い行で再生成ボタンが必ず失敗する
+
+処理済み一覧の「チャプターを生成」「切り抜き候補を生成」は、
+services.pipeline.regenerate() が transcript/compressed.txt を必要とするため、
+文字起こしが無い動画では押しても必ず日本語エラーで失敗する。
+
+- ProcessedVideo.has_transcript が False の行では両ボタンを disabled にする
+- st.button の help= に「先に字幕の取得と整形を実行してください。」を出す
+- **has_transcript は transcript/full.txt の有無を見ており、
+  regenerate が必要とする compressed.txt の有無とは一致しない。**
+  つまりこれは「必要条件の先出しチェック」であって完全な保証ではない。
+  services 側のエラーは今までどおり残すこと（UI で握りつぶさない）。
+  この点をコード上のコメントに 1 行残す。
+
+## 修正5: コピー成功表示の秒数を仕様に合わせる
+
+ui/components/results.py の build_clipboard_copy_html() の
+hide_after_ms 既定値が 3000 になっている。V1-5 の仕様は 2 秒なので 2000 にする。
+
+## 修正6: チャンネルページの start_job だけ settings を渡していない
+
+ui/pages/channel.py の一括投入は start_job(...) に settings を渡していないが、
+ui/pages/history.py は settings=settings を渡している。挙動は同じだが非対称。
+channel.py 側も get_settings() の結果を渡して揃える。
+
+## テスト
+純粋関数に切り出せるものは切り出して検証する
+（既存 tests/test_ui_history_page.py の _MockColumn / patch の書き方に合わせる）。
+
+tests/test_ui_history_page.py:
+- 修正1: 元動画 0 バイト + 中間ファイルありの動画がプレビュー件数に入ること ★必須
+- 修正1: 行バッジ用の元動画バイト数は中間ファイルを含まないこと ★必須
+- 修正2: 削除成功後に st.rerun が呼ばれ、メッセージが session_state に載ること
+- 修正4: has_transcript=False の行で両ボタンが disabled=True で呼ばれること ★必須
+
+tests/test_ui_run_page.py:
+- 修正5: hide_after_ms の既定値が 2000 で、生成 HTML に 2000 が含まれること
+
+## やらないこと（スコープ外。手を出さない）
+- 全文コピーの二重転送（text_area と components.html の両方に全文を送っている件）。
+  修正するとコピー操作が 2 段階になり UX が悪化するため、意図的に現状維持とする。
+- services/ の変更。W4-A / W4-B と競合する。
+- 新機能の追加。
+
+## Done 条件
+- uv run pytest が全件通る（205 件 + 追加分。既存を 1 件も壊さない）
+- git diff --stat が上記 5 ファイルだけであること（報告に貼ること）
+- 修正1 について、「プレビューの件数と purge_sources_older_than の戻り値の件数が
+  どういう条件で一致するか」を報告に 2〜3 行で説明すること
 ```
 
 ---
@@ -1357,7 +1501,7 @@ docs/execution-plan-v2.md の全チェックボックスとフェーズ状態・
 | W1 | **後方互換**（既存テストが無改修で通るか）。storage の削除安全性。jobs の原子的書き込み |
 | W2 | **ワーカーから st.\* を呼んでいないか**（最重要）。v1 機能の回帰。責務分離 |
 | W3 | UI にロジックが漏れていないか。容量計算の呼び出し頻度 |
-| W4 | **-ss の位置**（-i の後ろか）。連結が再エンコード経由か。字幕の時刻オフセット |
+| W4 | **-ss の位置**（-i の後ろか）。連結が再エンコード経由か。字幕の時刻オフセット。W4-C は削除プレビューの集計と行バッジを取り違えていないか |
 | W5 | 実機での目視確認結果（繋ぎ目・日本語字幕）が報告にあるか |
 | W6 | AC の未達が正直に報告されているか |
 
