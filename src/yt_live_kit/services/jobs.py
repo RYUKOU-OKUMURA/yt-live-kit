@@ -133,12 +133,26 @@ def _job_log_path(settings: Settings, job_id: str) -> Path:
     return _jobs_dir(settings) / f"{job_id}.log"
 
 
+def _current_path(settings: Settings) -> Path:
+    return _jobs_dir(settings) / "current.json"
+
+
 def _write_job(state: JobState, settings: Settings) -> None:
     jobs_dir = _jobs_dir(settings)
     jobs_dir.mkdir(parents=True, exist_ok=True)
     path = _job_path(settings, state.job_id)
     tmp_path = jobs_dir / f".{state.job_id}.tmp"
     payload = json.dumps(state.to_dict(), ensure_ascii=False, indent=2)
+    tmp_path.write_text(payload, encoding="utf-8")
+    os.replace(tmp_path, path)
+
+
+def _write_current(job_id: str, settings: Settings) -> None:
+    jobs_dir = _jobs_dir(settings)
+    jobs_dir.mkdir(parents=True, exist_ok=True)
+    path = _current_path(settings)
+    tmp_path = jobs_dir / ".current.tmp"
+    payload = json.dumps({"job_id": job_id}, ensure_ascii=False, indent=2)
     tmp_path.write_text(payload, encoding="utf-8")
     os.replace(tmp_path, path)
 
@@ -164,6 +178,7 @@ def create_job(
         message="開始しました",
     )
     _write_job(state, settings)
+    _write_current(state.job_id, settings)
     return state
 
 
@@ -214,11 +229,32 @@ def list_jobs(settings: Settings | None = None) -> list[JobState]:
     return jobs
 
 
+def read_current_job(settings: Settings | None = None) -> JobState | None:
+    """current.json が指す最新ジョブを読み込む。
+
+    current.json が無い・壊れている・指す先のジョブが無い場合は None を返す。
+    """
+    settings = settings or get_settings()
+    path = _current_path(settings)
+    if not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    job_id = data.get("job_id")
+    if not isinstance(job_id, str) or not job_id:
+        return None
+    return read_job(job_id, settings)
+
+
 def get_active_job(settings: Settings | None = None) -> JobState | None:
-    """status が running の最新ジョブを返す."""
-    for job in list_jobs(settings):
-        if job.status == "running":
-            return job
+    """status が running の最新ジョブを返す（current.json 経由、定数時間）."""
+    job = read_current_job(settings)
+    if job is not None and job.status == "running":
+        return job
     return None
 
 
@@ -235,8 +271,12 @@ def cleanup_finished(older_than_hours: int = 24, settings: Settings | None = Non
         return 0
 
     cutoff = datetime.now(timezone.utc) - timedelta(hours=older_than_hours)
+    current_job = read_current_job(settings)
+    current_job_id = current_job.job_id if current_job is not None else None
     removed = 0
     for job in list_jobs(settings):
+        if job.job_id == current_job_id:
+            continue
         if job.status not in ("done", "failed", "interrupted"):
             continue
         if job.finished_at is None or job.finished_at >= cutoff:

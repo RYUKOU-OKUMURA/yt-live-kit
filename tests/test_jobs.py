@@ -20,6 +20,7 @@ from yt_live_kit.services.jobs import (
     create_job,
     get_active_job,
     is_busy,
+    read_current_job,
     read_job,
     start_job,
     update_job,
@@ -287,3 +288,86 @@ def test_error_message_for_unknown_file_not_found_uses_generic_message():
     )
     assert message == "予期しないエラーが発生しました。しばらくしてから再度お試しください。"
     assert needs_log is True
+
+
+def test_get_active_job_uses_current_json_and_never_calls_list_jobs(tmp_path):
+    settings = Settings(data_dir=tmp_path)
+    running = create_job("single", settings=settings)
+
+    def _fail_if_called(*_args, **_kwargs):
+        raise AssertionError("list_jobs should not be called by get_active_job")
+
+    with patch("yt_live_kit.services.jobs.list_jobs", side_effect=_fail_if_called):
+        active = get_active_job(settings)
+
+    assert active is not None
+    assert active.job_id == running.job_id
+
+
+def test_get_active_job_returns_none_when_current_not_running(tmp_path):
+    settings = Settings(data_dir=tmp_path)
+    job = create_job("single", settings=settings)
+    update_job(job.job_id, settings=settings, status="done")
+
+    with patch("yt_live_kit.services.jobs.list_jobs") as mock_list_jobs:
+        active = get_active_job(settings)
+
+    assert active is None
+    mock_list_jobs.assert_not_called()
+
+
+def test_read_current_job_missing_file_returns_none(tmp_path):
+    settings = Settings(data_dir=tmp_path)
+    assert read_current_job(settings) is None
+
+
+def test_read_current_job_broken_json_returns_none(tmp_path):
+    settings = Settings(data_dir=tmp_path)
+    jobs_dir = tmp_path / "_jobs"
+    jobs_dir.mkdir(parents=True)
+    (jobs_dir / "current.json").write_text("{ not valid json", encoding="utf-8")
+
+    assert read_current_job(settings) is None
+
+
+def test_read_current_job_missing_target_job_returns_none(tmp_path):
+    settings = Settings(data_dir=tmp_path)
+    jobs_dir = tmp_path / "_jobs"
+    jobs_dir.mkdir(parents=True)
+    (jobs_dir / "current.json").write_text(
+        json.dumps({"job_id": "does-not-exist"}), encoding="utf-8"
+    )
+
+    assert read_current_job(settings) is None
+
+
+def test_read_current_job_returns_pointed_job(tmp_path):
+    settings = Settings(data_dir=tmp_path)
+    job = create_job("single", settings=settings)
+
+    current = read_current_job(settings)
+    assert current is not None
+    assert current.job_id == job.job_id
+
+
+def test_cleanup_finished_keeps_current_job(tmp_path):
+    from yt_live_kit.services.jobs import cleanup_finished
+
+    settings = Settings(data_dir=tmp_path)
+    # create_job は current.json を上書きするため、最後に作った done ジョブが
+    # current.json に指されるようにする。
+    old_job = create_job("single", settings=settings)
+    old_finished = datetime.now(timezone.utc) - timedelta(hours=48)
+    update_job(
+        old_job.job_id,
+        settings=settings,
+        status="done",
+        finished_at=old_finished,
+    )
+    # old_job が current.json の指す最新ジョブになっている。
+    removed = cleanup_finished(older_than_hours=24, settings=settings)
+
+    assert removed == 0
+    assert read_job(old_job.job_id, settings) is not None
+
+

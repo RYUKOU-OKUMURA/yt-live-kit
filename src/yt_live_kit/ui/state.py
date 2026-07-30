@@ -134,11 +134,12 @@ def init_orphans_once() -> list[str]:
         return []
     _orphans_initialized = True
 
-    from yt_live_kit.services.jobs import close_orphans, read_job
+    from yt_live_kit.services.jobs import close_orphans, cleanup_finished, read_job
     from yt_live_kit.config import get_settings
 
     settings = get_settings()
     interrupted_ids = close_orphans(settings)
+    cleanup_finished(older_than_hours=24, settings=settings)
     if not interrupted_ids:
         return interrupted_ids
 
@@ -149,5 +150,8 @@ def init_orphans_once() -> list[str]:
         if job is not None:
             title = job.title or job.video_id or "不明"
         notices.append({"job_id": job_id, "title": title})
+        # app.py が st.warning で通知済みのため、find_restorable_job 側で
+        # 二重に拾わないようここでハンドル済みにしておく。
+        mark_job_handled(job_id)
     set_interrupted_notices(notices)
     return interrupted_ids

@@ -8,7 +8,7 @@ import streamlit as st
 
 from yt_live_kit.config import get_settings
 from yt_live_kit.services.batch import read_batch_summary
-from yt_live_kit.services.jobs import JobState, get_active_job, list_jobs, read_job
+from yt_live_kit.services.jobs import JobState, get_active_job, read_current_job, read_job
 from yt_live_kit.services.pipeline import load_result_from_disk
 from yt_live_kit.ui.state import (
     clear_active_job_id,
@@ -64,7 +64,12 @@ def should_show_running_bar(job: JobState | None) -> bool:
 
 
 def find_restorable_job(settings) -> JobState | None:
-    """セッションまたはディスク上の未処理完了ジョブを探す."""
+    """セッションまたは current.json 上の未処理完了ジョブを探す.
+
+    list_jobs() による全走査は行わない。session_state の last_job_id を
+    優先し、無ければ current.json が指す最新ジョブを見る。読み込みは
+    最大でも current.json + 該当ジョブ json の 2 件で済む。
+    """
     last_id = get_last_job_id()
     if last_id:
         job = read_job(last_id, settings)
@@ -74,10 +79,15 @@ def find_restorable_job(settings) -> JobState | None:
             and not is_job_handled(job.job_id)
         ):
             return job
+        return None
 
-    for job in list_jobs(settings):
-        if job.status in ("done", "failed", "interrupted") and not is_job_handled(job.job_id):
-            return job
+    job = read_current_job(settings)
+    if (
+        job is not None
+        and job.status in ("done", "failed", "interrupted")
+        and not is_job_handled(job.job_id)
+    ):
+        return job
     return None
 
 

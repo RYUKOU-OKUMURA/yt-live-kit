@@ -239,8 +239,25 @@ def test_find_restorable_job_skips_handled_jobs() -> None:
         patch("yt_live_kit.ui.components.status_bar.get_last_job_id", return_value="handled-job"),
         patch("yt_live_kit.ui.components.status_bar.read_job", return_value=job),
         patch("yt_live_kit.ui.components.status_bar.is_job_handled", return_value=True),
-        patch("yt_live_kit.ui.components.status_bar.list_jobs", return_value=[]),
+        patch("yt_live_kit.ui.components.status_bar.read_current_job") as read_current,
     ):
         found = status_bar.find_restorable_job(settings)
 
     assert found is None
+    read_current.assert_not_called()
+
+
+def test_find_restorable_job_falls_back_to_current_job() -> None:
+    from yt_live_kit.ui.components import status_bar
+
+    job = JobState(job_id="current-job", kind="single", status="failed")
+    settings = MagicMock()
+
+    with (
+        patch("yt_live_kit.ui.components.status_bar.get_last_job_id", return_value=None),
+        patch("yt_live_kit.ui.components.status_bar.read_current_job", return_value=job),
+        patch("yt_live_kit.ui.components.status_bar.is_job_handled", return_value=False),
+    ):
+        found = status_bar.find_restorable_job(settings)
+
+    assert found is job
