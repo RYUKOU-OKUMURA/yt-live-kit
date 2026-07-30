@@ -120,3 +120,44 @@ def test_fullwidth_brackets_allowed():
 """
     result = validate_chapters(text)
     assert result.ok is True
+
+
+def test_rejects_invalid_seconds():
+    text = """\
+0:00 配信開始
+0:60 不正な秒
+10:00 まとめ
+"""
+    result = validate_chapters(text)
+    assert result.ok is False
+    assert any("00〜59" in err for err in result.errors)
+
+
+def test_rejects_non_canonical_first_timestamp():
+    text = """\
+00:00 配信開始
+5:00 本編
+10:00 まとめ
+"""
+    result = validate_chapters(text)
+    assert result.ok is False
+    assert any("0:00" in err for err in result.errors)
+
+
+def test_rejects_non_monotonic_timestamps():
+    text = """\
+0:00 配信開始
+10:00 本編
+5:00 巻き戻り
+"""
+    result = validate_chapters(text)
+    assert result.ok is False
+    assert any("時刻が前後しています" in err for err in result.errors)
+
+
+def test_format_chapters_normalizes_first_line():
+    from yt_live_kit.services.chapter_validator import format_chapters_markdown
+
+    chapters = parse_chapters(VALID_CHAPTERS)
+    formatted = format_chapters_markdown(chapters)
+    assert formatted.startswith("0:00 配信開始")
