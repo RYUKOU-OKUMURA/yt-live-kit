@@ -32,7 +32,7 @@ class CutResult:
     duration_sec: int
 
 
-def _find_ffmpeg(ffmpeg_path: str = FFMPEG_DEFAULT) -> str:
+def find_ffmpeg(ffmpeg_path: str = FFMPEG_DEFAULT) -> str:
     resolved = shutil.which(ffmpeg_path)
     if resolved is None:
         raise FfmpegError(
@@ -42,14 +42,20 @@ def _find_ffmpeg(ffmpeg_path: str = FFMPEG_DEFAULT) -> str:
     return resolved
 
 
-def _load_meta(video_dir: Path) -> VideoMeta:
+_find_ffmpeg = find_ffmpeg
+
+
+def load_meta(video_dir: Path) -> VideoMeta:
     meta_path = video_dir / "meta.json"
     if not meta_path.is_file():
         raise FfmpegError(f"メタデータが見つかりません: {meta_path}")
     return VideoMeta.model_validate_json(meta_path.read_text(encoding="utf-8"))
 
 
-def _ensure_source_video(video_id: str, settings: Settings) -> Path:
+_load_meta = load_meta
+
+
+def ensure_source_video(video_id: str, settings: Settings) -> Path:
     """切り出し用の元動画を取得する（未 DL なら yt-dlp でダウンロード）."""
     video_dir = settings.data_dir / video_id
     source_dir = video_dir / "clips" / "source"
@@ -59,8 +65,11 @@ def _ensure_source_video(video_id: str, settings: Settings) -> Path:
     if existing:
         return existing[0]
 
-    meta = _load_meta(video_dir)
+    meta = load_meta(video_dir)
     return download_video(meta.url, source_dir, settings)
+
+
+_ensure_source_video = ensure_source_video
 
 
 def build_ffmpeg_command(
@@ -73,7 +82,7 @@ def build_ffmpeg_command(
     reencode: bool = False,
 ) -> list[str]:
     """ffmpeg 切り出しコマンドを組み立てる."""
-    ffmpeg = _find_ffmpeg(ffmpeg_path)
+    ffmpeg = find_ffmpeg(ffmpeg_path)
     duration = end_sec - start_sec
     cmd = [
         ffmpeg,
@@ -93,7 +102,7 @@ def build_ffmpeg_command(
     return cmd
 
 
-def _save_command_log(
+def save_command_log(
     output_dir: Path,
     cmd: list[str],
     *,
@@ -117,6 +126,157 @@ def _save_command_log(
     ]
     log_path.write_text("\n".join(lines), encoding="utf-8")
     return log_path
+
+
+_save_command_log = save_command_log
+
+
+def encode_segment(
+    source: Path,
+    output: Path,
+    start_sec: float,
+    end_sec: float,
+    *,
+    ffmpeg_path: str = FFMPEG_DEFAULT,
+    scale: str | None = None,
+    extra_filters: str | None = None,
+    preset: str = "medium",
+    crf: int = 20,
+) -> Path:
+    """指定区間を精密シークで再エンコードする."""
+    if end_sec <= start_sec:
+        raise FfmpegError("終了時刻は開始時刻より後である必要があります。")
+
+    ffmpeg = find_ffmpeg(ffmpeg_path)
+    duration = end_sec - start_sec
+    cmd: list[str] = [
+        ffmpeg,
+        "-y",
+        "-i",
+        str(source),
+        "-ss",
+        str(start_sec),
+        "-t",
+        str(duration),
+    ]
+
+    filters: list[str] = []
+    if scale:
+        filters.append(scale)
+    if extra_filters:
+        filters.append(extra_filters)
+    if filters:
+        cmd.extend(["-vf", ",".join(filters)])
+
+    cmd.extend(
+        [
+            "-c:v",
+            "libx264",
+            "-preset",
+            preset,
+            "-crf",
+            str(crf),
+            "-c:a",
+            "aac",
+            str(output),
+        ]
+    )
+
+    output.parent.mkdir(parents=True, exist_ok=True)
+    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    log_path = save_command_log(
+        output.parent,
+        cmd,
+        returncode=result.returncode,
+        stdout=result.stdout,
+        stderr=result.stderr,
+    )
+
+    if result.returncode != 0:
+        stderr = (result.stderr or "").strip()
+        raise FfmpegError(
+            f"ffmpeg の区間エンコードに失敗しました。ログ: {log_path}"
+            + (f"\n（詳細: {stderr}）" if stderr else "")
+        )
+
+    if not output.is_file() or output.stat().st_size == 0:
+        raise FfmpegError(
+            f"エンコードファイルが生成されませんでした。ログ: {log_path}"
+        )
+
+    return output
+
+
+def build_concat_list(segment_paths: list[Path], list_path: Path) -> Path:
+    """concat demuxer 用のリストファイルを生成する."""
+    if not segment_paths:
+        raise FfmpegError("連結する区間ファイルが指定されていません。")
+
+    lines: list[str] = []
+    for segment in segment_paths:
+        absolute = segment.resolve()
+        escaped = str(absolute).replace("'", "'\\''")
+        lines.append(f"file '{escaped}'")
+
+    list_path.parent.mkdir(parents=True, exist_ok=True)
+    list_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return list_path
+
+
+def concat_segments(
+    segment_paths: list[Path],
+    output_path: Path,
+    *,
+    ffmpeg_path: str = FFMPEG_DEFAULT,
+    log_dir: Path | None = None,
+) -> Path:
+    """エンコード済み区間を concat demuxer で連結する."""
+    if not segment_paths:
+        raise FfmpegError("連結する区間ファイルが指定されていません。")
+
+    ffmpeg = find_ffmpeg(ffmpeg_path)
+    list_path = output_path.parent / "concat.txt"
+    build_concat_list(segment_paths, list_path)
+
+    cmd = [
+        ffmpeg,
+        "-y",
+        "-f",
+        "concat",
+        "-safe",
+        "0",
+        "-i",
+        str(list_path),
+        "-c",
+        "copy",
+        str(output_path),
+    ]
+
+    effective_log_dir = log_dir if log_dir is not None else output_path.parent
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    log_path = save_command_log(
+        effective_log_dir,
+        cmd,
+        returncode=result.returncode,
+        stdout=result.stdout,
+        stderr=result.stderr,
+    )
+
+    if result.returncode != 0:
+        stderr = (result.stderr or "").strip()
+        raise FfmpegError(
+            f"ffmpeg の連結に失敗しました。ログ: {log_path}"
+            + (f"\n（詳細: {stderr}）" if stderr else "")
+        )
+
+    if not output_path.is_file() or output_path.stat().st_size == 0:
+        raise FfmpegError(
+            f"連結ファイルが生成されませんでした。ログ: {log_path}"
+        )
+
+    list_path.unlink(missing_ok=True)
+    return output_path
 
 
 def cut_clip(
@@ -145,7 +305,7 @@ def cut_clip(
         raise FfmpegError("終了時刻は開始時刻より後である必要があります。")
 
     duration_sec = end_sec - start_sec
-    source_path = _ensure_source_video(video_id, settings)
+    source_path = ensure_source_video(video_id, settings)
 
     output_dir = video_dir / "clips" / "output"
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -166,7 +326,7 @@ def cut_clip(
     )
 
     result = subprocess.run(cmd, capture_output=True, text=True, check=False)
-    log_path = _save_command_log(
+    log_path = save_command_log(
         output_dir,
         cmd,
         returncode=result.returncode,
