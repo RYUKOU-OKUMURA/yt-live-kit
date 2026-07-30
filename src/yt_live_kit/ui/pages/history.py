@@ -29,6 +29,7 @@ _REGENERATE_NOTE = (
 _SESSION_STORAGE_SUMMARY = "history_storage_summary"
 _SESSION_PURGE_CONFIRM = "history_purge_confirm_ids"
 _SESSION_BULK_PREVIEW = "history_bulk_purge_preview"
+_SESSION_PURGE_SUCCESS = "history_purge_success_message"
 
 
 def chapter_button_label(has_chapters: bool) -> str:
@@ -46,8 +47,16 @@ def clips_button_label(has_clips: bool) -> str:
 
 
 def source_bytes_map(summary: StorageSummary) -> dict[str, int]:
-    """動画 ID から元動画バイト数へのマップを返す."""
+    """動画 ID から元動画バイト数へのマップを返す（行バッジ表示用）."""
     return {video.video_id: video.source_bytes for video in summary.videos}
+
+
+def deletable_bytes_map(summary: StorageSummary) -> dict[str, int]:
+    """動画 ID から削除対象バイト数（元動画＋中間ファイル）へのマップを返す."""
+    return {
+        video.video_id: video.source_bytes + video.intermediate_bytes
+        for video in summary.videos
+    }
 
 
 def format_video_storage_row(video: VideoStorage) -> str:
@@ -67,9 +76,9 @@ def preview_purge_sources_older_than(
     days: int,
     *,
     now: datetime | None = None,
-    source_bytes_for: Callable[[str], int] | None = None,
+    deletable_bytes_for: Callable[[str], int] | None = None,
 ) -> tuple[int, int]:
-    """N 日より古い元動画の削除対象件数と合計バイト数を返す."""
+    """N 日より古い削除対象（元動画＋中間ファイル）の件数と合計バイト数を返す."""
     if days < 0:
         return 0, 0
 
@@ -89,11 +98,13 @@ def preview_purge_sources_older_than(
         if fetched_at >= cutoff:
             continue
 
-        source_bytes = source_bytes_for(video.video_id) if source_bytes_for else 0
-        if source_bytes <= 0:
+        deletable_bytes = (
+            deletable_bytes_for(video.video_id) if deletable_bytes_for else 0
+        )
+        if deletable_bytes <= 0:
             continue
         count += 1
-        total_bytes += source_bytes
+        total_bytes += deletable_bytes
 
     return count, total_bytes
 
@@ -147,6 +158,21 @@ def _clear_bulk_preview() -> None:
     st.session_state[_SESSION_BULK_PREVIEW] = None
 
 
+def _get_purge_success_message() -> str | None:
+    raw = st.session_state.get(_SESSION_PURGE_SUCCESS)
+    if isinstance(raw, str):
+        return raw
+    return None
+
+
+def _set_purge_success_message(message: str) -> None:
+    st.session_state[_SESSION_PURGE_SUCCESS] = message
+
+
+def _clear_purge_success_message() -> None:
+    st.session_state[_SESSION_PURGE_SUCCESS] = None
+
+
 def _start_regenerate(video: ProcessedVideo, target: str, settings: Settings) -> None:
     try:
         job_id = start_job(
@@ -169,28 +195,36 @@ def _render_row_actions(
     *,
     busy: bool,
     settings: Settings,
-    source_bytes: int,
 ) -> None:
+    # has_transcript は full.txt の有無。regenerate が必要とする compressed.txt とは一致しない場合がある。
+    regen_disabled = busy or not video.has_transcript
+    regen_help = (
+        None
+        if video.has_transcript
+        else "先に字幕の取得と整形を実行してください。"
+    )
     action_cols = st.columns([2, 2, 2, 1])
     with action_cols[0]:
         if st.button(
             chapter_button_label(video.has_chapters),
             key=f"regen_chapters_{video.video_id}",
-            disabled=busy,
+            disabled=regen_disabled,
+            help=regen_help,
         ):
             _start_regenerate(video, "chapters", settings)
     with action_cols[1]:
         if st.button(
             clips_button_label(video.has_clips),
             key=f"regen_clips_{video.video_id}",
-            disabled=busy,
+            disabled=regen_disabled,
+            help=regen_help,
         ):
             _start_regenerate(video, "clips", settings)
     with action_cols[2]:
         confirming = video.video_id in _purge_confirm_ids()
         if confirming:
             st.warning(
-                "元動画を削除します。チャプター・全文・切り抜き候補・"
+                "元動画と中間ファイルを削除します。チャプター・全文・切り抜き候補・"
                 "切り出し済み動画は残ります。"
             )
             confirm_cols = st.columns(2)
@@ -207,9 +241,10 @@ def _render_row_actions(
                         summary = _get_storage_summary()
                         if summary is not None:
                             _set_storage_summary(summarize(settings))
-                        st.success(
-                            f"元動画を削除しました（{format_bytes(deleted)}）。"
+                        _set_purge_success_message(
+                            f"元動画と中間ファイルを削除しました（{format_bytes(deleted)}）。"
                         )
+                        st.rerun()
                     except StorageError as exc:
                         st.error(str(exc))
             with confirm_cols[1]:
@@ -274,15 +309,15 @@ def _render_storage_section(
             st.rerun()
 
         st.divider()
-        st.markdown("**古い元動画の一括削除**")
+        st.markdown("**古い元動画・中間ファイルの一括削除**")
         days = st.number_input(
-            "日数（この日数より前に取得した元動画を対象）",
+            "日数（この日数より前に取得した動画の元動画・中間ファイルを対象）",
             min_value=1,
             value=30,
             step=1,
             key="history_bulk_purge_days",
         )
-        bytes_map = source_bytes_map(summary)
+        deletable_map = deletable_bytes_map(summary)
         preview = _get_bulk_preview()
 
         preview_cols = st.columns([1, 1])
@@ -295,7 +330,7 @@ def _render_storage_section(
                 count, total_bytes = preview_purge_sources_older_than(
                     processed,
                     int(days),
-                    source_bytes_for=lambda vid: bytes_map.get(vid, 0),
+                    deletable_bytes_for=lambda vid: deletable_map.get(vid, 0),
                 )
                 _set_bulk_preview(int(days), count, total_bytes)
                 st.rerun()
@@ -312,10 +347,12 @@ def _render_storage_section(
             count = int(preview.get("count", 0))
             total_bytes = int(preview.get("total_bytes", 0))
             if count == 0:
-                st.info(f"{int(days)} 日より前の削除対象となる元動画はありません。")
+                st.info(
+                    f"{int(days)} 日より前の削除対象となる元動画・中間ファイルはありません。"
+                )
             else:
                 st.warning(
-                    f"{int(days)} 日より前の元動画が {count} 件、"
+                    f"{int(days)} 日より前の元動画・中間ファイルが {count} 件、"
                     f"合計 {format_bytes(total_bytes)} あります。"
                     "チャプター・全文・切り抜き候補・切り出し済み動画は残ります。"
                 )
@@ -352,6 +389,11 @@ def render_history_page() -> None:
     if busy:
         st.info(_BUSY_MESSAGE)
 
+    purge_success = _get_purge_success_message()
+    if purge_success is not None:
+        st.success(purge_success)
+        _clear_purge_success_message()
+
     storage_summary = _get_storage_summary()
     bytes_map = (
         source_bytes_map(storage_summary) if storage_summary is not None else {}
@@ -384,7 +426,6 @@ def render_history_page() -> None:
             video,
             busy=busy,
             settings=settings,
-            source_bytes=source_bytes,
         )
         st.divider()
 

@@ -231,6 +231,7 @@ def render_channel_page() -> None:
                 total=len(selected_urls),
                 urls=selected_urls,
                 skip_existing=True,
+                settings=settings,
             )
             set_active_job_id(job_id)
             st.rerun()

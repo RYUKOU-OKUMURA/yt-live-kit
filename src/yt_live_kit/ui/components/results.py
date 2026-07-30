@@ -46,7 +46,7 @@ def build_clipboard_copy_html(
     button_id: str,
     button_label: str,
     success_message: str = "コピーしました",
-    hide_after_ms: int = 3000,
+    hide_after_ms: int = 2000,
 ) -> str:
     """クリップボードコピー用の HTML を生成する（テスト可能な純粋関数）."""
     # JSON エンコード結果に "</script>" などが含まれると script タグが

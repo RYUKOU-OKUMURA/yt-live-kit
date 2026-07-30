@@ -78,6 +78,16 @@ def test_build_clipboard_copy_html_embeds_json_encoded_text() -> None:
     assert text not in html
 
 
+def test_build_clipboard_copy_html_default_hide_after_ms_is_2000() -> None:
+    html = build_clipboard_copy_html(
+        text="plain text",
+        button_id="copy_default_ms",
+        button_label="コピー",
+    )
+    assert "2000" in html
+    assert "3000" not in html
+
+
 def test_build_clipboard_copy_html_includes_button_and_success_message() -> None:
     html = build_clipboard_copy_html(
         text="plain text",
