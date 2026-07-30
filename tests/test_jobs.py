@@ -371,3 +371,17 @@ def test_cleanup_finished_keeps_current_job(tmp_path):
     assert read_job(old_job.job_id, settings) is not None
 
 
+def test_start_job_passes_job_id_to_target_fn(tmp_path):
+    settings = Settings(data_dir=tmp_path)
+    done = threading.Event()
+    received: dict[str, object] = {}
+
+    def target_fn(*, report, settings, job_id=None, **_kwargs):
+        received["job_id"] = job_id
+        done.set()
+
+    with patch("yt_live_kit.services.jobs.threading.Thread", wraps=threading.Thread) as mock_thread:
+        job_id = start_job("single", target_fn, settings=settings)
+        mock_thread.return_value.join(timeout=5)
+    assert done.wait(timeout=5)
+    assert received["job_id"] == job_id

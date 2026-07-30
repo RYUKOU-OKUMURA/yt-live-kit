@@ -340,7 +340,7 @@ def regenerate(
     )
 
 
-def run_single_job_target(*, report, settings, url: str) -> None:
+def run_single_job_target(*, report, settings, url: str, job_id: str | None = None) -> None:
     """start_job 用: 単本 URL を pipeline.run で処理する."""
     from yt_live_kit.services.jobs import get_active_job, update_job
 
@@ -348,10 +348,12 @@ def run_single_job_target(*, report, settings, url: str) -> None:
         report(stage=stage, message=message)
 
     result = run(url.strip(), settings, on_progress=on_progress)
-    active = get_active_job(settings)
-    if active is not None:
+    if job_id is None:
+        active = get_active_job(settings)
+        job_id = active.job_id if active is not None else None
+    if job_id is not None:
         update_job(
-            active.job_id,
+            job_id,
             settings=settings,
             video_id=result.video_id,
             title=result.title,

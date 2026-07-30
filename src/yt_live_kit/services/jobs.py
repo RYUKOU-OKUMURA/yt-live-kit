@@ -373,8 +373,8 @@ def start_job(
 
     def worker() -> None:
         try:
-            target_fn(report=report, settings=settings, **kwargs)
-        except BaseException as exc:
+            target_fn(report=report, settings=settings, job_id=job_id, **kwargs)
+        except Exception as exc:
             message, needs_log = _error_message_for(exc)
             if needs_log:
                 _write_error_log(settings, job_id, exc)
