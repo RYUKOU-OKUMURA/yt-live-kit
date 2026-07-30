@@ -340,14 +340,60 @@ def regenerate(
     )
 
 
-def run_single_job_target(*, report, settings, url: str, job_id: str | None = None) -> None:
+def run_single_job_target(
+    *,
+    report,
+    settings,
+    url: str,
+    job_id: str | None = None,
+    do_chapters: bool = True,
+    do_clips: bool = True,
+) -> None:
     """start_job 用: 単本 URL を pipeline.run で処理する."""
     from yt_live_kit.services.jobs import get_active_job, update_job
 
     def on_progress(stage: str, message: str) -> None:
         report(stage=stage, message=message)
 
-    result = run(url.strip(), settings, on_progress=on_progress)
+    result = run(
+        url.strip(),
+        settings,
+        on_progress=on_progress,
+        do_chapters=do_chapters,
+        do_clips=do_clips,
+    )
+    if job_id is None:
+        active = get_active_job(settings)
+        job_id = active.job_id if active is not None else None
+    if job_id is not None:
+        update_job(
+            job_id,
+            settings=settings,
+            video_id=result.video_id,
+            title=result.title,
+        )
+
+
+def regenerate_job_target(
+    *,
+    report,
+    settings,
+    video_id: str,
+    target: str,
+    job_id: str | None = None,
+) -> None:
+    """再生成用: 保存済み字幕を入力に指定ステップのみ pipeline.regenerate で処理する."""
+    from yt_live_kit.services.jobs import get_active_job, update_job
+
+    def on_progress(stage: str, message: str) -> None:
+        report(stage=stage, message=message)
+
+    result = regenerate(
+        video_id,
+        target=target,
+        settings=settings,
+        on_progress=on_progress,
+    )
     if job_id is None:
         active = get_active_job(settings)
         job_id = active.job_id if active is not None else None
