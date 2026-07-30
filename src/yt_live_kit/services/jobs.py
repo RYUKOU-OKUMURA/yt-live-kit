@@ -32,6 +32,10 @@ _UNEXPECTED_ERROR_MESSAGE = (
 )
 _BUSY_MESSAGE = "別の処理が実行中です。完了してから再度お試しください。"
 
+# is_busy() のチェックと create_job() の間の競合を防ぐためのロック。
+# 詳細は start_job() の docstring を参照。
+_START_LOCK = threading.Lock()
+
 _KNOWN_ERRORS = (
     AiPromptError,
     FfmpegError,
@@ -338,19 +342,27 @@ def start_job(
     settings: Settings | None = None,
     **kwargs: Any,
 ) -> str:
-    """バックグラウンドで target_fn を実行し、job_id を返す."""
-    settings = settings or get_settings()
-    if is_busy(settings):
-        raise JobBusyError()
+    """バックグラウンドで target_fn を実行し、job_id を返す.
 
-    state = create_job(
-        kind,
-        video_id=video_id,
-        title=title,
-        total=total,
-        settings=settings,
-    )
-    job_id = state.job_id
+    is_busy() のチェックと create_job() による作成の間を _START_LOCK で
+    直列化し、二重クリックや複数スレッドからの同時呼び出しで両方が
+    ジョブを作成してしまう競合を防ぐ。このロックは同一プロセス内の競合の
+    みを防ぐものであり、複数の Streamlit プロセスが同じ data ディレクトリを
+    共有する場合の競合は防げない。
+    """
+    settings = settings or get_settings()
+    with _START_LOCK:
+        if is_busy(settings):
+            raise JobBusyError()
+
+        state = create_job(
+            kind,
+            video_id=video_id,
+            title=title,
+            total=total,
+            settings=settings,
+        )
+        job_id = state.job_id
 
     def report(
         *,

@@ -209,6 +209,48 @@ def test_is_busy_and_job_busy_error(tmp_path):
     assert not is_busy(settings)
 
 
+def test_start_job_concurrent_calls_only_start_one_job(tmp_path):
+    """_START_LOCK により、同時に複数回 start_job() を呼んでも 1 件しか作られない."""
+    settings = Settings(data_dir=tmp_path)
+
+    def target_fn(*, report, settings, **_kwargs):
+        time.sleep(0.2)
+
+    barrier = threading.Barrier(5)
+    results: list[tuple[str, str | None]] = []
+    results_lock = threading.Lock()
+
+    def worker():
+        barrier.wait(timeout=5)
+        try:
+            job_id = start_job("single", target_fn, settings=settings)
+            outcome: tuple[str, str | None] = ("ok", job_id)
+        except JobBusyError:
+            outcome = ("busy", None)
+        with results_lock:
+            results.append(outcome)
+
+    with patch("yt_live_kit.services.jobs.threading.Thread", wraps=threading.Thread) as mock_thread:
+        workers = [threading.Thread(target=worker) for _ in range(5)]
+        for w in workers:
+            w.start()
+        for w in workers:
+            w.join(timeout=5)
+
+        for _ in range(50):
+            if not is_busy(settings):
+                break
+            time.sleep(0.05)
+        mock_thread.return_value.join(timeout=5)
+
+    assert len(results) == 5
+    ok_results = [r for r in results if r[0] == "ok"]
+    busy_results = [r for r in results if r[0] == "busy"]
+    assert len(ok_results) == 1
+    assert len(busy_results) == 4
+    assert not is_busy(settings)
+
+
 def test_close_orphans(tmp_path):
     settings = Settings(data_dir=tmp_path)
     running = create_job("single", settings=settings)
