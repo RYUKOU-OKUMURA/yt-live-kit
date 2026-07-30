@@ -11,8 +11,11 @@ from yt_live_kit.config import Settings
 from yt_live_kit.models.meta import VideoMeta
 from yt_live_kit.services.ffmpeg import (
     FfmpegError,
+    build_concat_list,
     build_ffmpeg_command,
+    concat_segments,
     cut_clip,
+    encode_segment,
 )
 
 
@@ -95,3 +98,117 @@ def test_cut_clip_fails_without_ffmpeg(mock_which, mock_run, tmp_path):
             ffmpeg_path="/usr/bin/ffmpeg",
             reencode=True,
         )
+
+
+@patch("yt_live_kit.services.ffmpeg.subprocess.run")
+@patch("yt_live_kit.services.ffmpeg.shutil.which")
+def test_encode_segment_ss_after_input(mock_which, mock_run, tmp_path):
+    mock_which.return_value = "/usr/bin/ffmpeg"
+
+    def fake_run(cmd, **kwargs):
+        output_path = Path(cmd[-1])
+        output_path.write_bytes(b"segment data")
+        return MagicMock(returncode=0, stdout="", stderr="")
+
+    mock_run.side_effect = fake_run
+
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"fake video")
+    output = tmp_path / "seg.mp4"
+
+    encode_segment(source, output, 10.0, 40.0, ffmpeg_path="/usr/bin/ffmpeg")
+
+    cmd = mock_run.call_args[0][0]
+    i_index = cmd.index("-i")
+    ss_index = cmd.index("-ss")
+    assert ss_index > i_index
+    assert cmd[i_index + 1] == str(source)
+    assert "-c:v" in cmd
+    assert "libx264" in cmd
+    assert "-c:a" in cmd
+    assert "aac" in cmd
+    assert "-b:a" in cmd
+    assert "192k" in cmd
+
+
+@patch("yt_live_kit.services.ffmpeg.subprocess.run")
+@patch("yt_live_kit.services.ffmpeg.shutil.which")
+def test_encode_segment_vf_filter_order(mock_which, mock_run, tmp_path):
+    mock_which.return_value = "/usr/bin/ffmpeg"
+
+    def fake_run(cmd, **kwargs):
+        output_path = Path(cmd[-1])
+        output_path.write_bytes(b"segment data")
+        return MagicMock(returncode=0, stdout="", stderr="")
+
+    mock_run.side_effect = fake_run
+
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"fake video")
+    output = tmp_path / "seg.mp4"
+
+    encode_segment(
+        source,
+        output,
+        0.0,
+        30.0,
+        ffmpeg_path="/usr/bin/ffmpeg",
+        scale="scale=1280:720",
+        extra_filters=["format=yuv420p"],
+    )
+
+    cmd = mock_run.call_args[0][0]
+    vf_index = cmd.index("-vf")
+    assert cmd[vf_index + 1] == "scale=1280:720,format=yuv420p"
+    assert "-b:a" in cmd
+    assert "192k" in cmd
+
+
+def test_build_concat_list_quote_escape(tmp_path):
+    segment = tmp_path / "seg's clip.mp4"
+    segment.write_bytes(b"data")
+    list_path = tmp_path / "concat.txt"
+
+    build_concat_list([segment], list_path)
+
+    content = list_path.read_text(encoding="utf-8")
+    assert "file '" in content
+    assert "'\\''" in content
+    assert content.endswith("\n")
+
+
+def test_build_concat_list_empty_raises():
+    with pytest.raises(FfmpegError, match="連結"):
+        build_concat_list([], Path("/tmp/concat.txt"))
+
+
+@patch("yt_live_kit.services.ffmpeg.subprocess.run")
+@patch("yt_live_kit.services.ffmpeg.shutil.which")
+def test_concat_segments_command(mock_which, mock_run, tmp_path):
+    mock_which.return_value = "/usr/bin/ffmpeg"
+
+    def fake_run(cmd, **kwargs):
+        output_path = Path(cmd[-1])
+        output_path.write_bytes(b"concat data")
+        return MagicMock(returncode=0, stdout="", stderr="")
+
+    mock_run.side_effect = fake_run
+
+    seg1 = tmp_path / "seg1.mp4"
+    seg2 = tmp_path / "seg2.mp4"
+    seg1.write_bytes(b"seg1")
+    seg2.write_bytes(b"seg2")
+    output = tmp_path / "output" / "highlight.mp4"
+    list_path = output.parent / "concat.txt"
+
+    result = concat_segments([seg1, seg2], output, ffmpeg_path="/usr/bin/ffmpeg")
+
+    cmd = mock_run.call_args[0][0]
+    assert "-f" in cmd
+    assert "concat" in cmd
+    assert "-safe" in cmd
+    assert "0" in cmd
+    assert "-c" in cmd
+    assert "copy" in cmd
+    assert result == output
+    assert not list_path.exists()
