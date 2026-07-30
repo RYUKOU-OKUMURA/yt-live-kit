@@ -6,6 +6,7 @@ import json
 import threading
 import time
 from datetime import datetime, timedelta, timezone
+from unittest.mock import patch
 
 import pytest
 
@@ -105,7 +106,9 @@ def test_start_job_updates_state_via_report(tmp_path):
         report(stage="fetch", message="取得中", current=1, total=2)
         done.set()
 
-    job_id = start_job("single", target_fn, settings=settings, total=2)
+    with patch("yt_live_kit.services.jobs.threading.Thread", wraps=threading.Thread) as mock_thread:
+        job_id = start_job("single", target_fn, settings=settings, total=2)
+        mock_thread.return_value.join(timeout=5)
     assert done.wait(timeout=5)
     for _ in range(50):
         state = read_job(job_id, settings)
@@ -131,7 +134,9 @@ def test_start_job_marks_failed_on_exception(tmp_path):
     def target_fn(*, report, settings, **_kwargs):
         raise RuntimeError("処理に失敗しました")
 
-    job_id = start_job("single", target_fn, settings=settings)
+    with patch("yt_live_kit.services.jobs.threading.Thread", wraps=threading.Thread) as mock_thread:
+        job_id = start_job("single", target_fn, settings=settings)
+        mock_thread.return_value.join(timeout=5)
     for _ in range(50):
         state = read_job(job_id, settings)
         if state is not None and state.status == "failed":
@@ -154,7 +159,9 @@ def test_start_job_writes_log_for_unexpected_exception(tmp_path):
     def target_fn(*, report, settings, **_kwargs):
         raise ValueError()
 
-    job_id = start_job("single", target_fn, settings=settings)
+    with patch("yt_live_kit.services.jobs.threading.Thread", wraps=threading.Thread) as mock_thread:
+        job_id = start_job("single", target_fn, settings=settings)
+        mock_thread.return_value.join(timeout=5)
     for _ in range(50):
         state = read_job(job_id, settings)
         if state is not None and state.status == "failed":
@@ -179,19 +186,21 @@ def test_is_busy_and_job_busy_error(tmp_path):
         time.sleep(0.2)
 
     assert not is_busy(settings)
-    job_id = start_job("single", target_fn, settings=settings)
-    assert started.wait(timeout=5)
-    assert is_busy(settings)
-    assert get_active_job(settings) is not None
-    assert get_active_job(settings).job_id == job_id
+    with patch("yt_live_kit.services.jobs.threading.Thread", wraps=threading.Thread) as mock_thread:
+        job_id = start_job("single", target_fn, settings=settings)
+        assert started.wait(timeout=5)
+        assert is_busy(settings)
+        assert get_active_job(settings) is not None
+        assert get_active_job(settings).job_id == job_id
 
-    with pytest.raises(JobBusyError, match="別の処理が実行中です"):
-        start_job("single", target_fn, settings=settings)
+        with pytest.raises(JobBusyError, match="別の処理が実行中です"):
+            start_job("single", target_fn, settings=settings)
 
-    for _ in range(50):
-        if not is_busy(settings):
-            break
-        time.sleep(0.05)
+        for _ in range(50):
+            if not is_busy(settings):
+                break
+            time.sleep(0.05)
+        mock_thread.return_value.join(timeout=5)
     assert not is_busy(settings)
 
 
