@@ -12,7 +12,7 @@
 
 | フェーズ | 名称 | 状態 |
 |----------|------|------|
-| P0 | プロジェクト骨格 | [ ] 未着手 |
+| P0 | プロジェクト骨格 | [x] 完了 |
 | P1 | 字幕取得・整形 | [ ] 未着手 |
 | P2 | チャプター生成 | [ ] 未着手 |
 | P3 | Web UI 縦一本 | [ ] 未着手 |
@@ -129,17 +129,17 @@ docs(P3): 実行計画の進捗チェックを更新
 ### P0: プロジェクト骨格
 
 **目的:** 以降の実装が同じ場所に載る土台を作る。  
-**フェーズ状態:** [ ] 未着手
+**フェーズ状態:** [x] 完了
 
 **作業:**
 
-- [ ] P0-1. `pyproject.toml`（uv）を作成し、依存を定義する（streamlit, pydantic, typer, yt-dlp 等）
-- [ ] P0-2. ディレクトリ構成を作成する（`src/yt_live_kit/`, `prompts/`, `tests/`, `data/`）
-- [ ] P0-3. `.gitignore`（`data/`, `.venv/` 等）を追加する
-- [ ] P0-4. `config.py`（data-dir, sleep, yt-dlp path）を用意する
-- [ ] P0-5. 空の Streamlit `ui/app.py` と `start.command` の雛形を置く
-- [ ] P0-6. README の骨子（起動・前提ソフト）を書く
-- [ ] P0-7. フェーズ完了コミット（必須）
+- [x] P0-1. `pyproject.toml`（uv）を作成し、依存を定義する（streamlit, pydantic, typer, yt-dlp 等）
+- [x] P0-2. ディレクトリ構成を作成する（`src/yt_live_kit/`, `prompts/`, `tests/`, `data/`）
+- [x] P0-3. `.gitignore`（`data/`, `.venv/` 等）を追加する
+- [x] P0-4. `config.py`（data-dir, sleep, yt-dlp path）を用意する
+- [x] P0-5. 空の Streamlit `ui/app.py` と `start.command` の雛形を置く
+- [x] P0-6. README の骨子（起動・前提ソフト）を書く
+- [x] P0-7. フェーズ完了コミット（必須）
 
 **成果物:**
 
@@ -148,9 +148,9 @@ docs(P3): 実行計画の進捗チェックを更新
 
 **Done 条件:**
 
-- [ ] `uv run streamlit run src/yt_live_kit/ui/app.py` で localhost が開く
-- [ ] `data/` が git 管理外である
-- [ ] フェーズ完了コミット済み
+- [x] `uv run streamlit run src/yt_live_kit/ui/app.py` で localhost が開く
+- [x] `data/` が git 管理外である
+- [x] フェーズ完了コミット済み
 
 **見積もり目安:** 0.5 日
 
