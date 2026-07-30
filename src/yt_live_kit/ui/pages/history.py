@@ -199,6 +199,7 @@ def _render_row_actions(
                     "削除を実行",
                     key=f"purge_exec_{video.video_id}",
                     type="primary",
+                    disabled=busy,
                 ):
                     try:
                         deleted = purge_source(video.video_id, settings)
@@ -212,7 +213,11 @@ def _render_row_actions(
                     except StorageError as exc:
                         st.error(str(exc))
             with confirm_cols[1]:
-                if st.button("キャンセル", key=f"purge_cancel_{video.video_id}"):
+                if st.button(
+                    "キャンセル",
+                    key=f"purge_cancel_{video.video_id}",
+                    disabled=busy,
+                ):
                     _clear_purge_confirm(video.video_id)
                     st.rerun()
         elif st.button(
@@ -223,6 +228,7 @@ def _render_row_actions(
             _request_purge_confirm(video.video_id)
             st.rerun()
     with action_cols[3]:
+        # 読み取り専用のため busy 中も有効のまま
         if st.button("開く", key=f"open_{video.video_id}"):
             loaded = load_result_from_disk(video.video_id, settings)
             if loaded is None:
@@ -236,6 +242,8 @@ def _render_row_actions(
 def _render_storage_section(
     processed: list[ProcessedVideo],
     settings: Settings,
+    *,
+    busy: bool,
 ) -> None:
     with st.expander("ストレージ", expanded=False):
         summary = _get_storage_summary()
@@ -243,7 +251,11 @@ def _render_storage_section(
             st.caption(
                 "容量の集計は data/ 全体を走査するため、必要なときだけ計算します。"
             )
-            if st.button("容量を計算", key="history_calc_storage"):
+            if st.button(
+                "容量を計算",
+                key="history_calc_storage",
+                disabled=busy,
+            ):
                 _set_storage_summary(summarize(settings))
                 st.rerun()
             return
@@ -253,7 +265,11 @@ def _render_storage_section(
         for video in summary.videos[:10]:
             st.text(format_video_storage_row(video))
 
-        if st.button("容量を再計算", key="history_recalc_storage"):
+        if st.button(
+            "容量を再計算",
+            key="history_recalc_storage",
+            disabled=busy,
+        ):
             _set_storage_summary(summarize(settings))
             st.rerun()
 
@@ -271,7 +287,11 @@ def _render_storage_section(
 
         preview_cols = st.columns([1, 1])
         with preview_cols[0]:
-            if st.button("対象を確認", key="history_bulk_preview"):
+            if st.button(
+                "対象を確認",
+                key="history_bulk_preview",
+                disabled=busy,
+            ):
                 count, total_bytes = preview_purge_sources_older_than(
                     processed,
                     int(days),
@@ -280,7 +300,11 @@ def _render_storage_section(
                 _set_bulk_preview(int(days), count, total_bytes)
                 st.rerun()
         with preview_cols[1]:
-            if st.button("確認をクリア", key="history_bulk_clear_preview"):
+            if st.button(
+                "確認をクリア",
+                key="history_bulk_clear_preview",
+                disabled=busy,
+            ):
                 _clear_bulk_preview()
                 st.rerun()
 
@@ -299,16 +323,21 @@ def _render_storage_section(
                     f"{count} 件を削除する",
                     key="history_bulk_purge_exec",
                     type="primary",
+                    disabled=busy,
                 ):
-                    results = purge_sources_older_than(int(days), settings)
-                    deleted_count = len(results)
-                    deleted_bytes = sum(size for _, size in results)
-                    _set_storage_summary(summarize(settings))
-                    _clear_bulk_preview()
-                    st.success(
-                        f"{deleted_count} 件、合計 {format_bytes(deleted_bytes)} "
-                        "を削除しました。"
-                    )
+                    try:
+                        results = purge_sources_older_than(int(days), settings)
+                    except StorageError as exc:
+                        st.error(str(exc))
+                    else:
+                        deleted_count = len(results)
+                        deleted_bytes = sum(size for _, size in results)
+                        _set_storage_summary(summarize(settings))
+                        _clear_bulk_preview()
+                        st.success(
+                            f"{deleted_count} 件、合計 {format_bytes(deleted_bytes)} "
+                            "を削除しました。"
+                        )
 
 
 def render_history_page() -> None:
@@ -359,4 +388,4 @@ def render_history_page() -> None:
         )
         st.divider()
 
-    _render_storage_section(processed, settings)
+    _render_storage_section(processed, settings, busy=busy)

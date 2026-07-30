@@ -2,12 +2,36 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 from yt_live_kit.services.history import ProcessedVideo
-from yt_live_kit.services.storage import StorageSummary, VideoStorage
+from yt_live_kit.services.storage import StorageError, StorageSummary, VideoStorage
 from yt_live_kit.ui.pages import history
+
+
+class _MockColumn:
+    def __enter__(self) -> _MockColumn:
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        return None
+
+
+def _mock_columns(spec: int | list[int]) -> list[_MockColumn]:
+    count = len(spec) if isinstance(spec, list) else spec
+    return [_MockColumn() for _ in range(count)]
+
+
+def _collect_button_disabled_calls() -> tuple[list[tuple[str, bool | None]], MagicMock]:
+    calls: list[tuple[str, bool | None]] = []
+
+    def mock_button(label: str, **kwargs: object) -> bool:
+        calls.append((label, kwargs.get("disabled")))  # type: ignore[arg-type]
+        return False
+
+    return calls, MagicMock(side_effect=mock_button)
 
 
 def test_chapter_button_label_switches_on_has_chapters() -> None:
@@ -195,3 +219,157 @@ def test_start_regenerate_shows_error_on_job_busy() -> None:
     show_error.assert_called_once()
     set_active.assert_not_called()
     rerun.assert_not_called()
+
+
+def test_render_row_actions_disables_purge_confirm_buttons_when_busy() -> None:
+    video = ProcessedVideo(
+        video_id="vid1234567",
+        title="テスト",
+        fetched_at=None,
+        has_chapters=True,
+        has_transcript=False,
+        has_clips=False,
+    )
+    settings = MagicMock()
+    calls, mock_button = _collect_button_disabled_calls()
+
+    with (
+        patch("yt_live_kit.ui.pages.history.st.columns", side_effect=_mock_columns),
+        patch("yt_live_kit.ui.pages.history.st.button", mock_button),
+        patch("yt_live_kit.ui.pages.history.st.warning"),
+        patch(
+            "yt_live_kit.ui.pages.history._purge_confirm_ids",
+            return_value={"vid1234567"},
+        ),
+    ):
+        history._render_row_actions(
+            video,
+            busy=True,
+            settings=settings,
+            source_bytes=1024,
+        )
+
+    disabled_by_label = dict(calls)
+    assert disabled_by_label["削除を実行"] is True
+    assert disabled_by_label["キャンセル"] is True
+    assert disabled_by_label.get("開く") is None
+
+
+def test_render_storage_section_disables_storage_buttons_when_busy() -> None:
+    processed = [
+        ProcessedVideo(
+            video_id="vid1234567",
+            title="テスト",
+            fetched_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            has_chapters=True,
+            has_transcript=False,
+            has_clips=False,
+        ),
+    ]
+    settings = MagicMock()
+    summary = StorageSummary(
+        total_bytes=1024,
+        videos=[
+            VideoStorage(
+                video_id="vid1234567",
+                title="テスト",
+                source_bytes=1024,
+                output_bytes=0,
+                intermediate_bytes=0,
+                other_bytes=0,
+                total_bytes=1024,
+            ),
+        ],
+    )
+    calls, mock_button = _collect_button_disabled_calls()
+
+    @contextmanager
+    def mock_expander(_label: str, *, expanded: bool = False):
+        yield
+
+    with (
+        patch("yt_live_kit.ui.pages.history.st.expander", side_effect=mock_expander),
+        patch("yt_live_kit.ui.pages.history.st.columns", side_effect=_mock_columns),
+        patch("yt_live_kit.ui.pages.history.st.button", mock_button),
+        patch("yt_live_kit.ui.pages.history.st.markdown"),
+        patch("yt_live_kit.ui.pages.history.st.caption"),
+        patch("yt_live_kit.ui.pages.history.st.text"),
+        patch("yt_live_kit.ui.pages.history.st.divider"),
+        patch("yt_live_kit.ui.pages.history.st.number_input", return_value=30),
+        patch("yt_live_kit.ui.pages.history._get_storage_summary", return_value=summary),
+        patch(
+            "yt_live_kit.ui.pages.history._get_bulk_preview",
+            return_value={"days": 30, "count": 1, "total_bytes": 1024},
+        ),
+    ):
+        history._render_storage_section(processed, settings, busy=True)
+
+    disabled_by_label = dict(calls)
+    assert disabled_by_label["容量を再計算"] is True
+    assert disabled_by_label["対象を確認"] is True
+    assert disabled_by_label["確認をクリア"] is True
+    assert disabled_by_label["1 件を削除する"] is True
+
+
+def test_render_storage_section_shows_error_on_bulk_purge_storage_error() -> None:
+    processed = [
+        ProcessedVideo(
+            video_id="vid1234567",
+            title="テスト",
+            fetched_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            has_chapters=True,
+            has_transcript=False,
+            has_clips=False,
+        ),
+    ]
+    settings = MagicMock()
+    summary = StorageSummary(
+        total_bytes=1024,
+        videos=[
+            VideoStorage(
+                video_id="vid1234567",
+                title="テスト",
+                source_bytes=1024,
+                output_bytes=0,
+                intermediate_bytes=0,
+                other_bytes=0,
+                total_bytes=1024,
+            ),
+        ],
+    )
+
+    def mock_button(label: str, **kwargs: object) -> bool:
+        return label == "1 件を削除する"
+
+    @contextmanager
+    def mock_expander(_label: str, *, expanded: bool = False):
+        yield
+
+    with (
+        patch("yt_live_kit.ui.pages.history.st.expander", side_effect=mock_expander),
+        patch("yt_live_kit.ui.pages.history.st.columns", side_effect=_mock_columns),
+        patch("yt_live_kit.ui.pages.history.st.button", side_effect=mock_button),
+        patch("yt_live_kit.ui.pages.history.st.markdown"),
+        patch("yt_live_kit.ui.pages.history.st.caption"),
+        patch("yt_live_kit.ui.pages.history.st.text"),
+        patch("yt_live_kit.ui.pages.history.st.divider"),
+        patch("yt_live_kit.ui.pages.history.st.warning"),
+        patch("yt_live_kit.ui.pages.history.st.number_input", return_value=30),
+        patch("yt_live_kit.ui.pages.history._get_storage_summary", return_value=summary),
+        patch(
+            "yt_live_kit.ui.pages.history._get_bulk_preview",
+            return_value={"days": 30, "count": 1, "total_bytes": 1024},
+        ),
+        patch(
+            "yt_live_kit.ui.pages.history.purge_sources_older_than",
+            side_effect=StorageError("一括削除に失敗しました"),
+        ),
+        patch("yt_live_kit.ui.pages.history.st.error") as show_error,
+        patch("yt_live_kit.ui.pages.history.st.success") as show_success,
+        patch("yt_live_kit.ui.pages.history.summarize") as summarize,
+    ):
+        history._render_storage_section(processed, settings, busy=False)
+
+    show_error.assert_called_once_with("一括削除に失敗しました")
+    show_success.assert_not_called()
+    summarize.assert_not_called()
