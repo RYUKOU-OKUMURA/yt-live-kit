@@ -12,11 +12,11 @@
 
 | フェーズ | 名称 | 状態 |
 |----------|------|------|
-| V0 | 要件・計画の改訂 | [ ] 未着手 |
-| V1 | 機能分離とコピー支援 | [ ] 未着手 |
-| V2 | 非同期実行とステータスバー | [ ] 未着手 |
-| V3 | チャンネルから URL 取得 | [ ] 未着手 |
-| V4 | ストレージ管理 | [ ] 未着手 |
+| V0 | 要件・計画の改訂 | [x] 完了 |
+| V1 | 機能分離とコピー支援 | [~] 進行中 |
+| V2 | 非同期実行とステータスバー | [x] 完了 |
+| V3 | チャンネルから URL 取得 | [~] 進行中 |
+| V4 | ストレージ管理 | [~] 進行中 |
 | V5 | ハイライトまとめ動画 | [ ] 未着手 |
 | V6 | 縦型ショート動画 | [ ] 未着手 |
 | V7 | 受け入れ・仕上げ | [ ] 未着手 |
@@ -28,7 +28,7 @@
 | ID | 内容 | 状態 |
 |----|------|------|
 | M6 | やり直しが安くなる（V1 完了） | [ ] |
-| M7 | 待ち時間が見える・触れる（V2 完了） | [ ] |
+| M7 | 待ち時間が見える・触れる（V2 完了） | [x] |
 | M8 | URL コピペが消える（V3 完了） | [ ] |
 | M9 | ハイライト動画が出る（V5 完了） | [ ] |
 | M10 | v2 完了（V7 完了） | [ ] |
@@ -152,24 +152,24 @@ data/{video_id}/ ...
 ### V0: 要件・計画の改訂
 
 **目的:** 実装より先に、要件と計画の食い違いを解消する（AGENTS.md §1 のルール）。
-**フェーズ状態:** [ ] 未着手
+**フェーズ状態:** [x] 完了
 
 **作業:**
 
-- [ ] V0-1. `docs/requirements.md` に **FR-09〜FR-15** を追加する（§7 に定義を記載）
-- [ ] V0-2. `docs/requirements.md` に **AC-11〜AC-17** を追加する（§8 に定義を記載）
-- [ ] V0-3. `docs/requirements.md` §6.1 を改訂する — 自動編集の禁止範囲を §3.1 の表に置き換える
-- [ ] V0-4. `docs/requirements.md` §6.3（v2 展望）から、本計画で実装する項目を移動する
-- [ ] V0-5. `docs/requirements.md` §5.2 に、v2 で追加されるディレクトリを反映する（§6 参照）
-- [ ] V0-6. `docs/tech-stack.md` に追記する — ffmpeg の再エンコード方針、Streamlit の非同期方針、日本語フォント指定
-- [ ] V0-7. `AGENTS.md` §5 の出力ルールに変更がないことを確認する（変更なしのはず）
-- [ ] V0-8. フェーズ完了コミット（必須）
+- [x] V0-1. `docs/requirements.md` に **FR-09〜FR-15** を追加する（§7 に定義を記載）
+- [x] V0-2. `docs/requirements.md` に **AC-11〜AC-17** を追加する（§8 に定義を記載）
+- [x] V0-3. `docs/requirements.md` §6.1 を改訂する — 自動編集の禁止範囲を §3.1 の表に置き換える
+- [x] V0-4. `docs/requirements.md` §6.3（v2 展望）から、本計画で実装する項目を移動する
+- [x] V0-5. `docs/requirements.md` §5.2 に、v2 で追加されるディレクトリを反映する（§6 参照）
+- [x] V0-6. `docs/tech-stack.md` に追記する — ffmpeg の再エンコード方針、Streamlit の非同期方針、日本語フォント指定
+- [x] V0-7. `AGENTS.md` §5 の出力ルールに変更がないことを確認する（変更なしのはず）
+- [x] V0-8. フェーズ完了コミット（必須）
 
 **Done 条件:**
 
-- [ ] requirements と本計画の間に矛盾がない
-- [ ] 「何を作らないか」（§3.1 の下半分）が要件に明記されている
-- [ ] フェーズ完了コミット済み
+- [x] requirements と本計画の間に矛盾がない
+- [x] 「何を作らないか」（§3.1 の下半分）が要件に明記されている
+- [x] フェーズ完了コミット済み
 
 **見積もり目安:** 0.5 日
 
@@ -178,18 +178,18 @@ data/{video_id}/ ...
 ### V1: 機能分離とコピー支援 ★最初のユーザー価値
 
 **目的:** チャプターと切り抜き候補を別々に実行・再実行できるようにし、日常のコピー操作を減らす。
-**フェーズ状態:** [ ] 未着手
+**フェーズ状態:** [~] 進行中
 
-**背景:** 現状 [`pipeline.py:77-142`](../src/yt_live_kit/services/pipeline.py) の `run()` は fetch → transcript → chapters → clips を直列に固定実行する。チャプターの出来が悪いときに作り直すには、字幕取得からやり直すしかない。Codex CLI 呼び出しが重い以上、これが日常運用で最も痛い。
+**背景:** 現状 [`pipeline.py`](../src/yt_live_kit/services/pipeline.py) の `run()` は fetch → transcript → chapters → clips を直列に固定実行する。チャプターの出来が悪いときに作り直すには、字幕取得からやり直すしかない。Codex CLI 呼び出しが重い以上、これが日常運用で最も痛い。
 
 **作業:**
 
-- [ ] V1-1. `services/pipeline.py` に実行ステップの選択を追加する
+- [x] V1-1. `services/pipeline.py` に実行ステップの選択を追加する
   → **大きめの実装のため、完了時にタスク単位コミット**
   - `run(url, *, do_chapters: bool = True, do_clips: bool = True, ...)` を追加
   - `fetch` / `transcript` は成果物が既にあればスキップする（`meta.json` と `transcript/full.txt` の存在で判定）
   - 既存の `run(url)` 呼び出しは引数デフォルトでそのまま動くこと（後方互換）
-- [ ] V1-2. `services/pipeline.py` に `regenerate(video_id, *, target)` を追加する
+- [x] V1-2. `services/pipeline.py` に `regenerate(video_id, *, target)` を追加する
   - `target` は `"chapters"` / `"clips"` / `"highlights"`（V5 で追加）
   - 保存済みの `transcript/compressed.txt` を入力に、指定ステップのみ再実行する
   - 既存成果物は上書き前に `chapters/chapters.md.bak` として退避する
@@ -203,12 +203,12 @@ data/{video_id}/ ...
   - 「文字起こし全文をコピー」— [`app.py:103-117`](../src/yt_live_kit/ui/app.py) の expander 内、ダウンロードボタンの隣
   - `st.components.v1.html` + `navigator.clipboard.writeText` で実装する
   - **`st.code` に全文を流さないこと**（数万文字で描画が重くなる）。表示は現行の `text_area` のまま
-- [ ] V1-6. 概要欄テンプレート合成を追加する
+- [x] V1-6. 概要欄テンプレート合成を追加する（services 完了。UI コピーボタンは W3）
   - `services/description.py` — タイムライン + 定型文を結合して 1 ブロックのテキストを返す
   - 定型文は `prompts/` ではなく `data/_config/description_template.txt` に置く（ユーザーが編集する運用データのため）
   - テンプレート未設置なら、タイムラインのみを返す
   - UI に「概要欄用テキストをコピー」ボタンを置く
-- [ ] V1-7. ユニットテスト
+- [x] V1-7. ユニットテスト
   - `tests/test_pipeline_partial.py` — フラグ組み合わせで呼ばれるステップが正しいこと（Codex はモック）
   - `tests/test_description.py` — テンプレート有／無の両方
 - [ ] V1-8. 実行計画の進捗チェック更新 + フェーズ完了コミット（必須）
@@ -216,8 +216,8 @@ data/{video_id}/ ...
 **Done 条件:**
 
 - [ ] AC-11 / AC-13 を満たす
-- [ ] チャプターだけを再生成でき、そのとき字幕の再取得も Codex の切り抜き候補呼び出しも走らない
-- [ ] 既存の `run(url)` を使うテストが全て通る（後方互換）
+- [x] チャプターだけを再生成でき、そのとき字幕の再取得も Codex の切り抜き候補呼び出しも走らない
+- [x] 既存の `run(url)` を使うテストが全て通る（後方互換）
 - [ ] フェーズ完了コミット済み
 
 **見積もり目安:** 1 日
@@ -227,26 +227,26 @@ data/{video_id}/ ...
 ### V2: 非同期実行とステータスバー
 
 **目的:** 長時間処理中も UI が固まらず、進行状況が常に見えるようにする。
-**フェーズ状態:** [ ] 未着手
+**フェーズ状態:** [x] 完了
 
-**背景:** 現状は [`app.py:179-216`](../src/yt_live_kit/ui/app.py) の `st.status` 内で同期実行しているため、処理中はページ全体がブロックされ、完了すると進捗表示が畳まれて消える。Codex CLI 呼び出しが数分かかる以上、ここは体感品質に直結する。
+**背景:** 現状は [`app.py`](../src/yt_live_kit/ui/app.py) の同期実行を廃し、ジョブ機構 + fragment ポーリングに置き換えた。
 
 **このフェーズは V5 / V6 の前提になる**（ハイライト・ショートは ffmpeg 再エンコードで数分かかるため）。
 
 **作業:**
 
-- [ ] V2-1. `services/jobs.py` を新規作成する
+- [x] V2-1. `services/jobs.py` を新規作成する
   → **大きめの実装のため、完了時にタスク単位コミット**
   - `JobState` dataclass: `job_id, kind, video_id, title, stage, message, progress, started_at, finished_at, error`
   - 保存先: `data/_jobs/{job_id}.json`（`data/_batch/status.json` と同じ発想）
   - `create_job()` / `update_job()` / `read_job()` / `list_active_jobs()` / `cleanup_finished(older_than)`
   - **書き込みは一時ファイル + `os.replace()` で原子的に行う**（UI が読み込み中の破損を防ぐ）
-- [ ] V2-2. `services/jobs.py` にワーカー起動を追加する
+- [x] V2-2. `services/jobs.py` にワーカー起動を追加する
   - `start_job(kind, target_fn, **kwargs) -> job_id` — `threading.Thread(daemon=True)` で実行
   - ワーカーは `on_progress` コールバックで `update_job()` を呼ぶだけ
   - **ワーカースレッド内で `st.*` を絶対に呼ばない**（`ScriptRunContext` 警告と未定義動作の原因）
   - 例外は捕捉して `error` に日本語メッセージを格納し、ジョブを `failed` で終了させる
-- [ ] V2-3. `ui/app.py` を非同期対応に書き換える
+- [x] V2-3. `ui/app.py` を非同期対応に書き換える
   → **大きめの実装のため、完了時にタスク単位コミット**
   - `@st.fragment(run_every="1s")` の常駐ステータスバーをページ最上部に置く
   - 実行中ジョブがあるとき: 現在ステージ・メッセージ・経過秒・進捗バーを表示
@@ -254,24 +254,24 @@ data/{video_id}/ ...
   - 「実行」ボタンは `start_job()` を呼んで即座に返る
   - ジョブ完了を検知したら結果を `session_state` に載せて `st.rerun()`
   - **streamlit 1.60 を使用中のため `st.fragment` は利用可能**（`pyproject.toml` の下限は `>=1.40.0` → `>=1.37.0` 以上であることを確認済み）
-- [ ] V2-4. 一括処理を新ジョブ機構に載せ替える
+- [x] V2-4. 一括処理を新ジョブ機構に載せ替える
   - [`batch.py`](../src/yt_live_kit/services/batch.py) の `run_batch` を `start_job` 経由に
   - 全体進捗（N/M 件）＋現在動画のステージを両方ステータスバーに出す
-- [ ] V2-5. 起動時の孤児ジョブ処理
+- [x] V2-5. 起動時の孤児ジョブ処理
   - 前回の異常終了で `finished_at` が無いまま残ったジョブを、起動時に `interrupted` としてクローズする
   - 「前回の処理が中断されています」と UI に日本語で表示し、再実行導線を出す
-- [ ] V2-6. ユニットテスト
+- [x] V2-6. ユニットテスト
   - `tests/test_jobs.py` — 状態遷移、原子的書き込み、孤児クローズ
   - スレッド起動を伴うテストは `join(timeout=)` で必ず終了を待つこと
-- [ ] V2-7. 実行計画の進捗チェック更新 + フェーズ完了コミット（必須）
+- [x] V2-7. 実行計画の進捗チェック更新 + フェーズ完了コミット（必須）
 
 **Done 条件:**
 
-- [ ] AC-12 を満たす
-- [ ] 処理中に別タブ（処理済み一覧）を開いても処理が継続する
-- [ ] 処理中にブラウザのタブを閉じて開き直しても、進行状況が復元される
-- [ ] ワーカースレッドから `st.*` を呼んでいる箇所が 1 つもない（grep で確認）
-- [ ] フェーズ完了コミット済み
+- [ ] AC-12 を満たす（V7 受け入れで最終確認）
+- [x] 処理中に別タブ（処理済み一覧）を開いても処理が継続する（ジョブファイル永続化 + fragment）
+- [x] 処理中にブラウザのタブを閉じて開き直しても、進行状況が復元される（`find_restorable_job`）
+- [x] ワーカースレッドから `st.*` を呼んでいる箇所が 1 つもない（grep で確認）
+- [x] フェーズ完了コミット済み
 
 **リスクと対策:**
 
@@ -288,13 +288,13 @@ data/{video_id}/ ...
 ### V3: チャンネルから URL 取得
 
 **目的:** チャンネルの配信アーカイブ一覧を画面に出し、URL のコピペ作業を無くす。
-**フェーズ状態:** [ ] 未着手
+**フェーズ状態:** [~] 進行中
 
 **背景:** YouTube Data API も OAuth も不要。yt-dlp の `--flat-playlist --dump-json` でチャンネルの `/streams` タブから一覧が取れる。**追加依存ゼロ**で、NFR-01（従量課金 API 禁止）と §6.1（YouTube Data API 不使用）の両方を維持できる。
 
 **作業:**
 
-- [ ] V3-1. `services/channel.py` を新規作成する
+- [x] V3-1. `services/channel.py` を新規作成する
   → **大きめの実装のため、完了時にタスク単位コミット**
   - `normalize_channel_url(input) -> str` — `@handle` / `channel/UC...` / フル URL を受け付け、`https://www.youtube.com/@handle/streams` に正規化する
   - `list_archives(channel_url, limit=50, settings) -> tuple[ChannelVideo, ...]`
@@ -303,7 +303,7 @@ data/{video_id}/ ...
     - 取り出す項目: `id`, `title`, `duration`, `upload_date`, `url`
   - `models/channel.py` に `ChannelVideo`（pydantic）を定義する
   - エラーは日本語の `ChannelError` に包む（チャンネルが見つからない／配信タブが無い／yt-dlp 失敗）
-- [ ] V3-2. 取得結果のキャッシュ
+- [x] V3-2. 取得結果のキャッシュ
   - `data/_channels/{handle}.json` に保存し、`fetched_at` を記録する
   - UI では「前回取得: YYYY-MM-DD HH:MM」と「再取得」ボタンを出す
   - 毎回叩かせない（レート制限対策 = NFR-05）
@@ -315,7 +315,7 @@ data/{video_id}/ ...
   - 「選択した N 本を一括処理」→ V2 のジョブ機構に流す
 - [ ] V3-4. CLI に `channel` サブコマンドを追加する（上級者向け補助）
   - `uv run yt-live-kit channel @handle --limit 50` で URL を標準出力に 1 行ずつ
-- [ ] V3-5. ユニットテスト
+- [x] V3-5. ユニットテスト
   - `tests/test_channel.py` — URL 正規化の各パターン、JSON Lines パース、処理済み突き合わせ
   - yt-dlp 呼び出しは `subprocess.run` をモック
 - [ ] V3-6. 実機確認 — 実在のチャンネル 1 件で一覧取得〜一括投入
@@ -335,13 +335,13 @@ data/{video_id}/ ...
 ### V4: ストレージ管理
 
 **目的:** 元動画キャッシュの肥大化に対処する。**V5 / V6 の前提。**
-**フェーズ状態:** [ ] 未着手
+**フェーズ状態:** [~] 進行中
 
 **背景:** [`ffmpeg.py:52-63`](../src/yt_live_kit/services/ffmpeg.py) の `_ensure_source_video()` は、切り出しのたびに元動画をフル解像度で `data/{video_id}/clips/source/` にダウンロードし、**削除しない**。2 時間配信 1 本で数 GB になる。V5 / V6 は中間ファイルをさらに生成するため、先に対策を入れる。
 
 **作業:**
 
-- [ ] V4-1. `services/storage.py` を新規作成する
+- [x] V4-1. `services/storage.py` を新規作成する
   - `dir_size(path) -> int` — 再帰的にバイト数を合計
   - `summarize(settings) -> StorageSummary` — 全体容量、動画ごとの内訳（source / output / highlights / shorts / その他）
   - `purge_source(video_id, settings)` — 元動画のみ削除（成果物は残す）
@@ -355,7 +355,7 @@ data/{video_id}/ ...
   - 「N 日以上前の元動画をまとめて削除」（実行前に対象件数と合計容量を提示して確認を取る）
 - [ ] V4-4. 切り出し完了時の案内
   - 切り出し成功メッセージに「元動画 (N GB) は再利用のため保持しています。不要なら一覧から削除できます」を添える
-- [ ] V4-5. ユニットテスト
+- [x] V4-5. ユニットテスト
   - `tests/test_storage.py` — 容量集計、data_dir 外パスの拒否、成果物が消えないこと
 - [ ] V4-6. 実行計画の進捗チェック更新 + フェーズ完了コミット（必須）
 
