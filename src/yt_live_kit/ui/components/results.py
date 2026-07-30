@@ -24,6 +24,20 @@ _TEMPLATE_NOT_SET_MESSAGE = (
     "定型文が未設定です。data/_config/description_template.txt に "
     "{{timeline}} を含むテンプレートを置くと、まとめてコピーできます。"
 )
+_CHAPTERS_NOT_GENERATED_MESSAGE = (
+    "チャプターは生成されていません。処理済み一覧から生成できます。"
+)
+_CLIPS_EMPTY_NOT_REQUESTED_MESSAGE = "この実行では切り抜き候補を生成していません。"
+_CLIPS_EMPTY_REQUESTED_MESSAGE = (
+    "切り抜き候補がありません。Codex CLI の設定を確認してください。"
+)
+
+
+def clips_empty_message(clips_requested: bool) -> str:
+    """切り抜き候補が 0 件のときの案内文言を返す（テスト可能な純粋関数）."""
+    if clips_requested:
+        return _CLIPS_EMPTY_REQUESTED_MESSAGE
+    return _CLIPS_EMPTY_NOT_REQUESTED_MESSAGE
 
 
 def build_clipboard_copy_html(
@@ -35,7 +49,10 @@ def build_clipboard_copy_html(
     hide_after_ms: int = 3000,
 ) -> str:
     """クリップボードコピー用の HTML を生成する（テスト可能な純粋関数）."""
-    encoded = json.dumps(text, ensure_ascii=False)
+    # JSON エンコード結果に "</script>" などが含まれると script タグが
+    # 途中で閉じてしまうため、"</" を "<\/" に置換して埋め込む
+    # （JavaScript 文字列リテラルとしては等価）。
+    encoded = json.dumps(text, ensure_ascii=False).replace("</", "<\\/")
     return f"""
 <div>
   <button id="{button_id}" type="button">{button_label}</button>
@@ -88,37 +105,40 @@ def render_results(result: PipelineResult) -> None:
         )
 
     st.subheader("タイムライン（概要欄用）")
-    st.caption("右上のコピーアイコン、または下のボタンでテキストを取得できます。")
-    st.code(result.chapters_text, language=None)
-    timeline_col, timeline_copy_col = st.columns([3, 1])
-    with timeline_col:
-        st.download_button(
-            label="タイムラインをテキストでダウンロード",
-            data=result.chapters_text,
-            file_name=f"{result.video_id}_chapters.txt",
-            mime="text/plain",
-            key=f"download_chapters_{result.video_id}",
-        )
-    with timeline_copy_col:
-        render_copy_button(
-            result.chapters_text,
-            label="タイムラインをコピー",
-            key=f"copy_chapters_{result.video_id}",
-        )
+    if result.chapters_text.strip():
+        st.caption("右上のコピーアイコン、または下のボタンでテキストを取得できます。")
+        st.code(result.chapters_text, language=None)
+        timeline_col, timeline_copy_col = st.columns([3, 1])
+        with timeline_col:
+            st.download_button(
+                label="タイムラインをテキストでダウンロード",
+                data=result.chapters_text,
+                file_name=f"{result.video_id}_chapters.txt",
+                mime="text/plain",
+                key=f"download_chapters_{result.video_id}",
+            )
+        with timeline_copy_col:
+            render_copy_button(
+                result.chapters_text,
+                label="タイムラインをコピー",
+                key=f"copy_chapters_{result.video_id}",
+            )
 
-    settings = get_settings()
-    if not get_template_path(settings).is_file():
-        st.info(_TEMPLATE_NOT_SET_MESSAGE)
+        settings = get_settings()
+        if not get_template_path(settings).is_file():
+            st.info(_TEMPLATE_NOT_SET_MESSAGE)
 
-    try:
-        description_text = build_description(result.video_id, settings=settings)
-        render_copy_button(
-            description_text,
-            label="概要欄用テキストをコピー",
-            key=f"copy_description_{result.video_id}",
-        )
-    except DescriptionError as exc:
-        st.error(str(exc))
+        try:
+            description_text = build_description(result.video_id, settings=settings)
+            render_copy_button(
+                description_text,
+                label="概要欄用テキストをコピー",
+                key=f"copy_description_{result.video_id}",
+            )
+        except DescriptionError as exc:
+            st.error(str(exc))
+    else:
+        st.info(_CHAPTERS_NOT_GENERATED_MESSAGE)
 
     with st.expander("文字起こし全文", expanded=False):
         st.text_area(
@@ -194,4 +214,4 @@ def render_results(result: PipelineResult) -> None:
             st.markdown(f"**保存先:** `{cut_result.output_path}`")
             st.markdown(f"**コマンドログ:** `{cut_result.command_log_path}`")
     elif not result.clips_error:
-        st.info("切り抜き候補がありません。Codex CLI の設定を確認してください。")
+        st.info(clips_empty_message(result.clips_requested))

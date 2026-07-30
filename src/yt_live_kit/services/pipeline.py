@@ -73,6 +73,7 @@ class PipelineResult:
     clips_candidates: tuple[ClipCandidate, ...]
     clips_candidates_path: Path | None
     clips_error: str | None = None
+    clips_requested: bool = True
 
 
 def _notify(
@@ -279,6 +280,7 @@ def run(
         clips_candidates=clips_candidates,
         clips_candidates_path=clips_candidates_path,
         clips_error=clips_error,
+        clips_requested=do_clips,
     )
 
 
@@ -414,10 +416,10 @@ def load_result_from_disk(
     settings = settings or get_settings()
     video_dir = settings.data_dir / video_id
     meta_path = video_dir / "meta.json"
-    chapters_path = video_dir / "chapters" / "chapters.md"
     full_path = video_dir / "transcript" / "full.txt"
 
-    if not meta_path.is_file() or not chapters_path.is_file() or not full_path.is_file():
+    # chapters.md はチャプター未生成でも成立する（切り抜き候補のみ実行時など）ため任意扱い。
+    if not meta_path.is_file() or not full_path.is_file():
         return None
 
     return _assemble_result(video_id, settings)

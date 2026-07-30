@@ -5,8 +5,12 @@ from __future__ import annotations
 import json
 
 from yt_live_kit.ui.components.results import (
+    _CHAPTERS_NOT_GENERATED_MESSAGE,
+    _CLIPS_EMPTY_NOT_REQUESTED_MESSAGE,
+    _CLIPS_EMPTY_REQUESTED_MESSAGE,
     _TEMPLATE_NOT_SET_MESSAGE,
     build_clipboard_copy_html,
+    clips_empty_message,
 )
 from yt_live_kit.ui.pages.run import (
     _NO_TARGET_MESSAGE,
@@ -93,3 +97,34 @@ def test_template_not_set_message_mentions_config_path() -> None:
 def test_batch_summary_severity_still_works_from_run_page() -> None:
     assert batch_summary_severity(success=0, failed=0) == "info"
     assert batch_summary_severity(success=5, failed=0) == "success"
+
+
+def test_build_clipboard_copy_html_escapes_closing_script_tag() -> None:
+    text = "本文</script><script>alert(1)</script>"
+    html = build_clipboard_copy_html(
+        text=text,
+        button_id="copy_xss",
+        button_label="コピー",
+    )
+
+    assert "</script><script>alert(1)</script>" not in html
+    assert "<\\/script>" in html
+    # 実際に閉じている </script> はコピー用ラッパー自身の 1 つだけ
+    # （テキスト中の </script> はすべて <\/script> にエスケープされ、
+    #   早期にタグを閉じない）。
+    assert html.count("</script>") == 1
+
+
+def test_chapters_not_generated_message_mentions_processed_list() -> None:
+    assert "チャプター" in _CHAPTERS_NOT_GENERATED_MESSAGE
+    assert "処理済み一覧" in _CHAPTERS_NOT_GENERATED_MESSAGE
+
+
+def test_clips_empty_message_when_requested_mentions_codex() -> None:
+    assert clips_empty_message(True) == _CLIPS_EMPTY_REQUESTED_MESSAGE
+    assert "Codex" in clips_empty_message(True)
+
+
+def test_clips_empty_message_when_not_requested_avoids_codex() -> None:
+    assert clips_empty_message(False) == _CLIPS_EMPTY_NOT_REQUESTED_MESSAGE
+    assert "Codex" not in clips_empty_message(False)

@@ -17,6 +17,7 @@ from yt_live_kit.services.pipeline import (
     STAGE_TRANSCRIPT,
     PipelineError,
     PipelineResult,
+    load_result_from_disk,
     regenerate,
     regenerate_job_target,
     run,
@@ -432,3 +433,69 @@ def test_regenerate_job_target_reports_progress(mock_regenerate, tmp_path):
         stage=STAGE_CHAPTERS,
         message="チャプターを生成しています…",
     )
+
+
+def test_load_result_from_disk_without_chapters_returns_result_with_empty_chapters_text(
+    tmp_path,
+):
+    """chapters.md が無くても meta.json と transcript/full.txt があれば復元できる."""
+    meta = _sample_meta()
+    settings = _setup_video_dir(tmp_path, meta)
+    _mock_transcript_paths(tmp_path, meta.id)
+    chapters_path = tmp_path / meta.id / "chapters" / "chapters.md"
+    assert not chapters_path.exists()
+
+    result = load_result_from_disk(meta.id, settings)
+
+    assert result is not None
+    assert result.chapters_text == ""
+    assert result.video_id == meta.id
+
+
+def test_load_result_from_disk_without_meta_returns_none(tmp_path):
+    meta = _sample_meta()
+    video_dir = tmp_path / meta.id
+    (video_dir / "transcript").mkdir(parents=True)
+    (video_dir / "transcript" / "full.txt").write_text("本文", encoding="utf-8")
+    settings = Settings(data_dir=tmp_path)
+
+    assert load_result_from_disk(meta.id, settings) is None
+
+
+def test_load_result_from_disk_without_transcript_returns_none(tmp_path):
+    meta = _sample_meta()
+    settings = _setup_video_dir(tmp_path, meta)
+
+    assert load_result_from_disk(meta.id, settings) is None
+
+
+@pytest.mark.parametrize("do_clips", [True, False])
+@patch("yt_live_kit.services.pipeline.suggest_clips")
+@patch("yt_live_kit.services.pipeline.generate_chapters")
+@patch("yt_live_kit.services.pipeline.build_transcripts")
+@patch("yt_live_kit.services.pipeline.fetch")
+def test_run_sets_clips_requested_flag(
+    mock_fetch,
+    mock_transcript,
+    mock_chapters,
+    mock_clips,
+    tmp_path,
+    do_clips,
+):
+    meta = _sample_meta()
+    mock_fetch.return_value = meta
+
+    def _build_transcripts_side_effect(vid: str, settings: Settings):
+        return _mock_transcript_paths(tmp_path, vid)
+
+    mock_transcript.side_effect = _build_transcripts_side_effect
+    mock_chapters.return_value = _mock_chapter_result(tmp_path, meta.id)
+    mock_clips.return_value = _mock_clips_result(tmp_path, meta.id)
+
+    result = run(
+        "https://www.youtube.com/watch?v=test1234567",
+        settings=Settings(data_dir=tmp_path),
+        do_clips=do_clips,
+    )
+
+    assert result.clips_requested is do_clips
