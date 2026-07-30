@@ -261,3 +261,18 @@ def test_find_restorable_job_falls_back_to_current_job() -> None:
         found = status_bar.find_restorable_job(settings)
 
     assert found is job
+
+
+def test_batch_summary_severity_all_skipped_is_info():
+    """全件スキップ（成功0・失敗0）は正常動作なのでエラー扱いにしない."""
+    from yt_live_kit.ui.pages.run import batch_summary_severity
+
+    assert batch_summary_severity(success=0, failed=0) == "info"
+
+
+def test_batch_summary_severity_branches():
+    from yt_live_kit.ui.pages.run import batch_summary_severity
+
+    assert batch_summary_severity(success=3, failed=1) == "warning"
+    assert batch_summary_severity(success=0, failed=2) == "error"
+    assert batch_summary_severity(success=5, failed=0) == "success"

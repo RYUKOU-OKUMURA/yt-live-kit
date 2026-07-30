@@ -18,6 +18,21 @@ from yt_live_kit.ui.state import (
 _BUSY_MESSAGE = "他の処理が実行中です。完了までお待ちください。"
 
 
+def batch_summary_severity(success: int, failed: int) -> str:
+    """一括処理サマリーの表示レベルを決める.
+
+    全件スキップ（成功 0・失敗 0）は「処理済みをスキップ」の正常動作であり、
+    エラーではないため info とする。
+    """
+    if failed > 0 and success > 0:
+        return "warning"
+    if failed > 0:
+        return "error"
+    if success == 0:
+        return "info"
+    return "success"
+
+
 def _render_batch_summary() -> None:
     summary = get_batch_summary()
     if not summary:
@@ -28,10 +43,13 @@ def _render_batch_summary() -> None:
     failed = int(summary.get("failed", 0) or 0)
     success = int(summary.get("success", 0) or 0)
 
-    if failed > 0 and success > 0:
+    severity = batch_summary_severity(success, failed)
+    if severity == "warning":
         st.warning(text)
-    elif failed > 0 or success == 0:
+    elif severity == "error":
         st.error(text)
+    elif severity == "info":
+        st.info(text)
     else:
         st.success(text)
 
