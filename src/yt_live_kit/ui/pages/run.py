@@ -101,6 +101,7 @@ def render_run_page() -> None:
                     url=url.strip(),
                 )
                 set_active_job_id(job_id)
+                st.rerun()
             except JobBusyError:
                 st.error(_BUSY_MESSAGE)
     else:
@@ -134,5 +135,6 @@ def render_run_page() -> None:
                     skip_existing=skip_existing,
                 )
                 set_active_job_id(job_id)
+                st.rerun()
             except JobBusyError:
                 st.error(_BUSY_MESSAGE)
