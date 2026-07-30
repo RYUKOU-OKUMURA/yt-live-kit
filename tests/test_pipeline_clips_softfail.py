@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from unittest.mock import patch
 
 from yt_live_kit.models.meta import VideoMeta
-from yt_live_kit.services.ai_prompt import ChapterGenerationResult
+from yt_live_kit.services.ai_prompt import AiPromptError, ChapterGenerationResult
 from yt_live_kit.services.clips import ClipValidationError, ClipsError
 from yt_live_kit.services.pipeline import load_result_from_disk, run
 
@@ -86,6 +86,37 @@ def test_run_clips_error_still_succeeds(
     result = run("https://www.youtube.com/watch?v=test1234567")
     assert "0:00 開始" in result.chapters_text
     assert result.clips_error == "Codex 失敗"
+
+
+@patch("yt_live_kit.services.pipeline.suggest_clips")
+@patch("yt_live_kit.services.pipeline.generate_chapters")
+@patch("yt_live_kit.services.pipeline.build_transcripts")
+@patch("yt_live_kit.services.pipeline.fetch")
+def test_run_clips_ai_prompt_error_still_succeeds(
+    mock_fetch, mock_transcript, mock_chapters, mock_clips, tmp_path
+):
+    meta = _sample_meta()
+    mock_fetch.return_value = meta
+
+    full_path = tmp_path / "full.txt"
+    full_path.write_text("全文\n", encoding="utf-8")
+    mock_transcript.return_value = (full_path, tmp_path / "compressed.txt")
+
+    chapters_path = tmp_path / "chapters.md"
+    chapters_path.write_text("0:00 開始\n5:00 本編\n10:00 終了\n", encoding="utf-8")
+    mock_chapters.return_value = ChapterGenerationResult(
+        video_id=meta.id,
+        prompt_path=tmp_path / "prompt.txt",
+        chapters_path=chapters_path,
+        used_codex=True,
+        validation=None,
+    )
+
+    mock_clips.side_effect = AiPromptError("Codex CLI がタイムアウトしました（300 秒）。")
+
+    result = run("https://www.youtube.com/watch?v=test1234567")
+    assert "0:00 開始" in result.chapters_text
+    assert result.clips_error == "Codex CLI がタイムアウトしました（300 秒）。"
 
 
 def test_load_result_from_disk(tmp_path):

@@ -125,7 +125,7 @@ def run(
         clips_result = suggest_clips(video_id, settings)
         clips_candidates = clips_result.candidates
         clips_candidates_path = clips_result.candidates_path
-    except (CodexNotFoundError, ClipValidationError, ClipsError) as exc:
+    except (CodexNotFoundError, ClipValidationError, ClipsError, AiPromptError) as exc:
         clips_error = str(exc)
 
     return PipelineResult(
