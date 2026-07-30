@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 from yt_live_kit.services.jobs import JobState
@@ -142,12 +142,12 @@ def test_handle_finished_job_shows_error_on_failed() -> None:
         patch("yt_live_kit.ui.components.status_bar.is_job_handled", return_value=False),
         patch("yt_live_kit.ui.components.status_bar.mark_job_handled") as mark_handled,
         patch("yt_live_kit.ui.components.status_bar.clear_active_job_id") as clear_active,
-        patch("yt_live_kit.ui.components.status_bar.st.error") as show_error,
+        patch("yt_live_kit.ui.components.status_bar.set_job_error") as set_error,
         patch("yt_live_kit.ui.components.status_bar.st.rerun") as rerun,
     ):
         status_bar._handle_finished_job(job)
 
-    show_error.assert_called_once_with("字幕が見つかりません")
+    set_error.assert_called_once_with("字幕が見つかりません")
     clear_active.assert_called_once()
     mark_handled.assert_called_once_with("fail123")
     rerun.assert_called_once_with(scope="app")
@@ -169,12 +169,12 @@ def test_handle_finished_job_shows_error_when_result_missing() -> None:
         patch("yt_live_kit.ui.components.status_bar.load_result_from_disk", return_value=None),
         patch("yt_live_kit.ui.components.status_bar.set_result") as set_result,
         patch("yt_live_kit.ui.components.status_bar.clear_active_job_id") as clear_active,
-        patch("yt_live_kit.ui.components.status_bar.st.error") as show_error,
+        patch("yt_live_kit.ui.components.status_bar.set_job_error") as set_error,
         patch("yt_live_kit.ui.components.status_bar.st.rerun") as rerun,
     ):
         status_bar._handle_finished_job(job)
 
-    show_error.assert_called_once_with(
+    set_error.assert_called_once_with(
         "成果物を読み込めませんでした。処理済み一覧から開き直してください。"
     )
     set_result.assert_not_called()
@@ -239,8 +239,132 @@ def test_find_restorable_job_skips_handled_jobs() -> None:
         patch("yt_live_kit.ui.components.status_bar.get_last_job_id", return_value="handled-job"),
         patch("yt_live_kit.ui.components.status_bar.read_job", return_value=job),
         patch("yt_live_kit.ui.components.status_bar.is_job_handled", return_value=True),
-        patch("yt_live_kit.ui.components.status_bar.list_jobs", return_value=[]),
+        patch("yt_live_kit.ui.components.status_bar.read_current_job") as read_current,
     ):
         found = status_bar.find_restorable_job(settings)
 
     assert found is None
+    read_current.assert_not_called()
+
+
+def test_find_restorable_job_falls_back_to_current_job() -> None:
+    from yt_live_kit.ui.components import status_bar
+
+    job = JobState(
+        job_id="current-job",
+        kind="single",
+        status="failed",
+        finished_at=datetime.now(timezone.utc),
+    )
+    settings = MagicMock()
+
+    with (
+        patch("yt_live_kit.ui.components.status_bar.get_last_job_id", return_value=None),
+        patch("yt_live_kit.ui.components.status_bar.read_current_job", return_value=job),
+        patch("yt_live_kit.ui.components.status_bar.is_job_handled", return_value=False),
+    ):
+        found = status_bar.find_restorable_job(settings)
+
+    assert found is job
+
+
+def test_is_recently_finished_returns_false_when_finished_at_is_none() -> None:
+    from yt_live_kit.ui.components import status_bar
+
+    job = JobState(job_id="a", kind="single", status="done", finished_at=None)
+
+    assert status_bar.is_recently_finished(job) is False
+
+
+def test_is_recently_finished_true_within_window() -> None:
+    from yt_live_kit.ui.components import status_bar
+
+    now = datetime(2026, 7, 30, 12, 0, 0, tzinfo=timezone.utc)
+    finished = now - timedelta(minutes=5)
+    job = JobState(job_id="a", kind="single", status="done", finished_at=finished)
+
+    assert status_bar.is_recently_finished(job, now=now) is True
+
+
+def test_is_recently_finished_false_outside_window() -> None:
+    from yt_live_kit.ui.components import status_bar
+
+    now = datetime(2026, 7, 30, 12, 0, 0, tzinfo=timezone.utc)
+    finished = now - timedelta(days=3)
+    job = JobState(job_id="a", kind="single", status="done", finished_at=finished)
+
+    assert status_bar.is_recently_finished(job, now=now) is False
+
+
+def test_is_recently_finished_handles_naive_datetime() -> None:
+    from yt_live_kit.ui.components import status_bar
+
+    now = datetime(2026, 7, 30, 12, 0, 0, tzinfo=timezone.utc)
+    finished_naive = datetime(2026, 7, 30, 11, 58, 0)  # tz なし
+
+    job = JobState(job_id="a", kind="single", status="done", finished_at=finished_naive)
+
+    # 例外を送出せず、UTC とみなして窓内と判定される
+    assert status_bar.is_recently_finished(job, now=now) is True
+
+
+def test_find_restorable_job_via_current_job_ignores_old_finished_job() -> None:
+    """read_current_job() 経路では、数日前に完了したジョブは復元対象にならない."""
+    from yt_live_kit.ui.components import status_bar
+
+    old_job = JobState(
+        job_id="old-current-job",
+        kind="single",
+        status="failed",
+        finished_at=datetime.now(timezone.utc) - timedelta(days=3),
+    )
+    settings = MagicMock()
+
+    with (
+        patch("yt_live_kit.ui.components.status_bar.get_last_job_id", return_value=None),
+        patch("yt_live_kit.ui.components.status_bar.read_current_job", return_value=old_job),
+        patch("yt_live_kit.ui.components.status_bar.is_job_handled", return_value=False),
+    ):
+        found = status_bar.find_restorable_job(settings)
+
+    assert found is None
+
+
+def test_find_restorable_job_via_last_job_id_ignores_time_window() -> None:
+    """get_last_job_id() 経路（同一セッション）では時間制限をかけない."""
+    from yt_live_kit.ui.components import status_bar
+
+    old_job = JobState(
+        job_id="old-last-job",
+        kind="single",
+        status="done",
+        finished_at=datetime.now(timezone.utc) - timedelta(days=3),
+    )
+    settings = MagicMock()
+
+    with (
+        patch(
+            "yt_live_kit.ui.components.status_bar.get_last_job_id",
+            return_value="old-last-job",
+        ),
+        patch("yt_live_kit.ui.components.status_bar.read_job", return_value=old_job),
+        patch("yt_live_kit.ui.components.status_bar.is_job_handled", return_value=False),
+    ):
+        found = status_bar.find_restorable_job(settings)
+
+    assert found is old_job
+
+
+def test_batch_summary_severity_all_skipped_is_info():
+    """全件スキップ（成功0・失敗0）は正常動作なのでエラー扱いにしない."""
+    from yt_live_kit.ui.pages.run import batch_summary_severity
+
+    assert batch_summary_severity(success=0, failed=0) == "info"
+
+
+def test_batch_summary_severity_branches():
+    from yt_live_kit.ui.pages.run import batch_summary_severity
+
+    assert batch_summary_severity(success=3, failed=1) == "warning"
+    assert batch_summary_severity(success=0, failed=2) == "error"
+    assert batch_summary_severity(success=5, failed=0) == "success"

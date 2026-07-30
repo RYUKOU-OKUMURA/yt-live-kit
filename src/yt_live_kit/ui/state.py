@@ -15,6 +15,7 @@ SESSION_HANDLED_JOBS = "handled_job_ids"
 SESSION_INTERRUPTED_NOTICES = "interrupted_notices"
 SESSION_INTERRUPTED_SHOWN = "interrupted_notices_shown"
 SESSION_BATCH_SUMMARY = "batch_summary"
+SESSION_JOB_ERROR = "job_error"
 
 _orphans_initialized = False
 
@@ -114,6 +115,18 @@ def clear_batch_summary() -> None:
     st.session_state[SESSION_BATCH_SUMMARY] = None
 
 
+def get_job_error() -> str | None:
+    return st.session_state.get(SESSION_JOB_ERROR)
+
+
+def set_job_error(message: str | None) -> None:
+    st.session_state[SESSION_JOB_ERROR] = message
+
+
+def clear_job_error() -> None:
+    st.session_state[SESSION_JOB_ERROR] = None
+
+
 def init_orphans_once() -> list[str]:
     """プロセス起動時に 1 回だけ孤児ジョブをクローズする."""
     global _orphans_initialized
@@ -121,11 +134,12 @@ def init_orphans_once() -> list[str]:
         return []
     _orphans_initialized = True
 
-    from yt_live_kit.services.jobs import close_orphans, read_job
+    from yt_live_kit.services.jobs import close_orphans, cleanup_finished, read_job
     from yt_live_kit.config import get_settings
 
     settings = get_settings()
     interrupted_ids = close_orphans(settings)
+    cleanup_finished(older_than_hours=24, settings=settings)
     if not interrupted_ids:
         return interrupted_ids
 
@@ -136,5 +150,8 @@ def init_orphans_once() -> list[str]:
         if job is not None:
             title = job.title or job.video_id or "不明"
         notices.append({"job_id": job_id, "title": title})
+        # app.py が st.warning で通知済みのため、find_restorable_job 側で
+        # 二重に拾わないようここでハンドル済みにしておく。
+        mark_job_handled(job_id)
     set_interrupted_notices(notices)
     return interrupted_ids

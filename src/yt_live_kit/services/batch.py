@@ -320,8 +320,15 @@ def run_batch_job_target(
     settings: Settings | None = None,
     urls: list[str],
     skip_existing: bool = False,
+    job_id: str | None = None,
 ) -> None:
-    """start_job 用: 一括処理を実行し、最後の成功結果をジョブに記録する."""
+    """start_job 用: 一括処理を実行し、最後の成功結果をジョブに記録する.
+
+    成功が 0 件（全件スキップ・全件失敗など）でも例外にはしない。
+    「表示する結果がない」ことと「処理が失敗した」ことは別であり、
+    サマリーは write_batch_summary() で永続化され、status_bar 側が
+    それを読んで結果を表示するため、ここで異常終了させる必要はない。
+    """
 
     def on_progress(current: int, total: int, url: str, message: str) -> None:
         report(
@@ -341,8 +348,9 @@ def run_batch_job_target(
     summary = _format_batch_summary(success, skipped, failed)
     lines = [_format_batch_line(item) for item in results]
 
-    active = get_active_job(settings)
-    job_id = active.job_id if active is not None else None
+    if job_id is None:
+        active = get_active_job(settings)
+        job_id = active.job_id if active is not None else None
 
     if job_id is not None:
         write_batch_summary(
@@ -356,30 +364,23 @@ def run_batch_job_target(
         )
         write_batch_log(settings or get_settings(), job_id, lines)
 
-    if success == 0 and failed >= 1:
-        raise PipelineError(
-            f"一括処理が完了しましたが、成功した動画がありません（失敗 {failed} 件）。"
-        )
-
-    if success == 0 and skipped >= 1 and failed == 0:
-        raise PipelineError(
-            f"すべてスキップされました（{skipped} 件）。処理対象がありませんでした。"
-        )
-
     last_result: PipelineResult | None = None
     for item in reversed(results):
         if item.status == "success" and item.result is not None:
             last_result = item.result
             break
 
-    if last_result is None:
-        raise PipelineError("一括処理が完了しましたが、成功した動画がありません。")
-
-    if active is not None:
+    if job_id is not None and last_result is not None:
         update_job(
-            active.job_id,
+            job_id,
             settings=settings,
             video_id=last_result.video_id,
             title=last_result.title,
+            message=summary,
+        )
+    elif job_id is not None:
+        update_job(
+            job_id,
+            settings=settings,
             message=summary,
         )

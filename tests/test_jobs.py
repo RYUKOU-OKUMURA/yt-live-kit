@@ -11,17 +11,21 @@ from unittest.mock import patch
 import pytest
 
 from yt_live_kit.config import Settings
+from yt_live_kit.services.clips import ClipsError
 from yt_live_kit.services.jobs import (
     JobBusyError,
     JobState,
+    _error_message_for,
     close_orphans,
     create_job,
     get_active_job,
     is_busy,
+    read_current_job,
     read_job,
     start_job,
     update_job,
 )
+from yt_live_kit.services.pipeline import PipelineError
 
 
 def test_create_update_read_roundtrip(tmp_path):
@@ -132,7 +136,8 @@ def test_start_job_marks_failed_on_exception(tmp_path):
     done = threading.Event()
 
     def target_fn(*, report, settings, **_kwargs):
-        raise RuntimeError("処理に失敗しました")
+        # PipelineError は _KNOWN_ERRORS に含まれるため、メッセージがそのまま使われる。
+        raise PipelineError("処理に失敗しました")
 
     with patch("yt_live_kit.services.jobs.threading.Thread", wraps=threading.Thread) as mock_thread:
         job_id = start_job("single", target_fn, settings=settings)
@@ -204,6 +209,48 @@ def test_is_busy_and_job_busy_error(tmp_path):
     assert not is_busy(settings)
 
 
+def test_start_job_concurrent_calls_only_start_one_job(tmp_path):
+    """_START_LOCK により、同時に複数回 start_job() を呼んでも 1 件しか作られない."""
+    settings = Settings(data_dir=tmp_path)
+
+    def target_fn(*, report, settings, **_kwargs):
+        time.sleep(0.2)
+
+    barrier = threading.Barrier(5)
+    results: list[tuple[str, str | None]] = []
+    results_lock = threading.Lock()
+
+    def worker():
+        barrier.wait(timeout=5)
+        try:
+            job_id = start_job("single", target_fn, settings=settings)
+            outcome: tuple[str, str | None] = ("ok", job_id)
+        except JobBusyError:
+            outcome = ("busy", None)
+        with results_lock:
+            results.append(outcome)
+
+    with patch("yt_live_kit.services.jobs.threading.Thread", wraps=threading.Thread) as mock_thread:
+        workers = [threading.Thread(target=worker) for _ in range(5)]
+        for w in workers:
+            w.start()
+        for w in workers:
+            w.join(timeout=5)
+
+        for _ in range(50):
+            if not is_busy(settings):
+                break
+            time.sleep(0.05)
+        mock_thread.return_value.join(timeout=5)
+
+    assert len(results) == 5
+    ok_results = [r for r in results if r[0] == "ok"]
+    busy_results = [r for r in results if r[0] == "busy"]
+    assert len(ok_results) == 1
+    assert len(busy_results) == 4
+    assert not is_busy(settings)
+
+
 def test_close_orphans(tmp_path):
     settings = Settings(data_dir=tmp_path)
     running = create_job("single", settings=settings)
@@ -254,3 +301,129 @@ def test_cleanup_finished_removes_old_jobs(tmp_path):
     assert removed == 1
     assert read_job(old_job.job_id, settings) is None
     assert read_job(recent_job.job_id, settings) is not None
+
+
+def test_error_message_for_known_error_passes_message_through():
+    exc = PipelineError("字幕が取得できませんでした。")
+    message, needs_log = _error_message_for(exc)
+    assert message == "字幕が取得できませんでした。"
+    assert needs_log is False
+
+
+def test_error_message_for_known_subclass_passes_message_through():
+    # ClipsError は AiPromptError のサブクラス。_KNOWN_ERRORS 経由で拾われる。
+    exc = ClipsError("クリップ候補の生成に失敗しました。")
+    message, needs_log = _error_message_for(exc)
+    assert message == "クリップ候補の生成に失敗しました。"
+    assert needs_log is False
+
+
+def test_error_message_for_unknown_error_uses_generic_message():
+    message, needs_log = _error_message_for(ValueError("boom"))
+    assert message == "予期しないエラーが発生しました。しばらくしてから再度お試しください。"
+    assert needs_log is True
+
+
+def test_error_message_for_unknown_file_not_found_uses_generic_message():
+    message, needs_log = _error_message_for(
+        FileNotFoundError(2, "No such file or directory", "/tmp/ja.vtt")
+    )
+    assert message == "予期しないエラーが発生しました。しばらくしてから再度お試しください。"
+    assert needs_log is True
+
+
+def test_get_active_job_uses_current_json_and_never_calls_list_jobs(tmp_path):
+    settings = Settings(data_dir=tmp_path)
+    running = create_job("single", settings=settings)
+
+    def _fail_if_called(*_args, **_kwargs):
+        raise AssertionError("list_jobs should not be called by get_active_job")
+
+    with patch("yt_live_kit.services.jobs.list_jobs", side_effect=_fail_if_called):
+        active = get_active_job(settings)
+
+    assert active is not None
+    assert active.job_id == running.job_id
+
+
+def test_get_active_job_returns_none_when_current_not_running(tmp_path):
+    settings = Settings(data_dir=tmp_path)
+    job = create_job("single", settings=settings)
+    update_job(job.job_id, settings=settings, status="done")
+
+    with patch("yt_live_kit.services.jobs.list_jobs") as mock_list_jobs:
+        active = get_active_job(settings)
+
+    assert active is None
+    mock_list_jobs.assert_not_called()
+
+
+def test_read_current_job_missing_file_returns_none(tmp_path):
+    settings = Settings(data_dir=tmp_path)
+    assert read_current_job(settings) is None
+
+
+def test_read_current_job_broken_json_returns_none(tmp_path):
+    settings = Settings(data_dir=tmp_path)
+    jobs_dir = tmp_path / "_jobs"
+    jobs_dir.mkdir(parents=True)
+    (jobs_dir / "current.json").write_text("{ not valid json", encoding="utf-8")
+
+    assert read_current_job(settings) is None
+
+
+def test_read_current_job_missing_target_job_returns_none(tmp_path):
+    settings = Settings(data_dir=tmp_path)
+    jobs_dir = tmp_path / "_jobs"
+    jobs_dir.mkdir(parents=True)
+    (jobs_dir / "current.json").write_text(
+        json.dumps({"job_id": "does-not-exist"}), encoding="utf-8"
+    )
+
+    assert read_current_job(settings) is None
+
+
+def test_read_current_job_returns_pointed_job(tmp_path):
+    settings = Settings(data_dir=tmp_path)
+    job = create_job("single", settings=settings)
+
+    current = read_current_job(settings)
+    assert current is not None
+    assert current.job_id == job.job_id
+
+
+def test_cleanup_finished_keeps_current_job(tmp_path):
+    from yt_live_kit.services.jobs import cleanup_finished
+
+    settings = Settings(data_dir=tmp_path)
+    # create_job は current.json を上書きするため、最後に作った done ジョブが
+    # current.json に指されるようにする。
+    old_job = create_job("single", settings=settings)
+    old_finished = datetime.now(timezone.utc) - timedelta(hours=48)
+    update_job(
+        old_job.job_id,
+        settings=settings,
+        status="done",
+        finished_at=old_finished,
+    )
+    # old_job が current.json の指す最新ジョブになっている。
+    removed = cleanup_finished(older_than_hours=24, settings=settings)
+
+    assert removed == 0
+    assert read_job(old_job.job_id, settings) is not None
+
+
+def test_start_job_passes_job_id_to_target_fn(tmp_path):
+    settings = Settings(data_dir=tmp_path)
+    done = threading.Event()
+    received: dict[str, object] = {}
+
+    def target_fn(*, report, settings, job_id=None, **_kwargs):
+        received["job_id"] = job_id
+        done.set()
+
+    with patch("yt_live_kit.services.jobs.threading.Thread", wraps=threading.Thread) as mock_thread:
+        job_id = start_job("single", target_fn, settings=settings)
+        mock_thread.return_value.join(timeout=5)
+    assert done.wait(timeout=5)
+    assert received["job_id"] == job_id
