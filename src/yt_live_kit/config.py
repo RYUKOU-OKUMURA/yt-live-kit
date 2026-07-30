@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     data_dir: Path = Field(default=Path("./data"), description="成果物ルートディレクトリ")
     sleep: float = Field(default=1.0, ge=0, description="URL 間のスリープ秒数")
     ytdlp_path: str = Field(default="yt-dlp", description="yt-dlp バイナリパス")
+    ffmpeg_path: str = Field(default="ffmpeg", description="ffmpeg バイナリパス")
 
     def ensure_data_dir(self) -> Path:
         """data ディレクトリを作成して返す."""

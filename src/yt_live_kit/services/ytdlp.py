@@ -167,3 +167,51 @@ def fetch(url: str, settings: Settings | None = None) -> VideoMeta:
     )
 
     return meta
+
+
+def download_video(url: str, output_dir: Path, settings: Settings | None = None) -> Path:
+    """切り出し用に動画を 1 本ダウンロードする."""
+    settings = settings or get_settings()
+
+    if shutil.which(settings.ytdlp_path) is None:
+        raise YtdlpError(
+            f"yt-dlp が見つかりません（パス: {settings.ytdlp_path}）。"
+            "インストール後 PATH に通すか、YTLK_YTDLP_PATH を設定してください。"
+        )
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_template = str(output_dir / "%(id)s.%(ext)s")
+
+    result = _run_ytdlp(
+        [
+            "-f",
+            "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+            "--merge-output-format",
+            "mp4",
+            "-o",
+            output_template,
+            url,
+        ],
+        settings,
+    )
+
+    if result.returncode != 0:
+        stderr = result.stderr.strip()
+        raise YtdlpError(
+            "動画のダウンロードに失敗しました。"
+            + (f"\n（詳細: {stderr}）" if stderr else "")
+        )
+
+    mp4_files = sorted(output_dir.glob("*.mp4"))
+    if mp4_files:
+        return mp4_files[0]
+
+    video_files = sorted(
+        f for f in output_dir.iterdir()
+        if f.is_file() and f.suffix.lower() in {".mp4", ".mkv", ".webm"}
+    )
+    if not video_files:
+        raise YtdlpError(
+            f"ダウンロードした動画ファイルが見つかりません: {output_dir}"
+        )
+    return video_files[0]
