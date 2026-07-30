@@ -1,12 +1,15 @@
-"""Streamlit Web UI — URL → タイムライン縦一本."""
+"""Streamlit Web UI — URL → タイムライン縦一本 + 切り抜き."""
 
 from __future__ import annotations
 
 import streamlit as st
 
 from yt_live_kit import __version__
+from yt_live_kit.config import get_settings
+from yt_live_kit.services.ffmpeg import FfmpegError, cut_clip
 from yt_live_kit.services.pipeline import (
     STAGE_CHAPTERS,
+    STAGE_CLIPS_SUGGEST,
     STAGE_FETCH,
     STAGE_LABELS,
     STAGE_MESSAGES,
@@ -22,7 +25,7 @@ st.caption(f"v{__version__} — YouTube ライブアーカイブのタイムラ�
 
 st.markdown(
     "YouTube **公開アーカイブ** の URL を貼り付けて「実行」を押すと、"
-    "概要欄用のタイムライン（チャプター）と文字起こし全文が生成されます。"
+    "概要欄用のタイムライン（チャプター）、文字起こし全文、切り抜き候補が生成されます。"
 )
 
 url = st.text_input(
@@ -34,7 +37,7 @@ url = st.text_input(
 run_clicked = st.button("実行", type="primary", disabled=not url.strip())
 
 if run_clicked and url.strip():
-    stage_order = [STAGE_FETCH, STAGE_TRANSCRIPT, STAGE_CHAPTERS]
+    stage_order = [STAGE_FETCH, STAGE_TRANSCRIPT, STAGE_CHAPTERS, STAGE_CLIPS_SUGGEST]
     progress_state: dict[str, str] = dict.fromkeys(stage_order, "pending")
     progress_ctx = {"message": STAGE_MESSAGES[STAGE_FETCH]}
 
@@ -105,3 +108,46 @@ if run_clicked and url.strip():
             file_name=f"{result.video_id}_transcript.txt",
             mime="text/plain",
         )
+
+    if result.clips_candidates:
+        st.subheader("切り抜き候補")
+        st.caption("候補を選んで「切り出し」を押すと ffmpeg で動画を切り出します。")
+
+        candidate_labels = [
+            f"{c.id}: {c.title}（{c.start} → {c.end}、{c.duration_sec // 60} 分）"
+            for c in result.clips_candidates
+        ]
+        selected_idx = st.radio(
+            "候補を選択",
+            range(len(result.clips_candidates)),
+            format_func=lambda i: candidate_labels[i],
+            label_visibility="collapsed",
+        )
+        selected = result.clips_candidates[selected_idx]
+        st.markdown(f"**理由:** {selected.reason}")
+
+        cut_clicked = st.button("切り出し", type="secondary", key="cut_clip")
+
+        if cut_clicked:
+            settings = get_settings()
+            with st.status("切り出し中…", expanded=True) as cut_status:
+                try:
+                    cut_result = cut_clip(
+                        result.video_id,
+                        selected.start,
+                        selected.end,
+                        settings,
+                        output_name=f"{selected.id}.mp4",
+                        ffmpeg_path=settings.ffmpeg_path,
+                    )
+                    cut_status.update(label="切り出し完了", state="complete", expanded=False)
+                except FfmpegError as exc:
+                    cut_status.update(label="切り出しエラー", state="error", expanded=True)
+                    st.error(str(exc))
+                    st.stop()
+
+            st.success("切り出しが完了しました。")
+            st.markdown(f"**保存先:** `{cut_result.output_path}`")
+            st.markdown(f"**コマンドログ:** `{cut_result.command_log_path}`")
+    else:
+        st.info("切り抜き候補がありません。Codex CLI の設定を確認してください。")

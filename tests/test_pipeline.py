@@ -5,10 +5,13 @@ from unittest.mock import patch
 
 import pytest
 
+from yt_live_kit.models.clips import ClipCandidate
 from yt_live_kit.models.meta import VideoMeta
 from yt_live_kit.services.ai_prompt import ChapterGenerationResult
+from yt_live_kit.services.clips import ClipSuggestResult
 from yt_live_kit.services.pipeline import (
     STAGE_CHAPTERS,
+    STAGE_CLIPS_SUGGEST,
     STAGE_FETCH,
     STAGE_TRANSCRIPT,
     PipelineError,
@@ -30,10 +33,11 @@ def _sample_meta() -> VideoMeta:
     )
 
 
+@patch("yt_live_kit.services.pipeline.suggest_clips")
 @patch("yt_live_kit.services.pipeline.generate_chapters")
 @patch("yt_live_kit.services.pipeline.build_transcripts")
 @patch("yt_live_kit.services.pipeline.fetch")
-def test_run_success(mock_fetch, mock_transcript, mock_chapters, tmp_path):
+def test_run_success(mock_fetch, mock_transcript, mock_chapters, mock_clips, tmp_path):
     meta = _sample_meta()
     mock_fetch.return_value = meta
 
@@ -53,6 +57,24 @@ def test_run_success(mock_fetch, mock_transcript, mock_chapters, tmp_path):
         validation=None,
     )
 
+    candidates_path = tmp_path / "candidates.json"
+    mock_clips.return_value = ClipSuggestResult(
+        video_id=meta.id,
+        prompt_path=tmp_path / "prompt_clips.txt",
+        candidates_path=candidates_path,
+        used_codex=True,
+        candidates=(
+            ClipCandidate(
+                id="clip_001",
+                title="テスト候補",
+                start="03:42",
+                end="16:30",
+                duration_sec=768,
+                reason="テスト理由",
+            ),
+        ),
+    )
+
     progress: list[tuple[str, str]] = []
 
     def on_progress(stage: str, message: str) -> None:
@@ -64,7 +86,13 @@ def test_run_success(mock_fetch, mock_transcript, mock_chapters, tmp_path):
     assert result.title == "テスト動画"
     assert "0:00 開始" in result.chapters_text
     assert result.full_transcript_text.startswith("[00:00:00]")
-    assert [p[0] for p in progress] == [STAGE_FETCH, STAGE_TRANSCRIPT, STAGE_CHAPTERS]
+    assert len(result.clips_candidates) == 1
+    assert [p[0] for p in progress] == [
+        STAGE_FETCH,
+        STAGE_TRANSCRIPT,
+        STAGE_CHAPTERS,
+        STAGE_CLIPS_SUGGEST,
+    ]
 
 
 @patch("yt_live_kit.services.pipeline.fetch")
