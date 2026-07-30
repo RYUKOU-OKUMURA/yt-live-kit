@@ -127,6 +127,8 @@ def test_encode_segment_ss_after_input(mock_which, mock_run, tmp_path):
     assert "libx264" in cmd
     assert "-c:a" in cmd
     assert "aac" in cmd
+    assert "-b:a" in cmd
+    assert "192k" in cmd
 
 
 @patch("yt_live_kit.services.ffmpeg.subprocess.run")
@@ -152,12 +154,14 @@ def test_encode_segment_vf_filter_order(mock_which, mock_run, tmp_path):
         30.0,
         ffmpeg_path="/usr/bin/ffmpeg",
         scale="scale=1280:720",
-        extra_filters="format=yuv420p",
+        extra_filters=["format=yuv420p"],
     )
 
     cmd = mock_run.call_args[0][0]
     vf_index = cmd.index("-vf")
     assert cmd[vf_index + 1] == "scale=1280:720,format=yuv420p"
+    assert "-b:a" in cmd
+    assert "192k" in cmd
 
 
 def test_build_concat_list_quote_escape(tmp_path):

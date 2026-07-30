@@ -139,7 +139,7 @@ def encode_segment(
     *,
     ffmpeg_path: str = FFMPEG_DEFAULT,
     scale: str | None = None,
-    extra_filters: str | None = None,
+    extra_filters: list[str] | None = None,
     preset: str = "medium",
     crf: int = 20,
 ) -> Path:
@@ -164,7 +164,7 @@ def encode_segment(
     if scale:
         filters.append(scale)
     if extra_filters:
-        filters.append(extra_filters)
+        filters.extend(extra_filters)
     if filters:
         cmd.extend(["-vf", ",".join(filters)])
 
@@ -178,6 +178,8 @@ def encode_segment(
             str(crf),
             "-c:a",
             "aac",
+            "-b:a",
+            "192k",
             str(output),
         ]
     )
