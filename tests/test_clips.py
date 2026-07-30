@@ -84,6 +84,12 @@ def test_validate_clip_candidates_duration_mismatch():
     assert any("duration_sec" in err for err in errors)
 
 
+def test_validate_clip_candidates_end_exceeds_duration():
+    data = json.loads(_sample_candidates_json())
+    _, errors = validate_clip_candidates(data, video_duration_sec=600)
+    assert any("動画長" in err for err in errors)
+
+
 def test_save_candidates_file(tmp_path: Path):
     video_id = "test_clips"
     video_dir = tmp_path / video_id

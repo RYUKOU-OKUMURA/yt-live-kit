@@ -62,6 +62,7 @@ class PipelineResult:
     full_transcript_text: str
     clips_candidates: tuple[ClipCandidate, ...]
     clips_candidates_path: Path | None
+    clips_error: str | None = None
 
 
 def _notify(
@@ -112,18 +113,20 @@ def run(
             "チャプターの生成に失敗しました。Codex CLI の設定を確認してください。"
         )
 
+    chapters_text = chapter_result.chapters_path.read_text(encoding="utf-8")
+    full_transcript_text = full_path.read_text(encoding="utf-8")
+
+    clips_candidates: tuple[ClipCandidate, ...] = ()
+    clips_candidates_path: Path | None = None
+    clips_error: str | None = None
+
     try:
         _notify(on_progress, STAGE_CLIPS_SUGGEST)
         clips_result = suggest_clips(video_id, settings)
-    except CodexNotFoundError as exc:
-        raise PipelineError(str(exc)) from exc
-    except ClipValidationError as exc:
-        raise PipelineError(str(exc)) from exc
-    except ClipsError as exc:
-        raise PipelineError(str(exc)) from exc
-
-    chapters_text = chapter_result.chapters_path.read_text(encoding="utf-8")
-    full_transcript_text = full_path.read_text(encoding="utf-8")
+        clips_candidates = clips_result.candidates
+        clips_candidates_path = clips_result.candidates_path
+    except (CodexNotFoundError, ClipValidationError, ClipsError) as exc:
+        clips_error = str(exc)
 
     return PipelineResult(
         video_id=video_id,
@@ -133,6 +136,50 @@ def run(
         chapters_path=chapter_result.chapters_path,
         full_transcript_path=full_path,
         full_transcript_text=full_transcript_text,
-        clips_candidates=clips_result.candidates,
-        clips_candidates_path=clips_result.candidates_path,
+        clips_candidates=clips_candidates,
+        clips_candidates_path=clips_candidates_path,
+        clips_error=clips_error,
+    )
+
+
+def load_result_from_disk(
+    video_id: str,
+    settings: Settings | None = None,
+) -> PipelineResult | None:
+    """data/{video_id}/ から保存済み成果物を読み込む."""
+    settings = settings or get_settings()
+    video_dir = settings.data_dir / video_id
+    meta_path = video_dir / "meta.json"
+    chapters_path = video_dir / "chapters" / "chapters.md"
+    full_path = video_dir / "transcript" / "full.txt"
+
+    if not meta_path.is_file() or not chapters_path.is_file() or not full_path.is_file():
+        return None
+
+    meta = VideoMeta.model_validate_json(meta_path.read_text(encoding="utf-8"))
+    chapters_text = chapters_path.read_text(encoding="utf-8")
+    full_transcript_text = full_path.read_text(encoding="utf-8")
+
+    clips_candidates: tuple[ClipCandidate, ...] = ()
+    clips_candidates_path: Path | None = None
+    candidates_path = video_dir / "clips" / "candidates.json"
+    if candidates_path.is_file():
+        from yt_live_kit.models.clips import ClipCandidatesDocument
+
+        doc = ClipCandidatesDocument.model_validate_json(
+            candidates_path.read_text(encoding="utf-8")
+        )
+        clips_candidates = tuple(doc.candidates)
+        clips_candidates_path = candidates_path
+
+    return PipelineResult(
+        video_id=video_id,
+        title=meta.title,
+        meta=meta,
+        chapters_text=chapters_text,
+        chapters_path=chapters_path,
+        full_transcript_path=full_path,
+        full_transcript_text=full_transcript_text,
+        clips_candidates=clips_candidates,
+        clips_candidates_path=clips_candidates_path,
     )

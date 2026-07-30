@@ -165,7 +165,11 @@ def _normalize_timestamp(timestamp: str) -> str:
     return timestamp
 
 
-def validate_clip_candidates(data: dict) -> tuple[ClipCandidatesDocument, tuple[str, ...]]:
+def validate_clip_candidates(
+    data: dict,
+    *,
+    video_duration_sec: int | None = None,
+) -> tuple[ClipCandidatesDocument, tuple[str, ...]]:
     """候補 JSON を検証し、正規化済みドキュメントを返す."""
     errors: list[str] = []
 
@@ -196,6 +200,12 @@ def validate_clip_candidates(data: dict) -> tuple[ClipCandidatesDocument, tuple[
         if end_sec <= start_sec:
             errors.append(f"{prefix}: 終了時刻は開始時刻より後である必要があります。")
             continue
+
+        if video_duration_sec is not None and end_sec > video_duration_sec:
+            errors.append(
+                f"{prefix}: 終了時刻 ({candidate.end}) が動画長"
+                f" ({video_duration_sec // 60}:{video_duration_sec % 60:02d}) を超えています。"
+            )
 
         duration = end_sec - start_sec
         if duration < MIN_DURATION_SEC or duration > MAX_DURATION_SEC:
@@ -240,6 +250,18 @@ def validate_clip_candidates(data: dict) -> tuple[ClipCandidatesDocument, tuple[
     return ClipCandidatesDocument(candidates=normalized), ()
 
 
+def _load_video_duration(video_id: str, settings: Settings) -> int | None:
+    meta_path = settings.data_dir / video_id / "meta.json"
+    if not meta_path.is_file():
+        return None
+    try:
+        meta_data = json.loads(meta_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return None
+    duration = meta_data.get("duration")
+    return int(duration) if duration is not None else None
+
+
 def save_candidates_file(
     video_id: str,
     raw_json_text: str,
@@ -247,7 +269,8 @@ def save_candidates_file(
 ) -> tuple[Path, ClipCandidatesDocument]:
     """バリデーション通過後に clips/candidates.json に保存する."""
     data = _extract_json_object(raw_json_text)
-    doc, errors = validate_clip_candidates(data)
+    video_duration = _load_video_duration(video_id, settings)
+    doc, errors = validate_clip_candidates(data, video_duration_sec=video_duration)
     if errors:
         detail = "\n".join(f"- {err}" for err in errors)
         raise ClipValidationError(
