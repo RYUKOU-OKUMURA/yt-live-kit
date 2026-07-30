@@ -11,9 +11,11 @@ from unittest.mock import patch
 import pytest
 
 from yt_live_kit.config import Settings
+from yt_live_kit.services.clips import ClipsError
 from yt_live_kit.services.jobs import (
     JobBusyError,
     JobState,
+    _error_message_for,
     close_orphans,
     create_job,
     get_active_job,
@@ -22,6 +24,7 @@ from yt_live_kit.services.jobs import (
     start_job,
     update_job,
 )
+from yt_live_kit.services.pipeline import PipelineError
 
 
 def test_create_update_read_roundtrip(tmp_path):
@@ -132,7 +135,8 @@ def test_start_job_marks_failed_on_exception(tmp_path):
     done = threading.Event()
 
     def target_fn(*, report, settings, **_kwargs):
-        raise RuntimeError("処理に失敗しました")
+        # PipelineError は _KNOWN_ERRORS に含まれるため、メッセージがそのまま使われる。
+        raise PipelineError("処理に失敗しました")
 
     with patch("yt_live_kit.services.jobs.threading.Thread", wraps=threading.Thread) as mock_thread:
         job_id = start_job("single", target_fn, settings=settings)
@@ -254,3 +258,32 @@ def test_cleanup_finished_removes_old_jobs(tmp_path):
     assert removed == 1
     assert read_job(old_job.job_id, settings) is None
     assert read_job(recent_job.job_id, settings) is not None
+
+
+def test_error_message_for_known_error_passes_message_through():
+    exc = PipelineError("字幕が取得できませんでした。")
+    message, needs_log = _error_message_for(exc)
+    assert message == "字幕が取得できませんでした。"
+    assert needs_log is False
+
+
+def test_error_message_for_known_subclass_passes_message_through():
+    # ClipsError は AiPromptError のサブクラス。_KNOWN_ERRORS 経由で拾われる。
+    exc = ClipsError("クリップ候補の生成に失敗しました。")
+    message, needs_log = _error_message_for(exc)
+    assert message == "クリップ候補の生成に失敗しました。"
+    assert needs_log is False
+
+
+def test_error_message_for_unknown_error_uses_generic_message():
+    message, needs_log = _error_message_for(ValueError("boom"))
+    assert message == "予期しないエラーが発生しました。しばらくしてから再度お試しください。"
+    assert needs_log is True
+
+
+def test_error_message_for_unknown_file_not_found_uses_generic_message():
+    message, needs_log = _error_message_for(
+        FileNotFoundError(2, "No such file or directory", "/tmp/ja.vtt")
+    )
+    assert message == "予期しないエラーが発生しました。しばらくしてから再度お試しください。"
+    assert needs_log is True

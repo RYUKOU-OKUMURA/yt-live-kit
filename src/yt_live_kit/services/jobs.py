@@ -15,8 +15,13 @@ from typing import Any
 
 from yt_live_kit.config import Settings, get_settings
 from yt_live_kit.services.ai_prompt import AiPromptError
+from yt_live_kit.services.channel import ChannelError
+from yt_live_kit.services.clips import ClipsError
+from yt_live_kit.services.description import DescriptionError
 from yt_live_kit.services.ffmpeg import FfmpegError
 from yt_live_kit.services.pipeline import PipelineError
+from yt_live_kit.services.storage import StorageError
+from yt_live_kit.services.transcript import TranscriptError
 from yt_live_kit.services.ytdlp import YtdlpError
 
 JobKind = str  # "single" | "batch" | "regenerate" | "highlights" | "shorts"
@@ -32,6 +37,11 @@ _KNOWN_ERRORS = (
     FfmpegError,
     PipelineError,
     YtdlpError,
+    ClipsError,
+    TranscriptError,
+    DescriptionError,
+    ChannelError,
+    StorageError,
 )
 
 
@@ -268,8 +278,6 @@ def close_orphans(settings: Settings | None = None) -> list[str]:
 def _error_message_for(exc: BaseException) -> tuple[str, bool]:
     """ユーザー向けメッセージと、詳細ログが必要かを返す."""
     if isinstance(exc, _KNOWN_ERRORS):
-        return str(exc), False
-    if isinstance(exc, Exception) and str(exc):
         return str(exc), False
     return _UNEXPECTED_ERROR_MESSAGE, True
 
