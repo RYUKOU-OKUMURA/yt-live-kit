@@ -321,7 +321,7 @@ def test_regenerate_unknown_target_raises(tmp_path):
     _mock_transcript_paths(tmp_path, _sample_meta().id)
 
     with pytest.raises(PipelineError, match="未知の再生成対象"):
-        regenerate("test1234567", target="highlights", settings=settings)
+        regenerate("test1234567", target="shorts", settings=settings)
 
 
 def test_regenerate_missing_transcript_raises(tmp_path):

@@ -21,6 +21,11 @@ from yt_live_kit.services.clips import (
     ClipsError,
     suggest_clips,
 )
+from yt_live_kit.services.highlights import (
+    HighlightValidationError,
+    HighlightsError,
+    suggest_highlights,
+)
 from yt_live_kit.services.transcript import TranscriptError, build_transcripts
 from yt_live_kit.services.ytdlp import (
     SubtitleNotFoundError,
@@ -52,7 +57,7 @@ STAGE_MESSAGES: dict[str, str] = {
 
 _SKIP_SUFFIX = "（取得済みのためスキップ）"
 
-_REGENERATE_TARGETS = frozenset({"chapters", "clips"})
+_REGENERATE_TARGETS = frozenset({"chapters", "clips", "highlights"})
 
 
 class PipelineError(Exception):
@@ -332,6 +337,17 @@ def regenerate(
             clips_candidates_path = clips_result.candidates_path
         except (CodexNotFoundError, ClipValidationError, ClipsError, AiPromptError) as exc:
             clips_error = str(exc)
+    elif target == "highlights":
+        try:
+            _backup_file(video_dir / "highlights" / "segments.json")
+            suggest_highlights(video_id, settings, on_progress=on_progress)
+        except (
+            CodexNotFoundError,
+            HighlightValidationError,
+            HighlightsError,
+            AiPromptError,
+        ):
+            pass
 
     return _assemble_result(
         video_id,

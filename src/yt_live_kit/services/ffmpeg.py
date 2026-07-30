@@ -4,16 +4,21 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
 from yt_live_kit.config import Settings, get_settings
+from yt_live_kit.models.highlights import HighlightSegment
 from yt_live_kit.models.meta import VideoMeta
 from yt_live_kit.services.chapter_validator import parse_timestamp_to_seconds
 from yt_live_kit.services.ytdlp import YtdlpError, download_video
 
 FFMPEG_DEFAULT = "ffmpeg"
+FFPROBE_DEFAULT = "ffprobe"
+
+ConcatProgressCallback = Callable[[int, int, str], None] | None
 
 
 class FfmpegError(Exception):
@@ -30,6 +35,17 @@ class CutResult:
     start: str
     end: str
     duration_sec: int
+
+
+@dataclass(frozen=True)
+class ConcatResult:
+    """ハイライト連結結果."""
+
+    video_id: str
+    output_path: Path
+    command_log_path: Path
+    segment_count: int
+    total_duration_sec: float
 
 
 def find_ffmpeg(ffmpeg_path: str = FFMPEG_DEFAULT) -> str:
@@ -366,4 +382,133 @@ def cut_clip(
         start=start,
         end=end,
         duration_sec=duration_sec,
+    )
+
+
+def _probe_video_scale(
+    source: Path,
+    *,
+    ffprobe_path: str = FFPROBE_DEFAULT,
+) -> str | None:
+    """元動画の解像度から scale フィルタ文字列を返す（取得失敗時は None）."""
+    ffprobe = shutil.which(ffprobe_path)
+    if ffprobe is None:
+        return None
+
+    cmd = [
+        ffprobe,
+        "-v",
+        "error",
+        "-select_streams",
+        "v:0",
+        "-show_entries",
+        "stream=width,height",
+        "-of",
+        "csv=p=0:s=x",
+        str(source),
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    if result.returncode != 0:
+        return None
+
+    dimensions = (result.stdout or "").strip()
+    if not dimensions or "x" not in dimensions:
+        return None
+
+    parts = dimensions.split("x")
+    if len(parts) != 2:
+        return None
+    try:
+        width, height = int(parts[0]), int(parts[1])
+    except ValueError:
+        return None
+    if width <= 0 or height <= 0:
+        return None
+
+    return f"scale={width}:{height}"
+
+
+def cut_and_concat(
+    video_id: str,
+    segments: list[HighlightSegment],
+    settings: Settings | None = None,
+    *,
+    output_name: str = "highlight.mp4",
+    ffmpeg_path: str = FFMPEG_DEFAULT,
+    ffprobe_path: str = FFPROBE_DEFAULT,
+    keep_segments: bool = False,
+    on_progress: ConcatProgressCallback = None,
+) -> ConcatResult:
+    """複数区間を再エンコードして連結し、ハイライト動画を出力する."""
+    if not segments:
+        raise FfmpegError("連結するハイライト区間が指定されていません。")
+
+    settings = settings or get_settings()
+    video_dir = settings.data_dir / video_id
+    if not video_dir.is_dir():
+        raise FfmpegError(f"動画ディレクトリが見つかりません: {video_dir}")
+
+    source_path = ensure_source_video(video_id, settings)
+    scale = _probe_video_scale(source_path, ffprobe_path=ffprobe_path)
+
+    segments_dir = video_dir / "highlights" / "segments"
+    output_dir = video_dir / "highlights" / "output"
+    segments_dir.mkdir(parents=True, exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_path = output_dir / output_name
+
+    total = len(segments)
+    encoded_paths: list[Path] = []
+    total_duration_sec = 0.0
+    last_log_path: Path | None = None
+
+    for index, segment in enumerate(segments, start=1):
+        if on_progress is not None:
+            on_progress(index, total, f"区間 {index}/{total} を処理中…")
+
+        try:
+            start_sec = float(parse_timestamp_to_seconds(segment.start))
+            end_sec = float(parse_timestamp_to_seconds(segment.end))
+        except ValueError as exc:
+            raise FfmpegError(str(exc)) from exc
+
+        duration = end_sec - start_sec
+        total_duration_sec += duration
+
+        seg_path = segments_dir / f"seg_{index:03d}.mp4"
+        encode_segment(
+            source_path,
+            seg_path,
+            start_sec,
+            end_sec,
+            ffmpeg_path=ffmpeg_path,
+            scale=scale,
+        )
+        encoded_paths.append(seg_path)
+        last_log_path = segments_dir / f"ffmpeg_{seg_path.stem}.log"
+        if not last_log_path.is_file():
+            logs = sorted(segments_dir.glob("ffmpeg_*.log"))
+            last_log_path = logs[-1] if logs else segments_dir
+
+    concat_log_dir = output_dir
+    concat_segments(
+        encoded_paths,
+        output_path,
+        ffmpeg_path=ffmpeg_path,
+        log_dir=concat_log_dir,
+    )
+
+    concat_logs = sorted(output_dir.glob("ffmpeg_*.log"))
+    command_log_path = concat_logs[-1] if concat_logs else (last_log_path or output_dir)
+
+    if not keep_segments:
+        for seg_path in encoded_paths:
+            seg_path.unlink(missing_ok=True)
+
+    return ConcatResult(
+        video_id=video_id,
+        output_path=output_path,
+        command_log_path=command_log_path,
+        segment_count=len(segments),
+        total_duration_sec=total_duration_sec,
     )
