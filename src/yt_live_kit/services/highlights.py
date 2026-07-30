@@ -16,10 +16,7 @@ from yt_live_kit.services.ai_prompt import (
     invoke_codex,
     is_codex_available,
 )
-from yt_live_kit.services.chapter_validator import (
-    ValidationResult,
-    parse_timestamp_to_seconds,
-)
+from yt_live_kit.services.chapter_validator import parse_timestamp_to_seconds
 
 PLACEHOLDER = "{{compressed_transcript}}"
 TEMPLATE_NAME = "highlights.md"
@@ -42,8 +39,8 @@ Codex CLI が見つかりません。ハイライト区間の自動生成には 
 1. 次のプロンプトファイルを Cursor のチャットに貼り付けてください:
    {prompt_path}
 2. 生成された JSON を {segments_path} に保存してください
-3. 保存後、次のコマンドで検証できます:
-   uv run yt-live-kit highlights suggest {video_id} --from-file {segments_path}
+3. 保存後、再度この画面から実行すると検証されます。
+   （CLI からの検証・保存は今後追加予定です）
 """
 
 ProgressCallback = Callable[[str, str], None] | None
@@ -59,6 +56,15 @@ class HighlightValidationError(HighlightsError):
     def __init__(self, message: str, errors: tuple[str, ...]) -> None:
         super().__init__(message)
         self.errors = errors
+
+
+@dataclass(frozen=True)
+class HighlightValidationResult:
+    """ハイライト区間バリデーション結果（正規化済み区間つき）."""
+
+    ok: bool
+    errors: tuple[str, ...]
+    segments: tuple[HighlightSegment, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -176,7 +182,7 @@ def validate_highlights(
     segments: dict | HighlightsDocument,
     *,
     video_duration: int | None = None,
-) -> ValidationResult:
+) -> HighlightValidationResult:
     """ハイライト区間 JSON を検証する."""
     errors: list[str] = []
 
@@ -186,10 +192,10 @@ def validate_highlights(
         try:
             data = HighlightsDocument.model_validate(segments)
         except Exception as exc:
-            return ValidationResult(
+            return HighlightValidationResult(
                 ok=False,
                 errors=(f"JSON スキーマが不正です: {exc}",),
-                chapters=(),
+                segments=(),
             )
 
     if len(data.candidates) < MIN_SEGMENTS:
@@ -260,20 +266,19 @@ def validate_highlights(
             )
         )
 
-    # 時系列順・重複チェック
+    # 時系列順チェック（隣接比較）
+    for i in range(1, len(normalized)):
+        seg_i, start_i, _end_i = normalized[i]
+        _, prev_start, _prev_end = normalized[i - 1]
+        if start_i < prev_start:
+            errors.append(
+                f"区間 {seg_i.id} は前の区間より前の開始時刻になっています"
+                f"（時系列順に並べてください）。"
+            )
+
+    # 重複チェック（全ペア）
     for i in range(len(normalized)):
         seg_i, start_i, end_i = normalized[i]
-        if i > 0:
-            _, prev_start, prev_end = normalized[i - 1]
-            if start_i < prev_start:
-                errors.append(
-                    f"区間 {seg_i.id} は前の区間より前の開始時刻になっています"
-                    f"（時系列順に並べてください）。"
-                )
-            if start_i < prev_end:
-                errors.append(
-                    f"区間 {normalized[i - 1][0].id} と {seg_i.id} の区間が重複しています。"
-                )
         for j in range(i + 1, len(normalized)):
             seg_j, start_j, end_j = normalized[j]
             if start_i < end_j and start_j < end_i:
@@ -282,7 +287,10 @@ def validate_highlights(
                 )
 
     ok = len(errors) == 0
-    return ValidationResult(ok=ok, errors=tuple(errors), chapters=())
+    normalized_segments = tuple(seg for seg, _start, _end in normalized)
+    return HighlightValidationResult(
+        ok=ok, errors=tuple(errors), segments=normalized_segments
+    )
 
 
 def _load_video_duration(video_id: str, settings: Settings) -> int | None:
@@ -313,7 +321,7 @@ def save_segments_file(
             validation.errors,
         )
 
-    doc = HighlightsDocument.model_validate(data)
+    doc = HighlightsDocument(candidates=list(validation.segments))
     video_dir = settings.data_dir / video_id
     highlights_dir = video_dir / "highlights"
     highlights_dir.mkdir(parents=True, exist_ok=True)

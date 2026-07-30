@@ -142,24 +142,34 @@ def _setup_video_dir(tmp_path: Path, video_id: str = "testvid1234") -> Path:
     return video_dir
 
 
+def _fake_encode_segment(source, output, start_sec, end_sec, **kwargs):
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_bytes(b"intermediate data")
+    return output
+
+
+def _fake_ffmpeg_run(cmd, **kwargs):
+    output_path = Path(cmd[-1])
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_bytes(b"short data")
+    return MagicMock(returncode=0, stdout="", stderr="")
+
+
 @patch("yt_live_kit.services.shorts.subprocess.run")
 @patch("yt_live_kit.services.shorts.find_ffmpeg")
+@patch("yt_live_kit.services.shorts.encode_segment")
 @patch("yt_live_kit.services.shorts.ensure_source_video")
 def test_build_short_blur_filter_in_command(
     mock_ensure,
+    mock_encode_segment,
     mock_find_ffmpeg,
     mock_run,
     tmp_path,
 ):
     mock_find_ffmpeg.return_value = "/usr/bin/ffmpeg"
     mock_ensure.return_value = tmp_path / "source.mp4"
-
-    def fake_run(cmd, **kwargs):
-        output_path = Path(cmd[-1])
-        output_path.write_bytes(b"short data")
-        return MagicMock(returncode=0, stdout="", stderr="")
-
-    mock_run.side_effect = fake_run
+    mock_encode_segment.side_effect = _fake_encode_segment
+    mock_run.side_effect = _fake_ffmpeg_run
 
     video_id = "testvid1234"
     _setup_video_dir(tmp_path, video_id)
@@ -179,7 +189,10 @@ def test_build_short_blur_filter_in_command(
             ffmpeg_path="/usr/bin/ffmpeg",
         )
 
+    mock_encode_segment.assert_called_once()
+
     cmd = mock_run.call_args[0][0]
+    assert "-ss" not in cmd
     fc_index = cmd.index("-filter_complex")
     filter_graph = cmd[fc_index + 1]
     assert BLUR_LAYOUT_FILTER in filter_graph
@@ -187,26 +200,24 @@ def test_build_short_blur_filter_in_command(
     assert result.layout == "blur"
     assert result.burned_subtitles is False
     assert result.duration_sec == pytest.approx(15.0)
+    assert result.font_warning is None
 
 
 @patch("yt_live_kit.services.shorts.subprocess.run")
 @patch("yt_live_kit.services.shorts.find_ffmpeg")
+@patch("yt_live_kit.services.shorts.encode_segment")
 @patch("yt_live_kit.services.shorts.ensure_source_video")
 def test_build_short_crop_with_subtitles(
     mock_ensure,
+    mock_encode_segment,
     mock_find_ffmpeg,
     mock_run,
     tmp_path,
 ):
     mock_find_ffmpeg.return_value = "/usr/bin/ffmpeg"
     mock_ensure.return_value = tmp_path / "source.mp4"
-
-    def fake_run(cmd, **kwargs):
-        output_path = Path(cmd[-1])
-        output_path.write_bytes(b"short data")
-        return MagicMock(returncode=0, stdout="", stderr="")
-
-    mock_run.side_effect = fake_run
+    mock_encode_segment.side_effect = _fake_encode_segment
+    mock_run.side_effect = _fake_ffmpeg_run
 
     video_id = "testvid1234"
     _setup_video_dir(tmp_path, video_id)
@@ -230,12 +241,240 @@ def test_build_short_crop_with_subtitles(
         )
 
     cmd = mock_run.call_args[0][0]
+    assert "-ss" not in cmd
     vf_index = cmd.index("-vf")
     vf_chain = cmd[vf_index + 1]
     assert CROP_LAYOUT_FILTER in vf_chain
     assert "subtitles=" in vf_chain
     assert "FontName=Hiragino Sans" in vf_chain
     assert result.burned_subtitles is True
+    assert result.font_warning is None
+
+
+@patch("subprocess.run")
+@patch("shutil.which")
+@patch("yt_live_kit.services.shorts.ensure_source_video")
+def test_build_short_two_pass_commands_no_mock_of_encode_segment(
+    mock_ensure,
+    mock_which,
+    mock_run,
+    tmp_path,
+):
+    """encode_segment 自体はモックせず、実際に生成される2本のコマンドを検証する."""
+    mock_which.return_value = "/usr/bin/ffmpeg"
+    mock_ensure.return_value = tmp_path / "source.mp4"
+    mock_run.side_effect = _fake_ffmpeg_run
+
+    video_id = "testvid1234"
+    _setup_video_dir(tmp_path, video_id)
+    settings = Settings(data_dir=tmp_path)
+
+    with patch(
+        "yt_live_kit.services.shorts.is_japanese_font_available",
+        return_value=True,
+    ):
+        result = build_short(
+            video_id,
+            10.0,
+            25.0,
+            settings,
+            layout="crop",
+            burn_subtitles=False,
+            ffmpeg_path="/usr/bin/ffmpeg",
+        )
+
+    assert mock_run.call_count == 2
+    pass1_cmd, pass2_cmd = (call.args[0] for call in mock_run.call_args_list)
+
+    # パス1（切り出し）: -ss は -i の後ろ（精密シーク）
+    i_index = pass1_cmd.index("-i")
+    ss_index = pass1_cmd.index("-ss")
+    assert ss_index > i_index
+    assert pass1_cmd[i_index + 1] == str(tmp_path / "source.mp4")
+
+    # パス2（整形）: -ss を一切含まない
+    assert "-ss" not in pass2_cmd
+    assert CROP_LAYOUT_FILTER in pass2_cmd[pass2_cmd.index("-vf") + 1]
+
+    assert result.output_path.is_file()
+
+
+@patch("yt_live_kit.services.shorts.subprocess.run")
+@patch("yt_live_kit.services.shorts.find_ffmpeg")
+@patch("yt_live_kit.services.shorts.encode_segment")
+@patch("yt_live_kit.services.shorts.ensure_source_video")
+def test_build_short_removes_intermediate_by_default(
+    mock_ensure,
+    mock_encode_segment,
+    mock_find_ffmpeg,
+    mock_run,
+    tmp_path,
+):
+    mock_find_ffmpeg.return_value = "/usr/bin/ffmpeg"
+    mock_ensure.return_value = tmp_path / "source.mp4"
+
+    created_intermediate: list[Path] = []
+
+    def fake_encode_segment(source, output, start_sec, end_sec, **kwargs):
+        _fake_encode_segment(source, output, start_sec, end_sec, **kwargs)
+        created_intermediate.append(output)
+        return output
+
+    mock_encode_segment.side_effect = fake_encode_segment
+    mock_run.side_effect = _fake_ffmpeg_run
+
+    video_id = "testvid1234"
+    _setup_video_dir(tmp_path, video_id)
+    settings = Settings(data_dir=tmp_path)
+
+    with patch(
+        "yt_live_kit.services.shorts.is_japanese_font_available",
+        return_value=True,
+    ):
+        build_short(
+            video_id,
+            10.0,
+            25.0,
+            settings,
+            layout="crop",
+            burn_subtitles=False,
+            ffmpeg_path="/usr/bin/ffmpeg",
+        )
+
+    assert created_intermediate
+    assert not created_intermediate[0].exists()
+
+
+@patch("yt_live_kit.services.shorts.subprocess.run")
+@patch("yt_live_kit.services.shorts.find_ffmpeg")
+@patch("yt_live_kit.services.shorts.encode_segment")
+@patch("yt_live_kit.services.shorts.ensure_source_video")
+def test_build_short_keeps_intermediate_when_requested(
+    mock_ensure,
+    mock_encode_segment,
+    mock_find_ffmpeg,
+    mock_run,
+    tmp_path,
+):
+    mock_find_ffmpeg.return_value = "/usr/bin/ffmpeg"
+    mock_ensure.return_value = tmp_path / "source.mp4"
+
+    created_intermediate: list[Path] = []
+
+    def fake_encode_segment(source, output, start_sec, end_sec, **kwargs):
+        _fake_encode_segment(source, output, start_sec, end_sec, **kwargs)
+        created_intermediate.append(output)
+        return output
+
+    mock_encode_segment.side_effect = fake_encode_segment
+    mock_run.side_effect = _fake_ffmpeg_run
+
+    video_id = "testvid1234"
+    _setup_video_dir(tmp_path, video_id)
+    settings = Settings(data_dir=tmp_path)
+
+    with patch(
+        "yt_live_kit.services.shorts.is_japanese_font_available",
+        return_value=True,
+    ):
+        build_short(
+            video_id,
+            10.0,
+            25.0,
+            settings,
+            layout="crop",
+            burn_subtitles=False,
+            ffmpeg_path="/usr/bin/ffmpeg",
+            keep_intermediate=True,
+        )
+
+    assert created_intermediate
+    assert created_intermediate[0].exists()
+
+
+@patch("yt_live_kit.services.shorts.subprocess.run")
+@patch("yt_live_kit.services.shorts.find_ffmpeg")
+@patch("yt_live_kit.services.shorts.encode_segment")
+@patch("yt_live_kit.services.shorts.ensure_source_video")
+def test_build_short_font_warning_when_font_missing(
+    mock_ensure,
+    mock_encode_segment,
+    mock_find_ffmpeg,
+    mock_run,
+    tmp_path,
+):
+    mock_find_ffmpeg.return_value = "/usr/bin/ffmpeg"
+    mock_ensure.return_value = tmp_path / "source.mp4"
+    mock_encode_segment.side_effect = _fake_encode_segment
+    mock_run.side_effect = _fake_ffmpeg_run
+
+    video_id = "testvid1234"
+    _setup_video_dir(tmp_path, video_id)
+    settings = Settings(data_dir=tmp_path)
+
+    progress_messages: list[str] = []
+
+    with patch(
+        "yt_live_kit.services.shorts.is_japanese_font_available",
+        return_value=False,
+    ), patch(
+        "yt_live_kit.services.shorts.resolve_font",
+        return_value="sans-serif",
+    ):
+        result = build_short(
+            video_id,
+            10.0,
+            25.0,
+            settings,
+            layout="crop",
+            burn_subtitles=True,
+            ffmpeg_path="/usr/bin/ffmpeg",
+            on_progress=progress_messages.append,
+        )
+
+    assert result.font_warning is not None
+    assert "フォント" in result.font_warning
+    assert not any("警告" in msg for msg in progress_messages)
+
+
+@patch("yt_live_kit.services.shorts.subprocess.run")
+@patch("yt_live_kit.services.shorts.find_ffmpeg")
+@patch("yt_live_kit.services.shorts.encode_segment")
+@patch("yt_live_kit.services.shorts.ensure_source_video")
+def test_build_short_no_font_warning_when_font_available(
+    mock_ensure,
+    mock_encode_segment,
+    mock_find_ffmpeg,
+    mock_run,
+    tmp_path,
+):
+    mock_find_ffmpeg.return_value = "/usr/bin/ffmpeg"
+    mock_ensure.return_value = tmp_path / "source.mp4"
+    mock_encode_segment.side_effect = _fake_encode_segment
+    mock_run.side_effect = _fake_ffmpeg_run
+
+    video_id = "testvid1234"
+    _setup_video_dir(tmp_path, video_id)
+    settings = Settings(data_dir=tmp_path)
+
+    with patch(
+        "yt_live_kit.services.shorts.is_japanese_font_available",
+        return_value=True,
+    ), patch(
+        "yt_live_kit.services.shorts.resolve_font",
+        return_value="Hiragino Sans",
+    ):
+        result = build_short(
+            video_id,
+            10.0,
+            25.0,
+            settings,
+            layout="crop",
+            burn_subtitles=True,
+            ffmpeg_path="/usr/bin/ffmpeg",
+        )
+
+    assert result.font_warning is None
 
 
 @patch("yt_live_kit.services.shorts.subprocess.run")

@@ -125,10 +125,14 @@ def save_command_log(
     returncode: int,
     stdout: str,
     stderr: str,
+    filename: str | None = None,
 ) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    log_path = output_dir / f"ffmpeg_{timestamp}.log"
+    if filename is not None:
+        log_path = output_dir / filename
+    else:
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        log_path = output_dir / f"ffmpeg_{timestamp}.log"
     lines = [
         " ".join(cmd),
         "",
@@ -208,6 +212,7 @@ def encode_segment(
         returncode=result.returncode,
         stdout=result.stdout,
         stderr=result.stderr,
+        filename=f"{output.stem}.ffmpeg.log",
     )
 
     if result.returncode != 0:
@@ -279,6 +284,7 @@ def concat_segments(
         returncode=result.returncode,
         stdout=result.stdout,
         stderr=result.stderr,
+        filename=f"{output_path.stem}.ffmpeg.log",
     )
 
     if result.returncode != 0:
@@ -460,7 +466,6 @@ def cut_and_concat(
     total = len(segments)
     encoded_paths: list[Path] = []
     total_duration_sec = 0.0
-    last_log_path: Path | None = None
 
     for index, segment in enumerate(segments, start=1):
         if on_progress is not None:
@@ -485,10 +490,12 @@ def cut_and_concat(
             scale=scale,
         )
         encoded_paths.append(seg_path)
-        last_log_path = segments_dir / f"ffmpeg_{seg_path.stem}.log"
-        if not last_log_path.is_file():
-            logs = sorted(segments_dir.glob("ffmpeg_*.log"))
-            last_log_path = logs[-1] if logs else segments_dir
+
+        if on_progress is not None:
+            on_progress(index, total, f"区間 {index}/{total} を処理しました")
+
+    if on_progress is not None:
+        on_progress(total, total, "区間を連結中…")
 
     concat_log_dir = output_dir
     concat_segments(
@@ -497,9 +504,7 @@ def cut_and_concat(
         ffmpeg_path=ffmpeg_path,
         log_dir=concat_log_dir,
     )
-
-    concat_logs = sorted(output_dir.glob("ffmpeg_*.log"))
-    command_log_path = concat_logs[-1] if concat_logs else (last_log_path or output_dir)
+    command_log_path = concat_log_dir / f"{output_path.stem}.ffmpeg.log"
 
     if not keep_segments:
         for seg_path in encoded_paths:

@@ -8,6 +8,7 @@ import pytest
 
 from yt_live_kit.config import Settings
 from yt_live_kit.services.highlights import (
+    CODEX_INSTALL_HINT,
     HighlightValidationError,
     HighlightsError,
     _extract_json_object,
@@ -148,6 +149,18 @@ def test_validate_highlights_overlap():
     assert any("重複" in err for err in result.errors)
 
 
+def test_validate_highlights_adjacent_overlap_reported_once():
+    data = {
+        "candidates": [
+            _segment(1, start="00:00:00", end="00:03:00", duration_sec=180),
+            _segment(2, start="00:02:00", end="00:05:00", duration_sec=180),
+        ]
+    }
+    result = validate_highlights(data)
+    overlap_errors = [err for err in result.errors if "重複" in err]
+    assert len(overlap_errors) == 1
+
+
 def test_validate_highlights_exceeds_video_duration():
     data = _sample_highlights_data(2)
     result = validate_highlights(data, video_duration=300)
@@ -209,6 +222,37 @@ def test_save_segments_file(tmp_path: Path):
     assert len(doc.candidates) == 3
 
 
+def test_save_segments_file_saves_normalized_values(tmp_path: Path):
+    video_id = "test_normalize"
+    (tmp_path / video_id).mkdir()
+    settings = Settings(data_dir=tmp_path)
+
+    data = {
+        "candidates": [
+            _segment(
+                1,
+                start="0:00",
+                end="2:00",
+                duration_sec=120,
+                title="  タイトル  ",
+                reason="  理由  ",
+            ),
+            _segment(2, start="00:05:00", end="00:07:00", duration_sec=120),
+        ]
+    }
+    raw = json.dumps(data, ensure_ascii=False)
+
+    path, doc = save_segments_file(video_id, raw, settings)
+
+    saved = json.loads(path.read_text(encoding="utf-8"))
+    first = saved["candidates"][0]
+    assert first["duration_sec"] == 120
+    assert first["title"] == "タイトル"
+    assert first["reason"] == "理由"
+    assert doc.candidates[0].title == "タイトル"
+    assert doc.candidates[0].duration_sec == 120
+
+
 def test_save_segments_file_invalid_raises(tmp_path: Path):
     video_id = "test_invalid"
     (tmp_path / video_id).mkdir()
@@ -254,3 +298,8 @@ def test_suggest_highlights_codex_not_found_message(_mock_available, tmp_path: P
     assert "prompt_highlights.txt" in message or str(
         settings.data_dir / video_id / "prompt_highlights.txt"
     ) in message
+
+
+def test_codex_install_hint_has_no_unimplemented_cli_command():
+    assert "highlights suggest" not in CODEX_INSTALL_HINT
+    assert "--from-file" not in CODEX_INSTALL_HINT

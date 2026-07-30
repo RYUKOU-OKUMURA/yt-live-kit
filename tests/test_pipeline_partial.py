@@ -316,6 +316,72 @@ def test_regenerate_clips_backs_up_candidates(
     mock_chapters.assert_not_called()
 
 
+@patch("yt_live_kit.services.pipeline.suggest_highlights")
+def test_regenerate_highlights_codex_not_found_sets_error(mock_highlights, tmp_path):
+    from yt_live_kit.services.ai_prompt import CodexNotFoundError
+
+    meta = _sample_meta()
+    settings = _setup_video_dir(tmp_path, meta)
+    _mock_transcript_paths(tmp_path, meta.id)
+
+    mock_highlights.side_effect = CodexNotFoundError("Codex CLI が見つかりません。")
+
+    result = regenerate(meta.id, target="highlights", settings=settings)
+
+    assert result.highlights_error is not None
+    assert "Codex CLI が見つかりません" in result.highlights_error
+
+
+@patch("yt_live_kit.services.pipeline.suggest_highlights")
+def test_regenerate_highlights_validation_error_sets_error(mock_highlights, tmp_path):
+    from yt_live_kit.services.highlights import HighlightValidationError
+
+    meta = _sample_meta()
+    settings = _setup_video_dir(tmp_path, meta)
+    _mock_transcript_paths(tmp_path, meta.id)
+
+    mock_highlights.side_effect = HighlightValidationError(
+        "ハイライト区間の形式が正しくありません:\n- エラー", ("エラー",)
+    )
+
+    result = regenerate(meta.id, target="highlights", settings=settings)
+
+    assert result.highlights_error is not None
+    assert "形式が正しくありません" in result.highlights_error
+
+
+@patch("yt_live_kit.services.pipeline.suggest_highlights")
+def test_regenerate_highlights_success_sets_no_error(mock_highlights, tmp_path):
+    meta = _sample_meta()
+    settings = _setup_video_dir(tmp_path, meta)
+    _mock_transcript_paths(tmp_path, meta.id)
+    mock_highlights.return_value = MagicMock()
+
+    result = regenerate(meta.id, target="highlights", settings=settings)
+
+    assert result.highlights_error is None
+
+
+@patch("yt_live_kit.services.pipeline.suggest_highlights")
+def test_regenerate_highlights_backs_up_existing_segments(mock_highlights, tmp_path):
+    meta = _sample_meta()
+    settings = _setup_video_dir(tmp_path, meta)
+    _mock_transcript_paths(tmp_path, meta.id)
+
+    highlights_dir = tmp_path / meta.id / "highlights"
+    highlights_dir.mkdir(parents=True)
+    segments_path = highlights_dir / "segments.json"
+    segments_path.write_text('{"candidates": []}', encoding="utf-8")
+
+    mock_highlights.return_value = MagicMock()
+
+    regenerate(meta.id, target="highlights", settings=settings)
+
+    backup_path = Path(f"{segments_path}.bak")
+    assert backup_path.is_file()
+    assert backup_path.read_text(encoding="utf-8") == '{"candidates": []}'
+
+
 def test_regenerate_unknown_target_raises(tmp_path):
     settings = _setup_video_dir(tmp_path)
     _mock_transcript_paths(tmp_path, _sample_meta().id)

@@ -79,6 +79,7 @@ class PipelineResult:
     clips_candidates_path: Path | None
     clips_error: str | None = None
     clips_requested: bool = True
+    highlights_error: str | None = None
 
 
 def _notify(
@@ -148,6 +149,7 @@ def _assemble_result(
     clips_candidates: tuple[ClipCandidate, ...] | None = None,
     clips_candidates_path: Path | None = None,
     clips_error: str | None = None,
+    highlights_error: str | None = None,
 ) -> PipelineResult:
     """保存済み成果物から PipelineResult を組み立てる."""
     video_dir = _video_dir(video_id, settings)
@@ -176,6 +178,7 @@ def _assemble_result(
         clips_candidates=clips_candidates,
         clips_candidates_path=clips_candidates_path,
         clips_error=clips_error,
+        highlights_error=highlights_error,
     )
 
 
@@ -311,6 +314,7 @@ def regenerate(
     clips_candidates: tuple[ClipCandidate, ...] | None = None
     clips_candidates_path: Path | None = None
     clips_error: str | None = None
+    highlights_error: str | None = None
 
     if target == "chapters":
         try:
@@ -346,8 +350,8 @@ def regenerate(
             HighlightValidationError,
             HighlightsError,
             AiPromptError,
-        ):
-            pass
+        ) as exc:
+            highlights_error = str(exc)
 
     return _assemble_result(
         video_id,
@@ -355,6 +359,7 @@ def regenerate(
         clips_candidates=clips_candidates,
         clips_candidates_path=clips_candidates_path,
         clips_error=clips_error,
+        highlights_error=highlights_error,
     )
 
 

@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from yt_live_kit.config import Settings, get_settings
-from yt_live_kit.services.vtt_parser import _clean_vtt_text
+from yt_live_kit.services.vtt_parser import clean_vtt_text
 
 _TIMESTAMP_RE = re.compile(
     r"^(?:(\d{2}):)?(\d{2}):(\d{2})(?:\.(\d{3}))?\s*-->\s*"
@@ -21,6 +21,13 @@ _MAC_FONT_DIRS = (
     Path("/System/Library/Fonts"),
     Path("/Library/Fonts"),
 )
+# 縦型ショート出力の解像度（1080x1920）。ASS の PlayResX/PlayResY と揃える.
+_ASS_PLAY_RES_X = 1080
+_ASS_PLAY_RES_Y = 1920
+# macOS の日本語ヒラギノは実ファイル名が英語名と一致しないため、別名候補で補う.
+_MAC_FONT_FILENAME_ALIASES: dict[str, tuple[str, ...]] = {
+    "hiraginosans": ("ヒラギノ角ゴシック", "ヒラギノ角ゴ"),
+}
 
 
 class SubtitleBurnError(Exception):
@@ -74,11 +81,62 @@ def _parse_vtt_with_end(content: str) -> list[TimedCue]:
             i += 1
 
         text = " ".join(text_lines).strip()
-        text = _clean_vtt_text(text)
+        text = clean_vtt_text(text)
         if text and end > start:
             cues.append(TimedCue(start_seconds=start, end_seconds=end, text=text))
 
-    return cues
+    return _deduplicate_progressive_timed(cues)
+
+
+def _deduplicate_progressive_timed(cues: list[TimedCue]) -> list[TimedCue]:
+    """プログレッシブ表示による部分文字列重複を除去する（終了時刻を保持）.
+
+    YouTube 自動字幕は「前の行 + 新しい語」が積み上がる形式で配信されるため、
+    そのまま焼き込むと同じ文が重なって表示される。ロジックは
+    vtt_parser.deduplicate_progressive() と等価（終了時刻対応版）で、
+    両者が同じ入力に対して同じ text 列を返すことをテストで保証している。
+    """
+    result: list[TimedCue] = []
+    prev_text = ""
+
+    for cue in cues:
+        text = cue.text.strip()
+        if not text:
+            continue
+
+        if prev_text:
+            if text == prev_text:
+                continue
+            if text.startswith(prev_text):
+                delta = text[len(prev_text) :].strip()
+                if delta:
+                    result.append(
+                        TimedCue(
+                            start_seconds=cue.start_seconds,
+                            end_seconds=cue.end_seconds,
+                            text=delta,
+                        )
+                    )
+                prev_text = text
+                continue
+            if prev_text in text:
+                idx = text.find(prev_text)
+                delta = (text[:idx] + text[idx + len(prev_text) :]).strip()
+                if delta:
+                    result.append(
+                        TimedCue(
+                            start_seconds=cue.start_seconds,
+                            end_seconds=cue.end_seconds,
+                            text=delta,
+                        )
+                    )
+                prev_text = text
+                continue
+
+        result.append(cue)
+        prev_text = text
+
+    return result
 
 
 def filter_cues_for_segment(
@@ -123,8 +181,15 @@ def _escape_ass_text(text: str) -> str:
     return text.replace("\\", "\\\\").replace("{", "\\{").replace("}", "\\}")
 
 
-def write_ass(cues: list[TimedCue], output_path: Path, *, font_name: str) -> Path:
-    """ASS 字幕ファイルを書き出す."""
+def write_ass(
+    cues: list[TimedCue],
+    output_path: Path,
+    *,
+    font_name: str,
+    play_res_x: int = _ASS_PLAY_RES_X,
+    play_res_y: int = _ASS_PLAY_RES_Y,
+) -> Path:
+    """ASS 字幕ファイルを書き出す（既定は縦型ショート 1080x1920 基準）."""
     output_path.parent.mkdir(parents=True, exist_ok=True)
     lines = [
         "[Script Info]",
@@ -132,6 +197,8 @@ def write_ass(cues: list[TimedCue], output_path: Path, *, font_name: str) -> Pat
         "WrapStyle: 0",
         "ScaledBorderAndShadow: yes",
         "YCbCr Matrix: TV.709",
+        f"PlayResX: {play_res_x}",
+        f"PlayResY: {play_res_y}",
         "",
         "[V4+ Styles]",
         "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, "
@@ -209,6 +276,8 @@ def _font_available_via_fc_list(font_name: str) -> bool:
 
 def _font_available_in_mac_dirs(font_name: str) -> bool:
     needle = font_name.casefold().replace(" ", "")
+    # 日本語ファイル名（例: ヒラギノ角ゴシック W3.ttc）でも検出できるよう別名を併用する.
+    needles = (needle, *_MAC_FONT_FILENAME_ALIASES.get(needle, ()))
     for directory in _MAC_FONT_DIRS:
         if not directory.is_dir():
             continue
@@ -216,7 +285,7 @@ def _font_available_in_mac_dirs(font_name: str) -> bool:
             if not path.is_file():
                 continue
             stem = path.stem.casefold().replace(" ", "")
-            if needle in stem or stem in needle:
+            if any(n in stem for n in needles):
                 return True
     return False
 

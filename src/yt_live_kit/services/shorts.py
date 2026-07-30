@@ -10,6 +10,8 @@ from pathlib import Path
 from yt_live_kit.config import Settings, get_settings
 from yt_live_kit.services.ffmpeg import (
     FFMPEG_DEFAULT,
+    FfmpegError,
+    encode_segment,
     ensure_source_video,
     find_ffmpeg,
     save_command_log,
@@ -46,12 +48,17 @@ class ShortResult:
     layout: str
     burned_subtitles: bool
     duration_sec: float
+    font_warning: str | None = None
 
 
 def _segment_output_name(start: float, end: float, output_name: str | None) -> str:
     if output_name is not None:
         return output_name
     return f"short_{start:g}_{end:g}.mp4"
+
+
+def _intermediate_segment_name(start: float, end: float) -> str:
+    return f"short_{start:g}_{end:g}_src.mp4"
 
 
 def validate_short_duration(start: float, end: float) -> float:
@@ -122,35 +129,26 @@ def build_video_filter_chain(
 
     if ass_path is not None and font_name is not None:
         subtitle_filter = build_subtitle_filter(ass_path, font_name)
-        if use_complex:
-            layout_filter = f"{layout_filter},{subtitle_filter}"
-        else:
-            layout_filter = f"{layout_filter},{subtitle_filter}"
+        layout_filter = f"{layout_filter},{subtitle_filter}"
 
     return layout_filter, use_complex
 
 
-def _build_short_command(
+def _build_short_layout_command(
     source: Path,
     output: Path,
-    start_sec: float,
-    end_sec: float,
     filter_chain: str,
     *,
     use_filter_complex: bool,
     ffmpeg_path: str = FFMPEG_DEFAULT,
 ) -> list[str]:
+    """パス2（整形）用コマンドを組み立てる（-ss / -t は付与しない）."""
     ffmpeg = find_ffmpeg(ffmpeg_path)
-    duration = end_sec - start_sec
     cmd: list[str] = [
         ffmpeg,
         "-y",
         "-i",
         str(source),
-        "-ss",
-        str(start_sec),
-        "-t",
-        str(duration),
     ]
 
     if use_filter_complex:
@@ -187,8 +185,9 @@ def build_short(
     output_name: str | None = None,
     ffmpeg_path: str = FFMPEG_DEFAULT,
     on_progress: Callable[[str], None] | None = None,
+    keep_intermediate: bool = False,
 ) -> ShortResult:
-    """縦型ショート動画を生成する."""
+    """縦型ショート動画を生成する（2パス: 精密シークで切り出してから字幕・レイアウトを焼き込む）."""
     settings = settings or get_settings()
     duration_sec = validate_short_duration(start, end)
 
@@ -198,8 +197,27 @@ def build_short(
 
     source_path = ensure_source_video(video_id, settings)
 
+    # パス1（切り出し）: 精密シークで [start, end] を 0 秒始まりの中間ファイルへ切り出す。
+    segments_dir = video_dir / "shorts" / "segments"
+    segments_dir.mkdir(parents=True, exist_ok=True)
+    intermediate_path = segments_dir / _intermediate_segment_name(start, end)
+
+    if on_progress:
+        on_progress("切り出し中…")
+    try:
+        encode_segment(
+            source_path,
+            intermediate_path,
+            start,
+            end,
+            ffmpeg_path=ffmpeg_path,
+        )
+    except FfmpegError as exc:
+        raise ShortsError(str(exc)) from exc
+
     ass_path: Path | None = None
     font_name: str | None = None
+    font_warning: str | None = None
     if burn_subtitles:
         if on_progress:
             on_progress("字幕を準備中…")
@@ -211,9 +229,9 @@ def build_short(
             ffmpeg_path=ffmpeg_path,
         )
         font_name = resolve_font(settings.subtitle_font)
-        if not is_japanese_font_available(settings.subtitle_font) and on_progress:
-            on_progress(
-                "警告: 日本語フォントが見つかりません。"
+        if not is_japanese_font_available(settings.subtitle_font):
+            font_warning = (
+                "日本語フォントが見つかりません。"
                 "字幕が正しく表示されない可能性があります。"
             )
 
@@ -233,17 +251,15 @@ def build_short(
         else:
             on_progress("変換中…")
 
-    cmd = _build_short_command(
-        source_path,
+    # パス2（整形）: 0 秒始まりの中間ファイルに対して -ss / -t を使わずレイアウト・字幕を焼き込む。
+    cmd = _build_short_layout_command(
+        intermediate_path,
         output_path,
-        start,
-        end,
         filter_chain,
         use_filter_complex=use_filter_complex,
         ffmpeg_path=ffmpeg_path,
     )
 
-    output_path.parent.mkdir(parents=True, exist_ok=True)
     result = subprocess.run(cmd, capture_output=True, text=True, check=False)
     log_path = save_command_log(
         output_dir,
@@ -265,6 +281,9 @@ def build_short(
             f"ショート動画ファイルが生成されませんでした。ログ: {log_path}"
         )
 
+    if not keep_intermediate:
+        intermediate_path.unlink(missing_ok=True)
+
     return ShortResult(
         video_id=video_id,
         output_path=output_path,
@@ -272,4 +291,5 @@ def build_short(
         layout=layout,
         burned_subtitles=burn_subtitles,
         duration_sec=duration_sec,
+        font_warning=font_warning,
     )

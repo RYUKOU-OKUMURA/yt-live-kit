@@ -25,12 +25,15 @@ class EmptyVttError(Exception):
         super().__init__(message)
 
 
-def _clean_vtt_text(text: str) -> str:
+def clean_vtt_text(text: str) -> str:
     """VTT インラインタグ（タイムスタンプ・c タグ等）を除去する."""
     cleaned = _VTT_TIMESTAMP_TAG_RE.sub("", text)
     cleaned = _VTT_C_TAG_RE.sub(r"\1", cleaned)
     cleaned = _VTT_OTHER_TAG_RE.sub("", cleaned)
     return " ".join(cleaned.split())
+
+
+_clean_vtt_text = clean_vtt_text
 
 
 @dataclass(frozen=True)
