@@ -25,6 +25,10 @@ from yt_live_kit.services.subtitle_burn import (
 MIN_DURATION_SEC = 10.0
 MAX_DURATION_SEC = 180.0
 
+# パス1（切り出し）の中間ファイルは一時的なので、パス2 で再エンコードされる
+# 世代劣化を抑えるため、最終出力（crf=20）より高品質（低 crf）で書き出す。
+INTERMEDIATE_CRF = 16
+
 BLUR_LAYOUT_FILTER = (
     "split[a][b];"
     "[a]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,gblur=sigma=20[bg];"
@@ -211,6 +215,7 @@ def build_short(
             start,
             end,
             ffmpeg_path=ffmpeg_path,
+            crf=INTERMEDIATE_CRF,
         )
     except FfmpegError as exc:
         raise ShortsError(str(exc)) from exc
@@ -218,71 +223,76 @@ def build_short(
     ass_path: Path | None = None
     font_name: str | None = None
     font_warning: str | None = None
-    if burn_subtitles:
+
+    # 中間ファイルを作った後は、字幕生成・パス2 のどこで失敗しても片付ける。
+    try:
+        if burn_subtitles:
+            if on_progress:
+                on_progress("字幕を準備中…")
+            ass_path = build_segment_subtitle(
+                video_id,
+                start,
+                end,
+                settings,
+                ffmpeg_path=ffmpeg_path,
+            )
+            font_name = resolve_font(settings.subtitle_font)
+            if not is_japanese_font_available(settings.subtitle_font):
+                font_warning = (
+                    "日本語フォントが見つかりません。"
+                    "字幕が正しく表示されない可能性があります。"
+                )
+
+        filter_chain, use_filter_complex = build_video_filter_chain(
+            layout,
+            ass_path=ass_path,
+            font_name=font_name,
+        )
+
+        output_dir = video_dir / "shorts" / "output"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        output_path = output_dir / _segment_output_name(start, end, output_name)
+
         if on_progress:
-            on_progress("字幕を準備中…")
-        ass_path = build_segment_subtitle(
-            video_id,
-            start,
-            end,
-            settings,
+            if burn_subtitles:
+                on_progress("字幕を焼き込み中…")
+            else:
+                on_progress("変換中…")
+
+        # パス2（整形）: 0 秒始まりの中間ファイルに対して -ss / -t を使わずレイアウト・字幕を焼き込む。
+        cmd = _build_short_layout_command(
+            intermediate_path,
+            output_path,
+            filter_chain,
+            use_filter_complex=use_filter_complex,
             ffmpeg_path=ffmpeg_path,
         )
-        font_name = resolve_font(settings.subtitle_font)
-        if not is_japanese_font_available(settings.subtitle_font):
-            font_warning = (
-                "日本語フォントが見つかりません。"
-                "字幕が正しく表示されない可能性があります。"
+
+        result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        log_path = save_command_log(
+            output_dir,
+            cmd,
+            returncode=result.returncode,
+            stdout=result.stdout,
+            stderr=result.stderr,
+        )
+
+        if result.returncode != 0:
+            stderr = (result.stderr or "").strip()
+            raise ShortsError(
+                f"ショート動画の生成に失敗しました。ログ: {log_path}"
+                + (f"\n（詳細: {stderr}）" if stderr else "")
             )
 
-    filter_chain, use_filter_complex = build_video_filter_chain(
-        layout,
-        ass_path=ass_path,
-        font_name=font_name,
-    )
-
-    output_dir = video_dir / "shorts" / "output"
-    output_dir.mkdir(parents=True, exist_ok=True)
-    output_path = output_dir / _segment_output_name(start, end, output_name)
-
-    if on_progress:
-        if burn_subtitles:
-            on_progress("字幕を焼き込み中…")
-        else:
-            on_progress("変換中…")
-
-    # パス2（整形）: 0 秒始まりの中間ファイルに対して -ss / -t を使わずレイアウト・字幕を焼き込む。
-    cmd = _build_short_layout_command(
-        intermediate_path,
-        output_path,
-        filter_chain,
-        use_filter_complex=use_filter_complex,
-        ffmpeg_path=ffmpeg_path,
-    )
-
-    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
-    log_path = save_command_log(
-        output_dir,
-        cmd,
-        returncode=result.returncode,
-        stdout=result.stdout,
-        stderr=result.stderr,
-    )
-
-    if result.returncode != 0:
-        stderr = (result.stderr or "").strip()
-        raise ShortsError(
-            f"ショート動画の生成に失敗しました。ログ: {log_path}"
-            + (f"\n（詳細: {stderr}）" if stderr else "")
-        )
-
-    if not output_path.is_file() or output_path.stat().st_size == 0:
-        raise ShortsError(
-            f"ショート動画ファイルが生成されませんでした。ログ: {log_path}"
-        )
-
-    if not keep_intermediate:
-        intermediate_path.unlink(missing_ok=True)
+        if not output_path.is_file() or output_path.stat().st_size == 0:
+            raise ShortsError(
+                f"ショート動画ファイルが生成されませんでした。ログ: {log_path}"
+            )
+    finally:
+        # keep_intermediate=False（既定）なら、パス2 の成否によらず中間ファイルを片付ける。
+        # keep_intermediate=True はデバッグ用途のため成功・失敗どちらでも残す。
+        if not keep_intermediate:
+            intermediate_path.unlink(missing_ok=True)
 
     return ShortResult(
         video_id=video_id,

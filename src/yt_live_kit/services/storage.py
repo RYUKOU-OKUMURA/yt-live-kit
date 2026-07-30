@@ -14,6 +14,7 @@ from yt_live_kit.models.meta import VideoMeta
 DELETABLE_REL_PATHS: tuple[Path, ...] = (
     Path("clips/source"),
     Path("highlights/segments"),
+    Path("shorts/segments"),
 )
 
 # 成果物として絶対に削除しないパス（参照用定数）
@@ -33,7 +34,11 @@ _OUTPUT_RELS = (
     Path("highlights/output"),
     Path("shorts/output"),
 )
-_INTERMEDIATE_REL = Path("highlights/segments")
+# 中間ファイル（再エンコード済みの一時セグメント）が置かれる相対パス群
+_INTERMEDIATE_RELS = (
+    Path("highlights/segments"),
+    Path("shorts/segments"),
+)
 
 
 class StorageError(Exception):
@@ -135,7 +140,7 @@ def _read_title(video_dir: Path) -> str | None:
 def _video_storage(video_dir: Path, video_id: str) -> VideoStorage:
     source_bytes = dir_size(video_dir / _SOURCE_REL)
     output_bytes = sum(dir_size(video_dir / rel) for rel in _OUTPUT_RELS)
-    intermediate_bytes = dir_size(video_dir / _INTERMEDIATE_REL)
+    intermediate_bytes = sum(dir_size(video_dir / rel) for rel in _INTERMEDIATE_RELS)
     total_bytes = dir_size(video_dir)
     categorized = source_bytes + output_bytes + intermediate_bytes
     other_bytes = max(0, total_bytes - categorized)

@@ -11,6 +11,7 @@ from yt_live_kit.models.meta import VideoMeta
 from yt_live_kit.services.shorts import (
     BLUR_LAYOUT_FILTER,
     CROP_LAYOUT_FILTER,
+    INTERMEDIATE_CRF,
     ShortsError,
     build_layout_filter,
     build_short,
@@ -153,6 +154,11 @@ def _fake_ffmpeg_run(cmd, **kwargs):
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_bytes(b"short data")
     return MagicMock(returncode=0, stdout="", stderr="")
+
+
+def _fake_ffmpeg_run_fail(cmd, **kwargs):
+    """パス2（整形）が失敗するケースを模倣する（出力ファイルは作らない）."""
+    return MagicMock(returncode=1, stdout="", stderr="boom")
 
 
 @patch("yt_live_kit.services.shorts.subprocess.run")
@@ -494,3 +500,176 @@ def test_build_short_duration_validation_in_build(
         build_short(video_id, 0.0, 9.0, settings)
 
     mock_run.assert_not_called()
+
+
+@patch("yt_live_kit.services.shorts.subprocess.run")
+@patch("yt_live_kit.services.shorts.find_ffmpeg")
+@patch("yt_live_kit.services.shorts.encode_segment")
+@patch("yt_live_kit.services.shorts.ensure_source_video")
+def test_build_short_removes_intermediate_when_pass2_fails(
+    mock_ensure,
+    mock_encode_segment,
+    mock_find_ffmpeg,
+    mock_run,
+    tmp_path,
+):
+    """パス2（整形）が失敗しても、keep_intermediate=False なら中間ファイルを片付ける."""
+    mock_find_ffmpeg.return_value = "/usr/bin/ffmpeg"
+    mock_ensure.return_value = tmp_path / "source.mp4"
+
+    created_intermediate: list[Path] = []
+
+    def fake_encode_segment(source, output, start_sec, end_sec, **kwargs):
+        _fake_encode_segment(source, output, start_sec, end_sec, **kwargs)
+        created_intermediate.append(output)
+        return output
+
+    mock_encode_segment.side_effect = fake_encode_segment
+    mock_run.side_effect = _fake_ffmpeg_run_fail
+
+    video_id = "testvid1234"
+    _setup_video_dir(tmp_path, video_id)
+    settings = Settings(data_dir=tmp_path)
+
+    with patch(
+        "yt_live_kit.services.shorts.is_japanese_font_available",
+        return_value=True,
+    ):
+        with pytest.raises(ShortsError, match="ショート動画の生成に失敗"):
+            build_short(
+                video_id,
+                10.0,
+                25.0,
+                settings,
+                layout="crop",
+                burn_subtitles=False,
+                ffmpeg_path="/usr/bin/ffmpeg",
+            )
+
+    assert created_intermediate
+    assert not created_intermediate[0].exists()
+
+
+@patch("yt_live_kit.services.shorts.subprocess.run")
+@patch("yt_live_kit.services.shorts.find_ffmpeg")
+@patch("yt_live_kit.services.shorts.encode_segment")
+@patch("yt_live_kit.services.shorts.ensure_source_video")
+def test_build_short_keeps_intermediate_when_pass2_fails_and_keep_requested(
+    mock_ensure,
+    mock_encode_segment,
+    mock_find_ffmpeg,
+    mock_run,
+    tmp_path,
+):
+    """keep_intermediate=True の場合は、パス2 失敗時も中間ファイルを残す（デバッグ用途）."""
+    mock_find_ffmpeg.return_value = "/usr/bin/ffmpeg"
+    mock_ensure.return_value = tmp_path / "source.mp4"
+
+    created_intermediate: list[Path] = []
+
+    def fake_encode_segment(source, output, start_sec, end_sec, **kwargs):
+        _fake_encode_segment(source, output, start_sec, end_sec, **kwargs)
+        created_intermediate.append(output)
+        return output
+
+    mock_encode_segment.side_effect = fake_encode_segment
+    mock_run.side_effect = _fake_ffmpeg_run_fail
+
+    video_id = "testvid1234"
+    _setup_video_dir(tmp_path, video_id)
+    settings = Settings(data_dir=tmp_path)
+
+    with patch(
+        "yt_live_kit.services.shorts.is_japanese_font_available",
+        return_value=True,
+    ):
+        with pytest.raises(ShortsError, match="ショート動画の生成に失敗"):
+            build_short(
+                video_id,
+                10.0,
+                25.0,
+                settings,
+                layout="crop",
+                burn_subtitles=False,
+                ffmpeg_path="/usr/bin/ffmpeg",
+                keep_intermediate=True,
+            )
+
+    assert created_intermediate
+    assert created_intermediate[0].exists()
+
+
+@patch("yt_live_kit.services.shorts.subprocess.run")
+@patch("yt_live_kit.services.shorts.find_ffmpeg")
+@patch("yt_live_kit.services.shorts.encode_segment")
+@patch("yt_live_kit.services.shorts.ensure_source_video")
+def test_build_short_pass1_uses_intermediate_crf(
+    mock_ensure,
+    mock_encode_segment,
+    mock_find_ffmpeg,
+    mock_run,
+    tmp_path,
+):
+    """パス1（切り出し）の encode_segment 呼び出しには高品質な crf（世代劣化対策）を渡す."""
+    mock_find_ffmpeg.return_value = "/usr/bin/ffmpeg"
+    mock_ensure.return_value = tmp_path / "source.mp4"
+    mock_encode_segment.side_effect = _fake_encode_segment
+    mock_run.side_effect = _fake_ffmpeg_run
+
+    video_id = "testvid1234"
+    _setup_video_dir(tmp_path, video_id)
+    settings = Settings(data_dir=tmp_path)
+
+    with patch(
+        "yt_live_kit.services.shorts.is_japanese_font_available",
+        return_value=True,
+    ):
+        build_short(
+            video_id,
+            10.0,
+            25.0,
+            settings,
+            layout="crop",
+            burn_subtitles=False,
+            ffmpeg_path="/usr/bin/ffmpeg",
+        )
+
+    mock_encode_segment.assert_called_once()
+    _, call_kwargs = mock_encode_segment.call_args
+    assert call_kwargs["crf"] == INTERMEDIATE_CRF == 16
+
+
+@patch("yt_live_kit.services.shorts.build_segment_subtitle")
+@patch("yt_live_kit.services.shorts.encode_segment")
+@patch("yt_live_kit.services.shorts.ensure_source_video")
+def test_build_short_removes_intermediate_when_subtitle_build_fails(
+    mock_ensure,
+    mock_encode,
+    mock_subtitle,
+    tmp_path,
+):
+    """字幕生成が失敗しても中間ファイルを残さない."""
+    from yt_live_kit.services.subtitle_burn import SubtitleBurnError
+
+    settings = Settings(data_dir=tmp_path)
+    video_dir = tmp_path / "vid123"
+    video_dir.mkdir(parents=True)
+    source = video_dir / "clips" / "source" / "src.mp4"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"src")
+    mock_ensure.return_value = source
+
+    intermediate = video_dir / "shorts" / "segments" / "short_10_40_src.mp4"
+
+    def _fake_encode(*args, **kwargs):
+        intermediate.parent.mkdir(parents=True, exist_ok=True)
+        intermediate.write_bytes(b"seg")
+        return intermediate
+
+    mock_encode.side_effect = _fake_encode
+    mock_subtitle.side_effect = SubtitleBurnError("字幕ファイルが見つかりません。")
+
+    with pytest.raises(SubtitleBurnError):
+        build_short("vid123", 10, 40, settings)
+
+    assert not intermediate.exists()

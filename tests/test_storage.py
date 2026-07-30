@@ -59,6 +59,18 @@ def _build_video_tree(
     _write_file(video_dir / "subtitles" / "ja.vtt", b"WEBVTT\n")
 
 
+def _build_video_tree_with_shorts(
+    video_dir: Path,
+    video_id: str,
+    *,
+    fetched_at: datetime | None = None,
+) -> None:
+    """shorts/segments（中間ファイル）と shorts/output（成果物）を含む動画ディレクトリを作る."""
+    _build_video_tree(video_dir, video_id, fetched_at=fetched_at)
+    _write_file(video_dir / "shorts" / "segments" / "short_0_15_src.mp4", b"d" * 300)
+    _write_file(video_dir / "shorts" / "output" / "short_0_15.mp4", b"e" * 100)
+
+
 def test_dir_size_missing_path(tmp_path: Path):
     assert dir_size(tmp_path / "missing") == 0
 
@@ -115,6 +127,42 @@ def test_purge_source_removes_only_deletable_dirs(tmp_path: Path):
     assert (video_dir / "transcript" / "full.txt").is_file()
     assert (video_dir / "clips" / "output" / "clip.mp4").is_file()
     assert (video_dir / "meta.json").is_file()
+
+
+def test_purge_source_removes_shorts_segments(tmp_path: Path):
+    """パス2 失敗時などに残るショート中間ファイルも「元動画を削除」で回収できること."""
+    settings = Settings(data_dir=tmp_path)
+    video_id = "purgeShorts01"
+    video_dir = tmp_path / video_id
+    _build_video_tree_with_shorts(video_dir, video_id)
+
+    deleted = purge_source(video_id, settings)
+    assert deleted == 1500 + 300
+    assert not (video_dir / "shorts" / "segments").exists()
+
+
+def test_purge_source_keeps_shorts_output(tmp_path: Path):
+    """shorts/output は成果物なので削除対象に含めない（回帰防止）."""
+    settings = Settings(data_dir=tmp_path)
+    video_id = "purgeShorts02"
+    video_dir = tmp_path / video_id
+    _build_video_tree_with_shorts(video_dir, video_id)
+
+    purge_source(video_id, settings)
+    assert (video_dir / "shorts" / "output" / "short_0_15.mp4").is_file()
+
+
+def test_summarize_intermediate_bytes_includes_highlights_and_shorts_segments(
+    tmp_path: Path,
+):
+    settings = Settings(data_dir=tmp_path)
+    video_dir = tmp_path / "videoBbbbbbb"
+    _build_video_tree_with_shorts(video_dir, "videoBbbbbbb")
+
+    summary = summarize(settings)
+    video = summary.videos[0]
+    # highlights/segments (500) + shorts/segments (300)
+    assert video.intermediate_bytes == 800
 
 
 def test_purge_source_missing_dir_returns_zero(tmp_path: Path):
