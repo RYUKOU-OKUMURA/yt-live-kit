@@ -3,8 +3,6 @@
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from yt_live_kit.config import Settings
 from yt_live_kit.models.meta import VideoMeta
 from yt_live_kit.services.batch import (
@@ -117,9 +115,13 @@ def test_run_batch_invalid_url(tmp_path):
     assert results[0].status == "failed"
 
 
+@patch("yt_live_kit.services.batch.update_job")
 @patch("yt_live_kit.services.batch.get_active_job")
 @patch("yt_live_kit.services.batch.run_batch")
-def test_run_batch_job_target_raises_when_all_failed(mock_run_batch, mock_get_active, tmp_path):
+def test_run_batch_job_target_all_failed_does_not_raise(
+    mock_run_batch, mock_get_active, mock_update_job, tmp_path
+):
+    """成功 0 件でも例外にせず正常終了し、サマリーに失敗件数が記録されること."""
     settings = Settings(data_dir=tmp_path)
     mock_get_active.return_value = MagicMock(job_id="job-all-fail")
     mock_run_batch.return_value = [
@@ -127,8 +129,7 @@ def test_run_batch_job_target_raises_when_all_failed(mock_run_batch, mock_get_ac
         MagicMock(status="failed", url="https://b", error="失敗B"),
     ]
 
-    with pytest.raises(PipelineError, match="成功した動画がありません"):
-        run_batch_job_target(report=MagicMock(), settings=settings, urls=["https://a", "https://b"])
+    run_batch_job_target(report=MagicMock(), settings=settings, urls=["https://a", "https://b"])
 
     summary_path = batch_summary_path(settings, "job-all-fail")
     assert summary_path.is_file()
@@ -137,22 +138,63 @@ def test_run_batch_job_target_raises_when_all_failed(mock_run_batch, mock_get_ac
     assert summary["failed"] == 2
     assert summary["success"] == 0
 
+    # 成功結果が無いので video_id / title は更新しない。message のみ更新する。
+    mock_update_job.assert_called_once()
+    kwargs = mock_update_job.call_args.kwargs
+    assert "video_id" not in kwargs
+    assert "title" not in kwargs
+    assert "失敗 2" in kwargs["message"]
 
+
+@patch("yt_live_kit.services.batch.update_job")
 @patch("yt_live_kit.services.batch.get_active_job")
 @patch("yt_live_kit.services.batch.run_batch")
-def test_run_batch_job_target_raises_when_all_skipped(mock_run_batch, mock_get_active, tmp_path):
+def test_run_batch_job_target_all_skipped_does_not_raise(
+    mock_run_batch, mock_get_active, mock_update_job, tmp_path
+):
+    """処理済みスキップにより全件スキップされても、正常終了（ジョブ done）になること."""
     settings = Settings(data_dir=tmp_path)
     mock_get_active.return_value = MagicMock(job_id="job-all-skip")
     mock_run_batch.return_value = [
         MagicMock(status="skipped", url="https://a", error=None),
     ]
 
-    with pytest.raises(PipelineError, match="すべてスキップされました"):
-        run_batch_job_target(report=MagicMock(), settings=settings, urls=["https://a"])
+    run_batch_job_target(report=MagicMock(), settings=settings, urls=["https://a"])
 
     summary = read_batch_summary(settings, "job-all-skip")
     assert summary is not None
     assert summary["skipped"] == 1
+    assert summary["success"] == 0
+    assert summary["failed"] == 0
+
+
+@patch("yt_live_kit.services.batch.update_job")
+@patch("yt_live_kit.services.batch.get_active_job")
+@patch("yt_live_kit.services.batch.run_batch")
+def test_run_batch_job_target_partial_skip_and_failure_does_not_raise(
+    mock_run_batch, mock_get_active, mock_update_job, tmp_path
+):
+    """0 成功 / 3 スキップ / 1 失敗 でも例外にならず、スキップ 3 件がサマリーに残ること."""
+    settings = Settings(data_dir=tmp_path)
+    mock_get_active.return_value = MagicMock(job_id="job-mixed")
+    mock_run_batch.return_value = [
+        MagicMock(status="skipped", url="https://a", error=None),
+        MagicMock(status="skipped", url="https://b", error=None),
+        MagicMock(status="skipped", url="https://c", error=None),
+        MagicMock(status="failed", url="https://d", error="失敗D"),
+    ]
+
+    run_batch_job_target(
+        report=MagicMock(),
+        settings=settings,
+        urls=["https://a", "https://b", "https://c", "https://d"],
+    )
+
+    summary = read_batch_summary(settings, "job-mixed")
+    assert summary is not None
+    assert summary["success"] == 0
+    assert summary["skipped"] == 3
+    assert summary["failed"] == 1
 
 
 @patch("yt_live_kit.services.batch.update_job")
