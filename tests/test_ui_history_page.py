@@ -62,9 +62,9 @@ def test_source_bytes_map_returns_video_id_to_bytes() -> None:
                 title="B",
                 source_bytes=0,
                 output_bytes=100,
-                intermediate_bytes=0,
+                intermediate_bytes=500,
                 other_bytes=0,
-                total_bytes=100,
+                total_bytes=600,
             ),
         ],
     )
@@ -72,6 +72,37 @@ def test_source_bytes_map_returns_video_id_to_bytes() -> None:
     assert history.source_bytes_map(summary) == {
         "abc123": 1000,
         "def456": 0,
+    }
+
+
+def test_deletable_bytes_map_includes_source_and_intermediate() -> None:
+    summary = StorageSummary(
+        total_bytes=3000,
+        videos=[
+            VideoStorage(
+                video_id="abc123",
+                title="A",
+                source_bytes=1000,
+                output_bytes=500,
+                intermediate_bytes=200,
+                other_bytes=100,
+                total_bytes=1800,
+            ),
+            VideoStorage(
+                video_id="def456",
+                title="B",
+                source_bytes=0,
+                output_bytes=100,
+                intermediate_bytes=500,
+                other_bytes=0,
+                total_bytes=600,
+            ),
+        ],
+    )
+
+    assert history.deletable_bytes_map(summary) == {
+        "abc123": 1200,
+        "def456": 500,
     }
 
 
@@ -123,13 +154,13 @@ def test_preview_purge_sources_older_than_counts_eligible_videos() -> None:
             has_clips=False,
         ),
     ]
-    source_sizes = {"old1": 1024, "new1": 2048, "old2": 0}
+    deletable_sizes = {"old1": 1024, "new1": 2048, "old2": 0}
 
     count, total_bytes = history.preview_purge_sources_older_than(
         processed,
         30,
         now=now,
-        source_bytes_for=lambda video_id: source_sizes.get(video_id, 0),
+        deletable_bytes_for=lambda video_id: deletable_sizes.get(video_id, 0),
     )
 
     assert count == 1
@@ -153,11 +184,58 @@ def test_preview_purge_sources_older_than_skips_missing_fetched_at() -> None:
         processed,
         30,
         now=now,
-        source_bytes_for=lambda _video_id: 999,
+        deletable_bytes_for=lambda _video_id: 999,
     )
 
     assert count == 0
     assert total_bytes == 0
+
+
+def test_preview_purge_counts_video_with_intermediate_only() -> None:
+    """元動画 0 バイト + 中間ファイルありの動画がプレビュー件数に入る."""
+    now = datetime(2026, 7, 31, 12, 0, 0, tzinfo=timezone.utc)
+    processed = [
+        ProcessedVideo(
+            video_id="old_seg",
+            title="中間のみ",
+            fetched_at=now - timedelta(days=40),
+            has_chapters=True,
+            has_transcript=True,
+            has_clips=False,
+        ),
+    ]
+    deletable_sizes = {"old_seg": 512}
+
+    count, total_bytes = history.preview_purge_sources_older_than(
+        processed,
+        30,
+        now=now,
+        deletable_bytes_for=lambda video_id: deletable_sizes.get(video_id, 0),
+    )
+
+    assert count == 1
+    assert total_bytes == 512
+
+
+def test_source_bytes_map_excludes_intermediate_for_row_badge() -> None:
+    """行バッジ用の元動画バイト数は中間ファイルを含まない."""
+    summary = StorageSummary(
+        total_bytes=600,
+        videos=[
+            VideoStorage(
+                video_id="seg_only",
+                title="中間のみ",
+                source_bytes=0,
+                output_bytes=0,
+                intermediate_bytes=512,
+                other_bytes=88,
+                total_bytes=600,
+            ),
+        ],
+    )
+
+    assert history.source_bytes_map(summary)["seg_only"] == 0
+    assert history.deletable_bytes_map(summary)["seg_only"] == 512
 
 
 def test_start_regenerate_calls_start_job_and_reruns() -> None:
@@ -246,7 +324,6 @@ def test_render_row_actions_disables_purge_confirm_buttons_when_busy() -> None:
             video,
             busy=True,
             settings=settings,
-            source_bytes=1024,
         )
 
     disabled_by_label = dict(calls)
@@ -373,3 +450,91 @@ def test_render_storage_section_shows_error_on_bulk_purge_storage_error() -> Non
     show_error.assert_called_once_with("一括削除に失敗しました")
     show_success.assert_not_called()
     summarize.assert_not_called()
+
+
+def test_render_row_actions_reruns_and_stores_message_on_purge_success() -> None:
+    video = ProcessedVideo(
+        video_id="vid1234567",
+        title="テスト",
+        fetched_at=None,
+        has_chapters=True,
+        has_transcript=True,
+        has_clips=False,
+    )
+    settings = MagicMock()
+    session_state: dict[str, object] = {}
+
+    def mock_button(label: str, **kwargs: object) -> bool:
+        return label == "削除を実行"
+
+    with (
+        patch("yt_live_kit.ui.pages.history.st.columns", side_effect=_mock_columns),
+        patch("yt_live_kit.ui.pages.history.st.button", side_effect=mock_button),
+        patch("yt_live_kit.ui.pages.history.st.warning"),
+        patch(
+            "yt_live_kit.ui.pages.history._purge_confirm_ids",
+            return_value={"vid1234567"},
+        ),
+        patch(
+            "yt_live_kit.ui.pages.history.purge_source",
+            return_value=1024,
+        ),
+        patch("yt_live_kit.ui.pages.history._get_storage_summary", return_value=None),
+        patch("yt_live_kit.ui.pages.history.st.session_state", session_state),
+        patch("yt_live_kit.ui.pages.history.st.rerun") as rerun,
+        patch("yt_live_kit.ui.pages.history.st.success") as show_success,
+    ):
+        history._render_row_actions(
+            video,
+            busy=False,
+            settings=settings,
+        )
+
+    rerun.assert_called_once()
+    show_success.assert_not_called()
+    assert session_state[history._SESSION_PURGE_SUCCESS] == (
+        "元動画と中間ファイルを削除しました（1.0 KB）。"
+    )
+
+
+def test_render_row_actions_disables_regen_buttons_without_transcript() -> None:
+    video = ProcessedVideo(
+        video_id="vid1234567",
+        title="テスト",
+        fetched_at=None,
+        has_chapters=False,
+        has_transcript=False,
+        has_clips=False,
+    )
+    settings = MagicMock()
+    calls: list[tuple[str, bool | None, str | None]] = []
+
+    def mock_button(label: str, **kwargs: object) -> bool:
+        calls.append(
+            (
+                label,
+                kwargs.get("disabled"),  # type: ignore[arg-type]
+                kwargs.get("help"),  # type: ignore[arg-type]
+            )
+        )
+        return False
+
+    with (
+        patch("yt_live_kit.ui.pages.history.st.columns", side_effect=_mock_columns),
+        patch("yt_live_kit.ui.pages.history.st.button", side_effect=mock_button),
+    ):
+        history._render_row_actions(
+            video,
+            busy=False,
+            settings=settings,
+        )
+
+    regen_calls = [
+        (label, disabled, help_text)
+        for label, disabled, help_text in calls
+        if label in ("チャプターを生成", "切り抜き候補を生成")
+    ]
+    assert len(regen_calls) == 2
+    for _label, disabled, help_text in regen_calls:
+        assert disabled is True
+        assert help_text == "先に字幕の取得と整形を実行してください。"
