@@ -150,7 +150,7 @@ def test_handle_finished_job_shows_error_on_failed() -> None:
     show_error.assert_called_once_with("字幕が見つかりません")
     clear_active.assert_called_once()
     mark_handled.assert_called_once_with("fail123")
-    rerun.assert_not_called()
+    rerun.assert_called_once_with(scope="app")
 
 
 def test_handle_finished_job_shows_error_when_result_missing() -> None:

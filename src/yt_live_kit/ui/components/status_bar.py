@@ -122,6 +122,7 @@ def _handle_finished_job(job: JobState) -> None:
         error_message = job.error or "処理に失敗しました。"
         st.error(error_message)
         clear_active_job_id()
+        st.rerun(scope="app")
 
 
 @st.fragment(run_every="1s")
