@@ -136,6 +136,7 @@ def highlights_build_cmd(
             video_id,
             selected,
             settings,
+            ffmpeg_path=settings.ffmpeg_path,
             keep_segments=keep_segments,
         )
         typer.echo(f"連結完了: {result.output_path}")

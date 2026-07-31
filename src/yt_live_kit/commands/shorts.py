@@ -11,6 +11,19 @@ from yt_live_kit.services.shorts import ShortsError, build_short
 LayoutChoice = Literal["blur", "crop"]
 
 
+def _format_timestamp_error(exc: ValueError, raw: str) -> str:
+    """時刻パース失敗時のメッセージを日本語に整形する.
+
+    int() が投げる英語メッセージ（invalid literal for int() ...）はそのまま
+    ユーザーに見せず日本語に差し替える。parse_timestamp_to_seconds 自身が
+    返す日本語メッセージ（秒の範囲エラー等）はそのまま活かす。
+    """
+    message = str(exc)
+    if "invalid literal" in message:
+        return f"時刻は HH:MM:SS または M:SS の形式で入力してください: {raw}"
+    return message
+
+
 def short_cmd(
     video_id: str = typer.Argument(..., help="YouTube 動画 ID"),
     start: str = typer.Option(..., "--start", help="開始時刻（HH:MM:SS または M:SS）"),
@@ -31,9 +44,14 @@ def short_cmd(
 
     try:
         start_sec = parse_timestamp_to_seconds(start)
+    except ValueError as exc:
+        typer.secho(_format_timestamp_error(exc, start), fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from exc
+
+    try:
         end_sec = parse_timestamp_to_seconds(end)
     except ValueError as exc:
-        typer.secho(str(exc), fg=typer.colors.RED, err=True)
+        typer.secho(_format_timestamp_error(exc, end), fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1) from exc
 
     try:
@@ -44,6 +62,7 @@ def short_cmd(
             settings,
             layout=layout,
             burn_subtitles=not no_subtitles,
+            ffmpeg_path=settings.ffmpeg_path,
         )
         typer.echo(f"ショート生成完了: {result.output_path}")
         typer.echo(f"レイアウト: {result.layout}")

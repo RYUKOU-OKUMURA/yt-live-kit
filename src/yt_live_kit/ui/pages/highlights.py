@@ -173,6 +173,7 @@ def build_highlight_job_target(
         video_id,
         segments,
         settings,
+        ffmpeg_path=settings.ffmpeg_path,
         on_progress=on_progress,
     )
 

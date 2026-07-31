@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 import os
 import threading
@@ -20,7 +21,9 @@ from yt_live_kit.services.clips import ClipsError
 from yt_live_kit.services.description import DescriptionError
 from yt_live_kit.services.ffmpeg import FfmpegError
 from yt_live_kit.services.pipeline import PipelineError
+from yt_live_kit.services.shorts import ShortsError
 from yt_live_kit.services.storage import StorageError
+from yt_live_kit.services.subtitle_burn import SubtitleBurnError
 from yt_live_kit.services.transcript import TranscriptError
 from yt_live_kit.services.ytdlp import YtdlpError
 
@@ -46,6 +49,8 @@ _KNOWN_ERRORS = (
     DescriptionError,
     ChannelError,
     StorageError,
+    ShortsError,
+    SubtitleBurnError,
 )
 
 
@@ -332,6 +337,26 @@ def _write_error_log(settings: Settings, job_id: str, exc: BaseException) -> Non
     log_path.write_text(traceback.format_exc(), encoding="utf-8")
 
 
+def _target_accepts_video_id(target_fn: Callable[..., Any]) -> bool:
+    """target_fn が video_id キーワード引数を受け取れるか調べる.
+
+    UI 側のジョブ関数（ハイライト・ショート等）は video_id を必須キーワード
+    引数として宣言しているが、run_single_job_target 等は url を使うため
+    video_id を持たない。無条件に渡すと後者が TypeError になるため、
+    シグネチャを見て受け取れる場合のみ渡す。
+    """
+    try:
+        signature = inspect.signature(target_fn)
+    except (TypeError, ValueError):
+        return False
+    for parameter in signature.parameters.values():
+        if parameter.kind == inspect.Parameter.VAR_KEYWORD:
+            return True
+        if parameter.name == "video_id":
+            return True
+    return False
+
+
 def start_job(
     kind: str,
     target_fn: Callable[..., Any],
@@ -385,7 +410,10 @@ def start_job(
 
     def worker() -> None:
         try:
-            target_fn(report=report, settings=settings, job_id=job_id, **kwargs)
+            call_kwargs: dict[str, Any] = dict(kwargs)
+            if _target_accepts_video_id(target_fn):
+                call_kwargs["video_id"] = video_id
+            target_fn(report=report, settings=settings, job_id=job_id, **call_kwargs)
         except Exception as exc:
             message, needs_log = _error_message_for(exc)
             if needs_log:

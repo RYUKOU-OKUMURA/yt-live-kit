@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
+from yt_live_kit.config import Settings
 from yt_live_kit.models.clips import ClipCandidate
 from yt_live_kit.models.highlights import HighlightSegment
 from yt_live_kit.ui.pages.highlights import (
+    build_highlight_job_target,
     can_build_highlight,
     clip_to_highlight_segment,
     collect_selected_segments,
@@ -94,3 +98,24 @@ def test_clip_to_highlight_segment_copies_fields() -> None:
     assert segment.end == clip.end
     assert segment.duration_sec == clip.duration_sec
     assert segment.reason == clip.reason
+
+
+@patch("yt_live_kit.services.ffmpeg.cut_and_concat")
+def test_build_highlight_job_target_passes_settings_ffmpeg_path(mock_concat, tmp_path) -> None:
+    """build_highlight_job_target が cut_and_concat に settings.ffmpeg_path を渡すこと（修正3）."""
+    settings = Settings(data_dir=tmp_path, ffmpeg_path="/opt/homebrew/bin/ffmpeg")
+    segment = _segment()
+    reports: list[dict[str, object]] = []
+
+    def report(**kwargs: object) -> None:
+        reports.append(kwargs)
+
+    build_highlight_job_target(
+        report=report,
+        settings=settings,
+        video_id="vid123",
+        segment_dicts=[segment.model_dump()],
+    )
+
+    mock_concat.assert_called_once()
+    assert mock_concat.call_args.kwargs["ffmpeg_path"] == "/opt/homebrew/bin/ffmpeg"

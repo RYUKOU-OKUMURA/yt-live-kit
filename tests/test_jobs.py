@@ -27,6 +27,7 @@ from yt_live_kit.services.jobs import (
     update_job,
 )
 from yt_live_kit.services.pipeline import PipelineError
+from yt_live_kit.services.shorts import ShortsError
 
 
 @contextmanager
@@ -442,3 +443,83 @@ def test_start_job_passes_job_id_to_target_fn(tmp_path):
         threads[-1].join(timeout=5)
     assert done.wait(timeout=5)
     assert received["job_id"] == job_id
+
+
+def test_start_job_passes_video_id_when_target_declares_it(tmp_path):
+    """video_id を必須キーワードで宣言する target には video_id が渡ること（修正1 の再現テスト）."""
+    settings = Settings(data_dir=tmp_path)
+    done = threading.Event()
+    received: dict[str, object] = {}
+
+    def target_fn(*, report, settings, video_id, job_id=None, **_kwargs):
+        received["video_id"] = video_id
+        done.set()
+
+    with _patch_real_thread() as (_mock_thread, threads):
+        job_id = start_job("highlights", target_fn, video_id="vid1", settings=settings)
+        threads[-1].join(timeout=5)
+    assert done.wait(timeout=5)
+
+    for _ in range(50):
+        state = read_job(job_id, settings)
+        if state is not None and state.status in ("done", "failed"):
+            break
+        time.sleep(0.05)
+    else:
+        pytest.fail("ジョブが完了しませんでした")
+
+    assert state is not None
+    assert state.status == "done"
+    assert received["video_id"] == "vid1"
+
+
+def test_start_job_does_not_pass_video_id_when_target_lacks_it(tmp_path):
+    """video_id を宣言しない target（run_single_job_target 相当）は TypeError にならず done になる（退行防止）."""
+    settings = Settings(data_dir=tmp_path)
+    done = threading.Event()
+
+    def target_fn(*, report, settings, job_id=None, url=None):
+        done.set()
+
+    with _patch_real_thread() as (_mock_thread, threads):
+        job_id = start_job("single", target_fn, settings=settings, url="https://example.com")
+        threads[-1].join(timeout=5)
+    assert done.wait(timeout=5)
+
+    for _ in range(50):
+        state = read_job(job_id, settings)
+        if state is not None and state.status in ("done", "failed"):
+            break
+        time.sleep(0.05)
+    else:
+        pytest.fail("ジョブが完了しませんでした")
+
+    assert state is not None
+    assert state.status == "done"
+    assert state.error is None
+
+
+def test_start_job_reports_shorts_error_message(tmp_path):
+    """ShortsError は _KNOWN_ERRORS に含まれ、日本語メッセージがそのまま error に入る（修正2）."""
+    settings = Settings(data_dir=tmp_path)
+    done = threading.Event()
+
+    def target_fn(*, report, settings, **_kwargs):
+        raise ShortsError("動画ディレクトリが見つかりません: /tmp/video1234567")
+
+    with _patch_real_thread() as (_mock_thread, threads):
+        job_id = start_job("shorts", target_fn, settings=settings)
+        threads[-1].join(timeout=5)
+
+    for _ in range(50):
+        state = read_job(job_id, settings)
+        if state is not None and state.status == "failed":
+            done.set()
+            break
+        time.sleep(0.05)
+    assert done.wait(timeout=5)
+
+    state = read_job(job_id, settings)
+    assert state is not None
+    assert state.status == "failed"
+    assert state.error == "動画ディレクトリが見つかりません: /tmp/video1234567"

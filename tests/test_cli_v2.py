@@ -254,6 +254,75 @@ def test_short_builds_with_timestamps(mock_build):
     assert "ショート生成完了" in result.stdout
 
 
+@patch("yt_live_kit.commands.highlights.cut_and_concat")
+@patch("yt_live_kit.commands.highlights.load_segments_file")
+def test_highlights_build_uses_settings_ffmpeg_path(mock_load, mock_concat, monkeypatch):
+    """settings.ffmpeg_path を cut_and_concat に渡すこと（修正3）."""
+    monkeypatch.setenv("YTLK_FFMPEG_PATH", "/opt/homebrew/bin/ffmpeg")
+    segments = _sample_segments(2)
+    mock_load.return_value = HighlightsDocument(candidates=segments)
+    mock_concat.return_value = ConcatResult(
+        video_id="abc12345678",
+        output_path=Path("/tmp/highlight.mp4"),
+        command_log_path=Path("/tmp/log.txt"),
+        segment_count=2,
+        total_duration_sec=240.0,
+    )
+
+    result = runner.invoke(app, ["highlights", "build", "abc12345678"])
+
+    assert result.exit_code == 0
+    assert mock_concat.call_args.kwargs["ffmpeg_path"] == "/opt/homebrew/bin/ffmpeg"
+
+
+@patch("yt_live_kit.commands.shorts.build_short")
+def test_short_uses_settings_ffmpeg_path(mock_build, monkeypatch):
+    """settings.ffmpeg_path を build_short に渡すこと（修正3）."""
+    monkeypatch.setenv("YTLK_FFMPEG_PATH", "/opt/homebrew/bin/ffmpeg")
+    mock_build.return_value = ShortResult(
+        video_id="abc12345678",
+        output_path=Path("/tmp/short.mp4"),
+        command_log_path=Path("/tmp/log.txt"),
+        layout="blur",
+        burned_subtitles=True,
+        duration_sec=50.0,
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "short",
+            "abc12345678",
+            "--start",
+            "00:12:30",
+            "--end",
+            "00:13:20",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert mock_build.call_args.kwargs["ffmpeg_path"] == "/opt/homebrew/bin/ffmpeg"
+
+
+def test_short_invalid_timestamp_shows_japanese_message():
+    """時刻フィールドが非数値のとき、英語の例外メッセージが漏れないこと（修正4）."""
+    result = runner.invoke(
+        app,
+        [
+            "short",
+            "abc12345678",
+            "--start",
+            "1:2a:30",
+            "--end",
+            "00:13:20",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "invalid literal" not in result.stderr
+    assert "時刻は HH:MM:SS または M:SS の形式で入力してください" in result.stderr
+
+
 @patch("yt_live_kit.commands.shorts.build_short")
 def test_short_no_subtitles_and_crop_layout(mock_build):
     mock_build.return_value = ShortResult(
