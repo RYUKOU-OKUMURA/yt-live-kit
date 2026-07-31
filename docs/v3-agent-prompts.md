@@ -122,6 +122,17 @@ uv run pytest
 - [ ] S3 の最終 mp4 が一時 `.mp4` への生成成功後だけ atomic replace され、失敗時に既存正式 mp4 が維持されるか。`keep_intermediate` が専用中間ディレクトリ全体へ成功・失敗とも適用され、元動画・ASS・S1 JSON・最終 mp4 / ログを削除していないか
 - [ ] テロップ焼き込みが「Codex の生成結果をそのまま焼き込む」のではなく、**人が確認・修正できるステップを経てから**焼き込む設計になっているか（S1・S4）
 - [ ] 180 秒超の区間選択が、エラーで落ちるだけでなく分割・短縮を促す案内になっているか（S3 のエラーメッセージ + S4 の UI 誘導）
+- [ ] S4 の候補ソースは snapshot form 外の前段で選択・即 rerun され、候補ソース文書の表示順が選択順として固定されているか。その後の form で個別 / 連結、layout、通常 / Hook preset を snapshot 化し、変更時に draft / 確定が全失効するか
+- [ ] S4 の Codex 呼び出しは対象カードの明示的な生成 / 再試行 submit 時だけで、通常 rerun / snapshot submit では session state の draft を再利用するか。確定後は editor が非表示で、全 snapshot 一致 + 全確定時だけ開始可能か
+- [ ] `save_confirmed_telop_script()` が修正済み台本を入力区間で再検証し、`ConfirmedTelopScriptResult(path, document)` として保存 path と正規化 document を返すか。S1 と同名の JSON へ atomic 保存し、失敗時に既存 JSON を維持し、返却 document を焼き込みへ渡すか
+- [ ] S4 の整数 ms 尺検証が Codex 前に行われ、180,000 ms 超は分割・削減・短縮を案内して Codex / job / ffmpeg を呼ばないか。異なる候補ソースの混在や同一 clip ID 衝突を暗黙 sort / dedupe せず拒否するか
+- [ ] 候補変換、個別 / 連結 target 構築、衝突 / 尺検証、fingerprint、失効 / 開始可否、直列化が `services/shorts_queue.py` の pure 関数にあり、UI が再実装していないか。fingerprint は video ID、元候補全内容、表示順、正規化全 segments、source / mode / layout / 両 preset を含むか
+- [ ] `ShortsQueueClipSpec` が frozen primitive segment tuple と canonical `model_dump(mode="json")` 台本 JSONによる deep immutable snapshot で、`to_dict()` / `from_dict()` が型・区間・台本を再検証するか。output name は決定的な `short_{clip_id}.mp4` で自動 suffix を付けず、衝突を拒否するか
+- [ ] 台本、layout、preset、Hook preset、output name が `run_shorts_queue()` から S3 へ欠落なく伝播するか。空入力は queue 全体エラー、1 本の失敗は item softfail、全件失敗でも結果を残すか
+- [ ] `run_shorts_queue()` が manifest の唯一の writer で、schema version、UTC created / updated timestamp、item Path の文字列化、Pydantic JSON、count を `to_dict()` / `from_dict()` で検証し、開始時と各 item 後に atomic 更新するか。`ShortsQueueResult.manifest_path` は JSON / `to_dict()` に保存せず、loader が実際の読込元 path を必須注入し、JSON 内の偽 field を拒否するか。job target は spec の再構築と report bridge だけか
+- [ ] `start_job()` の返却 job ID を video ID 別 session state map に即保持し、現在 video ID 用 manifest だけを表示するか。新 manifest 作成前は旧 latest でなく準備中を表示し、現在動画の key が無い場合だけ当該動画の `(created_at, job_id)` 降順 tie-break latest へ fallback するか。動画 A → B → A の切替で他動画の結果が混ざらないか
+- [ ] 既存 mp4 がある S4 開始は、不変の上書き対象一覧を表示する `st.dialog` の確定ボタンだけが `start_job()` を呼び、busy、キャンセル、確定前再描画、二重クリックで始まらないか
+- [ ] S4 結果が manifest 順に `st.video(Path)` で表示され、mp4 保存は引数なし callable + `on_click="ignore"` + `width="stretch"` で遅延読み込みし、出力欠損 / font warning / item error を日本語表示するか。コピー key が job ID + target ID + 種類で一意か
 
 ### 3.4 フェーズ P 特有の観点
 
@@ -148,7 +159,9 @@ uv run pytest
 
 | 項目 | 内容 |
 |------|------|
-| ジョブの同時実行制限 | [`services/jobs.py`](../src/yt_live_kit/services/jobs.py) の `is_busy()` により、同時実行できるジョブは 1 件のみ（v2 から変更なし）。S4 のキュー量産も、内部的には単一ジョブが複数本を順次処理する設計であることを `impl-sonnet` に明記する |
+| ジョブの同時実行制限 | [`services/jobs.py`](../src/yt_live_kit/services/jobs.py) の `is_busy()` により、同時実行できるジョブは 1 件のみ（v2 から変更なし）。S4 も全対象確定後の単一ジョブが順次処理し、`run_shorts_queue()` だけが対象単位の成否を `queue_{job_id}.json` へ各 item 後に atomic 保存する。UI は `start_job()` の返却 job ID を video ID 別に保持し、現在動画の manifest だけを表示する |
+| S4 の Streamlit 状態境界 | 候補ソースは form 外で変更時に即 rerun し、候補はソース文書の表示順を維持する。その後に選択・モード・layout・preset を 1 個の `st.form` で snapshot 化する。Codex は対象カードの明示生成 / 再試行 submit 時だけ呼び、editor も form submit の「台本を確定」でのみ確定する。確定後は editor を隠し、「修正する」で確定を解除する |
+| S4 の snapshot / manifest | fingerprint は video ID、元候補全内容、表示順、正規化全区間、source / mode / layout / 両 preset の canonical JSON SHA-256。spec は frozen primitive tuple + canonical 台本 JSON とし、全直列化境界で再検証する。`manifest_path` は JSON 外で loader が注入する。新 job ID 保持後は manifest 未作成でも旧 latest を表示せず、現在動画の key が無い場合だけ当該動画の検証済み latest へ fallback する |
 | `PipelineResult.highlights_error` / `clips_error` | 既存のこれらのフィールドは softfail の結果を保持する。動画詳細ページ（U2）で表示を移設する際、表示を落とさないよう注意する（v2 の W4 レビューで一度発生した不具合パターン） |
 | `ShortResult.font_warning` | `build_short()` / S3 で新設する `build_short_from_segments()` のどちらも、日本語フォントが解決できなかった場合にこのフィールドへ日本語警告を入れる。UI 側で `st.warning` として拾うことを忘れない |
 | クリップボード部品の移設（U2） | `build_clipboard_copy_html` / `render_copy_button` は **シグネチャ・実装を変えずに** `ui/components/results.py` から `ui/components/clipboard.py` へ移す。移設と機能追加を同時にやらない |
@@ -175,7 +188,7 @@ uv run pytest
 | S1 | テロップ台本とメタデータを 1 回の Codex 呼び出しで生成しているか。入力字幕が開始・終了・ミリ秒を保持し、区間・行の `start_sec` / `end_sec` が元動画基準の絶対秒で、`TelopSegmentScript` 自身にも区間境界があり、S3 の `累積尺 + 行の絶対秒 - 元区間開始秒` へ一意に変換できるか。S1 は失敗時に例外を送出し、呼び出し側が局所捕捉して既存 telop と他成果物を維持する softfail になっているか |
 | S2 | `TimedCue.emphasis=False` の追加が既存 3 引数構築を壊していないか。プリセット省略 + フックなしで `build_segment_subtitle()` と既存 ASS 出力が v2 完全互換か。通常字幕 / Hook の `\`・波括弧・C0 制御文字・実改行を指定順で安全化してから、選択 preset の強調色と本文復帰色を導出して行全体へ管理タグを付けているか。不明 preset / 不正色 / 空 hook を日本語エラーにし、通常字幕と Hook を同一 ASS に出せるか |
 | S3 | 公開 `NormalizedSegmentBounds` / 正規化 helper の整数 ms を ID・尺（10,000 / 180,000 ms）・encode・字幕 offset / clip の唯一の基準にし、0.5 ms 境界でも一貫するか。入力順を再生・ID・encode 順として保持し、全区間・layout・output 名・明示 hook・preset を source 取得前に検証するか。telop は ffmpeg 前と `build_concatenated_subtitle()` 直呼び境界の両方で tuple 入力に対して再検証し、直呼びでも明示 hook の空文字・半角山カッコを拒否するか。VTT の区間相対 cue に累積 ms を加え、1 回だけ読む fallback、Hook 単独、preset 全伝播、`force_style` なしの 1 回焼き込み、`len(segments) + 3` の進捗契約を満たすか。安全な output 名、`{正式出力stem}.ffmpeg.log`、atomic replace、失敗時の既存 mp4 保護、専用中間ディレクトリ単位の cleanup / keep、エラー型変換、font warning、既存 `build_short()` 不変を確認する |
-| S4 | 台本確認を経ずにキューへ積める抜け道が無いか。`ClipCandidate` は既存 `clip_to_highlight_segment()` と同等に `HighlightSegment` へ正規化してから S1 を呼び、S1 例外を生成対象単位で局所捕捉して残りの既存成果物を維持しているか |
+| S4 | form 外の source 切替と表示順、明示 Codex submit、不変 fingerprint と全台本確定が一致する時だけ開始するか。pure service、deep immutable spec、正規化台本、決定的出力名、softfail、単独 writer manifest、非永続 `manifest_path`、video ID 別 job ID と A → B → A 表示分離、latest tie-break、上書き dialog、busy / 二重開始防止まで確認する |
 | P0 | 実アップロードを `impl-sonnet` が独断で実行していないか（必ずユーザー承認後） |
 | P1 | `privacyStatus` の既定が `"private"` になっているか |
 | P2 | 1 日 100 本の Video Uploads 専用クォータ上限を 100 本目・101 本目で境界確認しているか |
@@ -187,6 +200,8 @@ uv run pytest
 
 | 日付 | 内容 |
 |------|------|
+| 2026-08-01 | S4 計画レビューを反映。form 外 source、表示順、明示 Codex submit、deep immutable spec、完全 fingerprint、manifest 単独 writer、job ID / latest 表示境界、決定的出力名をレビュー観点へ追加 |
+| 2026-08-01 | S4 着手前監査を反映。Streamlit form / 確定状態、修正台本の再検証・atomic 保存、単一ジョブ softfail、job ID 付き manifest、上書き dialog、遅延 download とテスト境界をレビュー観点へ追加 |
 | 2026-08-01 | S3 着手前監査を反映。共通整数 ms 正規化、入力順・全境界検証、二重 telop 再検証と累積字幕、VTT / Hook fallback、全入力 preflight、固定ログ名、進捗、atomic replace、cleanup、既存出力保護をレビュー観点へ追加 |
 | 2026-08-01 | S2 着手前監査・計画レビューを反映。`TimedCue.emphasis` の後方互換、既定 ASS 完全互換、入力安全化、preset 色導出、同一 ASS への Hook 統合、S3 への preset 伝播と `force_style` 分離をクイックリファレンスへ追加 |
 | 2026-08-01 | S1 着手前監査を反映。テロップ時刻の絶対秒基準、連結後変換式、`make_clip_id()` の入力型・丸め・連結規則を固定 |

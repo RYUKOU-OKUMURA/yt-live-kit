@@ -670,35 +670,67 @@ data/{video_id}/ ...
 
 **目的:** 複数のショート候補をまとめて生成できるようにし、生成前に必ず 1 本ずつテロップ台本を確認させる。
 **変更ファイル範囲:**
-- `src/yt_live_kit/services/shorts_queue.py`（新規。[`services/batch.py`](../src/yt_live_kit/services/batch.py) の `run_batch` と同じ「複数件を順次処理し進捗を報告する」パターンを踏襲する）
+- `src/yt_live_kit/services/shorts_queue.py`（新規。確定済み snapshot の型、順次生成、softfail、manifest 永続化 / 読み込みを担当）
+- `src/yt_live_kit/services/telop.py`（人が修正した台本を再検証して atomic 保存する `save_confirmed_telop_script()` を追加）
 - `src/yt_live_kit/services/jobs.py`（`JobKind` のコメントに `"shorts_queue"` を追加するのみ。ロジックは変更しない）
-- `src/yt_live_kit/ui/views/video_detail.py`（キュー量産セクションの追加）
-- `tests/test_shorts_queue.py` / `tests/test_ui_video_detail_page.py`（追記）
+- `src/yt_live_kit/ui/views/shorts.py`（既存の候補読み込み・単本ショート UI と共存させ、キュー部品を呼ぶ）
+- `src/yt_live_kit/ui/components/shorts_queue.py`（新規。選択、台本 editor / 確定、上書き確認 dialog、結果グリッドの表示のみ。検証・保存・キュー実行ロジックは services へ置く）
+- `src/yt_live_kit/ui/views/video_detail.py`（既存 `render_shorts_section()` との呼び出し契約が変わる場合のみ）
+- `tests/test_shorts_queue.py` / `tests/test_telop.py` / `tests/test_ui_shorts_queue.py`（新規または追記）
+- `tests/test_ui_shorts.py` / `tests/test_ui_video_detail_page.py`（既存呼び出し契約が変わる場合のみ追記）
 
 **作業:**
 
-- [ ] S4-1. 候補選択 UI: ハイライト候補・切り抜き候補の一覧にチェックボックスを追加する。「選択した区間を個別に生成する」と「選択した区間をまとめて 1 本に連結する」をトグルで切り替えられるようにする（個別 = 各候補ごとに `build_short_from_segments([1区間])`、連結 = `build_short_from_segments([複数区間])`）
-- [ ] S4-2. 生成前の台本確認: 各生成対象（個別なら各候補、連結なら選択セット全体）について、`services.telop.generate_telop_script()` を呼び、結果をテキストエリアで表示・編集できるようにする。**確定操作を挟んでからでないとキューに積めない**
-  - `ClipCandidate` を入力する場合は、既存 `ui/views/highlights.py` の `clip_to_highlight_segment()` と同等の変換で `HighlightSegment` へ正規化してから S1 を呼ぶ。S1 の公開入力型に候補型ごとの分岐を持ち込まない
-  - v3 では選択した全生成対象の台本を確認・確定してからキュージョブを開始する。エンコード中に未確定台本を後から追加する最適化は次イテレーション候補とする
-- [ ] S4-3. `services/shorts_queue.py` に `run_shorts_queue(video_id, clip_specs, settings=None, *, on_progress=None) -> ShortsQueueResult` を実装する
-  - `clip_specs` は確定済みの区間セット + 確定済みテロップ台本のリスト
-  - 内部で `build_short_from_segments()` を順番に呼び、`on_progress(current, total, message)` で進捗を報告する（`cut_and_concat` の `on_progress` シグネチャと合わせる）
-  - 1 本の失敗が残りの生成を止めないこと（`services/batch.py` の失敗時継続方針を踏襲）
-- [ ] S4-4. 「選んだ n 本をまとめて生成」ボタンで `jobs.start_job("shorts_queue", run_shorts_queue_job_target, ...)` を呼ぶ
-- [ ] S4-5. 結果グリッド: 完成したショートを `st.video()` 付きカードで並べ、各カードに「動画を開く / タイトルコピー / 説明文コピー / タグコピー」（U2 の `ui/components/clipboard.py` を使う）を配置する
-- [ ] S4-6. ユニットテスト
-  - `run_shorts_queue` が `clip_specs` の件数ぶん `build_short_from_segments` を呼ぶこと
-  - 1 本失敗しても残りが処理されること
-  - 台本確定前はキューに積めないこと（UI 側の分岐を純粋関数化して検証）
+- [ ] S4-1. 候補選択と不変 snapshot: 候補ソース（ハイライト / 切り抜き候補のいずれか一方）は snapshot form の外側・前段で選び、変更時は即 rerun して downstream の draft / 確定を失効させる。その後の単一 `st.form` でチェックボックス、生成モード、layout、通常 preset、Hook preset を一括確定する。候補は選択したソース文書の表示順を維持し、選択済み区間の順序もチェックされた候補をその表示順で走査した順とする（クリック時刻を順序として扱わない）
+  - 生成モードは `st.segmented_control` 等のコンパクトなネイティブ widget で「個別」と「連結」を切り替える。個別は選択 n 区間から n 本、連結は選択 n 区間から 1 本の生成対象を入力順で作る
+  - 候補変換・target 構築は `services/shorts_queue.py` の純粋関数に置く。`normalize_queue_candidates()` は `ClipCandidate` を既存 `clip_to_highlight_segment()` と同等に `HighlightSegment` へ正規化し、`build_shorts_queue_targets()` は個別 / 連結の target を表示順のまま構築する。S1 の公開入力型に候補型ごとの分岐を持ち込まない。異なる候補ソースを同時混在させず、同一 `clip_id` / 出力先になる生成対象の衝突は開始前に日本語で拒否する。暗黙の sort / dedupe / 自動 suffix は行わない
+  - snapshot の区間は S3 の公開整数 ms API で Codex 呼び出し前に検証する。10,000 ms 未満は選択変更を案内し、180,000 ms 超は「区間を分割するか減らす、または短くする」と案内し、Codex / ジョブ / ffmpeg を呼ばない
+- [ ] S4-2. 生成前の台本確認と保存: snapshot から作った各生成対象は、対象カードの「台本を生成」または失敗後の「再試行」を submit した時だけ `generate_telop_script()` を 1 回呼ぶ。通常 rerun や snapshot form の確定だけでは Codex を呼ばず、生成済み draft は session state から再表示する。各台本のフック、テロップ本文、タイトル案、説明文、タグを対象ごとの editor `st.form` で表示・修正できるようにする
+  - frozen dataclass `ConfirmedTelopScriptResult(path: Path, document: TelopScriptDocument)` を追加する。`save_confirmed_telop_script(video_id, segments, document, settings=None) -> ConfirmedTelopScriptResult` は `validate_telop_script(..., segments=segments)` を再実行し、正規化済み document だけを S1 と同じ `shorts/telop/telop_{clip_id}.json` へ atomic 保存し、保存 path とその正規化済み document を同時に返す。不正時は既存 JSON を維持し、日本語 `TelopError` にする
+  - editor の「台本を確定」が成功した対象だけを不変の確定済み snapshot に変換する。確定後は editor widget を非表示にして読み取り専用サマリと「修正する」のみを表示し、未 submit のフォーム値を無視して開始できる経路を作らない
+  - `make_shorts_queue_fingerprint()` は `video_id`、候補ソース、選択した元候補の全内容、表示順、正規化後の全 segments、生成モード、layout、通常 preset、Hook preset を canonical JSON 化して SHA-256 を返す。いずれかが変わったら `is_shorts_queue_snapshot_current()` により既存の draft / 確定を全て失効させる。`can_start_shorts_queue(..., busy: bool)` は外部状態を引数で受け、fingerprint 一致、全対象確定、衝突なし、尺、busy を副作用なく判定し、全条件成立時だけ開始 CTA を有効にする
+  - S1 の失敗は生成対象単位で捕捉し、そのカードだけ再試行可能にする。失敗対象は確定 / キュー追加不可とし、他対象の draft / 確定、既存 telop JSON、他成果物を維持する
+- [ ] S4-3. `services/shorts_queue.py` に pure な候補正規化、個別 / 連結 target 構築、衝突 / 尺検証、fingerprint、失効 / 開始可否、直列化と、次の frozen dataclass / 例外を実装する。UI は widget・session state・dialog・表示と service 呼び出しだけを担当し、候補変換や snapshot 判定を再実装しない
+  - frozen `ShortsQueueSegmentSpec`: `id: str`、`title: str`、`start_ms: int`、`end_ms: int`、`reason: str` の primitive 値だけを持つ。`ShortsQueueClipSpec`: `target_id: str`、入力順の `segments: tuple[ShortsQueueSegmentSpec, ...]`、`telop_document_json: str`、`layout: str`、`preset: str`、`hook_preset: str`、`output_name: str` を持つ。台本は `TelopScriptDocument.model_dump(mode="json")` を `ensure_ascii=False, sort_keys=True, separators=(",", ":")` で canonical JSON 化して保持し、mutable な Pydantic model / list / dict を snapshot 内に保持しない
+  - `ShortsQueueClipSpec.to_dict()` は tuple を JSON 配列へ、canonical 台本 JSON を JSON object へ変換する。`from_dict()` は未知 / 欠落 field、型、区間、台本、出力名を再検証し、台本を `TelopScriptDocument.model_validate()` して再 canonical 化してから frozen spec を返す。`output_name` は target の決定的 `clip_id` から必ず `short_{clip_id}.mp4` とし、自動 suffix を付けず、衝突は開始前に拒否する
+  - frozen `ShortsQueueItemResult`: `target_id: str`、`status: Literal["succeeded", "failed"]`、`output_path: Path | None`、`log_path: Path | None`、`font_warning: str | None`、`title_candidates: tuple[str, ...]`、`description: str`、`tags: tuple[str, ...]`、`error: str | None` を持つ
+  - frozen `ShortsQueueResult`: `video_id: str`、`job_id: str`、`status: Literal["running", "done"]`、`created_at: datetime`、`updated_at: datetime`、入力順の `clip_specs: tuple[ShortsQueueClipSpec, ...]` と `items: tuple[ShortsQueueItemResult, ...]`、`success_count: int`、`failure_count: int`、実行時専用の `manifest_path: Path` を持つ。item / result にも `to_dict()` / `from_dict()` を実装する。`manifest_path` は manifest JSON と `to_dict()` へ保存せず、`ShortsQueueResult.from_dict(data, *, manifest_path: Path)` の必須 keyword として loader が実際の読込元 path を注入する
+  - `ShortsQueueError(ShortsError)`: 空入力や queue 全体を開始 / 継続できないエラー用。既存 jobs の日本語既知エラー経路に載せる
+- [ ] S4-4. `run_shorts_queue(video_id: str, clip_specs: Sequence[ShortsQueueClipSpec], settings: Settings | None = None, *, job_id: str, on_progress: ShortsQueueProgressCallback = None) -> ShortsQueueResult` を実装し、manifest の作成・更新をこの関数だけが所有する
+  - 空 `clip_specs` は一件も処理せず `ShortsQueueError` にする。全 spec を再検証した後、`build_short_from_segments()` を入力順に 1 本ずつ呼び、台本、layout、preset、Hook preset、output name を欠落なく伝播する
+  - `ShortsProgressCallback` の内部メッセージは対象の outer `current` を進めず表示し、対象の成功 / 失敗確定時に outer `on_progress(current, total, message)` を `1..len(clip_specs)` へ進める。失敗時も current を進め、残りを続行する
+  - 1 本の `ShortsError` は item error として捕捉し、他対象の生成を止めない。全件失敗でも `ShortsQueueResult` と manifest を残し、ジョブを `done` として UI が各エラーを表示できるようにする。queue 全体の入力 / 永続化失敗だけを `ShortsQueueError` にする
+  - manifest schema は `schema_version=1`、`video_id`、`job_id`、`status`、UTC ISO 8601 の `created_at` / `updated_at`、入力順の `clip_specs` / `items`、`success_count`、`failure_count` に固定する。item の出力 / ログ `Path` は `to_dict()` で文字列、spec 内の Pydantic 台本は `model_dump(mode="json")` 由来の JSON object にし、`from_dict()` で schema version / 型 / timestamp / path / model / count と items が specs の入力順部分列であることを再検証する。`manifest_path` field が JSON に混入した場合も未知 field として拒否し、開始時と各 item 確定後に一時ファイル + `replace` で atomic 保存する
+- [ ] S4-5. `run_shorts_queue_job_target(*, report, settings: Settings, job_id: str, video_id: str, clip_spec_dicts: list[dict[str, object]]) -> None` を実装し、`jobs.start_job("shorts_queue", run_shorts_queue_job_target, video_id=..., title=..., total=len(clip_specs), settings=..., clip_spec_dicts=...)` から単一ジョブを開始する
+  - target は `ShortsQueueClipSpec.from_dict()` で frozen spec を再構築・再検証し、`report(current=..., total=..., message=...)` へブリッジする。manifest は作成せず `run_shorts_queue()` に一任する。`jobs.py` は target の戻り値を保存しないため、結果は manifest から再構築する
+  - `data/{video_id}/shorts/queue/queue_{job_id}.json` を読む `load_shorts_queue_result(video_id, job_id, settings=None)` と `load_latest_shorts_queue_result(video_id, settings=None)` を公開する。latest は検証済み manifest の `(created_at, job_id)` 降順（同時刻は job ID の辞書順降順）で決め、壊れた manifest は日本語エラーへ変換する
+  - UI は `is_busy(settings)` と確定済み snapshot を開始直前に再確認する。二重クリック / 同時ジョブは既存 `start_job()` の lock / `JobBusyError` でも防ぎ、既存正式 mp4 が 1 件でもある場合は不変の対象一覧を `st.dialog` に表示し、ダイアログ内の確定ボタンだけが `start_job()` を呼ぶ。キャンセル、確定前再描画、busy 時は開始しない
+  - `start_job()` が返した job ID は即座に `st.session_state["shorts_queue_job_ids"][video_id]` の動画別 map へ保持し、現在の `video_id` に対応する ID の manifest だけを表示する。manifest がまだ作られていない間は「準備中」とし、旧 latest を表示しない。現在動画の key が無い場合だけ、その動画に限定して `load_latest_shorts_queue_result(video_id, ...)` へ fallback する。他動画の保持 job ID は参照せず、通常 rerun / 新規開始直後に旧結果へ戻らない
+- [ ] S4-6. 結果グリッド: session state の現在 video ID 用 job ID（その動画の key が無い場合だけ当該動画 latest fallback）に対応する manifest から入力順に再構築し、成功 item は `st.video(Path)` 付きのカード、失敗 item は対象名と日本語エラーのカードで表示する
+  - mp4 の保存は、クリック時に file-like を返す引数なし callable を `st.download_button(data=callable, file_name=..., mime="video/mp4", on_click="ignore", width="stretch")` へ渡して遅延読み込みし、大きな動画を描画時に bytes 化しない。`use_container_width` は新規コードで使わない
+  - 第 1 タイトル案を主タイトルとし、タイトル案全件、説明文、タグを表示する。コピーは `ui/components/clipboard.py` を再利用し、key は `job_id + target_id + 種類` で一意にする。タグのコピー形式はカンマ区切りに固定する
+  - manifest の出力パスが消失・空ファイルの場合は日本語警告を表示し、`st.video` / download を呼ばない。`font_warning` は `st.warning` で表示する
+- [ ] S4-7. ユニットテスト
+  - form 外の候補ソース変更と即 rerun / downstream 失効、ソース文書の表示順を選択順に固定、個別 n 本 / 連結 1 本の pure spec 構築、`ClipCandidate` 正規化、同一 clip ID / `short_{clip_id}.mp4` 衝突拒否、自動 suffix なし
+  - 整数 ms の 10,000 / 180,000 ms 許容、9,999 / 180,001 ms の Codex 前拒否、180 秒超の分割・削減・短縮案内
+  - `save_confirmed_telop_script()` の再検証、`ConfirmedTelopScriptResult` の path + 正規化 document、atomic 保存、失敗時の既存 JSON 維持、その返却 document の S3 伝播
+  - 通常 rerun / snapshot submit で Codex 未呼び出し、明示生成 / 再試行 submit だけで 1 回呼び出し、draft 再利用。全確定前、S1 失敗対象あり、busy、fingerprint 不一致、未 submit editor が残る状態で `start_job()` 未呼び出し
+  - fingerprint に video ID、元候補全内容、表示順、正規化全 segments、source / mode / layout / 両 preset が含まれ、各値変更で確定失効する。pure な失効 / 開始可否関数と UI 判定が一致し、確定後 editor は非表示
+  - frozen segment tuple と canonical telop JSON の deep immutability、spec / result / manifest の `to_dict()` / `from_dict()` round-trip、mutable 元入力変更の非波及、不正型 / 不正 schema / 改変値の再検証拒否。manifest JSON / `to_dict()` に `manifest_path` が無く、loader が読込元 path を必須注入し、JSON 内の偽 `manifest_path` を拒否する
+  - `start_job("shorts_queue", ...)` の kind、total、video ID、title、serializable spec kwargs、返却 job ID の動画別 session state map 保存、二重開始防止、既存 mp4 dialog の未確定 / 確定境界
+  - 対象単位 S1 / S3 softfail、outer progress、全件失敗、`run_shorts_queue()` だけによる schema version / UTC timestamp / Path / Pydantic JSON を含む開始時・各 item 後の atomic manifest 更新、manifest round-trip / `(created_at, job_id)` latest tie-break / 壊れた JSON
+  - 新 job の manifest 作成前は旧 latest を表示せず準備中となり、同一 session では現在 video ID の保持 job ID の結果だけ、その動画の key が無い場合だけ当該動画 latest を表示する。動画 A で job ID を保持したまま動画 B へ切り替えても A の manifest を表示せず B の latest へ fallback し、A へ戻ると A の保持 ID を再利用する
+  - layout / preset / Hook preset / 確定済み台本 / 安全な output name の全段伝播、結果順序、font warning、出力欠損、`st.video`、callable download、コピー値 / key
+  - Codex CLI、subprocess、ffmpeg はすべて mock し、実課金 API、実 Codex、実 ffmpeg をユニットテストで呼ばない
 
 **Done 条件:**
 
 - [ ] `uv run pytest` が全件通る
 - [ ] 台本確認を経ずに生成が始まらないことを確認済み
+- [ ] ジョブ終了後または UI 再起動後も manifest から成功 / 失敗結果を再表示できる
 - [ ] タスク完了コミット済み
 
-**見積もり目安:** 1.5 日
+**見積もり目安:** 2.5 日
 
 ---
 
@@ -1042,6 +1074,7 @@ PLAN0 要件・計画の確定
 
 | 日付 | 内容 |
 |------|------|
+| 2026-08-01 | S4 着手前監査・計画レビューを反映。form 外 source と表示順、明示 Codex submit、pure service、deep immutable spec、完全 fingerprint、正規化台本返却、manifest 単独 writer、job ID / latest 表示境界、決定的出力名とテスト境界を固定 |
 | 2026-08-01 | S3 着手前監査・計画レビューを反映。共通整数 ms 正規化 API、入力順、二重検証境界、累積字幕、VTT / Hook fallback、全入力 preflight、進捗契約、force_style 分離、安全な出力名、固定ログ名、atomic replace、中間物 cleanup、既存出力保護を固定 |
 | 2026-08-01 | S2 着手前監査・計画レビューを反映。`TimedCue.emphasis`、ASS プリセットの完全な型・色導出、既定出力互換、フック固定時間、安全化順序、同一 ASS 統合、S3 への preset 伝播と `force_style` 分離を固定 |
 | 2026-08-01 | S1 着手前監査を反映。テロップ JSON の絶対秒スキーマ、公開シグネチャ、検証結果型、プロンプト保存先、`make_clip_id()` のミリ秒丸め、VTT parser の公開互換、softfail 境界を固定 |
