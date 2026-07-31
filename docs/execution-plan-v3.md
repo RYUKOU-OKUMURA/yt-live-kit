@@ -17,7 +17,7 @@
 | U0 | `ui/pages` → `ui/views` リネーム + `st.navigation` 導入 | [x] 完了 |
 | U1 | ライブラリページ | [x] 完了 |
 | U2 | 動画詳細ページ + ステッパー + 確認ダイアログ + 共通コピー部品 | [x] 完了 |
-| U3 | 取り込みページ | [ ] 未着手 |
+| U3 | 取り込みページ | [~] 進行中 |
 | U4 | 設定ページ | [ ] 未着手 |
 | U5 | 概要欄反映の差分プレビュー UI + フェーズ U 受け入れ | [ ] 未着手 |
 | S1 | テロップ台本 + メタデータ生成 | [ ] 未着手 |
@@ -353,29 +353,29 @@ data/{video_id}/ ...
 
 **作業:**
 
-- [ ] U3-1. `_local_settings.py` に `get_default_channel_handle(settings) -> str | None` / `save_default_channel_handle(handle, settings) -> Path` を実装する
-- [ ] U3-2. ページ初期状態: 既定ハンドルが保存済みなら、そのチャンネルの新着一覧を自動取得（[`services/channel.py`](../src/yt_live_kit/services/channel.py) の `load_cache()` を優先し、無ければ案内を出す。**自動で `list_archives()` を呼ばない**（NFR-05 のレート制限対策を維持）
-- [ ] U3-3. 「未処理の新着」を [`services/channel.py`](../src/yt_live_kit/services/channel.py) の `mark_processed()` で絞り込み、チェックボックス付きで表示する
-- [ ] U3-4. 「選択した N 本を処理開始」ボタン（既存の `run_batch_job_target` を `jobs.start_job()` 経由で実行するロジックを `ui/views/channel.py` から移設し、`do_chapters` / `do_clips` をジョブへ渡す）
-- [ ] U3-5. URL 入力（単本 / 複数行一括）を、ページ下部の折りたたみに「例外ルート」として配置する（旧「実行」ページの内容を移設）
-- [ ] U3-6. 「チャプターを作る」「切り抜き候補を出す」チェックを、新着一括処理・URL 入力（単本 / 複数行一括）のすべてで実行ボタンと同じカード内に配置し、選択値を実処理へ反映する
+- [x] U3-1. `_local_settings.py` に `get_default_channel_handle(settings) -> str | None` / `save_default_channel_handle(handle, settings) -> Path` を実装する
+- [x] U3-2. ページ初期状態: 既定ハンドルが保存済みなら、そのチャンネルの新着一覧を自動取得（[`services/channel.py`](../src/yt_live_kit/services/channel.py) の `load_cache()` を優先し、無ければ案内を出す。**自動で `list_archives()` を呼ばない**（NFR-05 のレート制限対策を維持）
+- [x] U3-3. 「未処理の新着」を [`services/channel.py`](../src/yt_live_kit/services/channel.py) の `mark_processed()` で絞り込み、チェックボックス付きで表示する
+- [x] U3-4. 「選択した N 本を処理開始」ボタン（既存の `run_batch_job_target` を `jobs.start_job()` 経由で実行するロジックを `ui/views/channel.py` から移設し、`do_chapters` / `do_clips` をジョブへ渡す）
+- [x] U3-5. URL 入力（単本 / 複数行一括）を、ページ下部の折りたたみに「例外ルート」として配置する（旧「実行」ページの内容を移設）
+- [x] U3-6. 「チャプターを作る」「切り抜き候補を出す」チェックを、新着一括処理・URL 入力（単本 / 複数行一括）のすべてで実行ボタンと同じカード内に配置し、選択値を実処理へ反映する
   - `run_batch()` / `run_batch_job_target()` に `do_chapters: bool = True` / `do_clips: bool = True` を追加し、`run_batch_job_target()` → `run_batch()` →各 URL の `pipeline.run()` の全呼び出しへそのまま渡す
   - 両方 `False` の場合は UI で実行ボタンを無効化して日本語で選択を促し、service 側でも明示的に拒否する
-- [ ] U3-7. ユニットテスト
+- [x] U3-7. ユニットテスト
   - `_local_settings` の保存・読み込み往復
   - 新着一覧が既定ハンドル未設定時に案内を出すこと
   - URL 入力ルートが折りたたみ内にあること（純粋関数化できる部分のみ検証）
   - UI 3 ルートのジョブ起動: 新着一括 / URL 複数行一括は `intake` → `start_job()` → `run_batch_job_target` の kwargs、URL 単本は `intake` → `start_job()` → `run_single_job_target` の kwargs に両 flag が反映されること
   - service の全呼び出し: `run_batch_job_target()` → `run_batch()`、`run_batch()` →各 URL の `pipeline.run()` に両 flag の有効な全組み合わせ（`True` / `True`、`True` / `False`、`False` / `True`）が伝播されること
   - バッチの既定 `True` / `True` が従来挙動を維持し、両方 `False` は `run_batch_job_target()` / `run_batch()` の各 service 入力で明示的に拒否されること
-- [ ] U3-8. `app.py` のナビゲーションを「取り込み」へ統合し、旧「実行」「チャンネル」導線を外す。移行後の `ui/views/channel.py` / `ui/views/run.py` と対応する旧 UI テストを削除する
+- [x] U3-8. `app.py` のナビゲーションを「取り込み」へ統合し、旧「実行」「チャンネル」導線を外す。移行後の `ui/views/channel.py` / `ui/views/run.py` と対応する旧 UI テストを削除する
 
 **Done 条件:**
 
-- [ ] `uv run pytest` が全件通る
-- [ ] チャンネルのハンドルを毎回入力しなくてよいことを実データで確認
-- [ ] `services/` の変更が `services/batch.py` の引数追加・全呼び出し伝播・両方 `False` の入力検証のみで、その他の処理ロジックに変更が無い
-- [ ] ナビゲーションに旧「実行」「チャンネル」導線が残らず、`ui/views/channel.py` / `ui/views/run.py` が存在しない
+- [x] `uv run pytest` が全件通る
+- [x] チャンネルのハンドルを毎回入力しなくてよいことを実データで確認
+- [x] `services/` の変更が `services/batch.py` の引数追加・全呼び出し伝播・両方 `False` の入力検証のみで、その他の処理ロジックに変更が無い
+- [x] ナビゲーションに旧「実行」「チャンネル」導線が残らず、`ui/views/channel.py` / `ui/views/run.py` が存在しない
 - [ ] タスク完了コミット済み
 
 **見積もり目安:** 1 日

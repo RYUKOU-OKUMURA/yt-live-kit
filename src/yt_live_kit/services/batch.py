@@ -19,6 +19,11 @@ from yt_live_kit.services.ytdlp import YtdlpError, extract_video_id
 
 BatchStatus = Literal["success", "failed", "skipped"]
 
+_NO_TARGET_MESSAGE = (
+    "「チャプターを作る」「切り抜き候補を出す」"
+    "のどちらかを選んでください。"
+)
+
 ProgressCallback = Callable[[int, int, str, str], None]
 """(current_index, total, url, message)"""
 
@@ -128,10 +133,15 @@ def run_batch(
     settings: Settings | None = None,
     *,
     skip_existing: bool = False,
+    do_chapters: bool = True,
+    do_clips: bool = True,
     sleep_sec: float | None = None,
     on_progress: ProgressCallback | None = None,
 ) -> list[BatchItemResult]:
     """複数 URL を順次処理する。個別失敗はスキップして継続."""
+    if not do_chapters and not do_clips:
+        raise ValueError(_NO_TARGET_MESSAGE)
+
     settings = settings or get_settings()
     settings.ensure_data_dir()
     sleep = sleep_sec if sleep_sec is not None else settings.sleep
@@ -179,7 +189,13 @@ def run_batch(
                 if on_progress is not None:
                     on_progress(i + 1, total, url, message)
 
-            result = run(url, settings, on_progress=item_progress)
+            result = run(
+                url,
+                settings,
+                on_progress=item_progress,
+                do_chapters=do_chapters,
+                do_clips=do_clips,
+            )
             item = BatchItemResult(
                 url=url,
                 video_id=result.video_id,
@@ -320,6 +336,8 @@ def run_batch_job_target(
     settings: Settings | None = None,
     urls: list[str],
     skip_existing: bool = False,
+    do_chapters: bool = True,
+    do_clips: bool = True,
     job_id: str | None = None,
 ) -> None:
     """start_job 用: 一括処理を実行し、最後の成功結果をジョブに記録する.
@@ -329,6 +347,9 @@ def run_batch_job_target(
     サマリーは write_batch_summary() で永続化され、status_bar 側が
     それを読んで結果を表示するため、ここで異常終了させる必要はない。
     """
+
+    if not do_chapters and not do_clips:
+        raise ValueError(_NO_TARGET_MESSAGE)
 
     def on_progress(current: int, total: int, url: str, message: str) -> None:
         report(
@@ -341,6 +362,8 @@ def run_batch_job_target(
         urls,
         settings,
         skip_existing=skip_existing,
+        do_chapters=do_chapters,
+        do_clips=do_clips,
         on_progress=on_progress,
     )
 

@@ -11,6 +11,7 @@ from yt_live_kit.config import Settings, get_settings
 
 _ARCHIVED_VIDEOS_FILENAME = "archived_videos.json"
 _DESCRIPTION_APPLIED_VIDEOS_FILENAME = "description_applied_videos.json"
+_CHANNEL_HANDLE_FILENAME = "channel_handle.txt"
 
 
 def _archived_videos_path(settings: Settings) -> Path:
@@ -19,6 +20,10 @@ def _archived_videos_path(settings: Settings) -> Path:
 
 def _description_applied_videos_path(settings: Settings) -> Path:
     return settings.data_dir / "_config" / _DESCRIPTION_APPLIED_VIDEOS_FILENAME
+
+
+def _channel_handle_path(settings: Settings) -> Path:
+    return settings.data_dir / "_config" / _CHANNEL_HANDLE_FILENAME
 
 
 def _load_id_set(path: Path) -> set[str]:
@@ -98,3 +103,45 @@ def mark_description_applied(
     ids = load_description_applied_ids(settings)
     ids.add(video_id)
     return save_description_applied_ids(ids, settings)
+
+
+def get_default_channel_handle(settings: Settings | None = None) -> str | None:
+    """保存済みのチャンネル既定ハンドルを返す."""
+    settings = settings or get_settings()
+    try:
+        handle = _channel_handle_path(settings).read_text(encoding="utf-8").strip()
+    except (OSError, UnicodeError):
+        return None
+    return handle or None
+
+
+def save_default_channel_handle(
+    handle: str, settings: Settings | None = None
+) -> Path:
+    """チャンネル既定ハンドルを 1 行テキストで原子的に保存する."""
+    settings = settings or get_settings()
+    normalized = handle.strip()
+    if not normalized or "\n" in normalized or "\r" in normalized:
+        raise ValueError("チャンネルハンドルを 1 行で入力してください。")
+
+    path = _channel_handle_path(settings)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as temporary_file:
+            temporary_file.write(normalized + "\n")
+            temporary_file.flush()
+            os.fsync(temporary_file.fileno())
+            temporary_path = Path(temporary_file.name)
+        os.replace(temporary_path, path)
+    finally:
+        if temporary_path is not None and temporary_path.exists():
+            temporary_path.unlink()
+    return path

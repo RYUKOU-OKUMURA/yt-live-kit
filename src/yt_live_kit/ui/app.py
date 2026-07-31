@@ -10,10 +10,9 @@ from yt_live_kit import __version__
 from yt_live_kit.services.ytdlp import check_ytdlp_version_warning
 from yt_live_kit.ui.components.results import render_results
 from yt_live_kit.ui.components.status_bar import render_status_bar
-from yt_live_kit.ui.views.channel import render_channel_page
 from yt_live_kit.ui.views.history import render_history_page
+from yt_live_kit.ui.views.intake import render_intake_page
 from yt_live_kit.ui.views.library import render_library_page
-from yt_live_kit.ui.views.run import render_run_page
 from yt_live_kit.ui.views.video_detail import render_video_detail_page
 from yt_live_kit.ui.state import (
     clear_job_error,
@@ -54,14 +53,14 @@ if ytdlp_warning:
     st.warning(ytdlp_warning)
 
 
-run_page = st.Page(
-    render_run_page,
-    title="実行",
-    icon=":material/play_arrow:",
-    url_path="run",
+intake_page = st.Page(
+    render_intake_page,
+    title="取り込み",
+    icon=":material/input:",
+    url_path="intake",
 )
 detail_page = st.Page(
-    partial(render_video_detail_page, run_page=run_page),
+    partial(render_video_detail_page, run_page=intake_page),
     title="動画詳細",
     icon=":material/movie:",
     url_path="video-detail",
@@ -77,13 +76,7 @@ library_page = st.Page(
 page = st.navigation(
     [
         library_page,
-        run_page,
-        st.Page(
-            render_channel_page,
-            title="チャンネル",
-            icon=":material/video_library:",
-            url_path="channel",
-        ),
+        intake_page,
         st.Page(
             render_history_page,
             title="処理済み一覧",

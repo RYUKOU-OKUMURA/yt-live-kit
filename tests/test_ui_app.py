@@ -52,8 +52,7 @@ def test_app_registers_japanese_navigation_after_page_config() -> None:
     assert page_titles == {
         "ライブラリ",
         "動画詳細",
-        "実行",
-        "チャンネル",
+        "取り込み",
         "処理済み一覧",
     }
 
@@ -83,13 +82,12 @@ def test_app_pages_have_unique_explicit_url_paths() -> None:
         assert keyword.value.value
         url_paths.append(keyword.value.value)
 
-    assert len(url_paths) == 5
+    assert len(url_paths) == 4
     assert len(url_paths) == len(set(url_paths))
     assert set(url_paths) == {
         "library",
-        "run",
+        "intake",
         "video-detail",
-        "channel",
         "history",
     }
 
@@ -428,13 +426,13 @@ def test_find_restorable_job_via_last_job_id_ignores_time_window() -> None:
 
 def test_batch_summary_severity_all_skipped_is_info():
     """全件スキップ（成功0・失敗0）は正常動作なのでエラー扱いにしない."""
-    from yt_live_kit.ui.views.run import batch_summary_severity
+    from yt_live_kit.ui.views.intake import batch_summary_severity
 
     assert batch_summary_severity(success=0, failed=0) == "info"
 
 
 def test_batch_summary_severity_branches():
-    from yt_live_kit.ui.views.run import batch_summary_severity
+    from yt_live_kit.ui.views.intake import batch_summary_severity
 
     assert batch_summary_severity(success=3, failed=1) == "warning"
     assert batch_summary_severity(success=0, failed=2) == "error"

@@ -3,6 +3,8 @@
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from yt_live_kit.config import Settings
 from yt_live_kit.models.meta import VideoMeta
 from yt_live_kit.services.batch import (
@@ -28,6 +30,84 @@ def test_parse_urls():
     urls = parse_urls(text)
     assert len(urls) == 2
     assert "abc12345678" in urls[0]
+
+
+@pytest.mark.parametrize(
+    ("do_chapters", "do_clips"),
+    [(True, True), (True, False), (False, True)],
+)
+@patch("yt_live_kit.services.batch.run")
+def test_run_batch_passes_all_valid_target_combinations_to_pipeline(
+    mock_run, tmp_path, do_chapters, do_clips
+):
+    mock_run.return_value = MagicMock(video_id="abc12345678", title="title")
+    settings = Settings(data_dir=tmp_path)
+
+    results = run_batch(
+        ["https://www.youtube.com/watch?v=abc12345678"],
+        settings,
+        do_chapters=do_chapters,
+        do_clips=do_clips,
+        sleep_sec=0,
+    )
+
+    assert results[0].status == "success"
+    assert mock_run.call_args.kwargs["do_chapters"] is do_chapters
+    assert mock_run.call_args.kwargs["do_clips"] is do_clips
+
+
+@patch("yt_live_kit.services.batch.run")
+def test_run_batch_defaults_preserve_both_targets(mock_run, tmp_path):
+    mock_run.return_value = MagicMock(video_id="abc12345678", title="title")
+    run_batch(
+        ["https://www.youtube.com/watch?v=abc12345678"],
+        Settings(data_dir=tmp_path),
+        sleep_sec=0,
+    )
+    assert mock_run.call_args.kwargs["do_chapters"] is True
+    assert mock_run.call_args.kwargs["do_clips"] is True
+
+
+def test_run_batch_rejects_no_targets(tmp_path):
+    with pytest.raises(ValueError, match="どちらか"):
+        run_batch(
+            ["https://www.youtube.com/watch?v=abc12345678"],
+            Settings(data_dir=tmp_path),
+            do_chapters=False,
+            do_clips=False,
+        )
+
+
+@pytest.mark.parametrize(
+    ("do_chapters", "do_clips"),
+    [(True, True), (True, False), (False, True)],
+)
+@patch("yt_live_kit.services.batch.run_batch", return_value=[])
+def test_run_batch_job_target_passes_all_valid_combinations_to_run_batch(
+    mock_run_batch, tmp_path, do_chapters, do_clips
+):
+    with patch("yt_live_kit.services.batch.update_job"):
+        run_batch_job_target(
+            report=MagicMock(),
+            settings=Settings(data_dir=tmp_path),
+            urls=["https://example.com/video"],
+            do_chapters=do_chapters,
+            do_clips=do_clips,
+            job_id="job-flags",
+        )
+    assert mock_run_batch.call_args.kwargs["do_chapters"] is do_chapters
+    assert mock_run_batch.call_args.kwargs["do_clips"] is do_clips
+
+
+def test_run_batch_job_target_rejects_no_targets(tmp_path):
+    with pytest.raises(ValueError, match="どちらか"):
+        run_batch_job_target(
+            report=MagicMock(),
+            settings=Settings(data_dir=tmp_path),
+            urls=["https://example.com/video"],
+            do_chapters=False,
+            do_clips=False,
+        )
 
 
 @patch("yt_live_kit.services.batch.run")
