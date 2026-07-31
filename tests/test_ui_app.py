@@ -49,7 +49,13 @@ def test_app_registers_japanese_navigation_after_page_config() -> None:
         for keyword in call.keywords
         if keyword.arg == "title" and isinstance(keyword.value, ast.Constant)
     }
-    assert page_titles == {"実行", "チャンネル", "処理済み一覧"}
+    assert page_titles == {
+        "ライブラリ",
+        "動画詳細",
+        "実行",
+        "チャンネル",
+        "処理済み一覧",
+    }
 
 
 def test_render_progress_shows_error_state() -> None:

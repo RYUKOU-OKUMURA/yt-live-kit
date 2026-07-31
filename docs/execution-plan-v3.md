@@ -15,7 +15,7 @@
 |----------|------|------|
 | PLAN0 | 要件・計画の確定 | [x] 完了 |
 | U0 | `ui/pages` → `ui/views` リネーム + `st.navigation` 導入 | [x] 完了 |
-| U1 | ライブラリページ | [ ] 未着手 |
+| U1 | ライブラリページ | [x] 完了 |
 | U2 | 動画詳細ページ + ステッパー + 確認ダイアログ + 共通コピー部品 | [ ] 未着手 |
 | U3 | 取り込みページ | [ ] 未着手 |
 | U4 | 設定ページ | [ ] 未着手 |
@@ -245,6 +245,7 @@ data/{video_id}/ ...
 - `src/yt_live_kit/ui/views/_local_settings.py`（新規。当初 U3 で新設する予定だったが、アーカイブ永続化のため U1 で先に新設する。U3・U4 はこのファイルに追記する）
 - `src/yt_live_kit/ui/app.py`（ナビゲーション登録）
 - `src/yt_live_kit/ui/state.py`（選択中動画 ID・アーカイブ表示切り替えのセッションキー追加）
+- `tests/test_ui_app.py`（U0 のナビゲーション期待値を U1 のライブラリ・hidden 詳細追加に合わせて更新）
 - `tests/test_ui_library_page.py`（新規）
 - （`services/` は変更しない）
 
@@ -255,13 +256,13 @@ data/{video_id}/ ...
 
 **作業:**
 
-- [ ] U1-1. `list_processed_videos()`（[`services/history.py`](../src/yt_live_kit/services/history.py)）の結果を、タイトル・状態バッジ付きで一覧表示する
-- [ ] U1-2. バッジ判定: チャプター（`ProcessedVideo.has_chapters`）、候補（`has_clips`）、ショート（`count_shorts()`）
-- [ ] U1-3. タイトルの部分一致検索ボックスを実装する
-- [ ] U1-4. `_local_settings.py` に `load_archived_ids(settings) -> set[str]` / `save_archived_ids(ids, settings) -> Path` を実装する（`data/_config/archived_videos.json` に JSON 配列で保存）
-- [ ] U1-5. 「アーカイブする / 表示に戻す」ボタンと、「アーカイブ済みを表示」トグル（既定 OFF）を実装する。トグル自体の状態は `st.session_state` でよいが、**どの動画がアーカイブ済みかは `load_archived_ids` / `save_archived_ids` 経由で永続化する**
-- [ ] U1-6. 行クリック（ボタンまたは `st.dataframe` の選択）で `ui/state.py` に選択中 `video_id` をセットし、動画詳細ページ（U2）へ遷移する
-- [ ] U1-7. ユニットテスト
+- [x] U1-1. `list_processed_videos()`（[`services/history.py`](../src/yt_live_kit/services/history.py)）の結果を、タイトル・状態バッジ付きで一覧表示する
+- [x] U1-2. バッジ判定: チャプター（`ProcessedVideo.has_chapters`）、候補（`has_clips`）、ショート（`count_shorts()`）
+- [x] U1-3. タイトルの部分一致検索ボックスを実装する
+- [x] U1-4. `_local_settings.py` に `load_archived_ids(settings) -> set[str]` / `save_archived_ids(ids, settings) -> Path` を実装する（`data/_config/archived_videos.json` に JSON 配列で保存）
+- [x] U1-5. 「アーカイブする / 表示に戻す」ボタンと、「アーカイブ済みを表示」トグル（既定 OFF）を実装する。トグル自体の状態は `st.session_state` でよいが、**どの動画がアーカイブ済みかは `load_archived_ids` / `save_archived_ids` 経由で永続化する**
+- [x] U1-6. 行クリック（ボタンまたは `st.dataframe` の選択）で `ui/state.py` に選択中 `video_id` をセットし、動画詳細ページ（U2）へ遷移する
+- [x] U1-7. ユニットテスト
   - `count_shorts` のカウント（0 件 / 複数件 / ディレクトリ無し）
   - 検索フィルタの部分一致
   - `load_archived_ids` / `save_archived_ids` の保存・読み込み往復（ファイル無し時は空集合を返すこと、`tmp_path` を使うこと）★必須
@@ -269,11 +270,11 @@ data/{video_id}/ ...
 
 **Done 条件:**
 
-- [ ] `uv run pytest` が全件通る
-- [ ] 47 件が状態バッジ付きで表示される（実データで確認）
-- [ ] アプリを再起動（プロセス再実行）してもアーカイブ状態が保持されることを確認する
-- [ ] `services/` に変更が無い（`git diff --stat` で確認）
-- [ ] タスク完了コミット済み
+- [x] `uv run pytest` が全件通る
+- [x] 47 件が状態バッジ付きで表示される（実データで確認）
+- [x] アプリを再起動（プロセス再実行）してもアーカイブ状態が保持されることを確認する
+- [x] `services/` に変更が無い（`git diff --stat` で確認）
+- [x] タスク完了コミット済み
 
 **見積もり目安:** 1 日
 

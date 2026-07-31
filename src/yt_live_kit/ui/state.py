@@ -16,6 +16,8 @@ SESSION_INTERRUPTED_NOTICES = "interrupted_notices"
 SESSION_INTERRUPTED_SHOWN = "interrupted_notices_shown"
 SESSION_BATCH_SUMMARY = "batch_summary"
 SESSION_JOB_ERROR = "job_error"
+SESSION_SELECTED_VIDEO_ID = "selected_video_id"
+SESSION_SHOW_ARCHIVED = "library_show_archived"
 
 _orphans_initialized = False
 
@@ -125,6 +127,17 @@ def set_job_error(message: str | None) -> None:
 
 def clear_job_error() -> None:
     st.session_state[SESSION_JOB_ERROR] = None
+
+
+def get_selected_video_id() -> str | None:
+    raw = st.session_state.get(SESSION_SELECTED_VIDEO_ID)
+    if isinstance(raw, str) and raw:
+        return raw
+    return None
+
+
+def set_selected_video_id(video_id: str | None) -> None:
+    st.session_state[SESSION_SELECTED_VIDEO_ID] = video_id
 
 
 def init_orphans_once() -> list[str]:
