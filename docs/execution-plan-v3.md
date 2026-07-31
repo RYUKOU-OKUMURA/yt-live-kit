@@ -783,13 +783,22 @@ data/{video_id}/ ...
 - [ ] P0-5. private lock がある場合、審査フォームの提出内容をユーザーに提示し、実 upload の承認とは別の**審査フォーム提出専用の明示承認**を得てから提出する。承認前は提出しない。審査待ちは P1 / P2 のブロッカーにしない
 - [ ] P0-6. 承認時刻、operation ID、YouTube video ID、upload / processing / schedule status、private lock、審査申請の有無と申請日を受け入れ証跡へ記録する。動画削除等の追加操作はこの承認に含めない
 
+**P0 read-only 準備記録（2026-08-01 06:01 JST）:**
+
+- P1 / P2 は独立レビュー APPROVE、`uv run pytest -q` は 820 passed / 2 skipped。自動テストによる実 API・実 upload は無い
+- `channels.list(mine=true)` でチャンネル `AI整体師`（`UCVAkt5l6kD4igMdVoEGTGIg`）を確認した
+- 対象候補は `/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/IJvd6k6ZmUo/shorts/output/short_b71e7cdb2b8d.mp4`、2,209,539 bytes、24.031995 秒
+- タイトルは「同じ条件でゲームを作らせた結果」、説明文は「ソル、テラ、ルナに同じ要件定義と技術スタックでゲームを作らせたときの意外な感想。」、タグは「ゲーム制作、ベンチマーク、ソル、テラ、ルナ」
+- policy は毎日 09:00、1 日間隔、`Asia/Tokyo`。準備時の候補 slot は 2026-08-01 09:00 JST / 2026-08-01 00:00 UTC、private 固定、notify false、LA 当日 attempt は 0 / 100
+- Made for Kids / synthetic media の選択、Community Guidelines 同意、外部公開可能性を含む P0 専用承認は未取得。承認時に最低 10 分の lead を下回った場合、または snapshot が変わった場合はこの候補を確定せず、新しい全項目を再提示する
+
 **Done 条件:**
 
-- [ ] P1 / P2 の安全契約を迂回する P0 専用 upload コードが無い
+- [x] P1 / P2 の安全契約を迂回する P0 専用 upload コードが無い
 - [ ] 実 upload と審査フォーム提出について、対象を示した別々の明示承認記録がある（審査不要ならその判定記録がある）
 - [ ] operation / attempt / poll の実結果と private lock 判定が記録されている
-- [ ] 4xx / 結果不明が発生した場合に新しい `videos.insert` が自動実行されず、`needs_reconciliation` のまま手動照合へ止まる
-- [ ] `uv run pytest` が全件通る（実 API を呼ぶテストは含めない）
+- [x] 4xx / 結果不明が発生した場合に新しい `videos.insert` が自動実行されず、`needs_reconciliation` のまま手動照合へ止まる
+- [x] `uv run pytest` が全件通る（実 API を呼ぶテストは含めない）
 - [ ] タスク完了コミット済み
 
 **見積もり目安:** 0.5 日（+ 審査待ち日数は開発のブロッカーにしない）
