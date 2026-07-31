@@ -104,6 +104,12 @@ def render_results(result: PipelineResult) -> None:
             f"{result.clips_error}"
         )
 
+    if result.highlights_error:
+        st.warning(
+            "ハイライト候補の生成に失敗しましたが、タイムラインと切り抜き候補は利用できます。\n\n"
+            f"{result.highlights_error}"
+        )
+
     st.subheader("タイムライン（概要欄用）")
     if result.chapters_text.strip():
         st.caption("右上のコピーアイコン、または下のボタンでテキストを取得できます。")
@@ -215,3 +221,7 @@ def render_results(result: PipelineResult) -> None:
             st.markdown(f"**コマンドログ:** `{cut_result.command_log_path}`")
     elif not result.clips_error:
         st.info(clips_empty_message(result.clips_requested))
+
+    from yt_live_kit.ui.pages.highlights import render_highlights_section
+
+    render_highlights_section(result)
