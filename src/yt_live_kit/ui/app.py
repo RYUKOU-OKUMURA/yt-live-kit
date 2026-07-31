@@ -8,9 +8,9 @@ from yt_live_kit import __version__
 from yt_live_kit.services.ytdlp import check_ytdlp_version_warning
 from yt_live_kit.ui.components.results import render_results
 from yt_live_kit.ui.components.status_bar import render_status_bar
-from yt_live_kit.ui.pages.channel import render_channel_page
-from yt_live_kit.ui.pages.history import render_history_page
-from yt_live_kit.ui.pages.run import render_run_page
+from yt_live_kit.ui.views.channel import render_channel_page
+from yt_live_kit.ui.views.history import render_history_page
+from yt_live_kit.ui.views.run import render_run_page
 from yt_live_kit.ui.state import (
     clear_job_error,
     get_interrupted_notices,
@@ -49,16 +49,27 @@ ytdlp_warning = check_ytdlp_version_warning()
 if ytdlp_warning:
     st.warning(ytdlp_warning)
 
-tab_run, tab_channel, tab_history = st.tabs(["実行", "チャンネル", "処理済み一覧"])
-
-with tab_run:
-    render_run_page()
-
-with tab_channel:
-    render_channel_page()
-
-with tab_history:
-    render_history_page()
+page = st.navigation(
+    [
+        st.Page(
+            render_run_page,
+            title="実行",
+            icon=":material/play_arrow:",
+            default=True,
+        ),
+        st.Page(
+            render_channel_page,
+            title="チャンネル",
+            icon=":material/video_library:",
+        ),
+        st.Page(
+            render_history_page,
+            title="処理済み一覧",
+            icon=":material/history:",
+        ),
+    ]
+)
+page.run()
 
 result = get_result()
 if result is not None:

@@ -14,7 +14,7 @@
 | フェーズ | 名称 | 状態 |
 |----------|------|------|
 | PLAN0 | 要件・計画の確定 | [x] 完了 |
-| U0 | `ui/pages` → `ui/views` リネーム + `st.navigation` 導入 | [ ] 未着手 |
+| U0 | `ui/pages` → `ui/views` リネーム + `st.navigation` 導入 | [x] 完了 |
 | U1 | ライブラリページ | [ ] 未着手 |
 | U2 | 動画詳細ページ + ステッパー + 確認ダイアログ + 共通コピー部品 | [ ] 未着手 |
 | U3 | 取り込みページ | [ ] 未着手 |
@@ -36,7 +36,7 @@
 
 | ID | 内容 | 状態 |
 |----|------|------|
-| M11 | サイドバーの事故導線が消える（U0 完了） | [ ] |
+| M11 | サイドバーの事故導線が消える（U0 完了） | [x] |
 | M12 | 動画軸で迷わず作業できる新 IA が揃う（U5 完了） | [ ] |
 | M13 | テロップ付きショートが量産できる（S5 完了） | [ ] |
 | M14 | 予約投稿が実際に公開される（v3 完了・P3 完了） | [ ] |
@@ -215,20 +215,20 @@ data/{video_id}/ ...
 
 **作業:**
 
-- [ ] U0-1. `ui/pages/` の 5 ファイルを `ui/views/` に移動する（内容は変更しない）
-- [ ] U0-2. `ui/app.py` を `st.navigation` ベースに書き換える
+- [x] U0-1. `ui/pages/` の 5 ファイルを `ui/views/` に移動する（内容は変更しない）
+- [x] U0-2. `ui/app.py` を `st.navigation` ベースに書き換える
   - 現時点では中身を変えず、既存の `render_run_page` / `render_channel_page` / `render_history_page` を、暫定的に `st.Page` でラップして登録する（U1〜U4 で正式な 4 ページに置き換わるまでの繋ぎ）
   - `st.set_page_config` は `st.navigation` より前に呼ぶ（Streamlit の制約）
-- [ ] U0-3. `ui/components/results.py` の `from yt_live_kit.ui.pages.highlights import ...` / `...pages.shorts import ...` を `ui.views.*` に更新する
-- [ ] U0-4. 既存テストの import パスを更新する（テストの検証内容自体は変更しない）
-- [ ] U0-5. 手動確認: `uv run streamlit run src/yt_live_kit/ui/app.py` を起動し、サイドバーに `app` `channel` `highlights` `history` `run` `shorts` のような内部モジュール名が **表示されない**ことを確認する
+- [x] U0-3. `ui/components/results.py` の `from yt_live_kit.ui.pages.highlights import ...` / `...pages.shorts import ...` を `ui.views.*` に更新する
+- [x] U0-4. 既存テストの import パスを更新する（テストの検証内容自体は変更しない）
+- [x] U0-5. 手動確認: `uv run streamlit run src/yt_live_kit/ui/app.py` を起動し、サイドバーに `app` `channel` `highlights` `history` `run` `shorts` のような内部モジュール名が **表示されない**ことを確認する
 
 **Done 条件:**
 
-- [ ] `src/yt_live_kit/ui/pages/` ディレクトリが存在しない
-- [ ] `uv run pytest` が全件通る（挙動不変であることの裏付け）
-- [ ] サイドバーに内部モジュール名が出ないことを手動確認済み（AC-18 の前提）
-- [ ] タスク完了コミット済み
+- [x] `src/yt_live_kit/ui/pages/` ディレクトリが存在しない
+- [x] `uv run pytest` が全件通る（挙動不変であることの裏付け）
+- [x] サイドバーに内部モジュール名が出ないことを手動確認済み（AC-18 の前提）
+- [x] タスク完了コミット済み
 
 **見積もり目安:** 0.5 日
 

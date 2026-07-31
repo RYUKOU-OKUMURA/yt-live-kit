@@ -1,11 +1,11 @@
-"""ui/pages/channel.py のヘルパー関数テスト."""
+"""ui/views/channel.py のヘルパー関数テスト."""
 
 from __future__ import annotations
 
 from datetime import datetime, timezone
 
 from yt_live_kit.models.channel import ChannelVideo
-from yt_live_kit.ui.pages.channel import (
+from yt_live_kit.ui.views.channel import (
     checkbox_key,
     collect_selected_urls,
     count_selected,

@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 from yt_live_kit.services.history import ProcessedVideo
 from yt_live_kit.services.storage import StorageError, StorageSummary, VideoStorage
 from yt_live_kit.services.youtube_api import YouTubeAPIError
-from yt_live_kit.ui.pages import history
+from yt_live_kit.ui.views import history
 
 
 class _MockColumn:
@@ -251,10 +251,10 @@ def test_start_regenerate_calls_start_job_and_reruns() -> None:
     settings = MagicMock()
 
     with (
-        patch("yt_live_kit.ui.pages.history.start_job", return_value="job-1") as start_job,
-        patch("yt_live_kit.ui.pages.history.set_active_job_id") as set_active,
-        patch("yt_live_kit.ui.pages.history.st.rerun") as rerun,
-        patch("yt_live_kit.ui.pages.history.st.error") as show_error,
+        patch("yt_live_kit.ui.views.history.start_job", return_value="job-1") as start_job,
+        patch("yt_live_kit.ui.views.history.set_active_job_id") as set_active,
+        patch("yt_live_kit.ui.views.history.st.rerun") as rerun,
+        patch("yt_live_kit.ui.views.history.st.error") as show_error,
     ):
         history._start_regenerate(video, "chapters", settings)
 
@@ -286,12 +286,12 @@ def test_start_regenerate_shows_error_on_job_busy() -> None:
 
     with (
         patch(
-            "yt_live_kit.ui.pages.history.start_job",
+            "yt_live_kit.ui.views.history.start_job",
             side_effect=JobBusyError(),
         ),
-        patch("yt_live_kit.ui.pages.history.set_active_job_id") as set_active,
-        patch("yt_live_kit.ui.pages.history.st.rerun") as rerun,
-        patch("yt_live_kit.ui.pages.history.st.error") as show_error,
+        patch("yt_live_kit.ui.views.history.set_active_job_id") as set_active,
+        patch("yt_live_kit.ui.views.history.st.rerun") as rerun,
+        patch("yt_live_kit.ui.views.history.st.error") as show_error,
     ):
         history._start_regenerate(video, "clips", settings)
 
@@ -313,11 +313,11 @@ def test_render_row_actions_disables_purge_confirm_buttons_when_busy() -> None:
     calls, mock_button = _collect_button_disabled_calls()
 
     with (
-        patch("yt_live_kit.ui.pages.history.st.columns", side_effect=_mock_columns),
-        patch("yt_live_kit.ui.pages.history.st.button", mock_button),
-        patch("yt_live_kit.ui.pages.history.st.warning"),
+        patch("yt_live_kit.ui.views.history.st.columns", side_effect=_mock_columns),
+        patch("yt_live_kit.ui.views.history.st.button", mock_button),
+        patch("yt_live_kit.ui.views.history.st.warning"),
         patch(
-            "yt_live_kit.ui.pages.history._purge_confirm_ids",
+            "yt_live_kit.ui.views.history._purge_confirm_ids",
             return_value={"vid1234567"},
         ),
     ):
@@ -366,17 +366,17 @@ def test_render_storage_section_disables_storage_buttons_when_busy() -> None:
         yield
 
     with (
-        patch("yt_live_kit.ui.pages.history.st.expander", side_effect=mock_expander),
-        patch("yt_live_kit.ui.pages.history.st.columns", side_effect=_mock_columns),
-        patch("yt_live_kit.ui.pages.history.st.button", mock_button),
-        patch("yt_live_kit.ui.pages.history.st.markdown"),
-        patch("yt_live_kit.ui.pages.history.st.caption"),
-        patch("yt_live_kit.ui.pages.history.st.text"),
-        patch("yt_live_kit.ui.pages.history.st.divider"),
-        patch("yt_live_kit.ui.pages.history.st.number_input", return_value=30),
-        patch("yt_live_kit.ui.pages.history._get_storage_summary", return_value=summary),
+        patch("yt_live_kit.ui.views.history.st.expander", side_effect=mock_expander),
+        patch("yt_live_kit.ui.views.history.st.columns", side_effect=_mock_columns),
+        patch("yt_live_kit.ui.views.history.st.button", mock_button),
+        patch("yt_live_kit.ui.views.history.st.markdown"),
+        patch("yt_live_kit.ui.views.history.st.caption"),
+        patch("yt_live_kit.ui.views.history.st.text"),
+        patch("yt_live_kit.ui.views.history.st.divider"),
+        patch("yt_live_kit.ui.views.history.st.number_input", return_value=30),
+        patch("yt_live_kit.ui.views.history._get_storage_summary", return_value=summary),
         patch(
-            "yt_live_kit.ui.pages.history._get_bulk_preview",
+            "yt_live_kit.ui.views.history._get_bulk_preview",
             return_value={"days": 30, "count": 1, "total_bytes": 1024},
         ),
     ):
@@ -424,27 +424,27 @@ def test_render_storage_section_shows_error_on_bulk_purge_storage_error() -> Non
         yield
 
     with (
-        patch("yt_live_kit.ui.pages.history.st.expander", side_effect=mock_expander),
-        patch("yt_live_kit.ui.pages.history.st.columns", side_effect=_mock_columns),
-        patch("yt_live_kit.ui.pages.history.st.button", side_effect=mock_button),
-        patch("yt_live_kit.ui.pages.history.st.markdown"),
-        patch("yt_live_kit.ui.pages.history.st.caption"),
-        patch("yt_live_kit.ui.pages.history.st.text"),
-        patch("yt_live_kit.ui.pages.history.st.divider"),
-        patch("yt_live_kit.ui.pages.history.st.warning"),
-        patch("yt_live_kit.ui.pages.history.st.number_input", return_value=30),
-        patch("yt_live_kit.ui.pages.history._get_storage_summary", return_value=summary),
+        patch("yt_live_kit.ui.views.history.st.expander", side_effect=mock_expander),
+        patch("yt_live_kit.ui.views.history.st.columns", side_effect=_mock_columns),
+        patch("yt_live_kit.ui.views.history.st.button", side_effect=mock_button),
+        patch("yt_live_kit.ui.views.history.st.markdown"),
+        patch("yt_live_kit.ui.views.history.st.caption"),
+        patch("yt_live_kit.ui.views.history.st.text"),
+        patch("yt_live_kit.ui.views.history.st.divider"),
+        patch("yt_live_kit.ui.views.history.st.warning"),
+        patch("yt_live_kit.ui.views.history.st.number_input", return_value=30),
+        patch("yt_live_kit.ui.views.history._get_storage_summary", return_value=summary),
         patch(
-            "yt_live_kit.ui.pages.history._get_bulk_preview",
+            "yt_live_kit.ui.views.history._get_bulk_preview",
             return_value={"days": 30, "count": 1, "total_bytes": 1024},
         ),
         patch(
-            "yt_live_kit.ui.pages.history.purge_sources_older_than",
+            "yt_live_kit.ui.views.history.purge_sources_older_than",
             side_effect=StorageError("一括削除に失敗しました"),
         ),
-        patch("yt_live_kit.ui.pages.history.st.error") as show_error,
-        patch("yt_live_kit.ui.pages.history.st.success") as show_success,
-        patch("yt_live_kit.ui.pages.history.summarize") as summarize,
+        patch("yt_live_kit.ui.views.history.st.error") as show_error,
+        patch("yt_live_kit.ui.views.history.st.success") as show_success,
+        patch("yt_live_kit.ui.views.history.summarize") as summarize,
     ):
         history._render_storage_section(processed, settings, busy=False)
 
@@ -469,21 +469,21 @@ def test_render_row_actions_reruns_and_stores_message_on_purge_success() -> None
         return label == "削除を実行"
 
     with (
-        patch("yt_live_kit.ui.pages.history.st.columns", side_effect=_mock_columns),
-        patch("yt_live_kit.ui.pages.history.st.button", side_effect=mock_button),
-        patch("yt_live_kit.ui.pages.history.st.warning"),
+        patch("yt_live_kit.ui.views.history.st.columns", side_effect=_mock_columns),
+        patch("yt_live_kit.ui.views.history.st.button", side_effect=mock_button),
+        patch("yt_live_kit.ui.views.history.st.warning"),
         patch(
-            "yt_live_kit.ui.pages.history._purge_confirm_ids",
+            "yt_live_kit.ui.views.history._purge_confirm_ids",
             return_value={"vid1234567"},
         ),
         patch(
-            "yt_live_kit.ui.pages.history.purge_source",
+            "yt_live_kit.ui.views.history.purge_source",
             return_value=1024,
         ),
-        patch("yt_live_kit.ui.pages.history._get_storage_summary", return_value=None),
-        patch("yt_live_kit.ui.pages.history.st.session_state", session_state),
-        patch("yt_live_kit.ui.pages.history.st.rerun") as rerun,
-        patch("yt_live_kit.ui.pages.history.st.success") as show_success,
+        patch("yt_live_kit.ui.views.history._get_storage_summary", return_value=None),
+        patch("yt_live_kit.ui.views.history.st.session_state", session_state),
+        patch("yt_live_kit.ui.views.history.st.rerun") as rerun,
+        patch("yt_live_kit.ui.views.history.st.success") as show_success,
     ):
         history._render_row_actions(
             video,
@@ -521,8 +521,8 @@ def test_render_row_actions_disables_regen_buttons_without_transcript() -> None:
         return False
 
     with (
-        patch("yt_live_kit.ui.pages.history.st.columns", side_effect=_mock_columns),
-        patch("yt_live_kit.ui.pages.history.st.button", side_effect=mock_button),
+        patch("yt_live_kit.ui.views.history.st.columns", side_effect=_mock_columns),
+        patch("yt_live_kit.ui.views.history.st.button", side_effect=mock_button),
     ):
         history._render_row_actions(
             video,
@@ -544,7 +544,7 @@ def test_render_row_actions_disables_regen_buttons_without_transcript() -> None:
 def test_toggle_open_chapter_adds_and_removes_video_id() -> None:
     session_state: dict[str, object] = {}
 
-    with patch("yt_live_kit.ui.pages.history.st.session_state", session_state):
+    with patch("yt_live_kit.ui.views.history.st.session_state", session_state):
         assert history._open_chapter_ids() == set()
 
         history._toggle_open_chapter("vid1234567")
@@ -570,13 +570,13 @@ def test_render_row_actions_toggles_chapter_visibility_and_reruns() -> None:
         return label == "チャプターを表示"
 
     with (
-        patch("yt_live_kit.ui.pages.history.st.columns", side_effect=_mock_columns),
-        patch("yt_live_kit.ui.pages.history.st.button", side_effect=mock_button),
-        patch("yt_live_kit.ui.pages.history.st.session_state", session_state),
-        patch("yt_live_kit.ui.pages.history.st.rerun") as rerun,
-        patch("yt_live_kit.ui.pages.history.load_result_from_disk"),
-        patch("yt_live_kit.ui.pages.history.st.code"),
-        patch("yt_live_kit.ui.pages.history.st.info"),
+        patch("yt_live_kit.ui.views.history.st.columns", side_effect=_mock_columns),
+        patch("yt_live_kit.ui.views.history.st.button", side_effect=mock_button),
+        patch("yt_live_kit.ui.views.history.st.session_state", session_state),
+        patch("yt_live_kit.ui.views.history.st.rerun") as rerun,
+        patch("yt_live_kit.ui.views.history.load_result_from_disk"),
+        patch("yt_live_kit.ui.views.history.st.code"),
+        patch("yt_live_kit.ui.views.history.st.info"),
     ):
         history._render_row_actions(video, busy=False, settings=settings)
 
@@ -601,18 +601,18 @@ def test_render_row_actions_shows_chapters_code_when_open() -> None:
         return False
 
     with (
-        patch("yt_live_kit.ui.pages.history.st.columns", side_effect=_mock_columns),
-        patch("yt_live_kit.ui.pages.history.st.button", side_effect=mock_button),
+        patch("yt_live_kit.ui.views.history.st.columns", side_effect=_mock_columns),
+        patch("yt_live_kit.ui.views.history.st.button", side_effect=mock_button),
         patch(
-            "yt_live_kit.ui.pages.history._open_chapter_ids",
+            "yt_live_kit.ui.views.history._open_chapter_ids",
             return_value={"vid1234567"},
         ),
         patch(
-            "yt_live_kit.ui.pages.history.load_result_from_disk",
+            "yt_live_kit.ui.views.history.load_result_from_disk",
             return_value=loaded,
         ),
-        patch("yt_live_kit.ui.pages.history.st.code") as show_code,
-        patch("yt_live_kit.ui.pages.history.st.info") as show_info,
+        patch("yt_live_kit.ui.views.history.st.code") as show_code,
+        patch("yt_live_kit.ui.views.history.st.info") as show_info,
     ):
         history._render_row_actions(video, busy=False, settings=settings)
 
@@ -637,18 +637,18 @@ def test_render_row_actions_shows_info_when_chapters_missing() -> None:
         return False
 
     with (
-        patch("yt_live_kit.ui.pages.history.st.columns", side_effect=_mock_columns),
-        patch("yt_live_kit.ui.pages.history.st.button", side_effect=mock_button),
+        patch("yt_live_kit.ui.views.history.st.columns", side_effect=_mock_columns),
+        patch("yt_live_kit.ui.views.history.st.button", side_effect=mock_button),
         patch(
-            "yt_live_kit.ui.pages.history._open_chapter_ids",
+            "yt_live_kit.ui.views.history._open_chapter_ids",
             return_value={"vid1234567"},
         ),
         patch(
-            "yt_live_kit.ui.pages.history.load_result_from_disk",
+            "yt_live_kit.ui.views.history.load_result_from_disk",
             return_value=loaded,
         ),
-        patch("yt_live_kit.ui.pages.history.st.code") as show_code,
-        patch("yt_live_kit.ui.pages.history.st.info") as show_info,
+        patch("yt_live_kit.ui.views.history.st.code") as show_code,
+        patch("yt_live_kit.ui.views.history.st.info") as show_info,
     ):
         history._render_row_actions(video, busy=False, settings=settings)
 
@@ -675,9 +675,9 @@ def test_render_row_actions_desc_button_disabled_without_chapters() -> None:
         return False
 
     with (
-        patch("yt_live_kit.ui.pages.history.st.columns", side_effect=_mock_columns),
-        patch("yt_live_kit.ui.pages.history.st.button", side_effect=mock_button),
-        patch("yt_live_kit.ui.pages.history._get_desc_preview", return_value=None),
+        patch("yt_live_kit.ui.views.history.st.columns", side_effect=_mock_columns),
+        patch("yt_live_kit.ui.views.history.st.button", side_effect=mock_button),
+        patch("yt_live_kit.ui.views.history._get_desc_preview", return_value=None),
     ):
         history._render_row_actions(video, busy=False, settings=settings)
 
@@ -705,9 +705,9 @@ def test_render_row_actions_desc_button_enabled_with_chapters() -> None:
         return False
 
     with (
-        patch("yt_live_kit.ui.pages.history.st.columns", side_effect=_mock_columns),
-        patch("yt_live_kit.ui.pages.history.st.button", side_effect=mock_button),
-        patch("yt_live_kit.ui.pages.history._get_desc_preview", return_value=None),
+        patch("yt_live_kit.ui.views.history.st.columns", side_effect=_mock_columns),
+        patch("yt_live_kit.ui.views.history.st.button", side_effect=mock_button),
+        patch("yt_live_kit.ui.views.history._get_desc_preview", return_value=None),
     ):
         history._render_row_actions(video, busy=False, settings=settings)
 
@@ -718,7 +718,7 @@ def test_render_row_actions_desc_button_enabled_with_chapters() -> None:
 def test_desc_preview_session_state_helpers_set_get_clear() -> None:
     session_state: dict[str, object] = {}
 
-    with patch("yt_live_kit.ui.pages.history.st.session_state", session_state):
+    with patch("yt_live_kit.ui.views.history.st.session_state", session_state):
         assert history._get_desc_preview("vid1") is None
 
         history._set_desc_preview("vid1", "現在の概要", "反映後の概要")
@@ -744,9 +744,9 @@ def test_start_description_preview_errors_when_not_configured() -> None:
     settings.youtube_client_secret = "data/_config/client_secret.json"
 
     with (
-        patch("yt_live_kit.ui.pages.history.youtube_api.is_configured", return_value=False),
-        patch("yt_live_kit.ui.pages.history.st.error") as show_error,
-        patch("yt_live_kit.ui.pages.history.st.rerun") as rerun,
+        patch("yt_live_kit.ui.views.history.youtube_api.is_configured", return_value=False),
+        patch("yt_live_kit.ui.views.history.st.error") as show_error,
+        patch("yt_live_kit.ui.views.history.st.rerun") as rerun,
     ):
         history._start_description_preview(video, settings)
 
@@ -768,10 +768,10 @@ def test_start_description_preview_errors_when_no_chapters() -> None:
     loaded.chapters_text = "   "
 
     with (
-        patch("yt_live_kit.ui.pages.history.youtube_api.is_configured", return_value=True),
-        patch("yt_live_kit.ui.pages.history.load_result_from_disk", return_value=loaded),
-        patch("yt_live_kit.ui.pages.history.st.error") as show_error,
-        patch("yt_live_kit.ui.pages.history.st.rerun") as rerun,
+        patch("yt_live_kit.ui.views.history.youtube_api.is_configured", return_value=True),
+        patch("yt_live_kit.ui.views.history.load_result_from_disk", return_value=loaded),
+        patch("yt_live_kit.ui.views.history.st.error") as show_error,
+        patch("yt_live_kit.ui.views.history.st.rerun") as rerun,
     ):
         history._start_description_preview(video, settings)
 
@@ -794,15 +794,15 @@ def test_start_description_preview_sets_preview_and_reruns() -> None:
     session_state: dict[str, object] = {}
 
     with (
-        patch("yt_live_kit.ui.pages.history.youtube_api.is_configured", return_value=True),
-        patch("yt_live_kit.ui.pages.history.load_result_from_disk", return_value=loaded),
+        patch("yt_live_kit.ui.views.history.youtube_api.is_configured", return_value=True),
+        patch("yt_live_kit.ui.views.history.load_result_from_disk", return_value=loaded),
         patch(
-            "yt_live_kit.ui.pages.history.youtube_api.fetch_video_snippet",
+            "yt_live_kit.ui.views.history.youtube_api.fetch_video_snippet",
             return_value={"title": "t", "description": "既存の概要"},
         ),
-        patch("yt_live_kit.ui.pages.history.st.session_state", session_state),
-        patch("yt_live_kit.ui.pages.history.st.warning") as show_warning,
-        patch("yt_live_kit.ui.pages.history.st.rerun") as rerun,
+        patch("yt_live_kit.ui.views.history.st.session_state", session_state),
+        patch("yt_live_kit.ui.views.history.st.warning") as show_warning,
+        patch("yt_live_kit.ui.views.history.st.rerun") as rerun,
     ):
         history._start_description_preview(video, settings)
 
@@ -828,14 +828,14 @@ def test_start_description_preview_shows_error_on_youtube_api_error() -> None:
     loaded.chapters_text = "0:00 イントロ\n1:00 本編\n2:00 まとめ"
 
     with (
-        patch("yt_live_kit.ui.pages.history.youtube_api.is_configured", return_value=True),
-        patch("yt_live_kit.ui.pages.history.load_result_from_disk", return_value=loaded),
+        patch("yt_live_kit.ui.views.history.youtube_api.is_configured", return_value=True),
+        patch("yt_live_kit.ui.views.history.load_result_from_disk", return_value=loaded),
         patch(
-            "yt_live_kit.ui.pages.history.youtube_api.fetch_video_snippet",
+            "yt_live_kit.ui.views.history.youtube_api.fetch_video_snippet",
             side_effect=YouTubeAPIError("エラーが発生しました"),
         ),
-        patch("yt_live_kit.ui.pages.history.st.error") as show_error,
-        patch("yt_live_kit.ui.pages.history.st.rerun") as rerun,
+        patch("yt_live_kit.ui.views.history.st.error") as show_error,
+        patch("yt_live_kit.ui.views.history.st.rerun") as rerun,
     ):
         history._start_description_preview(video, settings)
 
@@ -863,15 +863,15 @@ def test_render_description_preview_writes_and_clears_on_success() -> None:
         return label == "YouTube に書き込む"
 
     with (
-        patch("yt_live_kit.ui.pages.history.st.columns", side_effect=_mock_columns),
-        patch("yt_live_kit.ui.pages.history.st.button", side_effect=mock_button),
-        patch("yt_live_kit.ui.pages.history.st.warning"),
-        patch("yt_live_kit.ui.pages.history.st.code"),
-        patch("yt_live_kit.ui.pages.history.st.session_state", session_state),
+        patch("yt_live_kit.ui.views.history.st.columns", side_effect=_mock_columns),
+        patch("yt_live_kit.ui.views.history.st.button", side_effect=mock_button),
+        patch("yt_live_kit.ui.views.history.st.warning"),
+        patch("yt_live_kit.ui.views.history.st.code"),
+        patch("yt_live_kit.ui.views.history.st.session_state", session_state),
         patch(
-            "yt_live_kit.ui.pages.history.youtube_api.update_video_description"
+            "yt_live_kit.ui.views.history.youtube_api.update_video_description"
         ) as update_desc,
-        patch("yt_live_kit.ui.pages.history.st.rerun") as rerun,
+        patch("yt_live_kit.ui.views.history.st.rerun") as rerun,
     ):
         history._render_description_preview(video, busy=False, settings=settings)
 
@@ -901,17 +901,17 @@ def test_render_description_preview_shows_error_on_update_failure() -> None:
         return label == "YouTube に書き込む"
 
     with (
-        patch("yt_live_kit.ui.pages.history.st.columns", side_effect=_mock_columns),
-        patch("yt_live_kit.ui.pages.history.st.button", side_effect=mock_button),
-        patch("yt_live_kit.ui.pages.history.st.warning"),
-        patch("yt_live_kit.ui.pages.history.st.code"),
-        patch("yt_live_kit.ui.pages.history.st.session_state", session_state),
+        patch("yt_live_kit.ui.views.history.st.columns", side_effect=_mock_columns),
+        patch("yt_live_kit.ui.views.history.st.button", side_effect=mock_button),
+        patch("yt_live_kit.ui.views.history.st.warning"),
+        patch("yt_live_kit.ui.views.history.st.code"),
+        patch("yt_live_kit.ui.views.history.st.session_state", session_state),
         patch(
-            "yt_live_kit.ui.pages.history.youtube_api.update_video_description",
+            "yt_live_kit.ui.views.history.youtube_api.update_video_description",
             side_effect=YouTubeAPIError("反映に失敗しました"),
         ),
-        patch("yt_live_kit.ui.pages.history.st.error") as show_error,
-        patch("yt_live_kit.ui.pages.history.st.rerun") as rerun,
+        patch("yt_live_kit.ui.views.history.st.error") as show_error,
+        patch("yt_live_kit.ui.views.history.st.rerun") as rerun,
     ):
         history._render_description_preview(video, busy=False, settings=settings)
 
@@ -940,12 +940,12 @@ def test_render_description_preview_cancel_clears_and_reruns() -> None:
         return label == "キャンセル"
 
     with (
-        patch("yt_live_kit.ui.pages.history.st.columns", side_effect=_mock_columns),
-        patch("yt_live_kit.ui.pages.history.st.button", side_effect=mock_button),
-        patch("yt_live_kit.ui.pages.history.st.warning"),
-        patch("yt_live_kit.ui.pages.history.st.code"),
-        patch("yt_live_kit.ui.pages.history.st.session_state", session_state),
-        patch("yt_live_kit.ui.pages.history.st.rerun") as rerun,
+        patch("yt_live_kit.ui.views.history.st.columns", side_effect=_mock_columns),
+        patch("yt_live_kit.ui.views.history.st.button", side_effect=mock_button),
+        patch("yt_live_kit.ui.views.history.st.warning"),
+        patch("yt_live_kit.ui.views.history.st.code"),
+        patch("yt_live_kit.ui.views.history.st.session_state", session_state),
+        patch("yt_live_kit.ui.views.history.st.rerun") as rerun,
     ):
         history._render_description_preview(video, busy=False, settings=settings)
 

@@ -1,4 +1,4 @@
-"""ui/pages/highlights.py のヘルパー関数テスト."""
+"""ui/views/highlights.py のヘルパー関数テスト."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from unittest.mock import patch
 from yt_live_kit.config import Settings
 from yt_live_kit.models.clips import ClipCandidate
 from yt_live_kit.models.highlights import HighlightSegment
-from yt_live_kit.ui.pages.highlights import (
+from yt_live_kit.ui.views.highlights import (
     build_highlight_job_target,
     can_build_highlight,
     clip_to_highlight_segment,

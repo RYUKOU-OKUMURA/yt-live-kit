@@ -1,11 +1,11 @@
-"""ui/pages/shorts.py のヘルパー関数テスト."""
+"""ui/views/shorts.py のヘルパー関数テスト."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
 from yt_live_kit.config import Settings
-from yt_live_kit.ui.pages.shorts import (
+from yt_live_kit.ui.views.shorts import (
     LAYOUT_BLUR_LABEL,
     LAYOUT_CROP_LABEL,
     ShortInterval,

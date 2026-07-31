@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import ast
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from yt_live_kit.services.jobs import JobState
@@ -21,6 +23,33 @@ from yt_live_kit.ui.components.status_bar import (
 )
 
 _STAGE_ORDER = [STAGE_FETCH, STAGE_TRANSCRIPT, STAGE_CHAPTERS, STAGE_CLIPS_SUGGEST]
+
+
+def test_app_registers_japanese_navigation_after_page_config() -> None:
+    app_path = Path(__file__).parents[1] / "src/yt_live_kit/ui/app.py"
+    tree = ast.parse(app_path.read_text(encoding="utf-8"))
+
+    streamlit_calls = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "st"
+    ]
+    call_positions = {
+        call.func.attr: (call.lineno, call.col_offset) for call in streamlit_calls
+    }
+    assert call_positions["set_page_config"] < call_positions["navigation"]
+
+    page_titles = {
+        keyword.value.value
+        for call in streamlit_calls
+        if call.func.attr == "Page"
+        for keyword in call.keywords
+        if keyword.arg == "title" and isinstance(keyword.value, ast.Constant)
+    }
+    assert page_titles == {"実行", "チャンネル", "処理済み一覧"}
 
 
 def test_render_progress_shows_error_state() -> None:
@@ -357,13 +386,13 @@ def test_find_restorable_job_via_last_job_id_ignores_time_window() -> None:
 
 def test_batch_summary_severity_all_skipped_is_info():
     """全件スキップ（成功0・失敗0）は正常動作なのでエラー扱いにしない."""
-    from yt_live_kit.ui.pages.run import batch_summary_severity
+    from yt_live_kit.ui.views.run import batch_summary_severity
 
     assert batch_summary_severity(success=0, failed=0) == "info"
 
 
 def test_batch_summary_severity_branches():
-    from yt_live_kit.ui.pages.run import batch_summary_severity
+    from yt_live_kit.ui.views.run import batch_summary_severity
 
     assert batch_summary_severity(success=3, failed=1) == "warning"
     assert batch_summary_severity(success=0, failed=2) == "error"
