@@ -16,6 +16,8 @@ from yt_live_kit.services.ffmpeg import (
     concat_segments,
     cut_clip,
     encode_segment,
+    ffprobe_path_for,
+    probe_duration,
 )
 
 
@@ -180,6 +182,44 @@ def test_build_concat_list_quote_escape(tmp_path):
 def test_build_concat_list_empty_raises():
     with pytest.raises(FfmpegError, match="連結"):
         build_concat_list([], Path("/tmp/concat.txt"))
+
+
+@patch("yt_live_kit.services.ffmpeg.subprocess.run")
+@patch("yt_live_kit.services.ffmpeg.shutil.which")
+def test_probe_duration_uses_ffprobe(mock_which, mock_run, tmp_path):
+    source = tmp_path / "short.mp4"
+    source.write_bytes(b"video")
+    mock_which.return_value = "/usr/bin/ffprobe"
+    mock_run.return_value = MagicMock(returncode=0, stdout="30.125\n", stderr="")
+
+    assert probe_duration(source) == 30.125
+    assert "format=duration" in mock_run.call_args.args[0]
+
+
+@patch("yt_live_kit.services.ffmpeg.subprocess.run")
+@patch("yt_live_kit.services.ffmpeg.shutil.which")
+def test_probe_duration_rejects_invalid_result(mock_which, mock_run, tmp_path):
+    source = tmp_path / "short.mp4"
+    source.write_bytes(b"video")
+    mock_which.return_value = "/usr/bin/ffprobe"
+    mock_run.return_value = MagicMock(returncode=0, stdout="unknown", stderr="")
+    with pytest.raises(FfmpegError, match="正しくありません"):
+        probe_duration(source)
+
+
+@pytest.mark.parametrize(
+    ("ffmpeg_path", "expected"),
+    [
+        ("ffmpeg", "ffprobe"),
+        ("/usr/local/bin/ffmpeg", "/usr/local/bin/ffprobe"),
+        (
+            "/opt/homebrew/opt/ffmpeg-full/bin/ffmpeg",
+            "/opt/homebrew/opt/ffmpeg-full/bin/ffprobe",
+        ),
+    ],
+)
+def test_ffprobe_path_for_replaces_basename_only(ffmpeg_path, expected):
+    assert ffprobe_path_for(ffmpeg_path) == expected
 
 
 @patch("yt_live_kit.services.ffmpeg.subprocess.run")

@@ -26,8 +26,10 @@ from yt_live_kit.services.storage import StorageError
 from yt_live_kit.services.subtitle_burn import SubtitleBurnError
 from yt_live_kit.services.transcript import TranscriptError
 from yt_live_kit.services.ytdlp import YtdlpError
+from yt_live_kit.services.youtube_api import YouTubeAPIError
+from yt_live_kit.services.upload_queue import UploadQueueError
 
-JobKind = str  # "single" | "batch" | "regenerate" | "highlights" | "shorts" | "shorts_queue"
+JobKind = str  # pipeline / batch / shorts_queue / upload
 JobStatus = str  # "running" | "done" | "failed" | "interrupted"
 
 _UNEXPECTED_ERROR_MESSAGE = (
@@ -51,6 +53,8 @@ _KNOWN_ERRORS = (
     StorageError,
     ShortsError,
     SubtitleBurnError,
+    YouTubeAPIError,
+    UploadQueueError,
 )
 
 
@@ -172,13 +176,19 @@ def create_job(
     video_id: str | None = None,
     title: str | None = None,
     total: int = 0,
+    requested_job_id: str | None = None,
     settings: Settings | None = None,
 ) -> JobState:
     """新規ジョブを running で作成し、永続化する."""
     settings = settings or get_settings()
     settings.ensure_data_dir()
+    job_id = requested_job_id or uuid.uuid4().hex
+    if not job_id or any(character not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-" for character in job_id):
+        raise ValueError("ジョブ ID の形式が正しくありません。")
+    if _job_path(settings, job_id).exists():
+        raise ValueError("指定されたジョブ ID は既に存在します。")
     state = JobState(
-        job_id=uuid.uuid4().hex,
+        job_id=job_id,
         kind=kind,
         status="running",
         video_id=video_id,
@@ -321,6 +331,11 @@ def close_orphans(settings: Settings | None = None) -> list[str]:
             error="前回の処理が中断されました",
         )
         interrupted.append(job.job_id)
+    # 外部効果の有無は jobs JSON ではなく attempt 台帳を正本として、
+    # 必ず orphan close 後に upload operation を復元する。
+    from yt_live_kit.services.upload_queue import recover_upload_operations
+
+    recover_upload_operations(settings)
     return interrupted
 
 
@@ -364,6 +379,7 @@ def start_job(
     video_id: str | None = None,
     title: str | None = None,
     total: int = 0,
+    requested_job_id: str | None = None,
     settings: Settings | None = None,
     **kwargs: Any,
 ) -> str:
@@ -385,6 +401,7 @@ def start_job(
             video_id=video_id,
             title=title,
             total=total,
+            requested_job_id=requested_job_id,
             settings=settings,
         )
         job_id = state.job_id
@@ -430,8 +447,13 @@ def start_job(
 
         result_ref = video_id
         current = read_job(job_id, settings)
-        if current is not None and current.video_id:
-            result_ref = current.video_id
+        if current is not None:
+            # upload / shorts_queue 等の target が永続参照を明示した場合は
+            # pipeline 用 video_id で上書きしない。
+            if current.result_ref:
+                result_ref = current.result_ref
+            elif current.video_id:
+                result_ref = current.video_id
 
         update_job(
             job_id,

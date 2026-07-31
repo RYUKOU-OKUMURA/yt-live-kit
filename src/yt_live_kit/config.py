@@ -28,6 +28,12 @@ class Settings(BaseSettings):
         default=Path("./data/_config/client_secret.json"),
         description="YouTube Data API の OAuth クライアントシークレット JSON のパス",
     )
+    video_upload_daily_limit: int = Field(
+        default=100,
+        ge=1,
+        le=100,
+        description="America/Los_Angeles 暦日あたりの upload attempt 上限",
+    )
 
     def ensure_data_dir(self) -> Path:
         """data ディレクトリを作成して返す."""

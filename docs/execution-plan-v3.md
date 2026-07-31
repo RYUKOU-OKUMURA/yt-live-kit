@@ -26,7 +26,7 @@
 | S4 | キュー量産 UI + 台本確認フロー | [x] 完了 |
 | S5 | フェーズ S 受け入れ（実配信 1 本からショート複数本を通しで作る） | [x] 完了 |
 | P0 | 安全な実機 upload probe（P1 / P2 完了後） | [ ] 未着手 |
-| P1 | 安全なアップロードサービス | [ ] 未着手 |
+| P1 | 安全なアップロードサービス | [~] 進行中 |
 | P2 | スケジュールポリシー + 原子的な予約確定 + 投稿確認 UI | [ ] 未着手 |
 | P3 | フェーズ P 受け入れ（予約投稿が実際に公開される） | [ ] 未着手 |
 
@@ -812,18 +812,18 @@ data/{video_id}/ ...
 
 **作業:**
 
-- [ ] P1-1. `models/upload.py` に frozen な `UploadChannel`、`UploadContentSnapshot`、`UploadStatusObservation`、`UploadOperation`、`UploadResult` を定義する。snapshot は `self_declared_made_for_kids: bool`、`contains_synthetic_media: bool`、`community_guidelines_confirmed: Literal[True]`、同意 UTC timestamp を必須とする。`UploadStatusObservation` は UTC `polled_at`、`phase: Literal["processing", "publication"]`、取得した `status` / `processing_details`、`classification`、日本語 `error` を持つ。operation は `operation_id`、`source_video_id`、`source_kind`、`clip_id`、絶対 `video_path`、content snapshot、`reserved/uploading/uploaded/failed/needs_reconciliation`、`job_id`、YouTube `video_id`、UTC の `created_at/updated_at/started_at/finished_at`、日本語 `error`、入力順の `poll_history: tuple[UploadStatusObservation, ...]` を必須 field として保持し、unknown / 欠落 field と不正状態遷移を拒否する。最新状態は poll history 末尾から導出し、履歴を上書きしない
-- [ ] P1-2. upload preflight を実装する。mp4 の存在・通常ファイル・絶対パス化、サイズと `mtime_ns`、`probe_duration()` の 10〜180 秒、title strip 後 1〜100 文字、description UTF-8 5000 bytes 以下、全 tag 非空かつ `",".join(tags)` 500 文字以下、全 metadata の半角山カッコ禁止を検証し、canonical content snapshot を作る
-- [ ] P1-3. publish 契約を固定する。`privacy_status` は引数で緩めず `private` のみ、`publish_at` は aware かつ `now + 10 分` 以上、`notify_subscribers` は `False` のみを許可し、API body は UTC RFC 3339 `Z` へ正規化する。`status.selfDeclaredMadeForKids` / `status.containsSyntheticMedia` は snapshot の必須 bool をそのまま反映する。Community Guidelines 未同意、naive / 過去 / リード不足 / `public` / `unlisted` / publishAt 無しを API 構築前に日本語で拒否する
-- [ ] P1-4. `fetch_mine_channel(settings) -> UploadChannel` を `channels.list(part="snippet", mine=True)` で実装し、0 件 / 複数件 / 欠落 field を日本語エラーにする。確認 snapshot に channel ID / 名称を含める
-- [ ] P1-5. `MediaFileUpload(..., resumable=True)` と単一 `videos.insert(part="snippet,status", notifySubscribers=False, ...)` request の `next_chunk()` loop を実装する。ネットワーク例外と HTTP 500 / 502 / 503 / 504 だけを同一 session で最大 5 回、1 / 2 / 4 / 8 / 16 秒に bounded retry し、retry 後は同じ request の `next_chunk()` を続ける。4xx、retry exhaustion、response 欠落 / video ID 欠落は新規 insert を作らず `needs_reconciliation` を返す。preflight の確定的失敗だけ `failed` とし、全例外を日本語 `YouTubeAPIError` または typed outcome にする
-- [ ] P1-6. `data/_schedule/queue.json` を full operation と予約 slot の単一正本、`upload_attempts.json` を試行台帳として、advisory file lock + process lock 下の一時ファイル + replace で各ファイルを atomic 保存する。queue record は P1-1 の全 operation field を保持し、別の operation JSON と二重管理しない。壊れた JSON、schema 不一致、重複 operation ID は fail closed の日本語 `UploadQueueError` とし、空配列へ回復しない。attempt は `America/Los_Angeles` の upload attempt 開始日、operation ID、job ID、UTC timestamp を **`MediaFileUpload` / `videos.insert` による resumable upload session 作成前**に 1 回記録し、失敗・結果不明も残す。事前の read-only `channels.list` は attempt に数えない。設定上限 1〜100 の境界を守り、予約公開日・予約件数は参照しない
-- [ ] P1-7. `upload_job_target(*, report, settings: Settings, job_id: str, operation_id: str) -> None` を jobs 契約に合わせる。confirm transaction は operation ID と job ID を先に生成し、同じ queue record へ `reserved` として atomic 保存する。`jobs.start_job()` は `requested_job_id` を受けてその ID の job JSON を thread 起動前に作り、既存 ID を黙って上書きしない。target は queue の job ID と受領 job ID の一致を確認し、`reserved` だけを `uploading` へ進めて attempt を 1 回記録後に upload session を作る。`uploading/uploaded/failed/needs_reconciliation` の再実行は insert せず既存結果を返すか手動照合を案内する。完了時に jobs の `result_ref=operation_id` を設定し、jobs worker は target が設定した `result_ref` を video ID で上書きしない
-- [ ] P1-8. 起動順を `jobs.close_orphans()` → upload recovery に固定し、attempt ledger を外部効果開始の正本とする。recovery の状態遷移対象は active state の `reserved` / `uploading` だけとし、当該 operation の attempt が無ければ upload session 未作成の契約により `failed` + slot 解放として新しい preview / 承認を要求する。attempt が 1 件以上、job / operation 不一致、または attempt ledger が壊れて有無を確定できない場合は `needs_reconciliation` + slot 保持として自動再送しない。terminal の `uploaded/failed/needs_reconciliation` は変更せず、ledger と不整合なら queue / slot を一切変更せず日本語 `UploadQueueError` で全新規 upload を fail closed にし、手動修復を要求する
-- [ ] P1-9. `videos.list(part="status,processingDetails", id=...)` の poll 契約を固定する。processing poll は sleep / clock 注入可能、10 秒間隔・最大 30 回とし、`processingStatus=succeeded` を成功 terminal、`failed/terminated` を失敗 terminal、30 回後を timeout とする。公開 poll は予約時刻到来後に 30 秒間隔・最大 20 回とし、`privacyStatus=public` を公開成功、processing の `failed/terminated` を失敗、20 回後も private を timeout とする。各 response と時刻を operation へ記録する
-- [ ] P1-10. private lock 判定表を固定する。予約時刻前の `privacyStatus=private` かつ期待する `publishAt` は正常な scheduled、processing 成功後に `publishAt` が欠落、または予約時刻 + 5 分を過ぎても private なら `suspected_private_lock`、public なら `published` とする。API だけで確定せず、P0 では YouTube Studio の表示を併用して `confirmed_private_lock / no_private_lock` を記録する。lock は `uploaded` と別の予約公開可否 field として保持する
-- [ ] P1-11. status bar は `single/regenerate` 等の pipeline kind だけを pipeline loader へ、`batch` は batch loader、`shorts_queue` は manifest UI、`upload` は operation loader へ dispatch する。未知 kind / result_ref 欠落 / operation 読込失敗も日本語で表示し、pipeline 読み込みを誤実行しない
-- [ ] P1-12. ユニットテスト
+- [x] P1-1. `models/upload.py` に frozen な `UploadChannel`、`UploadContentSnapshot`、`UploadStatusObservation`、`UploadOperation`、`UploadResult` を定義する。snapshot は `self_declared_made_for_kids: bool`、`contains_synthetic_media: bool`、`community_guidelines_confirmed: Literal[True]`、同意 UTC timestamp を必須とする。`UploadStatusObservation` は UTC `polled_at`、`phase: Literal["processing", "publication"]`、取得した `status` / `processing_details`、`classification`、日本語 `error` を持つ。operation は `operation_id`、`source_video_id`、`source_kind`、`clip_id`、絶対 `video_path`、content snapshot、`reserved/uploading/uploaded/failed/needs_reconciliation`、`job_id`、YouTube `video_id`、UTC の `created_at/updated_at/started_at/finished_at`、日本語 `error`、入力順の `poll_history: tuple[UploadStatusObservation, ...]` を必須 field として保持し、unknown / 欠落 field と不正状態遷移を拒否する。最新状態は poll history 末尾から導出し、履歴を上書きしない
+- [x] P1-2. upload preflight を実装する。mp4 の存在・通常ファイル・絶対パス化、サイズと `mtime_ns`、`probe_duration()` の 10〜180 秒、title strip 後 1〜100 文字、description UTF-8 5000 bytes 以下、全 tag 非空かつ `",".join(tags)` 500 文字以下、全 metadata の半角山カッコ禁止を検証し、canonical content snapshot を作る
+- [x] P1-3. publish 契約を固定する。`privacy_status` は引数で緩めず `private` のみ、`publish_at` は aware かつ `now + 10 分` 以上、`notify_subscribers` は `False` のみを許可し、API body は UTC RFC 3339 `Z` へ正規化する。`status.selfDeclaredMadeForKids` / `status.containsSyntheticMedia` は snapshot の必須 bool をそのまま反映する。Community Guidelines 未同意、naive / 過去 / リード不足 / `public` / `unlisted` / publishAt 無しを API 構築前に日本語で拒否する
+- [x] P1-4. `fetch_mine_channel(settings) -> UploadChannel` を `channels.list(part="snippet", mine=True)` で実装し、0 件 / 複数件 / 欠落 field を日本語エラーにする。確認 snapshot に channel ID / 名称を含める
+- [x] P1-5. `MediaFileUpload(..., resumable=True)` と単一 `videos.insert(part="snippet,status", notifySubscribers=False, ...)` request の `next_chunk()` loop を実装する。ネットワーク例外と HTTP 500 / 502 / 503 / 504 だけを同一 session で最大 5 回、1 / 2 / 4 / 8 / 16 秒に bounded retry し、retry 後は同じ request の `next_chunk()` を続ける。4xx、retry exhaustion、response 欠落 / video ID 欠落は新規 insert を作らず `needs_reconciliation` を返す。preflight の確定的失敗だけ `failed` とし、全例外を日本語 `YouTubeAPIError` または typed outcome にする
+- [x] P1-6. `data/_schedule/queue.json` を full operation と予約 slot の単一正本、`upload_attempts.json` を試行台帳として、advisory file lock + process lock 下の一時ファイル + replace で各ファイルを atomic 保存する。queue record は P1-1 の全 operation field を保持し、別の operation JSON と二重管理しない。壊れた JSON、schema 不一致、重複 operation ID は fail closed の日本語 `UploadQueueError` とし、空配列へ回復しない。attempt は `America/Los_Angeles` の upload attempt 開始日、operation ID、job ID、UTC timestamp を **`MediaFileUpload` / `videos.insert` による resumable upload session 作成前**に 1 回記録し、失敗・結果不明も残す。事前の read-only `channels.list` は attempt に数えない。設定上限 1〜100 の境界を守り、予約公開日・予約件数は参照しない
+- [x] P1-7. `upload_job_target(*, report, settings: Settings, job_id: str, operation_id: str) -> None` を jobs 契約に合わせる。confirm transaction は operation ID と job ID を先に生成し、同じ queue record へ `reserved` として atomic 保存する。`jobs.start_job()` は `requested_job_id` を受けてその ID の job JSON を thread 起動前に作り、既存 ID を黙って上書きしない。target は queue の job ID と受領 job ID の一致を確認し、`reserved` だけを `uploading` へ進めて attempt を 1 回記録後に upload session を作る。`uploading/uploaded/failed/needs_reconciliation` の再実行は insert せず既存結果を返すか手動照合を案内する。完了時に jobs の `result_ref=operation_id` を設定し、jobs worker は target が設定した `result_ref` を video ID で上書きしない
+- [x] P1-8. 起動順を `jobs.close_orphans()` → upload recovery に固定し、attempt ledger を外部効果開始の正本とする。recovery の状態遷移対象は active state の `reserved` / `uploading` だけとし、当該 operation の attempt が無ければ upload session 未作成の契約により `failed` + slot 解放として新しい preview / 承認を要求する。attempt が 1 件以上、job / operation 不一致、または attempt ledger が壊れて有無を確定できない場合は `needs_reconciliation` + slot 保持として自動再送しない。terminal の `uploaded/failed/needs_reconciliation` は変更せず、ledger と不整合なら queue / slot を一切変更せず日本語 `UploadQueueError` で全新規 upload を fail closed にし、手動修復を要求する
+- [x] P1-9. `videos.list(part="status,processingDetails", id=...)` の poll 契約を固定する。processing poll は sleep / clock 注入可能、10 秒間隔・最大 30 回とし、`processingStatus=succeeded` を成功 terminal、`failed/terminated` を失敗 terminal、30 回後を timeout とする。公開 poll は予約時刻到来後に 30 秒間隔・最大 20 回とし、`privacyStatus=public` を公開成功、processing の `failed/terminated` を失敗、20 回後も private を timeout とする。各 response と時刻を operation へ記録する
+- [x] P1-10. private lock 判定表を固定する。予約時刻前の `privacyStatus=private` かつ期待する `publishAt` は正常な scheduled、processing 成功後に `publishAt` が欠落、または予約時刻 + 5 分を過ぎても private なら `suspected_private_lock`、public なら `published` とする。API だけで確定せず、P0 では YouTube Studio の表示を併用して `confirmed_private_lock / no_private_lock` を記録する。lock は `uploaded` と別の予約公開可否 field として保持する
+- [x] P1-11. status bar は `single/regenerate` 等の pipeline kind だけを pipeline loader へ、`batch` は batch loader、`shorts_queue` は manifest UI、`upload` は operation loader へ dispatch する。未知 kind / result_ref 欠落 / operation 読込失敗も日本語で表示し、pipeline 読み込みを誤実行しない
+- [x] P1-12. ユニットテスト
   - metadata / file / duration / aware time / 10 分 lead / UTC `Z` / private 固定 / notify false、Made for Kids / synthetic media の必須 bool、Community Guidelines 同意の正常系と全境界
   - `channels.list(mine=True)` と `videos.insert` body、`MediaFileUpload(resumable=True)`、`next_chunk()` 複数 chunk
   - network と 500 / 502 / 503 / 504 の同一 request 内 5 回 retry、backoff 列、4xx / retry exhaustion / response 不明で insert 1 回かつ `needs_reconciliation`
@@ -836,11 +836,11 @@ data/{video_id}/ ...
 
 **Done 条件:**
 
-- [ ] `uv run pytest` が全件通る
-- [ ] 実 API・sleep・ffprobe subprocess はすべてモックされ、実 upload を行っていない
-- [ ] 4xx / 結果不明から新しい `videos.insert` が自動作成されないことを call count で確認済み
-- [ ] 壊れた永続 JSON、同時確定、再起動復元、同一 operation 再実行が fail closed / 冪等である
-- [ ] 全ユーザー向けエラーが日本語で、従量課金 AI API を追加していない
+- [x] `uv run pytest` が全件通る
+- [x] 実 API・sleep・ffprobe subprocess はすべてモックされ、実 upload を行っていない
+- [x] 4xx / 結果不明から新しい `videos.insert` が自動作成されないことを call count で確認済み
+- [x] 壊れた永続 JSON、同時確定、再起動復元、同一 operation 再実行が fail closed / 冪等である
+- [x] 全ユーザー向けエラーが日本語で、従量課金 AI API を追加していない
 - [ ] タスク完了コミット済み
 
 **見積もり目安:** 2.5 日

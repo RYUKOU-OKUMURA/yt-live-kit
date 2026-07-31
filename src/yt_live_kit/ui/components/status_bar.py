@@ -10,6 +10,7 @@ from yt_live_kit.config import get_settings
 from yt_live_kit.services.batch import read_batch_summary
 from yt_live_kit.services.jobs import JobState, get_active_job, read_current_job, read_job
 from yt_live_kit.services.pipeline import load_result_from_disk
+from yt_live_kit.services.upload_queue import UploadQueueError, load_operation
 from yt_live_kit.ui.state import (
     clear_active_job_id,
     clear_cut_result,
@@ -31,7 +32,12 @@ _KIND_LABELS: dict[str, str] = {
     "regenerate": "再生成",
     "highlights": "ハイライト動画",
     "shorts": "ショート動画",
+    "shorts_queue": "ショート量産",
+    "upload": "予約投稿",
 }
+
+_PIPELINE_KINDS = frozenset({"single", "regenerate", "highlights", "shorts"})
+_KNOWN_NON_PIPELINE_KINDS = frozenset({"batch", "shorts_queue", "upload"})
 
 _RESULT_LOAD_ERROR = (
     "成果物を読み込めませんでした。ライブラリから開き直してください。"
@@ -147,13 +153,30 @@ def _handle_finished_job(job: JobState) -> None:
     settings = get_settings()
 
     if job.status == "done":
-        if job.result_ref:
+        if job.kind in _PIPELINE_KINDS and job.result_ref:
             result = load_result_from_disk(job.result_ref, settings)
             if result is not None:
                 set_result(result)
                 clear_cut_result()
             else:
                 set_job_error(_RESULT_LOAD_ERROR)
+
+        elif job.kind in _PIPELINE_KINDS:
+            set_job_error("完了ジョブに成果物の参照先がありません。ライブラリから確認してください。")
+        elif job.kind == "upload":
+            if not job.result_ref:
+                set_job_error("完了した予約投稿に operation ID がありません。手動で確認してください。")
+            else:
+                try:
+                    load_operation(job.result_ref, settings)
+                except UploadQueueError as exc:
+                    set_job_error(f"予約投稿の状態を読み込めませんでした。{exc}")
+        elif job.kind == "shorts_queue" and not job.result_ref:
+            set_job_error("完了したショート量産ジョブに成果物の参照先がありません。")
+        elif job.kind not in _KNOWN_NON_PIPELINE_KINDS:
+            set_job_error(
+                f"未対応のジョブ種別「{job.kind}」です。成果物を自動で読み込みませんでした。"
+            )
 
         _load_batch_summary_for_job(job, settings)
         clear_active_job_id()

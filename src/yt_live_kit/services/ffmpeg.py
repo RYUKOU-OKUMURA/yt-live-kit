@@ -25,6 +25,57 @@ class FfmpegError(Exception):
     """ffmpeg 実行エラー."""
 
 
+def ffprobe_path_for(ffmpeg_path: str) -> str:
+    """ffmpeg コマンドと同じディレクトリの ffprobe パスを返す."""
+    path = Path(ffmpeg_path)
+    return str(path.with_name("ffprobe"))
+
+
+def probe_duration(
+    source: Path,
+    *,
+    ffprobe_path: str = FFPROBE_DEFAULT,
+) -> float:
+    """ffprobe で動画の尺を秒として取得する."""
+    path = source.resolve()
+    if not path.is_file():
+        raise FfmpegError(f"動画ファイルが見つかりません: {path}")
+    ffprobe = shutil.which(ffprobe_path)
+    if ffprobe is None:
+        raise FfmpegError(
+            "ffprobe が見つかりません。ffmpeg をインストールするか設定を確認してください。"
+        )
+    command = [
+        ffprobe,
+        "-v",
+        "error",
+        "-show_entries",
+        "format=duration",
+        "-of",
+        "default=noprint_wrappers=1:nokey=1",
+        str(path),
+    ]
+    try:
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError as exc:
+        raise FfmpegError(f"ffprobe を実行できませんでした: {exc}") from exc
+    if result.returncode != 0:
+        detail = (result.stderr or "").strip()
+        raise FfmpegError(f"動画の尺を取得できませんでした。詳細: {detail or '不明'}")
+    try:
+        duration = float((result.stdout or "").strip())
+    except ValueError as exc:
+        raise FfmpegError("ffprobe の尺取得結果が正しくありません。") from exc
+    if duration <= 0:
+        raise FfmpegError("動画の尺が 0 秒以下です。")
+    return duration
+
+
 @dataclass(frozen=True)
 class CutResult:
     """切り出し結果."""

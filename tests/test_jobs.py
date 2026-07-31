@@ -7,7 +7,7 @@ import threading
 import time
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -102,6 +102,66 @@ def test_job_state_to_dict_from_dict():
     assert restored.started_at == started
     assert restored.finished_at == finished
     assert restored.result_ref == "video1234567"
+
+
+def test_requested_job_id_is_written_before_thread_and_not_overwritten(tmp_path):
+    settings = Settings(data_dir=tmp_path)
+    observed = threading.Event()
+
+    def target_fn(*, report, settings, job_id, **_kwargs):
+        state = read_job(job_id, settings)
+        assert state is not None
+        assert state.job_id == "requested-job"
+        update_job(job_id, settings=settings, result_ref="operation-1")
+        observed.set()
+
+    with _patch_real_thread() as (_mock_thread, threads):
+        job_id = start_job(
+            "upload", target_fn, settings=settings,
+            requested_job_id="requested-job",
+        )
+        threads[-1].join(timeout=5)
+    assert observed.is_set()
+    assert job_id == "requested-job"
+    state = read_job(job_id, settings)
+    assert state is not None
+    assert state.status == "done"
+    assert state.result_ref == "operation-1"
+
+    with pytest.raises(ValueError, match="既に存在"):
+        start_job(
+            "upload", target_fn, settings=settings,
+            requested_job_id="requested-job",
+        )
+
+
+def test_requested_job_json_failure_does_not_start_thread(tmp_path):
+    settings = Settings(data_dir=tmp_path)
+    with (
+        patch("yt_live_kit.services.jobs._write_job", side_effect=OSError("fault")),
+        patch("yt_live_kit.services.jobs.threading.Thread") as thread,
+    ):
+        with pytest.raises(OSError, match="fault"):
+            start_job(
+                "upload", lambda **_kwargs: None, settings=settings,
+                requested_job_id="job-before-thread",
+            )
+    thread.assert_not_called()
+
+
+def test_thread_start_failure_leaves_requested_job_json_for_recovery(tmp_path):
+    settings = Settings(data_dir=tmp_path)
+    thread = MagicMock()
+    thread.start.side_effect = RuntimeError("thread fault")
+    with patch("yt_live_kit.services.jobs.threading.Thread", return_value=thread):
+        with pytest.raises(RuntimeError, match="thread fault"):
+            start_job(
+                "upload", lambda **_kwargs: None, settings=settings,
+                requested_job_id="job-saved-before-thread",
+            )
+    state = read_job("job-saved-before-thread", settings)
+    assert state is not None
+    assert state.status == "running"
 
 
 def test_read_job_returns_none_for_broken_json(tmp_path):
@@ -290,6 +350,26 @@ def test_close_orphans(tmp_path):
     loaded_done = read_job(done.job_id, settings)
     assert loaded_done is not None
     assert loaded_done.status == "done"
+
+
+def test_close_orphans_runs_upload_recovery_after_job_is_interrupted(tmp_path):
+    settings = Settings(data_dir=tmp_path)
+    job = create_job(
+        "upload", requested_job_id="orphan-upload", settings=settings
+    )
+
+    def assert_closed(_settings):
+        current = read_job(job.job_id, settings)
+        assert current is not None
+        assert current.status == "interrupted"
+        return ()
+
+    with patch(
+        "yt_live_kit.services.upload_queue.recover_upload_operations",
+        side_effect=assert_closed,
+    ) as recover:
+        close_orphans(settings)
+    recover.assert_called_once_with(settings)
 
 
 def test_cleanup_finished_removes_old_jobs(tmp_path):

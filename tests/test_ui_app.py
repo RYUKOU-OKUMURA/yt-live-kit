@@ -7,6 +7,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from yt_live_kit.services.jobs import JobState
 from yt_live_kit.services.pipeline import (
     STAGE_CHAPTERS,
@@ -284,6 +286,44 @@ def test_handle_finished_job_loads_result_on_done() -> None:
     clear_active.assert_called_once()
     mark_handled.assert_called_once_with("done123")
     rerun.assert_called_once_with(scope="app")
+
+
+@pytest.mark.parametrize("kind", ["batch", "shorts_queue", "upload"])
+def test_non_pipeline_finished_jobs_never_use_pipeline_loader(kind: str) -> None:
+    from yt_live_kit.ui.components import status_bar
+
+    job = JobState(
+        job_id=f"done-{kind}", kind=kind, status="done",
+        result_ref="operation-1" if kind == "upload" else "video1",
+    )
+    with (
+        patch("yt_live_kit.ui.components.status_bar.is_job_handled", return_value=False),
+        patch("yt_live_kit.ui.components.status_bar.mark_job_handled"),
+        patch("yt_live_kit.ui.components.status_bar.load_result_from_disk") as pipeline_loader,
+        patch("yt_live_kit.ui.components.status_bar.load_operation"),
+        patch("yt_live_kit.ui.components.status_bar.read_batch_summary", return_value=None),
+        patch("yt_live_kit.ui.components.status_bar.clear_active_job_id"),
+        patch("yt_live_kit.ui.components.status_bar.st.rerun"),
+    ):
+        status_bar._handle_finished_job(job)
+    pipeline_loader.assert_not_called()
+
+
+def test_unknown_finished_job_reports_japanese_error_without_pipeline_load() -> None:
+    from yt_live_kit.ui.components import status_bar
+
+    job = JobState(job_id="done-unknown", kind="mystery", status="done", result_ref="x")
+    with (
+        patch("yt_live_kit.ui.components.status_bar.is_job_handled", return_value=False),
+        patch("yt_live_kit.ui.components.status_bar.mark_job_handled"),
+        patch("yt_live_kit.ui.components.status_bar.load_result_from_disk") as loader,
+        patch("yt_live_kit.ui.components.status_bar.set_job_error") as set_error,
+        patch("yt_live_kit.ui.components.status_bar.clear_active_job_id"),
+        patch("yt_live_kit.ui.components.status_bar.st.rerun"),
+    ):
+        status_bar._handle_finished_job(job)
+    loader.assert_not_called()
+    assert "未対応" in set_error.call_args.args[0]
 
 
 def test_handle_finished_job_shows_error_on_failed() -> None:

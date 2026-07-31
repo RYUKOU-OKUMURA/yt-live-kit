@@ -271,10 +271,21 @@ def _fake_encode_segment(source, output, start_sec, end_sec, **kwargs):
 
 
 def _fake_ffmpeg_run(cmd, **kwargs):
+    # build_short() 内のフォント探索も同じ subprocess.run を使う。
+    # fc-list の末尾引数 ``family`` を出力パスと誤認して cwd に書かない。
+    if Path(cmd[0]).name == "fc-list":
+        return MagicMock(returncode=0, stdout="", stderr="")
     output_path = Path(cmd[-1])
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_bytes(b"short data")
     return MagicMock(returncode=0, stdout="", stderr="")
+
+
+def test_fake_ffmpeg_run_does_not_write_fc_list_argument(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    result = _fake_ffmpeg_run(["fc-list", ":", "family"])
+    assert result.returncode == 0
+    assert not (tmp_path / "family").exists()
 
 
 def _fake_ffmpeg_run_fail(cmd, **kwargs):
