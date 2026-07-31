@@ -564,14 +564,29 @@ data/{video_id}/ ...
 
 **作業:**
 
-- [ ] S2-1. `TELOP_PRESETS: dict[str, TelopPreset]` を定義する（例: `"bold_outline"` 太字 + 縁取り強め、`"boxed"` 座布団付き、`"default"` 既存 v2 スタイル互換）。各プリセットは `Bold` / `Outline` / `BorderStyle` / `BackColour` 等の ASS スタイルパラメータを持つ
-- [ ] S2-2. `write_ass()` に `preset: str = "default"` 引数を追加し、`cues` に強調フラグ（`TelopLine.emphasis` 相当）がある場合は該当語を `{\c&H...&}...{\c&HFFFFFF&}` のインライン色替えで囲む
-- [ ] S2-3. `write_hook_ass(hook_text, output_path, *, font_name, preset="hook") -> Path` を新規実装する。フックタイトルは動画冒頭の 1〜2 秒程度（表示区間は 0 秒〜最大 2 秒）に大きく表示する専用スタイル（既定スタイルよりフォントサイズを大きくする）とする
-- [ ] S2-4. 既存の `build_segment_subtitle()` は後方互換のため既定プリセットで動くこと（v2 の呼び出し元を壊さない）
+- [ ] S2-1. `TimedCue` の末尾に `emphasis: bool = False` を追加する。既存の 3 引数構築を壊さず、`TimedCue` を再生成する `filter_cues_for_segment()` 等ではフラグを引き継ぐ
+- [ ] S2-2. frozen dataclass の `TelopPreset` と `TELOP_PRESETS: dict[str, TelopPreset]` を定義する
+  - `TelopPreset` は `font_size: float`、`primary_colour` / `secondary_colour` / `outline_colour` / `back_colour: str`、`bold` / `italic` / `underline` / `strike_out: bool`、`scale_x` / `scale_y` / `spacing` / `angle: float`、`border_style: int`、`outline` / `shadow: float`、`alignment: int`、`margin_l` / `margin_r` / `margin_v: int`、`encoding: int`、`emphasis_colour: str` を持つ。`font_name` は従来どおり呼び出し引数で渡す
+  - ASS スタイル行の真偽値は `True=-1` / `False=0` で直列化する。スタイル色はアルファ込みの `&HAABBGGRR`、アルファを受けないインライン色は `&HBBGGRR&` とする。`BorderStyle` は通常縁取りを `1`、矩形の座布団を `3` とする
+  - `primary_colour` / `secondary_colour` / `outline_colour` / `back_colour` / `emphasis_colour` は `&H` + 8 桁の 16 進数というスタイル色形式を必須とし、不正なプリセット定義を日本語の `SubtitleBurnError` にする。インライン色は、スタイル色の先頭 2 桁のアルファを除いて `&HBBGGRR&` に変換する
+  - `"default"` は既存 v2 スタイル互換とし、`Style: Default,{font_name},54,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,0,0,0,0,100,100,0,0,1,3,0,2,10,10,180,1` と完全一致させる。`"bold_outline"` は太字 + 強い通常縁取り、`"boxed"` は `BorderStyle=3` の座布団、`"hook"` は `font_size > 54` のフック専用スタイルとする
+- [ ] S2-3. `write_ass(cues, output_path, *, font_name, preset="default", hook_text: str | None = None, hook_preset="hook", play_res_x=1080, play_res_y=1920) -> Path` へ後方互換で拡張する
+  - `hook_text is None` の場合は Hook スタイル / Hook イベントを一切追加せず、既定引数で既存のヘッダー・`Default` スタイル・イベント出力と完全互換にする
+  - `hook_text` がある場合は、選択した通常字幕スタイルを `Default`、フック用スタイルを `Hook` として同一 ASS に出力する。通常字幕は `Layer=0`、フックは `Layer=1` とする
+  - `TimedCue.emphasis=True` は語の一部ではなく、安全化済みの行全体を、選択した `TelopPreset.emphasis_colour` から導出したインライン色タグと、同じプリセットの `primary_colour` から導出した復帰色タグで囲む。本文を先に安全化し、その後でのみ管理下の色タグを付与する
+  - 通常字幕とフックに共通する安全化は、CRLF / CR を LF へ正規化し、ユーザー由来の `\` / `{` / `}` を全角の `＼` / `｛` / `｝` へ置換し、LF 以外の C0 制御文字を空白へ置換してから、最後に実 LF だけを管理下の `\N` へ変換する。この順序により、ユーザー由来の ASS override tag / control sequence を残さず、物理的な `Dialogue` 行を増やさない
+  - `hook_text is not None` かつ strip 後に空の場合は、`write_hook_ass()` と同じ日本語の `SubtitleBurnError` にする
+  - 不明な `preset` / `hook_preset` は、利用可能な名前を含む日本語の `SubtitleBurnError` にする
+- [ ] S2-4. `write_hook_ass(hook_text, output_path, *, font_name, preset="hook") -> Path` を新規実装する。同じ ASS serializer へ委譲し、フックを `0:00:00.00` から `0:00:02.00` まで固定表示する。strip 後に空の `hook_text` は日本語の `SubtitleBurnError` にする。既存の `build_segment_subtitle()` は後方互換のため既定プリセットで動かし、v2 の呼び出し元を壊さない
 - [ ] S2-5. ユニットテスト
-  - 各プリセットで `[V4+ Styles]` の該当行が変わること
-  - 強調語のインライン色替えが正しい範囲を囲むこと
-  - `write_hook_ass` の出力形式（`PlayResX/PlayResY` は 1080x1920 のまま）
+  - `TimedCue` を従来の 3 引数で構築でき、`emphasis=False` になること。再生成処理でもフラグを引き継ぐこと
+  - `default` のスタイル行が既存文字列と完全一致し、`preset` 省略かつフックなしの出力に Hook スタイル / イベントが無いこと。各追加プリセットの必須フィールド・`BorderStyle`・色形式とスタイル行の差分
+  - 不明な `preset` / `hook_preset` が利用可能名を含む日本語エラーになること
+  - 全プリセット色が `&H` + 8 桁の 16 進数として検証され、不正な色を日本語エラーにすること。強調なしでは色タグが無く、強調ありでは選択プリセットの `emphasis_colour` から導出した色で安全化済みの行全体を囲み、`primary_colour` から導出した色へ復帰すること
+  - 通常字幕と Hook の双方で、ユーザー由来の `\` / `{` / `}`、文字列として入力された `\N`、実改行、LF 以外の C0 制御文字を安全化できること。ユーザー由来の override / control sequence が残らず、実改行を含めても想定外の物理 `Dialogue` 行が増えないこと
+  - `write_hook_ass` が `0:00:00.00`〜`0:00:02.00`、`PlayResX/PlayResY=1080x1920`、54 より大きいフォントで出力すること。`write_hook_ass()` と `write_ass(..., hook_text=...)` の双方が空白だけのフックを拒否すること
+  - 同一 ASS に通常字幕と Hook の両スタイル・両イベントが入り、通常字幕 `Layer=0` / Hook `Layer=1` になること
+  - `build_segment_subtitle()` が引き続き既定の `default` 相当で動くこと
 
 **Done 条件:**
 
@@ -596,24 +611,27 @@ data/{video_id}/ ...
 
 **作業:**
 
-- [ ] S3-1. `build_short_from_segments(video_id, segments: list[tuple[float, float]], settings=None, *, layout="blur", telop_script: TelopScriptDocument | None = None, hook_text: str | None = None, output_name: str | None = None, ffmpeg_path=FFMPEG_DEFAULT, on_progress=None, keep_intermediate=False) -> ShortResult` を実装する
+- [ ] S3-1. `build_short_from_segments(video_id, segments: list[tuple[float, float]], settings=None, *, layout="blur", telop_script: TelopScriptDocument | None = None, hook_text: str | None = None, preset="default", hook_preset="hook", output_name: str | None = None, ffmpeg_path=FFMPEG_DEFAULT, on_progress=None, keep_intermediate=False) -> ShortResult` を実装する
   - 手順:
     1. `ensure_source_video()` で元動画を確保
     2. 各区間を `encode_segment(..., crf=INTERMEDIATE_CRF)` で切り出す → `data/{video_id}/shorts/segments/{clip_id}/seg_001.mp4` …
     3. `build_concat_list()` → `concat_segments()` で 0 秒始まりの中間ファイルに連結する → `.../segments/{clip_id}/concat.mp4`
-    4. `subtitle_burn.build_concatenated_subtitle()`（新規）で、区間ごとのテロップ行を**連結後のタイムライン**に合わせて再計算し、`hook_text` があれば冒頭に追加した ASS を生成する
-    5. パス 2（[`build_short()`](../src/yt_live_kit/services/shorts.py) と同じ考え方）: レイアウト（blur / crop）+ 字幕焼き込みを連結済み中間ファイルに対して実行する
+    4. `subtitle_burn.build_concatenated_subtitle()`（新規）へ `preset` / `hook_preset` を渡し、区間ごとのテロップ行を**連結後のタイムライン**に合わせて再計算する。さらに S2 の `write_ass(..., preset=preset, hook_text=..., hook_preset=hook_preset)` を使って通常字幕とフックを同一 ASS に生成する
+    5. パス 2（[`build_short()`](../src/yt_live_kit/services/shorts.py) と同じ考え方）: レイアウト（blur / crop）+ 字幕焼き込みを連結済み中間ファイルに対して実行する。S3 の字幕フィルタは ASS 内の `Default` / `Hook` スタイルを優先するため `subtitles=...` を `force_style` なしで使う。既存 `build_short()` の単一区間向け `force_style` 経路は変更しない
     6. `keep_intermediate=False`（既定）なら中間ファイルを削除する
   - 出力: `data/{video_id}/shorts/output/short_{clip_id}.mp4`（単一区間の従来命名 `short_{start}_{end}.mp4` とは区別する）
-- [ ] S3-2. `subtitle_burn.build_concatenated_subtitle(video_id, segments, settings, *, telop_script=None, hook_text=None) -> Path` を実装する
+- [ ] S3-2. `subtitle_burn.build_concatenated_subtitle(video_id, segments, settings, *, telop_script=None, hook_text=None, preset="default", hook_preset="hook") -> Path` を実装する
   - 各区間のカットは元動画のタイムコードを持つが、連結後は「その区間より前にある区間の合計尺」だけ後ろにずれる。**累積オフセット**を区間ごとに計算し、`TelopLine` の時刻をずらしてから ASS に書き出す
   - `telop_script` が無い場合（S1 を経ずに生成する場合）は VTT 由来の字幕（既存の `filter_cues_for_segment`）にフォールバックする
+  - 通常字幕と `hook_text`、`preset`、`hook_preset` は S2 の同一 ASS API へ一度に渡し、ffmpeg の字幕焼き込みも 1 回だけ行う。フック用の別 ASS を後段で重ねず、選択プリセットを全呼び出し段で欠落させない
 - [ ] S3-3. 尺バリデーション: 合計尺が `MIN_DURATION_SEC`（10 秒）未満、または `MAX_DURATION_SEC`（180 秒）超なら `ShortsError` にする。**エラーメッセージには「区間を減らすか短くしてください」という具体的な対処を含める**（UI 側の分割・短縮誘導は S4 で実装する）
 - [ ] S3-4. ユニットテスト
   - `build_short_from_segments` が区間数ぶん `encode_segment` を呼ぶこと
   - 累積オフセット計算（3 区間以上、区間間に間隔がある場合）
   - 合計尺の境界値（9 秒 / 10 秒 / 180 秒 / 181 秒）
   - `on_progress` が区間ごと・連結時・焼き込み時に呼ばれること
+  - `preset` / `hook_preset` が `build_short_from_segments()` → `build_concatenated_subtitle()` → `write_ass()` へ欠落なく伝播すること
+  - S3 の ffmpeg コマンドが `subtitles=...` を使い `force_style` を含まないこと。既存 `build_short()` の `force_style` 付きコマンド契約は変わらないこと
   - subprocess はすべてモックする
 
 **Done 条件:**
@@ -1000,6 +1018,7 @@ PLAN0 要件・計画の確定
 
 | 日付 | 内容 |
 |------|------|
+| 2026-08-01 | S2 着手前監査・計画レビューを反映。`TimedCue.emphasis`、ASS プリセットの完全な型・色導出、既定出力互換、フック固定時間、安全化順序、同一 ASS 統合、S3 への preset 伝播と `force_style` 分離を固定 |
 | 2026-08-01 | S1 着手前監査を反映。テロップ JSON の絶対秒スキーマ、公開シグネチャ、検証結果型、プロンプト保存先、`make_clip_id()` のミリ秒丸め、VTT parser の公開互換、softfail 境界を固定 |
 | 2026-08-01 | PLAN0-7: U5 着手前監査を反映。正式 IA を公開 3 画面 + 非表示詳細に固定し、旧処理済み一覧の削除、ストレージ管理の設定画面移設、概要欄更新経路・成功記録・安全な受け入れ境界を明確化 |
 | 2026-08-01 | PLAN0-6: 実装前監査の指摘を反映。YouTube granular quota を 100 uploads/day に更新し、進捗更新権限・概要欄完了記録・`clip_id`・S4 確認境界・P1 ffprobe 範囲を明確化 |
