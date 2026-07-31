@@ -777,7 +777,7 @@ data/{video_id}/ ...
 **作業:**
 
 - [x] P0-1. P1 / P2 の Done 条件と全モックテストが完了し、実 API を自動テストが呼ばないことを確認する。実操作の承認待ちでも P1 / P2 の開発・レビュー・コミットを止めない
-- [ ] P0-2. `channels.list(mine=true)` の実チャンネル ID / 名称、対象ファイル、絶対パス、サイズ、尺、タイトル、説明文、タグ、timezone 付き予約日時と UTC `Z`、`privacyStatus=private`、`notifySubscribers=false`、Made for Kids / synthetic media の選択、Community Guidelines 同意、当日 attempt 数をユーザーに提示する。**private lock が非該当なら、この probe 動画も指定時刻に public となり得る**ことを明記し、その外部公開まで含む P0 専用の明示承認を得るまで確定しない
+- [x] P0-2. `channels.list(mine=true)` の実チャンネル ID / 名称、対象ファイル、絶対パス、サイズ、尺、タイトル、説明文、タグ、timezone 付き予約日時と UTC `Z`、`privacyStatus=private`、`notifySubscribers=false`、Made for Kids / synthetic media の選択、Community Guidelines 同意、当日 attempt 数をユーザーに提示する。**private lock が非該当なら、この probe 動画も指定時刻に public となり得る**ことを明記し、その外部公開まで含む P0 専用の明示承認を得るまで確定しない
 - [ ] P0-3. 承認後も P2 の確認後再検証を通し、operation ID を発行した本番経路から 1 本だけ upload する。operation の `reserved → uploading → uploaded` または `needs_reconciliation` / `failed`、job ID、YouTube video ID、attempt 台帳を記録する
 - [ ] P0-4. `videos.list(part="status,processingDetails")` の bounded poll と YouTube Studio で processing 状態、指定時刻前の private、公開予約可否、private lock の有無を確認する。**private lock は probe 成功や予約投稿成功として扱わない**
 - [ ] P0-5. private lock がある場合、審査フォームの提出内容をユーザーに提示し、実 upload の承認とは別の**審査フォーム提出専用の明示承認**を得てから提出する。承認前は提出しない。審査待ちは P1 / P2 のブロッカーにしない
@@ -790,7 +790,8 @@ data/{video_id}/ ...
 - 対象候補は `/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/IJvd6k6ZmUo/shorts/output/short_b71e7cdb2b8d.mp4`、2,209,539 bytes、24.031995 秒
 - タイトルは「同じ条件でゲームを作らせた結果」、説明文は「ソル、テラ、ルナに同じ要件定義と技術スタックでゲームを作らせたときの意外な感想。」、タグは「ゲーム制作、ベンチマーク、ソル、テラ、ルナ」
 - policy は毎日 09:00、1 日間隔、`Asia/Tokyo`。準備時の候補 slot は 2026-08-01 09:00 JST / 2026-08-01 00:00 UTC、private 固定、notify false、LA 当日 attempt は 0 / 100
-- Made for Kids / synthetic media の選択、Community Guidelines 同意、外部公開可能性を含む P0 専用承認は未取得。承認時に最低 10 分の lead を下回った場合、または snapshot が変わった場合はこの候補を確定せず、新しい全項目を再提示する
+- 2026-08-01 07:12 JST、ユーザーから Made for Kids「いいえ」、synthetic media「いいえ」、Community Guidelines「確認済み」、上記動画の実 upload と指定時刻の外部公開可能性を含む P0 専用承認を取得した。動画削除と審査フォーム提出は承認範囲外
+- 承認後の本番 preview 再検証で全項目、LA 当日 attempt 0 / 100、fingerprint `097707e51c7723bc0a0cc31a1aabd0834635cabd5e4c6418ee2606179e913ca3` が一致し、最低 10 分の lead を維持していることを確認した
 
 **Done 条件:**
 
