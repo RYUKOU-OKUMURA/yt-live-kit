@@ -8,6 +8,8 @@ from typing import Callable
 import streamlit as st
 
 from yt_live_kit.config import Settings, get_settings
+from yt_live_kit.services import youtube_api
+from yt_live_kit.services.chapter_validator import validate_chapters
 from yt_live_kit.services.history import ProcessedVideo, list_processed_videos
 from yt_live_kit.services.jobs import JobBusyError, is_busy, start_job
 from yt_live_kit.services.pipeline import load_result_from_disk, regenerate_job_target
@@ -20,7 +22,8 @@ from yt_live_kit.services.storage import (
     purge_sources_older_than,
     summarize,
 )
-from yt_live_kit.ui.state import clear_cut_result, set_active_job_id, set_result
+from yt_live_kit.services.youtube_api import YouTubeAPIError
+from yt_live_kit.ui.state import set_active_job_id
 
 _BUSY_MESSAGE = "他の処理が実行中です。完了までお待ちください。"
 _REGENERATE_NOTE = (
@@ -30,6 +33,8 @@ _SESSION_STORAGE_SUMMARY = "history_storage_summary"
 _SESSION_PURGE_CONFIRM = "history_purge_confirm_ids"
 _SESSION_BULK_PREVIEW = "history_bulk_purge_preview"
 _SESSION_PURGE_SUCCESS = "history_purge_success_message"
+_SESSION_OPEN_CHAPTER_IDS = "history_open_chapter_ids"
+_SESSION_DESC_PREVIEW = "history_desc_preview"
 
 
 def chapter_button_label(has_chapters: bool) -> str:
@@ -139,6 +144,53 @@ def _clear_purge_confirm(video_id: str) -> None:
     st.session_state[_SESSION_PURGE_CONFIRM] = ids
 
 
+def _open_chapter_ids() -> set[str]:
+    raw = st.session_state.get(_SESSION_OPEN_CHAPTER_IDS)
+    if isinstance(raw, set):
+        return raw
+    return set()
+
+
+def _toggle_open_chapter(video_id: str) -> None:
+    ids = _open_chapter_ids()
+    if video_id in ids:
+        ids.discard(video_id)
+    else:
+        ids.add(video_id)
+    st.session_state[_SESSION_OPEN_CHAPTER_IDS] = ids
+
+
+def _get_desc_preview(video_id: str) -> dict[str, str] | None:
+    previews = st.session_state.get(_SESSION_DESC_PREVIEW)
+    if not isinstance(previews, dict):
+        return None
+    preview = previews.get(video_id)
+    if isinstance(preview, dict):
+        return preview
+    return None
+
+
+def _set_desc_preview(
+    video_id: str, current: str, merged: str, warning: str | None = None
+) -> None:
+    previews = st.session_state.get(_SESSION_DESC_PREVIEW)
+    if not isinstance(previews, dict):
+        previews = {}
+    entry = {"current": current, "merged": merged}
+    if warning:
+        entry["warning"] = warning
+    previews[video_id] = entry
+    st.session_state[_SESSION_DESC_PREVIEW] = previews
+
+
+def _clear_desc_preview(video_id: str) -> None:
+    previews = st.session_state.get(_SESSION_DESC_PREVIEW)
+    if not isinstance(previews, dict):
+        return
+    previews.pop(video_id, None)
+    st.session_state[_SESSION_DESC_PREVIEW] = previews
+
+
 def _get_bulk_preview() -> dict[str, object] | None:
     raw = st.session_state.get(_SESSION_BULK_PREVIEW)
     if isinstance(raw, dict):
@@ -190,6 +242,85 @@ def _start_regenerate(video: ProcessedVideo, target: str, settings: Settings) ->
     st.rerun()
 
 
+def _start_description_preview(video: ProcessedVideo, settings: Settings) -> None:
+    if not youtube_api.is_configured(settings):
+        st.error(
+            "OAuth クライアントシークレットが見つかりません"
+            f"（{settings.youtube_client_secret}）。"
+            "README の「概要欄への反映」節を参照してセットアップしてください。"
+        )
+        return
+
+    loaded = load_result_from_disk(video.video_id, settings)
+    chapters_text = loaded.chapters_text if loaded is not None else ""
+    if not chapters_text.strip():
+        st.error("チャプターがありません。")
+        return
+
+    validation = validate_chapters(chapters_text)
+    warning = (
+        "チャプター形式に問題があります: " + "; ".join(validation.errors)
+        if validation.errors
+        else None
+    )
+
+    try:
+        # 初回のみ get_credentials 内でブラウザが開き OAuth 同意フローが走る
+        # （Streamlit の処理をブロックするが、ローカルツールのため許容する）。
+        snippet = youtube_api.fetch_video_snippet(video.video_id, settings)
+        current = snippet.get("description", "")
+        merged = youtube_api.merge_chapters_into_description(current, chapters_text)
+    except YouTubeAPIError as exc:
+        st.error(str(exc))
+        return
+
+    _set_desc_preview(video.video_id, current, merged, warning)
+    st.rerun()
+
+
+def _render_description_preview(
+    video: ProcessedVideo,
+    *,
+    busy: bool,
+    settings: Settings,
+) -> None:
+    preview = _get_desc_preview(video.video_id)
+    if preview is None:
+        return
+
+    st.warning("以下の内容で YouTube の概要欄を上書きします。取り消しはできません。")
+    if preview.get("warning"):
+        st.warning(preview["warning"])
+    st.code(preview["merged"])
+
+    preview_cols = st.columns(2)
+    with preview_cols[0]:
+        if st.button(
+            "YouTube に書き込む",
+            key=f"desc_write_{video.video_id}",
+            type="primary",
+            disabled=busy,
+        ):
+            try:
+                youtube_api.update_video_description(
+                    video.video_id, preview["merged"], settings
+                )
+            except YouTubeAPIError as exc:
+                st.error(str(exc))
+            else:
+                _clear_desc_preview(video.video_id)
+                _set_purge_success_message("概要欄に反映しました。")
+                st.rerun()
+    with preview_cols[1]:
+        if st.button(
+            "キャンセル",
+            key=f"desc_cancel_{video.video_id}",
+            disabled=busy,
+        ):
+            _clear_desc_preview(video.video_id)
+            st.rerun()
+
+
 def _render_row_actions(
     video: ProcessedVideo,
     *,
@@ -203,7 +334,7 @@ def _render_row_actions(
         if video.has_transcript
         else "先に字幕の取得と整形を実行してください。"
     )
-    action_cols = st.columns([2, 2, 2, 1])
+    action_cols = st.columns([2, 2, 2, 2, 1])
     with action_cols[0]:
         if st.button(
             chapter_button_label(video.has_chapters),
@@ -263,15 +394,31 @@ def _render_row_actions(
             _request_purge_confirm(video.video_id)
             st.rerun()
     with action_cols[3]:
+        if st.button(
+            "概要欄に反映",
+            key=f"desc_{video.video_id}",
+            disabled=busy or not video.has_chapters,
+            help=None if video.has_chapters else "先にチャプターを生成してください。",
+        ):
+            _start_description_preview(video, settings)
+    with action_cols[4]:
         # 読み取り専用のため busy 中も有効のまま
-        if st.button("開く", key=f"open_{video.video_id}"):
-            loaded = load_result_from_disk(video.video_id, settings)
-            if loaded is None:
-                st.error("成果物を読み込めませんでした。処理済み一覧から開き直してください。")
-            else:
-                set_result(loaded)
-                clear_cut_result()
-                st.rerun()
+        is_open = video.video_id in _open_chapter_ids()
+        label = "チャプターを閉じる" if is_open else "チャプターを表示"
+        if st.button(label, key=f"open_{video.video_id}"):
+            _toggle_open_chapter(video.video_id)
+            st.rerun()
+
+    if video.video_id in _open_chapter_ids():
+        loaded = load_result_from_disk(video.video_id, settings)
+        if loaded is None or not loaded.chapters_text.strip():
+            st.info(
+                "チャプターがまだ生成されていません。「チャプターを生成」を実行してください。"
+            )
+        else:
+            st.code(loaded.chapters_text, language="markdown")
+
+    _render_description_preview(video, busy=busy, settings=settings)
 
 
 def _render_storage_section(

@@ -152,6 +152,29 @@ uv run streamlit run src/yt_live_kit/ui/app.py --server.address 127.0.0.1
 
 ---
 
+## 概要欄への反映（YouTube Data API）
+
+処理済み一覧の **「概要欄に反映」** ボタンから、生成したチャプターを YouTube の概要欄に直接書き込めます。ネットワーク経由で YouTube Data API を呼び出すため、事前に以下のセットアップが必要です。
+
+### セットアップ手順
+
+1. [Google Cloud Console](https://console.cloud.google.com/) でプロジェクトを作成する
+2. 「APIとサービス」→「ライブラリ」から **YouTube Data API v3** を有効化する
+3. 「APIとサービス」→「OAuth 同意画面」で、User Type を **外部** にして作成し、**テストユーザー** に自分の Google アカウントを追加する
+4. 「APIとサービス」→「認証情報」→「認証情報を作成」→「OAuth クライアント ID」で、アプリケーションの種類に **デスクトップアプリ** を選んで作成する
+5. 作成した OAuth クライアント ID の JSON をダウンロードし、`data/_config/client_secret.json` として配置する（`YTLK_YOUTUBE_CLIENT_SECRET` で別パスも指定可能）
+
+### 使い方
+
+1. **処理済み一覧** タブで、チャプターを生成済みの動画の行にある **「概要欄に反映」** を押す
+2. **初回のみブラウザが自動で開き**、Google アカウントでの認証と権限の承認を求められます（承認後、認証情報は `data/_config/youtube_token.json` に保存され、以降は自動で使われます）
+3. 現在の概要欄にチャプターをマージした内容がプレビュー表示されます。**この時点ではまだ YouTube 側は更新されません**
+4. 内容を確認し、**「YouTube に書き込む」** を押すと概要欄が上書きされます（取り消しはできません）。誤りがある場合は **「キャンセル」** を押してください
+
+概要欄はマーカー行（`▼ タイムライン` 〜 `▲ タイムラインここまで`）で管理されます。既にマーカーがある場合はその間だけを差し替え、前後の本文（挨拶文やリンクなど）はそのまま残ります。マーカーがまだ無い場合は、既存の概要欄の末尾に追記されます。
+
+---
+
 ## Codex CLI 未導入時
 
 チャプター・切り抜き候補の自動生成には Codex CLI が必要です。未導入の場合、画面に日本語でインストール手順が表示されます。
@@ -311,6 +334,8 @@ data/
     {handle}.json         # チャンネル一覧のキャッシュ
   _config/
     description_template.txt   # 概要欄の定型文（ユーザー編集）
+    client_secret.json         # YouTube Data API の OAuth クライアントシークレット（ユーザー配置）
+    youtube_token.json         # OAuth 認証トークン（初回認証後に自動生成）
   {video_id}/
     meta.json
     subtitles/ja.vtt
@@ -338,6 +363,7 @@ data/
 | `YTLK_YTDLP_PATH` | yt-dlp バイナリのパス | `yt-dlp` |
 | `YTLK_FFMPEG_PATH` | ffmpeg バイナリのパス | `ffmpeg` |
 | `YTLK_SUBTITLE_FONT` | 字幕焼き込みに使うフォント名（未指定時は自動検出） | 自動検出 |
+| `YTLK_YOUTUBE_CLIENT_SECRET` | YouTube Data API の OAuth クライアントシークレット JSON のパス | `./data/_config/client_secret.json` |
 
 ## セキュリティ
 

@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 
 from yt_live_kit.services.history import ProcessedVideo
 from yt_live_kit.services.storage import StorageError, StorageSummary, VideoStorage
+from yt_live_kit.services.youtube_api import YouTubeAPIError
 from yt_live_kit.ui.pages import history
 
 
@@ -329,7 +330,7 @@ def test_render_row_actions_disables_purge_confirm_buttons_when_busy() -> None:
     disabled_by_label = dict(calls)
     assert disabled_by_label["削除を実行"] is True
     assert disabled_by_label["キャンセル"] is True
-    assert disabled_by_label.get("開く") is None
+    assert disabled_by_label.get("チャプターを表示") is None
 
 
 def test_render_storage_section_disables_storage_buttons_when_busy() -> None:
@@ -538,3 +539,415 @@ def test_render_row_actions_disables_regen_buttons_without_transcript() -> None:
     for _label, disabled, help_text in regen_calls:
         assert disabled is True
         assert help_text == "先に字幕の取得と整形を実行してください。"
+
+
+def test_toggle_open_chapter_adds_and_removes_video_id() -> None:
+    session_state: dict[str, object] = {}
+
+    with patch("yt_live_kit.ui.pages.history.st.session_state", session_state):
+        assert history._open_chapter_ids() == set()
+
+        history._toggle_open_chapter("vid1234567")
+        assert history._open_chapter_ids() == {"vid1234567"}
+
+        history._toggle_open_chapter("vid1234567")
+        assert history._open_chapter_ids() == set()
+
+
+def test_render_row_actions_toggles_chapter_visibility_and_reruns() -> None:
+    video = ProcessedVideo(
+        video_id="vid1234567",
+        title="テスト",
+        fetched_at=None,
+        has_chapters=True,
+        has_transcript=True,
+        has_clips=False,
+    )
+    settings = MagicMock()
+    session_state: dict[str, object] = {}
+
+    def mock_button(label: str, **kwargs: object) -> bool:
+        return label == "チャプターを表示"
+
+    with (
+        patch("yt_live_kit.ui.pages.history.st.columns", side_effect=_mock_columns),
+        patch("yt_live_kit.ui.pages.history.st.button", side_effect=mock_button),
+        patch("yt_live_kit.ui.pages.history.st.session_state", session_state),
+        patch("yt_live_kit.ui.pages.history.st.rerun") as rerun,
+        patch("yt_live_kit.ui.pages.history.load_result_from_disk"),
+        patch("yt_live_kit.ui.pages.history.st.code"),
+        patch("yt_live_kit.ui.pages.history.st.info"),
+    ):
+        history._render_row_actions(video, busy=False, settings=settings)
+
+    rerun.assert_called_once()
+    assert session_state[history._SESSION_OPEN_CHAPTER_IDS] == {"vid1234567"}
+
+
+def test_render_row_actions_shows_chapters_code_when_open() -> None:
+    video = ProcessedVideo(
+        video_id="vid1234567",
+        title="テスト",
+        fetched_at=None,
+        has_chapters=True,
+        has_transcript=True,
+        has_clips=False,
+    )
+    settings = MagicMock()
+    loaded = MagicMock()
+    loaded.chapters_text = "00:00 イントロ"
+
+    def mock_button(label: str, **kwargs: object) -> bool:
+        return False
+
+    with (
+        patch("yt_live_kit.ui.pages.history.st.columns", side_effect=_mock_columns),
+        patch("yt_live_kit.ui.pages.history.st.button", side_effect=mock_button),
+        patch(
+            "yt_live_kit.ui.pages.history._open_chapter_ids",
+            return_value={"vid1234567"},
+        ),
+        patch(
+            "yt_live_kit.ui.pages.history.load_result_from_disk",
+            return_value=loaded,
+        ),
+        patch("yt_live_kit.ui.pages.history.st.code") as show_code,
+        patch("yt_live_kit.ui.pages.history.st.info") as show_info,
+    ):
+        history._render_row_actions(video, busy=False, settings=settings)
+
+    show_code.assert_called_once_with("00:00 イントロ", language="markdown")
+    show_info.assert_not_called()
+
+
+def test_render_row_actions_shows_info_when_chapters_missing() -> None:
+    video = ProcessedVideo(
+        video_id="vid1234567",
+        title="テスト",
+        fetched_at=None,
+        has_chapters=False,
+        has_transcript=True,
+        has_clips=False,
+    )
+    settings = MagicMock()
+    loaded = MagicMock()
+    loaded.chapters_text = "   "
+
+    def mock_button(label: str, **kwargs: object) -> bool:
+        return False
+
+    with (
+        patch("yt_live_kit.ui.pages.history.st.columns", side_effect=_mock_columns),
+        patch("yt_live_kit.ui.pages.history.st.button", side_effect=mock_button),
+        patch(
+            "yt_live_kit.ui.pages.history._open_chapter_ids",
+            return_value={"vid1234567"},
+        ),
+        patch(
+            "yt_live_kit.ui.pages.history.load_result_from_disk",
+            return_value=loaded,
+        ),
+        patch("yt_live_kit.ui.pages.history.st.code") as show_code,
+        patch("yt_live_kit.ui.pages.history.st.info") as show_info,
+    ):
+        history._render_row_actions(video, busy=False, settings=settings)
+
+    show_code.assert_not_called()
+    show_info.assert_called_once_with(
+        "チャプターがまだ生成されていません。「チャプターを生成」を実行してください。"
+    )
+
+
+def test_render_row_actions_desc_button_disabled_without_chapters() -> None:
+    video = ProcessedVideo(
+        video_id="vid1234567",
+        title="テスト",
+        fetched_at=None,
+        has_chapters=False,
+        has_transcript=True,
+        has_clips=False,
+    )
+    settings = MagicMock()
+    calls: list[tuple[str, bool | None, str | None]] = []
+
+    def mock_button(label: str, **kwargs: object) -> bool:
+        calls.append((label, kwargs.get("disabled"), kwargs.get("help")))  # type: ignore[arg-type]
+        return False
+
+    with (
+        patch("yt_live_kit.ui.pages.history.st.columns", side_effect=_mock_columns),
+        patch("yt_live_kit.ui.pages.history.st.button", side_effect=mock_button),
+        patch("yt_live_kit.ui.pages.history._get_desc_preview", return_value=None),
+    ):
+        history._render_row_actions(video, busy=False, settings=settings)
+
+    disabled_by_label = {label: (disabled, help_text) for label, disabled, help_text in calls}
+    assert disabled_by_label["概要欄に反映"] == (
+        True,
+        "先にチャプターを生成してください。",
+    )
+
+
+def test_render_row_actions_desc_button_enabled_with_chapters() -> None:
+    video = ProcessedVideo(
+        video_id="vid1234567",
+        title="テスト",
+        fetched_at=None,
+        has_chapters=True,
+        has_transcript=True,
+        has_clips=False,
+    )
+    settings = MagicMock()
+    calls: list[tuple[str, bool | None, str | None]] = []
+
+    def mock_button(label: str, **kwargs: object) -> bool:
+        calls.append((label, kwargs.get("disabled"), kwargs.get("help")))  # type: ignore[arg-type]
+        return False
+
+    with (
+        patch("yt_live_kit.ui.pages.history.st.columns", side_effect=_mock_columns),
+        patch("yt_live_kit.ui.pages.history.st.button", side_effect=mock_button),
+        patch("yt_live_kit.ui.pages.history._get_desc_preview", return_value=None),
+    ):
+        history._render_row_actions(video, busy=False, settings=settings)
+
+    disabled_by_label = {label: (disabled, help_text) for label, disabled, help_text in calls}
+    assert disabled_by_label["概要欄に反映"] == (False, None)
+
+
+def test_desc_preview_session_state_helpers_set_get_clear() -> None:
+    session_state: dict[str, object] = {}
+
+    with patch("yt_live_kit.ui.pages.history.st.session_state", session_state):
+        assert history._get_desc_preview("vid1") is None
+
+        history._set_desc_preview("vid1", "現在の概要", "反映後の概要")
+        assert history._get_desc_preview("vid1") == {
+            "current": "現在の概要",
+            "merged": "反映後の概要",
+        }
+
+        history._clear_desc_preview("vid1")
+        assert history._get_desc_preview("vid1") is None
+
+
+def test_start_description_preview_errors_when_not_configured() -> None:
+    video = ProcessedVideo(
+        video_id="vid1234567",
+        title="テスト",
+        fetched_at=None,
+        has_chapters=True,
+        has_transcript=True,
+        has_clips=False,
+    )
+    settings = MagicMock()
+    settings.youtube_client_secret = "data/_config/client_secret.json"
+
+    with (
+        patch("yt_live_kit.ui.pages.history.youtube_api.is_configured", return_value=False),
+        patch("yt_live_kit.ui.pages.history.st.error") as show_error,
+        patch("yt_live_kit.ui.pages.history.st.rerun") as rerun,
+    ):
+        history._start_description_preview(video, settings)
+
+    show_error.assert_called_once()
+    rerun.assert_not_called()
+
+
+def test_start_description_preview_errors_when_no_chapters() -> None:
+    video = ProcessedVideo(
+        video_id="vid1234567",
+        title="テスト",
+        fetched_at=None,
+        has_chapters=True,
+        has_transcript=True,
+        has_clips=False,
+    )
+    settings = MagicMock()
+    loaded = MagicMock()
+    loaded.chapters_text = "   "
+
+    with (
+        patch("yt_live_kit.ui.pages.history.youtube_api.is_configured", return_value=True),
+        patch("yt_live_kit.ui.pages.history.load_result_from_disk", return_value=loaded),
+        patch("yt_live_kit.ui.pages.history.st.error") as show_error,
+        patch("yt_live_kit.ui.pages.history.st.rerun") as rerun,
+    ):
+        history._start_description_preview(video, settings)
+
+    show_error.assert_called_once_with("チャプターがありません。")
+    rerun.assert_not_called()
+
+
+def test_start_description_preview_sets_preview_and_reruns() -> None:
+    video = ProcessedVideo(
+        video_id="vid1234567",
+        title="テスト",
+        fetched_at=None,
+        has_chapters=True,
+        has_transcript=True,
+        has_clips=False,
+    )
+    settings = MagicMock()
+    loaded = MagicMock()
+    loaded.chapters_text = "0:00 イントロ\n1:00 本編\n2:00 まとめ"
+    session_state: dict[str, object] = {}
+
+    with (
+        patch("yt_live_kit.ui.pages.history.youtube_api.is_configured", return_value=True),
+        patch("yt_live_kit.ui.pages.history.load_result_from_disk", return_value=loaded),
+        patch(
+            "yt_live_kit.ui.pages.history.youtube_api.fetch_video_snippet",
+            return_value={"title": "t", "description": "既存の概要"},
+        ),
+        patch("yt_live_kit.ui.pages.history.st.session_state", session_state),
+        patch("yt_live_kit.ui.pages.history.st.warning") as show_warning,
+        patch("yt_live_kit.ui.pages.history.st.rerun") as rerun,
+    ):
+        history._start_description_preview(video, settings)
+
+    rerun.assert_called_once()
+    preview = session_state[history._SESSION_DESC_PREVIEW]["vid1234567"]
+    assert preview["current"] == "既存の概要"
+    assert "0:00 イントロ" in preview["merged"]
+    # チャプター形式が正しいため警告は出ない
+    show_warning.assert_not_called()
+
+
+def test_start_description_preview_shows_error_on_youtube_api_error() -> None:
+    video = ProcessedVideo(
+        video_id="vid1234567",
+        title="テスト",
+        fetched_at=None,
+        has_chapters=True,
+        has_transcript=True,
+        has_clips=False,
+    )
+    settings = MagicMock()
+    loaded = MagicMock()
+    loaded.chapters_text = "0:00 イントロ\n1:00 本編\n2:00 まとめ"
+
+    with (
+        patch("yt_live_kit.ui.pages.history.youtube_api.is_configured", return_value=True),
+        patch("yt_live_kit.ui.pages.history.load_result_from_disk", return_value=loaded),
+        patch(
+            "yt_live_kit.ui.pages.history.youtube_api.fetch_video_snippet",
+            side_effect=YouTubeAPIError("エラーが発生しました"),
+        ),
+        patch("yt_live_kit.ui.pages.history.st.error") as show_error,
+        patch("yt_live_kit.ui.pages.history.st.rerun") as rerun,
+    ):
+        history._start_description_preview(video, settings)
+
+    show_error.assert_called_once_with("エラーが発生しました")
+    rerun.assert_not_called()
+
+
+def test_render_description_preview_writes_and_clears_on_success() -> None:
+    video = ProcessedVideo(
+        video_id="vid1234567",
+        title="テスト",
+        fetched_at=None,
+        has_chapters=True,
+        has_transcript=True,
+        has_clips=False,
+    )
+    settings = MagicMock()
+    session_state: dict[str, object] = {
+        history._SESSION_DESC_PREVIEW: {
+            "vid1234567": {"current": "元", "merged": "反映後の概要"}
+        }
+    }
+
+    def mock_button(label: str, **kwargs: object) -> bool:
+        return label == "YouTube に書き込む"
+
+    with (
+        patch("yt_live_kit.ui.pages.history.st.columns", side_effect=_mock_columns),
+        patch("yt_live_kit.ui.pages.history.st.button", side_effect=mock_button),
+        patch("yt_live_kit.ui.pages.history.st.warning"),
+        patch("yt_live_kit.ui.pages.history.st.code"),
+        patch("yt_live_kit.ui.pages.history.st.session_state", session_state),
+        patch(
+            "yt_live_kit.ui.pages.history.youtube_api.update_video_description"
+        ) as update_desc,
+        patch("yt_live_kit.ui.pages.history.st.rerun") as rerun,
+    ):
+        history._render_description_preview(video, busy=False, settings=settings)
+
+    update_desc.assert_called_once_with("vid1234567", "反映後の概要", settings)
+    rerun.assert_called_once()
+    assert session_state[history._SESSION_DESC_PREVIEW].get("vid1234567") is None
+    assert session_state[history._SESSION_PURGE_SUCCESS] == "概要欄に反映しました。"
+
+
+def test_render_description_preview_shows_error_on_update_failure() -> None:
+    video = ProcessedVideo(
+        video_id="vid1234567",
+        title="テスト",
+        fetched_at=None,
+        has_chapters=True,
+        has_transcript=True,
+        has_clips=False,
+    )
+    settings = MagicMock()
+    session_state: dict[str, object] = {
+        history._SESSION_DESC_PREVIEW: {
+            "vid1234567": {"current": "元", "merged": "反映後の概要"}
+        }
+    }
+
+    def mock_button(label: str, **kwargs: object) -> bool:
+        return label == "YouTube に書き込む"
+
+    with (
+        patch("yt_live_kit.ui.pages.history.st.columns", side_effect=_mock_columns),
+        patch("yt_live_kit.ui.pages.history.st.button", side_effect=mock_button),
+        patch("yt_live_kit.ui.pages.history.st.warning"),
+        patch("yt_live_kit.ui.pages.history.st.code"),
+        patch("yt_live_kit.ui.pages.history.st.session_state", session_state),
+        patch(
+            "yt_live_kit.ui.pages.history.youtube_api.update_video_description",
+            side_effect=YouTubeAPIError("反映に失敗しました"),
+        ),
+        patch("yt_live_kit.ui.pages.history.st.error") as show_error,
+        patch("yt_live_kit.ui.pages.history.st.rerun") as rerun,
+    ):
+        history._render_description_preview(video, busy=False, settings=settings)
+
+    show_error.assert_called_once_with("反映に失敗しました")
+    rerun.assert_not_called()
+    assert session_state[history._SESSION_DESC_PREVIEW]["vid1234567"] is not None
+
+
+def test_render_description_preview_cancel_clears_and_reruns() -> None:
+    video = ProcessedVideo(
+        video_id="vid1234567",
+        title="テスト",
+        fetched_at=None,
+        has_chapters=True,
+        has_transcript=True,
+        has_clips=False,
+    )
+    settings = MagicMock()
+    session_state: dict[str, object] = {
+        history._SESSION_DESC_PREVIEW: {
+            "vid1234567": {"current": "元", "merged": "反映後の概要"}
+        }
+    }
+
+    def mock_button(label: str, **kwargs: object) -> bool:
+        return label == "キャンセル"
+
+    with (
+        patch("yt_live_kit.ui.pages.history.st.columns", side_effect=_mock_columns),
+        patch("yt_live_kit.ui.pages.history.st.button", side_effect=mock_button),
+        patch("yt_live_kit.ui.pages.history.st.warning"),
+        patch("yt_live_kit.ui.pages.history.st.code"),
+        patch("yt_live_kit.ui.pages.history.st.session_state", session_state),
+        patch("yt_live_kit.ui.pages.history.st.rerun") as rerun,
+    ):
+        history._render_description_preview(video, busy=False, settings=settings)
+
+    rerun.assert_called_once()
+    assert session_state[history._SESSION_DESC_PREVIEW].get("vid1234567") is None

@@ -24,6 +24,10 @@ class Settings(BaseSettings):
         default=None,
         description="字幕焼き込み用フォント名（未指定時は自動検出）",
     )
+    youtube_client_secret: Path = Field(
+        default=Path("./data/_config/client_secret.json"),
+        description="YouTube Data API の OAuth クライアントシークレット JSON のパス",
+    )
 
     def ensure_data_dir(self) -> Path:
         """data ディレクトリを作成して返す."""
