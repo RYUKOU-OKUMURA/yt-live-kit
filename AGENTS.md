@@ -11,9 +11,14 @@
 
 | 優先 | ファイル | 用途 |
 |------|----------|------|
-| 1 | [`docs/execution-plan.md`](docs/execution-plan.md) | **進捗の正本。** タスクチェックとフェーズ状態 |
-| 2 | [`docs/requirements.md`](docs/requirements.md) | 何を作るか（FR / NFR / AC） |
-| 3 | [`docs/tech-stack.md`](docs/tech-stack.md) | どう作るか（技術選定） |
+| 1 | [`docs/execution-plan-v3.md`](docs/execution-plan-v3.md) | **v3 作業での進捗の正本。** タスクチェックとフェーズ状態 |
+| 2 | [`docs/requirements-v3.md`](docs/requirements-v3.md) | v3 で何を作るか（FR / NFR / AC） |
+| 3 | [`docs/v3-agent-prompts.md`](docs/v3-agent-prompts.md) | v3 ワーカー（`impl-sonnet`）への指示テンプレートとレビュー観点 |
+| 4 | [`docs/execution-plan.md`](docs/execution-plan.md) | v1 実行計画（履歴） |
+| 5 | [`docs/requirements.md`](docs/requirements.md) | v1/v2 要件（FR / NFR / AC。v3 分は requirements-v3.md 側にある） |
+| 6 | [`docs/tech-stack.md`](docs/tech-stack.md) | どう作るか（技術選定） |
+
+**v3 作業では `docs/execution-plan-v3.md` が進捗の正本になる。** `docs/execution-plan.md`（v1）・[`docs/execution-plan-v2.md`](docs/execution-plan-v2.md)（v2）は履歴として残すが、v3 の着手中はチェック更新の対象にしない。
 
 要件や技術スタックと実行計画が食い違う場合は、**実行計画の更新を先に行い**、そのうえで実装する。
 
@@ -43,6 +48,7 @@
 - 実行計画を読まずに次の実装を始める
 - チェックを更新せずに次フェーズへ進む
 - スコープ外（Whisper 一括、自動編集、YouTube 自動投稿など）を勝手に実装する
+  - **v3 改訂注記:** v3 では [`docs/requirements-v3.md`](docs/requirements-v3.md) §2 のとおり、ジャンプカット・テロップ生成・YouTube への予約投稿（`publishAt` 指定の非公開アップロード）を明示的にスコープ入りさせた。v3 のタスクとして [`docs/execution-plan-v3.md`](docs/execution-plan-v3.md) に定義されていない範囲（BGM・SE、ズーム・トランジション、即時公開投稿等）は引き続きスコープ外であり、これを勝手に実装してはいけない
 
 ---
 
@@ -72,58 +78,62 @@
 
 ## 4. オーケストレーション
 
-本プロジェクトの実装は **オーケストレーター + ワーカー + レビュー** で進める。
+本プロジェクトの実装は **オーケストレーター + ワーカー + レビュー** で進める。**v3 からは Claude Code 上で実施する体制に切り替えた。**
 
-### 4.1 役割とモデル指定
+### 4.1 役割とモデル指定（v3 体制）
 
-| 役割 | モデル | Cursor Task の `model` 指定 | 責務 |
-|------|--------|------------------------------|------|
-| **オーケストレーター** | **Grok 4.5** | `cursor-grok-4.5-high-fast` | 進捗確認、タスク分解、ワーカーへの指示、品質判定、再修正指示、実行計画の進捗更新の最終確認、フェーズ／大タスクのコミット判断 |
-| **ワーカー（実装）** | **Composer 2.5** | `composer-2.5-fast` | 指示されたタスクの実装・テスト・局所的な docs 更新 |
-| **レビューワーカー** | **Composer 2.5** | `composer-2.5-fast` | 実装結果の欠陥優先レビュー、要件・実行計画との差分指摘 |
+| 役割 | モデル | 呼び出し方法 | 責務 |
+|------|--------|--------------|------|
+| **オーケストレーター + レビュー** | **Claude（Fable 5）** | — | 進捗確認、タスク分解、ワーカーへの指示、品質判定、再修正指示、実行計画の進捗更新の最終確認、フェーズ／大タスクのコミット判断。軽微な docs 修正・進捗チェック更新は直接行ってよいが、**大きなコード変更は自分で書かない** |
+| **実装ワーカー** | **`impl-sonnet`（Sonnet 5）** | Agent ツールでサブエージェント呼び出し | 指示されたファイル範囲内での実装・テスト。指示テンプレートと完了報告フォーマットは [`docs/v3-agent-prompts.md`](docs/v3-agent-prompts.md) を参照 |
 
-### 4.2 必須ルール（モデル固定）
-
-1. **実装・修正・再実装は、必ず Composer 2.5（`composer-2.5-fast`）のサブエージェントに依頼する**
-2. **レビューも Composer 2.5（`composer-2.5-fast`）のサブエージェントに依頼する**
-3. **オーケストレーター（Grok 4.5）が再実装・修正を指示するときも、必ず Composer 2.5 を呼び出す。** オーケストレーター自身が大きなコード変更を直接書かない（軽微な docs 修正・進捗チェック更新・コミット操作は可）
-4. ワーカー呼び出し時は Task ツールで `model: "composer-2.5-fast"` を明示する
-5. レビュー呼び出し時も同様に `model: "composer-2.5-fast"` を明示する
-
-### 4.3 標準フロー
+**v3 の標準フロー:**
 
 ```
-[オーケストレーター = Grok 4.5]
-  1. execution-plan.md の進捗を確認
-  2. 次タスクを特定し、ワーカーへ詳細プロンプトを渡す
+[オーケストレーター = Claude]
+  1. docs/execution-plan-v3.md の進捗を確認
+  2. 次タスクを特定し、docs/v3-agent-prompts.md のテンプレートに沿って
+     impl-sonnet へ詳細プロンプトを渡す（Agent ツール）
        ↓
-[ワーカー = Composer 2.5] 実装
+[impl-sonnet] 実装・テスト
        ↓
-[レビューワーカー = Composer 2.5] レビュー
-       ↓
-[オーケストレーター = Grok 4.5]
+[オーケストレーター = Claude] レビュー
+  - docs/v3-agent-prompts.md §3 のレビュー観点チェックリストで確認
   - OK → 進捗チェック更新、必要ならコミット、次タスクへ
-  - NG → 修正指示を Composer 2.5 ワーカーへ再送（必ず Composer 2.5）
-         （再レビューも Composer 2.5）
+  - NG → 修正指示を impl-sonnet へ再送
 ```
 
-### 4.4 ワーカーへの指示に必ず含めること
+**v3 でのワーカーへの指示に必ず含めること**（詳細は [`docs/v3-agent-prompts.md`](docs/v3-agent-prompts.md) §2 のテンプレート参照）:
 
-- 対象タスク ID（例: `P1-2`）
-- 参照すべき docs（requirements / tech-stack / execution-plan の該当節）
+- 対象タスク ID（例: `U2`, `S3`）
+- 参照すべき docs（`requirements-v3.md` / `execution-plan-v3.md` の該当節）
 - 完了条件（Done / AC）
 - 変更してよいファイル範囲
-- 「完了後に execution-plan の当該チェックを `[x]` にする」指示
-- 大きなタスクなら「完了後にタスク単位コミットする」指示（ユーザー方針に従い、コミットは依頼がある場合または本 AGENTS のコミット方針に従う）
+- テスト実行コマンド（`uv run pytest`）
+- 「完了後に execution-plan-v3.md の当該チェックを `[x]` にする」指示
 
-### 4.5 レビュー観点（最低限）
+**v3 でのレビュー観点（最低限。詳細は `v3-agent-prompts.md` §3）:**
 
 - 要件・実行計画スコープ外の実装がないか
 - 半角 `<>` 禁止など出力ルール違反がないか
 - UI にビジネスロジックが肥大化していないか（services 分離）
+- フェーズ U では `services/` を変更していないか
 - 従量課金 API を呼んでいないか
+- 破壊的操作（削除・再生成・概要欄反映・投稿）に確認ダイアログがあるか
 - エラーが日本語でユーザーに伝わるか（該当フェーズ）
 - テストまたは実機確認の有無
+
+### 4.2 v1/v2 当時の体制（履歴）
+
+v1/v2 は Cursor 上で、オーケストレーター = Grok 4.5、ワーカー・レビュー = Composer 2.5 の体制で進めていた。**この体制は v3 では使用しない。** 過去の実行計画（`docs/execution-plan.md` / `docs/execution-plan-v2.md`）やコミット履歴を読む際の参考として、当時のルールを残す。
+
+| 役割 | モデル | Cursor Task の `model` 指定 | 責務 |
+|------|--------|------------------------------|------|
+| オーケストレーター | Grok 4.5 | `cursor-grok-4.5-high-fast` | 進捗確認、タスク分解、ワーカーへの指示、品質判定、再修正指示、実行計画の進捗更新の最終確認、フェーズ／大タスクのコミット判断 |
+| ワーカー（実装） | Composer 2.5 | `composer-2.5-fast` | 指示されたタスクの実装・テスト・局所的な docs 更新 |
+| レビューワーカー | Composer 2.5 | `composer-2.5-fast` | 実装結果の欠陥優先レビュー、要件・実行計画との差分指摘 |
+
+v2 の並列ウェーブ実行時は、実行計画のチェック更新とコミットをワーカーではなくオーケストレーターがまとめて行うルールだった（[`docs/v2-agent-prompts.md`](docs/v2-agent-prompts.md) §0.3 参照）。v3 は並列ウェーブ運用を行わないため、このルールは v3 には引き継がない（`v3-agent-prompts.md` §1 参照）。
 
 ---
 
@@ -141,10 +151,10 @@
 
 作業を始めるたびに、次を実行する。
 
-- [ ] `docs/execution-plan.md` の進捗サマリーを読んだ
+- [ ] `docs/execution-plan-v3.md` の進捗サマリーを読んだ（v1/v2 の作業指示を受けた場合のみ `docs/execution-plan.md` / `docs/execution-plan-v2.md` を読む）
 - [ ] 次に着手するタスク ID を特定した
-- [ ] 実装は Composer 2.5 ワーカーに依頼する計画にした
-- [ ] 完了後のレビューも Composer 2.5 で行う計画にした
+- [ ] 実装は `impl-sonnet` サブエージェント（Agent ツール）に依頼する計画にした（[`docs/v3-agent-prompts.md`](docs/v3-agent-prompts.md) のテンプレートを使う）
+- [ ] 完了後のレビューは自分（オーケストレーター）が [`docs/v3-agent-prompts.md`](docs/v3-agent-prompts.md) §3 のチェックリストで行う計画にした
 - [ ] フェーズ完了または大タスク完了時のコミット方針を確認した
 
 ---
@@ -153,4 +163,5 @@
 
 | 日付 | 内容 |
 |------|------|
+| 2026-08-01 | v3 体制へ改訂。§1 に v3 ドキュメント（execution-plan-v3 / requirements-v3 / v3-agent-prompts）を追加し進捗の正本を明記。§2.3 にスコープ改訂注記を追加。§4 のオーケストレーション体制を Claude（Fable 5）+ `impl-sonnet` に切り替え、旧 Grok 4.5 / Composer 2.5 体制は §4.2 に履歴として残した |
 | 2026-07-30 | 初版。進捗確認必須、コミット方針、Grok 4.5 / Composer 2.5 オーケストレーションを定義 |
