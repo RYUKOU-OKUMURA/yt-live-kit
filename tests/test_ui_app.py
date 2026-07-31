@@ -54,6 +54,7 @@ def test_app_registers_japanese_navigation_after_page_config() -> None:
         "動画詳細",
         "取り込み",
         "処理済み一覧",
+        "設定",
     }
 
 
@@ -82,14 +83,63 @@ def test_app_pages_have_unique_explicit_url_paths() -> None:
         assert keyword.value.value
         url_paths.append(keyword.value.value)
 
-    assert len(url_paths) == 4
+    assert len(url_paths) == 5
     assert len(url_paths) == len(set(url_paths))
     assert set(url_paths) == {
         "library",
         "intake",
         "video-detail",
         "history",
+        "settings",
     }
+
+
+def test_settings_page_is_included_in_navigation_list() -> None:
+    app_path = Path(__file__).parents[1] / "src/yt_live_kit/ui/app.py"
+    tree = ast.parse(app_path.read_text(encoding="utf-8"))
+
+    settings_assignment = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.Assign)
+        and any(
+            isinstance(target, ast.Name) and target.id == "settings_page"
+            for target in node.targets
+        )
+    )
+    assert isinstance(settings_assignment.value, ast.Call)
+    title_keyword = next(
+        keyword
+        for keyword in settings_assignment.value.keywords
+        if keyword.arg == "title"
+    )
+    url_keyword = next(
+        keyword
+        for keyword in settings_assignment.value.keywords
+        if keyword.arg == "url_path"
+    )
+    assert isinstance(title_keyword.value, ast.Constant)
+    assert title_keyword.value.value == "設定"
+    assert isinstance(url_keyword.value, ast.Constant)
+    assert url_keyword.value.value == "settings"
+
+    navigation_call = next(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "st"
+        and node.func.attr == "navigation"
+    )
+    assert navigation_call.args
+    assert isinstance(navigation_call.args[0], ast.List)
+    navigation_names = {
+        item.id
+        for item in navigation_call.args[0].elts
+        if isinstance(item, ast.Name)
+    }
+    assert "settings_page" in navigation_names
 
 
 def test_render_progress_shows_error_state() -> None:

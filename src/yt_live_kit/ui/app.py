@@ -13,6 +13,7 @@ from yt_live_kit.ui.components.status_bar import render_status_bar
 from yt_live_kit.ui.views.history import render_history_page
 from yt_live_kit.ui.views.intake import render_intake_page
 from yt_live_kit.ui.views.library import render_library_page
+from yt_live_kit.ui.views.settings import render_settings_page
 from yt_live_kit.ui.views.video_detail import render_video_detail_page
 from yt_live_kit.ui.state import (
     clear_job_error,
@@ -73,6 +74,12 @@ library_page = st.Page(
     url_path="library",
     default=True,
 )
+settings_page = st.Page(
+    render_settings_page,
+    title="設定",
+    icon=":material/settings:",
+    url_path="settings",
+)
 page = st.navigation(
     [
         library_page,
@@ -83,6 +90,7 @@ page = st.navigation(
             icon=":material/history:",
             url_path="history",
         ),
+        settings_page,
         detail_page,
     ]
 )

@@ -18,7 +18,7 @@
 | U1 | ライブラリページ | [x] 完了 |
 | U2 | 動画詳細ページ + ステッパー + 確認ダイアログ + 共通コピー部品 | [x] 完了 |
 | U3 | 取り込みページ | [x] 完了 |
-| U4 | 設定ページ | [ ] 未着手 |
+| U4 | 設定ページ | [~] 進行中 |
 | U5 | 概要欄反映の差分プレビュー UI + フェーズ U 受け入れ | [ ] 未着手 |
 | S1 | テロップ台本 + メタデータ生成 | [ ] 未着手 |
 | S2 | ASS テロップスタイルプリセット + フックタイトル | [ ] 未着手 |
@@ -396,21 +396,21 @@ data/{video_id}/ ...
 
 **作業:**
 
-- [ ] U4-1. チャンネル既定ハンドルの表示・編集フォーム（`ui/views/_local_settings.py` の関数を再利用）
-- [ ] U4-2. ffmpeg パス・字幕フォント・`data_dir` を読み取り専用で表示し、`.env` での変更方法を案内する
-- [ ] U4-3. Codex CLI の稼働確認: [`services/ai_prompt.py`](../src/yt_live_kit/services/ai_prompt.py) の `is_codex_available()` を呼び、結果を日本語で表示する（利用可能 / 見つからないの 2 状態。**この関数を呼ぶだけで `services/` は変更しない**）
-- [ ] U4-4. フェーズ P で追加するスケジュールポリシー欄のプレースホルダ（見出しのみ）を用意する
-- [ ] U4-5. ユニットテスト
+- [x] U4-1. チャンネル既定ハンドルの表示・編集フォーム（`ui/views/_local_settings.py` の関数を再利用）
+- [x] U4-2. ffmpeg パス・字幕フォント・`data_dir` を読み取り専用で表示し、`.env` での変更方法を案内する
+- [x] U4-3. Codex CLI の稼働確認: [`services/ai_prompt.py`](../src/yt_live_kit/services/ai_prompt.py) の `is_codex_available()` を呼び、結果を日本語で表示する（利用可能 / 見つからないの 2 状態。**この関数を呼ぶだけで `services/` は変更しない**）
+- [x] U4-4. フェーズ P で追加するスケジュールポリシー欄のプレースホルダ（見出しのみ）を用意する
+- [x] U4-5. ユニットテスト
   - `is_codex_available` の結果に応じた表示文言（モックして検証）
   - 既定ハンドルの保存フォームが `_local_settings` の関数を正しく呼ぶこと
   - 「設定」の `st.Page`（または代入した `settings_page`）が `st.navigation` へ渡すページ列に実際に含まれることを AST で検証し、全ページの `url_path` が一意であること
 
 **Done 条件:**
 
-- [ ] `uv run pytest` が全件通る
-- [ ] Codex CLI の状態が画面に表示される（実環境で確認）
-- [ ] 自動テストで「設定」が `st.navigation` へ実際に登録され、`url_path="settings"` が他ページと重複しないことを確認済み
-- [ ] `services/` / `config.py` に変更が無い
+- [x] `uv run pytest` が全件通る
+- [x] Codex CLI の状態が画面に表示される（実環境で確認）
+- [x] 自動テストで「設定」が `st.navigation` へ実際に登録され、`url_path="settings"` が他ページと重複しないことを確認済み
+- [x] `services/` / `config.py` に変更が無い
 - [ ] タスク完了コミット済み
 
 **見積もり目安:** 0.5 日
