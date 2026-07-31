@@ -154,7 +154,10 @@ def load_short_meta(output_path: Path) -> dict[str, Any] | None:
     meta_path = short_meta_path(output_path)
     if not meta_path.is_file():
         return None
-    return json.loads(meta_path.read_text(encoding="utf-8"))
+    try:
+        return json.loads(meta_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return None
 
 
 def build_short_job_target(
@@ -211,7 +214,7 @@ def _start_build_short(
 ) -> None:
     try:
         job_id = start_job(
-            "short",
+            "shorts",
             build_short_job_target,
             video_id=video_id,
             title=title,
