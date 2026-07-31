@@ -778,7 +778,7 @@ data/{video_id}/ ...
 
 - [x] P0-1. P1 / P2 の Done 条件と全モックテストが完了し、実 API を自動テストが呼ばないことを確認する。実操作の承認待ちでも P1 / P2 の開発・レビュー・コミットを止めない
 - [x] P0-2. `channels.list(mine=true)` の実チャンネル ID / 名称、対象ファイル、絶対パス、サイズ、尺、タイトル、説明文、タグ、timezone 付き予約日時と UTC `Z`、`privacyStatus=private`、`notifySubscribers=false`、Made for Kids / synthetic media の選択、Community Guidelines 同意、当日 attempt 数をユーザーに提示する。**private lock が非該当なら、この probe 動画も指定時刻に public となり得る**ことを明記し、その外部公開まで含む P0 専用の明示承認を得るまで確定しない
-- [ ] P0-3. 承認後も P2 の確認後再検証を通し、operation ID を発行した本番経路から 1 本だけ upload する。operation の `reserved → uploading → uploaded` または `needs_reconciliation` / `failed`、job ID、YouTube video ID、attempt 台帳を記録する
+- [x] P0-3. 承認後も P2 の確認後再検証を通し、operation ID を発行した本番経路から 1 本だけ upload する。operation の `reserved → uploading → uploaded` または `needs_reconciliation` / `failed`、job ID、YouTube video ID、attempt 台帳を記録する
 - [ ] P0-4. `videos.list(part="status,processingDetails")` の bounded poll と YouTube Studio で processing 状態、指定時刻前の private、公開予約可否、private lock の有無を確認する。**private lock は probe 成功や予約投稿成功として扱わない**
 - [ ] P0-5. private lock がある場合、審査フォームの提出内容をユーザーに提示し、実 upload の承認とは別の**審査フォーム提出専用の明示承認**を得てから提出する。承認前は提出しない。審査待ちは P1 / P2 のブロッカーにしない
 - [ ] P0-6. 承認時刻、operation ID、YouTube video ID、upload / processing / schedule status、private lock、審査申請の有無と申請日を受け入れ証跡へ記録する。動画削除等の追加操作はこの承認に含めない
@@ -792,6 +792,14 @@ data/{video_id}/ ...
 - policy は毎日 09:00、1 日間隔、`Asia/Tokyo`。準備時の候補 slot は 2026-08-01 09:00 JST / 2026-08-01 00:00 UTC、private 固定、notify false、LA 当日 attempt は 0 / 100
 - 2026-08-01 07:12 JST、ユーザーから Made for Kids「いいえ」、synthetic media「いいえ」、Community Guidelines「確認済み」、上記動画の実 upload と指定時刻の外部公開可能性を含む P0 専用承認を取得した。動画削除と審査フォーム提出は承認範囲外
 - 承認後の本番 preview 再検証で全項目、LA 当日 attempt 0 / 100、fingerprint `097707e51c7723bc0a0cc31a1aabd0834635cabd5e4c6418ee2606179e913ca3` が一致し、最低 10 分の lead を維持していることを確認した
+
+**P0 実 upload・公開前確認記録（2026-08-01 07:13 JST）:**
+
+- P2 の確認後再検証を通した同一の本番経路から 1 本だけ upload した。operation ID は `886c300a9a1142058f24e99249fe79ca`、job ID は `83eb9e997b3c400582472bdbd9e57888`、YouTube video ID は `4WYXdB5p0K0`、URL は `https://youtube.com/shorts/4WYXdB5p0K0`
+- operation は `reserved → uploading → uploaded`、job は `done`。LA 当日 attempt は upload 前 0 / 100、upload 後 1 / 100 で、追加の `videos.insert` は実行していない
+- `videos.list(part="status,processingDetails")` の bounded poll は 2026-07-31 22:13:26 UTC、22:13:36 UTC、22:13:46 UTC の 3 回で、`processing → processing → processing_succeeded`。最終 `uploadStatus=processed`、`privacyStatus=private`、`publishAt=2026-08-01T00:00:00Z`
+- YouTube Studio でも Standard / HD processing 完了、公開設定「公開予約」、公開までは非公開、2026-08-01 09:00、GMT+0900 を確認した。Made for Kids は「いいえ」。保存・変更操作は行っていない
+- P0-4 の公開後 status、実視聴、private lock 判定は予約時刻後に確認する。現時点では lock の有無を確定せず、審査フォームも提出していない
 
 **Done 条件:**
 
