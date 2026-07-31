@@ -21,7 +21,7 @@ from yt_live_kit.services.jobs import JobBusyError, is_busy, start_job
 from yt_live_kit.ui.state import set_active_job_id
 
 _BUSY_MESSAGE = "他の処理が実行中です。完了までお待ちください。"
-_UNEXPECTED_ERROR = "予期しないエラーが発生しました。"
+_UNEXPECTED_ERROR = "予期しないエラーが発生しました。しばらくしてから再度お試しください。"
 _LIMIT_OPTIONS = [20, 50, 100]
 _CHECKBOX_KEY_PREFIX = "channel_cb_"
 

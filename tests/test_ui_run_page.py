@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 
+from yt_live_kit.config import Settings
+from yt_live_kit.services.storage import format_bytes
 from yt_live_kit.ui.components.results import (
     _CHAPTERS_NOT_GENERATED_MESSAGE,
     _CLIPS_EMPTY_NOT_REQUESTED_MESSAGE,
@@ -11,6 +13,7 @@ from yt_live_kit.ui.components.results import (
     _TEMPLATE_NOT_SET_MESSAGE,
     build_clipboard_copy_html,
     clips_empty_message,
+    source_cache_note,
 )
 from yt_live_kit.ui.pages.run import (
     _NO_TARGET_MESSAGE,
@@ -138,3 +141,31 @@ def test_clips_empty_message_when_requested_mentions_codex() -> None:
 def test_clips_empty_message_when_not_requested_avoids_codex() -> None:
     assert clips_empty_message(False) == _CLIPS_EMPTY_NOT_REQUESTED_MESSAGE
     assert "Codex" not in clips_empty_message(False)
+
+
+def test_source_cache_note_mentions_size_when_source_has_files(tmp_path) -> None:
+    settings = Settings(data_dir=tmp_path)
+    source_dir = tmp_path / "video1" / "clips" / "source"
+    source_dir.mkdir(parents=True)
+    (source_dir / "source.mp4").write_bytes(b"x" * 2048)
+
+    note = source_cache_note("video1", settings)
+
+    assert note is not None
+    assert "元動画" in note
+    assert "再利用のため保持" in note
+    assert format_bytes(2048) in note
+
+
+def test_source_cache_note_is_none_when_source_dir_missing(tmp_path) -> None:
+    settings = Settings(data_dir=tmp_path)
+
+    assert source_cache_note("video1", settings) is None
+
+
+def test_source_cache_note_is_none_when_source_dir_empty(tmp_path) -> None:
+    settings = Settings(data_dir=tmp_path)
+    source_dir = tmp_path / "video1" / "clips" / "source"
+    source_dir.mkdir(parents=True)
+
+    assert source_cache_note("video1", settings) is None

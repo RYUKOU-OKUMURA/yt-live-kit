@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -17,6 +18,8 @@ from yt_live_kit.services.ai_prompt import (
     is_codex_available,
 )
 from yt_live_kit.services.chapter_validator import parse_timestamp_to_seconds
+
+logger = logging.getLogger(__name__)
 
 PLACEHOLDER = "{{compressed_transcript}}"
 TEMPLATE_NAME = "highlights.md"
@@ -192,9 +195,13 @@ def validate_highlights(
         try:
             data = HighlightsDocument.model_validate(segments)
         except Exception as exc:
+            logger.warning("ハイライト区間 JSON のスキーマ検証に失敗しました: %s", exc)
             return HighlightValidationResult(
                 ok=False,
-                errors=(f"JSON スキーマが不正です: {exc}",),
+                errors=(
+                    "ハイライト区間の JSON 形式が想定と異なります。"
+                    "必須項目の不足か、値の型が誤っています。",
+                ),
                 segments=(),
             )
 
@@ -213,9 +220,9 @@ def validate_highlights(
         prefix = f"区間 {i + 1} ({segment.id})"
 
         if "<" in segment.title or ">" in segment.title:
-            errors.append(f"{prefix}: タイトルに半角の <> は使えません。")
+            errors.append(f"{prefix}: タイトルに半角の 〈 〉 は使えません。")
         if "<" in segment.reason or ">" in segment.reason:
-            errors.append(f"{prefix}: 理由に半角の <> は使えません。")
+            errors.append(f"{prefix}: 理由に半角の 〈 〉 は使えません。")
 
         try:
             start_sec = parse_timestamp_to_seconds(segment.start)

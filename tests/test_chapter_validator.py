@@ -51,6 +51,33 @@ def test_parse_timestamp_hh_mm_ss():
     assert parse_timestamp_to_seconds("1:23:45") == 5025
 
 
+@pytest.mark.parametrize("timestamp", ["1:2a:30", "a:00", "0:0a:00"])
+def test_parse_timestamp_non_numeric_field_raises_japanese_error(timestamp):
+    with pytest.raises(ValueError) as exc_info:
+        parse_timestamp_to_seconds(timestamp)
+    message = str(exc_info.value)
+    assert "invalid literal" not in message
+    assert "時刻" in message and "形式" in message
+
+
+def test_parse_timestamp_seconds_range_error_unchanged():
+    with pytest.raises(ValueError) as exc_info:
+        parse_timestamp_to_seconds("0:60")
+    assert "秒は 00〜59 の範囲である必要があります" in str(exc_info.value)
+
+
+def test_parse_timestamp_minutes_range_error_unchanged():
+    with pytest.raises(ValueError) as exc_info:
+        parse_timestamp_to_seconds("1:60:00")
+    assert "分は 00〜59 の範囲である必要があります" in str(exc_info.value)
+
+
+def test_parse_timestamp_invalid_format_error_unchanged():
+    with pytest.raises(ValueError) as exc_info:
+        parse_timestamp_to_seconds("1:2:3:4")
+    assert "不正な時刻形式" in str(exc_info.value)
+
+
 def test_extract_chapter_lines_from_markdown():
     text = """\
 # チャプター案
@@ -97,7 +124,8 @@ def test_validate_minimum_gap():
 def test_validate_forbids_angle_brackets():
     result = validate_chapters(INVALID_ANGLE_BRACKETS)
     assert result.ok is False
-    assert any("<>" in err for err in result.errors)
+    assert any("〈" in err and "〉" in err for err in result.errors)
+    assert not any("<>" in err for err in result.errors)
 
 
 def test_parse_chapters_preserves_raw_line():

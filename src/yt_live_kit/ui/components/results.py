@@ -7,7 +7,7 @@ import json
 import streamlit as st
 import streamlit.components.v1 as components
 
-from yt_live_kit.config import get_settings
+from yt_live_kit.config import Settings, get_settings
 from yt_live_kit.services.description import (
     DescriptionError,
     build_description,
@@ -15,6 +15,7 @@ from yt_live_kit.services.description import (
 )
 from yt_live_kit.services.ffmpeg import CutResult, FfmpegError, cut_clip
 from yt_live_kit.services.pipeline import PipelineResult
+from yt_live_kit.services.storage import dir_size, format_bytes
 from yt_live_kit.ui.state import get_cut_result, set_cut_result
 
 _UNEXPECTED_ERROR_MSG = (
@@ -38,6 +39,18 @@ def clips_empty_message(clips_requested: bool) -> str:
     if clips_requested:
         return _CLIPS_EMPTY_REQUESTED_MESSAGE
     return _CLIPS_EMPTY_NOT_REQUESTED_MESSAGE
+
+
+def source_cache_note(video_id: str, settings: Settings) -> str | None:
+    """元動画キャッシュの容量案内を返す（テスト可能な純粋関数）。0 バイトなら None."""
+    source_dir = settings.data_dir / video_id / "clips" / "source"
+    size = dir_size(source_dir)
+    if size == 0:
+        return None
+    return (
+        f"元動画 ({format_bytes(size)}) は再利用のため保持しています。"
+        "不要なら一覧から削除できます。"
+    )
 
 
 def build_clipboard_copy_html(
@@ -219,6 +232,9 @@ def render_results(result: PipelineResult) -> None:
             st.success("切り出しが完了しました。")
             st.markdown(f"**保存先:** `{cut_result.output_path}`")
             st.markdown(f"**コマンドログ:** `{cut_result.command_log_path}`")
+            note = source_cache_note(result.video_id, get_settings())
+            if note is not None:
+                st.caption(note)
     elif not result.clips_error:
         st.info(clips_empty_message(result.clips_requested))
 

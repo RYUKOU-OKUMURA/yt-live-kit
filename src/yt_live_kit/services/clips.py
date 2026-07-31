@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -16,6 +17,8 @@ from yt_live_kit.services.ai_prompt import (
     is_codex_available,
 )
 from yt_live_kit.services.chapter_validator import parse_timestamp_to_seconds
+
+logger = logging.getLogger(__name__)
 
 PLACEHOLDER = "{{compressed_transcript}}"
 TEMPLATE_NAME = "clips_suggest.md"
@@ -176,7 +179,11 @@ def validate_clip_candidates(
     try:
         doc = ClipCandidatesDocument.model_validate(data)
     except Exception as exc:
-        return ClipCandidatesDocument(candidates=[]), (f"JSON スキーマが不正です: {exc}",)
+        logger.warning("切り抜き候補 JSON のスキーマ検証に失敗しました: %s", exc)
+        return ClipCandidatesDocument(candidates=[]), (
+            "切り抜き候補の JSON 形式が想定と異なります。"
+            "必須項目の不足か、値の型が誤っています。",
+        )
 
     if len(doc.candidates) < MIN_CANDIDATES:
         errors.append(
@@ -188,7 +195,7 @@ def validate_clip_candidates(
         prefix = f"候補 {i + 1} ({candidate.id})"
 
         if "<" in candidate.title or ">" in candidate.title:
-            errors.append(f"{prefix}: タイトルに半角の <> は使えません。")
+            errors.append(f"{prefix}: タイトルに半角の 〈 〉 は使えません。")
 
         try:
             start_sec = parse_timestamp_to_seconds(candidate.start)

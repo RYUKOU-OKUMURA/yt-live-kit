@@ -267,7 +267,7 @@ def _render_row_actions(
         if st.button("開く", key=f"open_{video.video_id}"):
             loaded = load_result_from_disk(video.video_id, settings)
             if loaded is None:
-                st.error("成果物を読み込めませんでした。")
+                st.error("成果物を読み込めませんでした。処理済み一覧から開き直してください。")
             else:
                 set_result(loaded)
                 clear_cut_result()

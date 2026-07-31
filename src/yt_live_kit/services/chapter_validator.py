@@ -39,6 +39,16 @@ def _validate_seconds_field(seconds_str: str, timestamp: str) -> str | None:
     return None
 
 
+def _parse_int_field(value_str: str, timestamp: str) -> int:
+    """時・分フィールドを整数に変換する。非数値なら日本語エラーを送出する."""
+    try:
+        return int(value_str)
+    except ValueError:
+        raise ValueError(
+            f"時刻は HH:MM:SS または M:SS の形式である必要があります: {timestamp}"
+        ) from None
+
+
 def parse_timestamp_to_seconds(timestamp: str) -> int:
     """M:SS または H:MM:SS を秒に変換する."""
     parts = timestamp.split(":")
@@ -47,14 +57,17 @@ def parse_timestamp_to_seconds(timestamp: str) -> int:
         err = _validate_seconds_field(seconds_str, timestamp)
         if err:
             raise ValueError(err)
-        minutes, seconds = int(minutes_str), int(seconds_str)
+        minutes = _parse_int_field(minutes_str, timestamp)
+        seconds = int(seconds_str)
         return minutes * 60 + seconds
     if len(parts) == 3:
         hours_str, minutes_str, seconds_str = parts
         err = _validate_seconds_field(seconds_str, timestamp)
         if err:
             raise ValueError(err)
-        hours, minutes, seconds = int(hours_str), int(minutes_str), int(seconds_str)
+        hours = _parse_int_field(hours_str, timestamp)
+        minutes = _parse_int_field(minutes_str, timestamp)
+        seconds = int(seconds_str)
         if minutes < 0 or minutes > 59:
             raise ValueError(f"分は 00〜59 の範囲である必要があります: {timestamp}")
         return hours * 3600 + minutes * 60 + seconds
@@ -138,7 +151,7 @@ def validate_chapters(text: str) -> ValidationResult:
 
     for chapter in chapters:
         if "<" in chapter.raw_line or ">" in chapter.raw_line:
-            errors.append(f"半角の <> は使用できません: {chapter.raw_line}")
+            errors.append(f"半角の 〈 〉 は使用できません: {chapter.raw_line}")
 
     return ValidationResult(
         ok=len(errors) == 0,

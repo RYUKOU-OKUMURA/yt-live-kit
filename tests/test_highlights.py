@@ -177,7 +177,7 @@ def test_validate_highlights_halfwidth_angle_brackets_in_title():
     }
     result = validate_highlights(data)
     assert not result.ok
-    assert any("タイトル" in err and "<>" in err for err in result.errors)
+    assert any("タイトル" in err and "〈" in err and "〉" in err for err in result.errors)
 
 
 def test_validate_highlights_halfwidth_angle_brackets_in_reason():
@@ -189,7 +189,38 @@ def test_validate_highlights_halfwidth_angle_brackets_in_reason():
     }
     result = validate_highlights(data)
     assert not result.ok
-    assert any("理由" in err and "<>" in err for err in result.errors)
+    assert any("理由" in err and "〈" in err and "〉" in err for err in result.errors)
+
+
+def test_validate_highlights_invalid_timestamp_field_is_japanese():
+    data = {
+        "candidates": [
+            _segment(1, start="0:0a:00", end="00:02:00"),
+            _segment(2, start="00:05:00", end="00:07:00", duration_sec=120),
+        ]
+    }
+    result = validate_highlights(data)
+    assert not result.ok
+    joined = "\n".join(result.errors)
+    assert "invalid literal" not in joined
+    assert any("時刻" in err and "形式" in err for err in result.errors)
+
+
+def test_validate_highlights_schema_error_hides_pydantic_details():
+    data = {
+        "candidates": [
+            {"id": "hl_001", "title": "タイトル"},
+        ]
+    }
+    result = validate_highlights(data)
+    assert not result.ok
+    joined = "\n".join(result.errors)
+    assert "validation error" not in joined
+    assert "pydantic" not in joined
+    assert "For further information" not in joined
+    assert any(
+        "JSON 形式が想定と異なります" in err for err in result.errors
+    )
 
 
 def test_extract_json_object_plain():
