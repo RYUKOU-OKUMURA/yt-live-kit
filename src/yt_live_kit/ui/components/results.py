@@ -223,5 +223,7 @@ def render_results(result: PipelineResult) -> None:
         st.info(clips_empty_message(result.clips_requested))
 
     from yt_live_kit.ui.pages.highlights import render_highlights_section
+    from yt_live_kit.ui.pages.shorts import render_shorts_section
 
     render_highlights_section(result)
+    render_shorts_section(result)
