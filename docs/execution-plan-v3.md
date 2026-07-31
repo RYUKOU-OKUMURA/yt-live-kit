@@ -923,8 +923,8 @@ data/{video_id}/ ...
 
 - [x] P3-1. P0 の private lock が解消または非該当で、P1 / P2 の全テストが通ることを確認する。lock 中は予約公開成功を装わず P3 未完了のままにする
 - [x] P3-2. 実チャンネル ID / 名称、対象ファイル、サイズ / 尺、タイトル、説明文、タグ、policy timezone / UTC `Z` の予約日時、private、notify false、Made for Kids / synthetic media の選択、Community Guidelines 同意、operation / slot / attempt snapshot をユーザーに提示し、**P0 upload や審査承認とは別の P3 実予約公開専用承認**を得る。承認前は確定しない
-- [ ] P3-3. 承認後の再検証を通して 1 本を予約 upload し、`videos.list(part="status,processingDetails")` を upload 後 processing 完了まで、予約時刻前、予約時刻後に bounded poll して operation に記録する。時刻前 private、時刻後 public と実視聴可能を確認する
-- [ ] P3-4. `docs/requirements-v3.md` の AC-18〜AC-28 を総点検する。4xx / unknown の reconciliation、LA attempt、再起動復元、status bar kind dispatch はモック証跡、実公開は P3 の operation 証跡を使う
+- [x] P3-3. 承認後の再検証を通して 1 本を予約 upload し、`videos.list(part="status,processingDetails")` を upload 後 processing 完了まで、予約時刻前、予約時刻後に bounded poll して operation に記録する。時刻前 private、時刻後 public と実視聴可能を確認する
+- [x] P3-4. `docs/requirements-v3.md` の AC-18〜AC-28 を総点検する。4xx / unknown の reconciliation、LA attempt、再起動復元、status bar kind dispatch はモック証跡、実公開は P3 の operation 証跡を使う
 - [x] P3-5. 実配信 1 本でチャプター生成 → ショート複数本生成までを通し、上記の承認済み 1 本だけを予約投稿対象にする（AC-28）
 - [x] P3-6. README を更新する。private 固定、10 分 lead、IANA timezone、確認ダイアログ全項目、notify false、LA upload attempt 上限、`needs_reconciliation` は自動再送しないこと、private lock / 審査、実 API を自動テストしないことを記載する
 - [ ] P3-7. 版数を `0.3.0` に更新し、進捗サマリー、M14、受け入れ証跡を最終更新する
@@ -960,13 +960,20 @@ data/{video_id}/ ...
 - 前倒し承認に基づき、10 分 lead を維持して 2026-08-01 08:15 JST / 2026-07-31 23:15 UTC へ変更した。YouTube Studio の「すべての変更を保存しました」と API の `privacyStatus=private`、`processingStatus=succeeded`、`publishAt=2026-07-31T23:15:00Z` を照合した。operation の upload 時 snapshot は元の slot を不変記録として保持し、公開 poll には実際の 08:15 を使う
 - 元の実配信 `IJvd6k6ZmUo` は S5 でチャプター生成からショート複数本生成まで完了済みで、P3ではそのうち専用承認を得た clip `5ea2b4ff8e08` だけを投稿対象にした
 
+**P3 公開後確認・最終 AC 監査記録（2026-08-01 08:25 JST）:**
+
+- 予約時刻前の 2026-07-31 23:00:53 UTC に `uploadStatus=processed`、`processingStatus=succeeded`、`privacyStatus=private`、`publishAt=2026-07-31T23:15:00Z`、classification `scheduled` を operation へ追記した
+- 予約時刻後の bounded publication poll は 2026-07-31 23:25:58 UTC の初回で `uploadStatus=processed`、`processingStatus=succeeded`、`privacyStatus=public`、classification `published` を返した。operation の poll history は processing 4 件、公開前 1 件、公開後 1 件の計 6 件
+- API の `snippet.publishedAt=2026-07-31T23:15:36Z` で予約時刻から 36 秒後の公開を確認した。YouTube Studio は公開設定「公開」、Standard / HD processing 完了。公開 URL `https://youtube.com/shorts/1bxDoF52DEs` は動画プレーヤー、チャンネル `@ai.seitai`、タイトル「テラとルナを比較した結果」を表示し、実視聴可能と確認した
+- AC-18〜AC-26 は既存の自動テストと U5 / S5 実機証跡、AC-27 は P0 / P3 operation と安全契約テスト、AC-28 は実配信 `IJvd6k6ZmUo` のチャプター生成、3 本のショート生成、専用承認済み 1 本だけの予約公開、および全 821 tests で総点検した。未達・次イテレーションへの申し送りは無い
+
 **Done 条件:**
 
 - [x] P3 実予約公開の対象と全内容を提示した専用の明示承認記録がある
-- [ ] operation に upload 後、公開前、公開後の status / processingDetails と poll 時刻が記録されている
-- [ ] private lock を成功扱いにせず、予約時刻後に実際に public かつ視聴可能である
-- [ ] AC-18〜AC-28 が確認済み（未達は明示的に次イテレーションへ移す）
-- [ ] `uv run pytest` が全件通り、実 API を呼ぶ自動テストが無く、v1 / v2 に回帰が無い
+- [x] operation に upload 後、公開前、公開後の status / processingDetails と poll 時刻が記録されている
+- [x] private lock を成功扱いにせず、予約時刻後に実際に public かつ視聴可能である
+- [x] AC-18〜AC-28 が確認済み（未達は明示的に次イテレーションへ移す）
+- [x] `uv run pytest` が全件通り、実 API を呼ぶ自動テストが無く、v1 / v2 に回帰が無い
 - [ ] v3 完了コミット済み
 
 **見積もり目安:** 1 日

@@ -409,7 +409,7 @@ Streamlit は、エントリスクリプト（[`src/yt_live_kit/ui/app.py`](../s
 
 ### AC-27: 予約投稿
 
-- [ ] 予約投稿した動画が指定時刻に公開される
+- [x] 予約投稿した動画が指定時刻に公開される
 - [x] upload は `privacyStatus=private`、未来 10 分以上の aware `publishAt`、UTC RFC 3339 `Z`、`notifySubscribers=false` 以外を拒否し、過去時刻を即時公開へ変換しない
 - [x] 投稿前に確認ダイアログで実チャンネル ID / 名称、対象ファイル、サイズ / 尺、タイトル、説明文、タグ、予約日時、`notifySubscribers=false`、Made for Kids / synthetic media の選択、Community Guidelines 同意を確認でき、確定後の再検証で変更・枠競合を検出すると upload が始まらない
 - [x] metadata のタイトル非空・100 文字、説明文 UTF-8 5000 bytes、タグ合計 500 文字、半角山カッコ禁止の境界が自動テストされている
@@ -419,15 +419,15 @@ Streamlit は、エントリスクリプト（[`src/yt_live_kit/ui/app.py`](../s
 - [x] upload attempt は America/Los_Angeles の実試行日で resumable upload session 前に記録され、失敗も数え、`YTLK_VIDEO_UPLOAD_DAILY_LIMIT` の 1・上限・上限超過境界を超えない。read-only API と予約枠件数は別に扱われる
 - [x] upload job target が `job_id` を受け、`YouTubeAPIError` が jobs の既知例外として日本語表示され、status bar が upload / shorts queue 等の非 pipeline 完了結果を誤って pipeline として読まない
 - [x] `videos.list(part="status,processingDetails")` が processing 10 秒 × 30、公開 30 秒 × 20 の terminal / timeout 契約と fake clock でテストされ、判定表により private lock を予約投稿成功として扱わない
-- [ ] P0 のテストアップロードで非公開ロックの有無が確認され、記録されている
-- [ ] P0 の専用承認に、private lock 非該当時は probe 動画が指定時刻に public となり得ることまで含まれている
+- [x] P0 のテストアップロードで非公開ロックの有無が確認され、記録されている
+- [x] P0 の専用承認に、private lock 非該当時は probe 動画が指定時刻に public となり得ることまで含まれている
 
 ### AC-28: v3 総合受け入れ
 
-- [ ] AC-18〜AC-27 がすべて満たされている（未達は明示的に「次イテレーション」へ移す）
+- [x] AC-18〜AC-27 がすべて満たされている（未達は明示的に「次イテレーション」へ移す）
 - [x] v1 / v2 の機能に回帰が無い（`uv run pytest` が全件通過する）
-- [ ] 実配信 1 本から、チャプター生成 → ショート複数本の生成 → 予約投稿までを通しで実行できる
-- [ ] 実 upload、審査フォーム提出、P3 の実予約公開について、各操作ごとの対象と内容を提示した別々の明示承認記録がある
+- [x] 実配信 1 本から、チャプター生成 → ショート複数本の生成 → 予約投稿までを通しで実行できる
+- [x] 実 upload、審査フォーム提出、P3 の実予約公開について、各操作ごとの対象と内容を提示した別々の明示承認記録がある
 
 ---
 

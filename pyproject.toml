@@ -1,6 +1,6 @@
 [project]
 name = "yt-live-kit"
-version = "0.2.0"
+version = "0.3.0"
 description = "YouTube ライブアーカイブから字幕・チャプター・切り抜き素材を生成するローカル Web UI ツール"
 readme = "README.md"
 requires-python = ">=3.11"
