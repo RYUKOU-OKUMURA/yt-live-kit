@@ -921,8 +921,8 @@ data/{video_id}/ ...
 
 **作業:**
 
-- [ ] P3-1. P0 の private lock が解消または非該当で、P1 / P2 の全テストが通ることを確認する。lock 中は予約公開成功を装わず P3 未完了のままにする
-- [ ] P3-2. 実チャンネル ID / 名称、対象ファイル、サイズ / 尺、タイトル、説明文、タグ、policy timezone / UTC `Z` の予約日時、private、notify false、Made for Kids / synthetic media の選択、Community Guidelines 同意、operation / slot / attempt snapshot をユーザーに提示し、**P0 upload や審査承認とは別の P3 実予約公開専用承認**を得る。承認前は確定しない
+- [x] P3-1. P0 の private lock が解消または非該当で、P1 / P2 の全テストが通ることを確認する。lock 中は予約公開成功を装わず P3 未完了のままにする
+- [x] P3-2. 実チャンネル ID / 名称、対象ファイル、サイズ / 尺、タイトル、説明文、タグ、policy timezone / UTC `Z` の予約日時、private、notify false、Made for Kids / synthetic media の選択、Community Guidelines 同意、operation / slot / attempt snapshot をユーザーに提示し、**P0 upload や審査承認とは別の P3 実予約公開専用承認**を得る。承認前は確定しない
 - [ ] P3-3. 承認後の再検証を通して 1 本を予約 upload し、`videos.list(part="status,processingDetails")` を upload 後 processing 完了まで、予約時刻前、予約時刻後に bounded poll して operation に記録する。時刻前 private、時刻後 public と実視聴可能を確認する
 - [ ] P3-4. `docs/requirements-v3.md` の AC-18〜AC-28 を総点検する。4xx / unknown の reconciliation、LA attempt、再起動復元、status bar kind dispatch はモック証跡、実公開は P3 の operation 証跡を使う
 - [ ] P3-5. 実配信 1 本でチャプター生成 → ショート複数本生成までを通し、上記の承認済み 1 本だけを予約投稿対象にする（AC-28）
@@ -943,9 +943,18 @@ data/{video_id}/ ...
 - AC-28 の v1 / v2 回帰なしは `uv run pytest -q` の全 821 件通過で確認した
 - 実予約公開、P0 private lock / 専用承認、AC-28 の総合充足・実通し・操作別承認は実機証跡がないため未チェックを維持した。P3-4 本体も実公開 operation 証跡を得るまで未完了とする
 
+**P3 実予約公開の承認記録（2026-08-01 07:53 JST）:**
+
+- P0 operation `886c300a9a1142058f24e99249fe79ca` は API / Studio / 公開 URL で public、`no_private_lock` と確認済み。P1 / P2 を含む直近の `uv run pytest -q` は 821 passed / 2 skipped で、以後コード変更はない
+- チャンネル `AI整体師`（`UCVAkt5l6kD4igMdVoEGTGIg`）、対象 `/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/IJvd6k6ZmUo/shorts/output/short_5ea2b4ff8e08.mp4`、3,791,982 bytes、17.042993 秒を提示した
+- タイトルは「テラとルナを比較した結果」、説明文は「テラとルナを比較した感想と、Grok 4.5 Highで作成した結果を紹介します。」、タグは「AI、テラ、ルナ、Grok 4.5」
+- policy は毎日 09:00、1 日間隔、`Asia/Tokyo`。slot は 2026-08-02 09:00 JST / 2026-08-02 00:00 UTC、private 固定、notify false、LA 当日 attempt は 1 / 100、fingerprint は `1677a3b1f97285ae614ceea2280474b1cc0e4787b1af3119e9a4271fe5ac4df7`。承認前のため operation / job ID は未発行
+- ユーザーから P0 と別の P3 実予約公開、Made for Kids「いいえ」、synthetic media「いいえ」、Community Guidelines「確認済み」、実 upload と外部公開、upload 後に 10 分 lead を保つ最短時刻へ前倒しして検証することへの明示承認を取得した
+- 承認後の本番 preview 再検証で、上記の全項目、attempt、fingerprint が一致した
+
 **Done 条件:**
 
-- [ ] P3 実予約公開の対象と全内容を提示した専用の明示承認記録がある
+- [x] P3 実予約公開の対象と全内容を提示した専用の明示承認記録がある
 - [ ] operation に upload 後、公開前、公開後の status / processingDetails と poll 時刻が記録されている
 - [ ] private lock を成功扱いにせず、予約時刻後に実際に public かつ視聴可能である
 - [ ] AC-18〜AC-28 が確認済み（未達は明示的に次イテレーションへ移す）
