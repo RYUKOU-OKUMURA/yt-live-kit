@@ -300,7 +300,7 @@ def test_start_regenerate_shows_error_on_job_busy() -> None:
     rerun.assert_not_called()
 
 
-def test_render_row_actions_disables_purge_confirm_buttons_when_busy() -> None:
+def test_purge_dialog_disables_confirm_buttons_when_busy() -> None:
     video = ProcessedVideo(
         video_id="vid1234567",
         title="テスト",
@@ -313,24 +313,16 @@ def test_render_row_actions_disables_purge_confirm_buttons_when_busy() -> None:
     calls, mock_button = _collect_button_disabled_calls()
 
     with (
-        patch("yt_live_kit.ui.views.history.st.columns", side_effect=_mock_columns),
         patch("yt_live_kit.ui.views.history.st.button", mock_button),
         patch("yt_live_kit.ui.views.history.st.warning"),
-        patch(
-            "yt_live_kit.ui.views.history._purge_confirm_ids",
-            return_value={"vid1234567"},
-        ),
+        patch("yt_live_kit.ui.views.history.st.info"),
+        patch("yt_live_kit.ui.views.history.is_busy", return_value=True),
     ):
-        history._render_row_actions(
-            video,
-            busy=True,
-            settings=settings,
-        )
+        history._confirm_purge_dialog.__wrapped__(video, settings)
 
     disabled_by_label = dict(calls)
     assert disabled_by_label["削除を実行"] is True
     assert disabled_by_label["キャンセル"] is True
-    assert disabled_by_label.get("チャプターを表示") is None
 
 
 def test_render_storage_section_disables_storage_buttons_when_busy() -> None:
@@ -389,71 +381,27 @@ def test_render_storage_section_disables_storage_buttons_when_busy() -> None:
     assert disabled_by_label["1 件を削除する"] is True
 
 
-def test_render_storage_section_shows_error_on_bulk_purge_storage_error() -> None:
-    processed = [
-        ProcessedVideo(
-            video_id="vid1234567",
-            title="テスト",
-            fetched_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
-            has_chapters=True,
-            has_transcript=False,
-            has_clips=False,
-        ),
-    ]
+def test_bulk_purge_dialog_shows_storage_error_after_confirmation() -> None:
     settings = MagicMock()
-    summary = StorageSummary(
-        total_bytes=1024,
-        videos=[
-            VideoStorage(
-                video_id="vid1234567",
-                title="テスト",
-                source_bytes=1024,
-                output_bytes=0,
-                intermediate_bytes=0,
-                other_bytes=0,
-                total_bytes=1024,
-            ),
-        ],
-    )
-
-    def mock_button(label: str, **kwargs: object) -> bool:
-        return label == "1 件を削除する"
-
-    @contextmanager
-    def mock_expander(_label: str, *, expanded: bool = False):
-        yield
 
     with (
-        patch("yt_live_kit.ui.views.history.st.expander", side_effect=mock_expander),
-        patch("yt_live_kit.ui.views.history.st.columns", side_effect=_mock_columns),
-        patch("yt_live_kit.ui.views.history.st.button", side_effect=mock_button),
-        patch("yt_live_kit.ui.views.history.st.markdown"),
-        patch("yt_live_kit.ui.views.history.st.caption"),
-        patch("yt_live_kit.ui.views.history.st.text"),
-        patch("yt_live_kit.ui.views.history.st.divider"),
+        patch("yt_live_kit.ui.views.history.st.button", return_value=True),
         patch("yt_live_kit.ui.views.history.st.warning"),
-        patch("yt_live_kit.ui.views.history.st.number_input", return_value=30),
-        patch("yt_live_kit.ui.views.history._get_storage_summary", return_value=summary),
-        patch(
-            "yt_live_kit.ui.views.history._get_bulk_preview",
-            return_value={"days": 30, "count": 1, "total_bytes": 1024},
-        ),
+        patch("yt_live_kit.ui.views.history.is_busy", return_value=False),
         patch(
             "yt_live_kit.ui.views.history.purge_sources_older_than",
             side_effect=StorageError("一括削除に失敗しました"),
         ),
         patch("yt_live_kit.ui.views.history.st.error") as show_error,
-        patch("yt_live_kit.ui.views.history.st.success") as show_success,
         patch("yt_live_kit.ui.views.history.summarize") as summarize,
     ):
-        history._render_storage_section(processed, settings, busy=False)
+        history._confirm_bulk_purge_dialog.__wrapped__(30, 1, 1024, settings)
 
     show_error.assert_called_once_with("一括削除に失敗しました")
-    show_success.assert_not_called()
     summarize.assert_not_called()
 
 
-def test_render_row_actions_reruns_and_stores_message_on_purge_success() -> None:
+def test_purge_dialog_reruns_and_stores_message_on_success() -> None:
     video = ProcessedVideo(
         video_id="vid1234567",
         title="テスト",
@@ -465,17 +413,13 @@ def test_render_row_actions_reruns_and_stores_message_on_purge_success() -> None
     settings = MagicMock()
     session_state: dict[str, object] = {}
 
-    def mock_button(label: str, **kwargs: object) -> bool:
-        return label == "削除を実行"
-
     with (
-        patch("yt_live_kit.ui.views.history.st.columns", side_effect=_mock_columns),
-        patch("yt_live_kit.ui.views.history.st.button", side_effect=mock_button),
-        patch("yt_live_kit.ui.views.history.st.warning"),
         patch(
-            "yt_live_kit.ui.views.history._purge_confirm_ids",
-            return_value={"vid1234567"},
+            "yt_live_kit.ui.views.history.st.button",
+            side_effect=lambda label, **_kwargs: label == "削除を実行",
         ),
+        patch("yt_live_kit.ui.views.history.st.warning"),
+        patch("yt_live_kit.ui.views.history.is_busy", return_value=False),
         patch(
             "yt_live_kit.ui.views.history.purge_source",
             return_value=1024,
@@ -485,17 +429,78 @@ def test_render_row_actions_reruns_and_stores_message_on_purge_success() -> None
         patch("yt_live_kit.ui.views.history.st.rerun") as rerun,
         patch("yt_live_kit.ui.views.history.st.success") as show_success,
     ):
-        history._render_row_actions(
-            video,
-            busy=False,
-            settings=settings,
-        )
+        history._confirm_purge_dialog.__wrapped__(video, settings)
 
     rerun.assert_called_once()
     show_success.assert_not_called()
     assert session_state[history._SESSION_PURGE_SUCCESS] == (
         "元動画と中間ファイルを削除しました（1.0 KB）。"
     )
+
+
+def test_row_purge_button_opens_dialog_without_deleting() -> None:
+    video = ProcessedVideo(
+        video_id="vid1234567",
+        title="テスト",
+        fetched_at=None,
+        has_chapters=True,
+        has_transcript=True,
+        has_clips=False,
+    )
+    settings = MagicMock()
+
+    with (
+        patch("yt_live_kit.ui.views.history.st.columns", side_effect=_mock_columns),
+        patch(
+            "yt_live_kit.ui.views.history.st.button",
+            side_effect=lambda label, **_kwargs: label == "元動画を削除",
+        ),
+        patch("yt_live_kit.ui.views.history._confirm_purge_dialog") as dialog,
+        patch("yt_live_kit.ui.views.history.purge_source") as purge,
+    ):
+        history._render_row_actions(video, busy=False, settings=settings)
+
+    dialog.assert_called_once_with(video, settings)
+    purge.assert_not_called()
+
+
+def test_row_regenerate_button_opens_dialog_without_starting_job() -> None:
+    video = ProcessedVideo(
+        video_id="vid1234567",
+        title="テスト",
+        fetched_at=None,
+        has_chapters=True,
+        has_transcript=True,
+        has_clips=True,
+    )
+    settings = MagicMock()
+
+    with (
+        patch("yt_live_kit.ui.views.history.st.columns", side_effect=_mock_columns),
+        patch(
+            "yt_live_kit.ui.views.history.st.button",
+            side_effect=lambda label, **_kwargs: label == "チャプターを再生成",
+        ),
+        patch("yt_live_kit.ui.views.history._confirm_regenerate_dialog") as dialog,
+        patch("yt_live_kit.ui.views.history.start_job") as start_job,
+    ):
+        history._render_row_actions(video, busy=False, settings=settings)
+
+    dialog.assert_called_once_with(video, "chapters", settings)
+    start_job.assert_not_called()
+
+
+def test_bulk_purge_dialog_does_not_delete_before_confirmation() -> None:
+    settings = MagicMock()
+    with (
+        patch("yt_live_kit.ui.views.history.st.button", return_value=False),
+        patch("yt_live_kit.ui.views.history.st.warning"),
+        patch("yt_live_kit.ui.views.history.is_busy", return_value=False),
+        patch("yt_live_kit.ui.views.history.purge_sources_older_than") as purge,
+    ):
+        history._confirm_bulk_purge_dialog.__wrapped__(30, 2, 2048, settings)
+
+    purge.assert_not_called()
 
 
 def test_render_row_actions_disables_regen_buttons_without_transcript() -> None:

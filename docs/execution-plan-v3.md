@@ -16,7 +16,7 @@
 | PLAN0 | 要件・計画の確定 | [x] 完了 |
 | U0 | `ui/pages` → `ui/views` リネーム + `st.navigation` 導入 | [x] 完了 |
 | U1 | ライブラリページ | [x] 完了 |
-| U2 | 動画詳細ページ + ステッパー + 確認ダイアログ + 共通コピー部品 | [ ] 未着手 |
+| U2 | 動画詳細ページ + ステッパー + 確認ダイアログ + 共通コピー部品 | [~] 進行中 |
 | U3 | 取り込みページ | [ ] 未着手 |
 | U4 | 設定ページ | [ ] 未着手 |
 | U5 | 概要欄反映の差分プレビュー UI + フェーズ U 受け入れ | [ ] 未着手 |
@@ -287,43 +287,45 @@ data/{video_id}/ ...
 - `src/yt_live_kit/ui/views/video_detail.py`（新規）
 - `src/yt_live_kit/ui/components/clipboard.py`（新規。`results.py` の `build_clipboard_copy_html` / `render_copy_button` を移設）
 - `src/yt_live_kit/ui/components/results.py`（クリップボード関数の移設に伴う import 整理。ハイライト・ショートのセクション呼び出しは `video_detail.py` に移す）
-- `src/yt_live_kit/ui/views/highlights.py` / `shorts.py`（`render_highlights_section` / `render_shorts_section` の呼び出し元を `video_detail.py` に変更。関数自体のロジックは変更しない）
+- `src/yt_live_kit/ui/views/highlights.py` / `shorts.py`（`render_highlights_section` / `render_shorts_section` の呼び出し元を `video_detail.py` に変更。既存の表示・生成ロジックは維持しつつ、既存成果物を上書きする場合に限り確認 `st.dialog` を追加してよい）
 - `src/yt_live_kit/ui/app.py`（ナビゲーション登録）
 - `src/yt_live_kit/ui/views/_local_settings.py`（概要欄反映済み ID の軽量永続化を追加。U5 で成功時に記録する）
 - `tests/test_ui_video_detail_page.py`（新規）
+- `tests/test_ui_run_page.py` / `tests/test_ui_history_page.py`（クリップボード移設と確認ダイアログへの置換に伴う既存期待の更新）
+- `tests/test_ui_highlights.py` / `tests/test_ui_shorts.py`（既存成果物を上書きする経路の確認ダイアログ追加に伴うテスト）
 - （`services/` は変更しない）
 
 **背景:** 現状は「実行」ページの結果表示（[`ui/components/results.py`](../src/yt_live_kit/ui/components/results.py) の `render_results()`）が直後の 1 回分の実行結果しか扱えず、「処理済み一覧」（`ui/views/history.py`）の行アクションは過去動画への再生成・削除・概要欄反映を扱う、という 2 つの入口に処理が分かれている。動画詳細ページはこの 2 つを統合し、`services.pipeline.load_result_from_disk(video_id, settings)`（既存関数、`ui/views/history.py` の `_start_description_preview` が既に使っている）を使って **保存済みの成果物から** 常に画面を再構築する。
 
 **作業:**
 
-- [ ] U2-1. ステッパー: 字幕 → チャプター → 候補 → ショート → 概要欄の 5 段階を、`ProcessedVideo` / `PipelineResult` / U1 の `count_shorts()` / UI 層の概要欄反映済み ID から計算する純粋関数として実装し、テストする
+- [x] U2-1. ステッパー: 字幕 → チャプター → 候補 → ショート → 概要欄の 5 段階を、`ProcessedVideo` / `PipelineResult` / U1 の `count_shorts()` / UI 層の概要欄反映済み ID から計算する純粋関数として実装し、テストする
   - 記法は「✓ 完了」「● 次にやる」「○ 未着手」の 3 状態
   - 「次にやる」ステップのボタンを他より大きく・目立つ色で表示する
   - 概要欄の完了状態は `data/_config/description_applied_videos.json` に video ID の配列として永続化する。U2 では `_local_settings.py` に読み書き関数を用意し、U5 の `update_video_description()` 成功後にのみ記録する
-- [ ] U2-2. パイプライン順セクションを実装する
+- [x] U2-2. パイプライン順セクションを実装する
   1. 字幕・文字起こし全文（`ui/components/clipboard.py` の共通コピー部品でコピー）
   2. チャプター（表示 + `regenerate(target="chapters")` を `jobs.start_job()` 経由で実行するボタンは expander 内）
   3. 切り抜き候補（表示 + `regenerate(target="clips")` は expander 内）
   4. ハイライト候補（`render_highlights_section` の内容をこのページから呼ぶ）
   5. ショート作成（`render_shorts_section` の内容をこのページから呼ぶ。フェーズ S で拡張される）
   6. 概要欄反映（U5 で差分プレビューに置き換える。このタスクでは呼び出し位置だけ用意する）
-- [ ] U2-3. `ui/components/clipboard.py` を新設し、`build_clipboard_copy_html` / `render_copy_button` を `results.py` から移設する。**関数のシグネチャ・実装は変更しない**（移動のみ）。呼び出し側の import を更新する
-- [ ] U2-4. 破壊的操作（元動画削除・成果物の再生成による上書き）を `st.dialog` の確認ダイアログに統一する
+- [x] U2-3. `ui/components/clipboard.py` を新設し、`build_clipboard_copy_html` / `render_copy_button` を `results.py` から移設する。**関数のシグネチャ・実装は変更しない**（移動のみ）。呼び出し側の import を更新する
+- [x] U2-4. 破壊的操作（元動画削除・成果物の再生成による上書き）を `st.dialog` の確認ダイアログに統一する
   - `ui/views/history.py` の `_render_row_actions` にある「削除を実行 / キャンセル」の 2 段階ボタン方式を、`st.dialog` を開く方式に置き換える
   - 確認文言（「チャプター・全文・切り抜き候補・切り出し済み動画は残ります」等）は既存文言を流用する
-- [ ] U2-5. 完了済みステップの再実行導線はすべて `st.expander` に畳む（初期状態は閉じる）
-- [ ] U2-6. ユニットテスト
+- [x] U2-5. 完了済みステップの再実行導線はすべて `st.expander` に畳む（初期状態は閉じる）
+- [x] U2-6. ユニットテスト
   - ステッパーの状態計算（5 パターン以上）
   - `st.dialog` 分岐（開く条件・確定時に呼ばれる関数）を `st.dialog` をモックして検証
   - クリップボード部品の移設後もコピー用 HTML が生成されること（既存テストの移設）
 
 **Done 条件:**
 
-- [ ] `uv run pytest` が全件通る
-- [ ] ステッパーが実データで正しい状態を表示する
-- [ ] 削除・再生成の破壊的操作がすべて `st.dialog` を経由する
-- [ ] `services/` に変更が無い
+- [x] `uv run pytest` が全件通る
+- [x] ステッパーが実データで正しい状態を表示する
+- [x] 削除・再生成の破壊的操作がすべて `st.dialog` を経由する
+- [x] `services/` に変更が無い
 - [ ] タスク完了コミット済み
 
 **見積もり目安:** 2 日

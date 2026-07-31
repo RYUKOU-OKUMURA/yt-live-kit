@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-import json
-
 import streamlit as st
-import streamlit.components.v1 as components
 
 from yt_live_kit.config import Settings, get_settings
 from yt_live_kit.services.description import (
@@ -16,6 +13,7 @@ from yt_live_kit.services.description import (
 from yt_live_kit.services.ffmpeg import CutResult, FfmpegError, cut_clip
 from yt_live_kit.services.pipeline import PipelineResult
 from yt_live_kit.services.storage import dir_size, format_bytes
+from yt_live_kit.ui.components.clipboard import render_copy_button
 from yt_live_kit.ui.state import get_cut_result, set_cut_result
 
 _UNEXPECTED_ERROR_MSG = (
@@ -51,61 +49,6 @@ def source_cache_note(video_id: str, settings: Settings) -> str | None:
         f"元動画 ({format_bytes(size)}) は再利用のため保持しています。"
         "不要なら一覧から削除できます。"
     )
-
-
-def build_clipboard_copy_html(
-    *,
-    text: str,
-    button_id: str,
-    button_label: str,
-    success_message: str = "コピーしました",
-    hide_after_ms: int = 2000,
-) -> str:
-    """クリップボードコピー用の HTML を生成する（テスト可能な純粋関数）."""
-    # JSON エンコード結果に "</script>" などが含まれると script タグが
-    # 途中で閉じてしまうため、"</" を "<\/" に置換して埋め込む
-    # （JavaScript 文字列リテラルとしては等価）。
-    encoded = json.dumps(text, ensure_ascii=False).replace("</", "<\\/")
-    return f"""
-<div>
-  <button id="{button_id}" type="button">{button_label}</button>
-  <span id="{button_id}-msg" style="display:none;color:#0a7;margin-left:8px;">
-    {success_message}
-  </span>
-</div>
-<script>
-  (function() {{
-    const text = {encoded};
-    const button = document.getElementById({json.dumps(button_id)});
-    const message = document.getElementById({json.dumps(f"{button_id}-msg")});
-    button.addEventListener("click", async function() {{
-      try {{
-        await navigator.clipboard.writeText(text);
-        message.style.display = "inline";
-        setTimeout(function() {{
-          message.style.display = "none";
-        }}, {hide_after_ms});
-      }} catch (err) {{
-        message.textContent = "コピーに失敗しました";
-        message.style.display = "inline";
-        message.style.color = "#c00";
-      }}
-    }});
-  }})();
-</script>
-"""
-
-
-def render_copy_button(
-    text: str,
-    *,
-    label: str,
-    key: str,
-    height: int = 50,
-) -> None:
-    """navigator.clipboard.writeText を使うコピーボタンを描画する."""
-    html = build_clipboard_copy_html(text=text, button_id=key, button_label=label)
-    components.html(html, height=height)
 
 
 def render_results(result: PipelineResult) -> None:
@@ -237,9 +180,3 @@ def render_results(result: PipelineResult) -> None:
                 st.caption(note)
     elif not result.clips_error:
         st.info(clips_empty_message(result.clips_requested))
-
-    from yt_live_kit.ui.views.highlights import render_highlights_section
-    from yt_live_kit.ui.views.shorts import render_shorts_section
-
-    render_highlights_section(result)
-    render_shorts_section(result)

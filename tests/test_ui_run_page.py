@@ -6,12 +6,12 @@ import json
 
 from yt_live_kit.config import Settings
 from yt_live_kit.services.storage import format_bytes
+from yt_live_kit.ui.components.clipboard import build_clipboard_copy_html
 from yt_live_kit.ui.components.results import (
     _CHAPTERS_NOT_GENERATED_MESSAGE,
     _CLIPS_EMPTY_NOT_REQUESTED_MESSAGE,
     _CLIPS_EMPTY_REQUESTED_MESSAGE,
     _TEMPLATE_NOT_SET_MESSAGE,
-    build_clipboard_copy_html,
     clips_empty_message,
     source_cache_note,
 )

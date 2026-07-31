@@ -226,6 +226,70 @@ def _start_build_highlight(
     st.rerun()
 
 
+@st.dialog("ハイライト候補の再生成を確認")
+def _confirm_regenerate_highlights_dialog(
+    result: PipelineResult,
+    settings: Settings,
+) -> None:
+    st.warning(
+        "ハイライト候補を再生成します。既存の候補は退避された後に上書きされます。"
+    )
+    busy = is_busy()
+    if busy:
+        st.info(_BUSY_MESSAGE)
+    if st.button(
+        "再生成を実行",
+        key=f"hl_confirm_generate_{result.video_id}",
+        type="primary",
+        disabled=busy,
+    ):
+        _start_regenerate_highlights(result, settings)
+
+
+@st.dialog("ハイライト動画の再作成を確認")
+def _confirm_build_highlight_dialog(
+    result: PipelineResult,
+    selected: list[HighlightSegment],
+    settings: Settings,
+) -> None:
+    st.warning("既存のハイライト動画を上書きして再作成します。")
+    busy = is_busy()
+    if busy:
+        st.info(_BUSY_MESSAGE)
+    if st.button(
+        "再作成を実行",
+        key=f"hl_confirm_build_{result.video_id}",
+        type="primary",
+        disabled=busy,
+    ):
+        _start_build_highlight(result, selected, settings)
+
+
+def _start_or_confirm_regenerate_highlights(
+    result: PipelineResult,
+    settings: Settings,
+    *,
+    output_exists: bool,
+) -> None:
+    if output_exists:
+        _confirm_regenerate_highlights_dialog(result, settings)
+    else:
+        _start_regenerate_highlights(result, settings)
+
+
+def _start_or_confirm_build_highlight(
+    result: PipelineResult,
+    selected: list[HighlightSegment],
+    settings: Settings,
+    *,
+    output_exists: bool,
+) -> None:
+    if output_exists:
+        _confirm_build_highlight_dialog(result, selected, settings)
+    else:
+        _start_build_highlight(result, selected, settings)
+
+
 def _render_output_video(video_id: str, settings: Settings) -> None:
     output_path = settings.data_dir / video_id / "highlights" / "output" / "highlight.mp4"
     log_path = output_path.parent / "highlight.ffmpeg.log"
@@ -252,12 +316,19 @@ def render_highlights_section(result: PipelineResult) -> None:
 
         gen_cols = st.columns([2, 2])
         with gen_cols[0]:
+            segments_path = (
+                settings.data_dir / result.video_id / "highlights" / "segments.json"
+            )
             if st.button(
                 "ハイライト候補を生成",
                 key=f"hl_generate_{result.video_id}",
                 disabled=busy,
             ):
-                _start_regenerate_highlights(result, settings)
+                _start_or_confirm_regenerate_highlights(
+                    result,
+                    settings,
+                    output_exists=segments_path.is_file(),
+                )
 
         use_clips = st.toggle(
             "切り抜き候補から選ぶ",
@@ -304,6 +375,18 @@ def render_highlights_section(result: PipelineResult) -> None:
                 disabled=build_disabled,
                 help=build_help,
             ):
-                _start_build_highlight(result, selected, settings)
+                output_path = (
+                    settings.data_dir
+                    / result.video_id
+                    / "highlights"
+                    / "output"
+                    / "highlight.mp4"
+                )
+                _start_or_confirm_build_highlight(
+                    result,
+                    selected,
+                    settings,
+                    output_exists=output_path.is_file(),
+                )
 
         _render_output_video(result.video_id, settings)

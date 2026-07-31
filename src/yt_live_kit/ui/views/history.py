@@ -30,7 +30,6 @@ _REGENERATE_NOTE = (
     "再生成時は既存の成果物を .bak に退避してから上書きします。"
 )
 _SESSION_STORAGE_SUMMARY = "history_storage_summary"
-_SESSION_PURGE_CONFIRM = "history_purge_confirm_ids"
 _SESSION_BULK_PREVIEW = "history_bulk_purge_preview"
 _SESSION_PURGE_SUCCESS = "history_purge_success_message"
 _SESSION_OPEN_CHAPTER_IDS = "history_open_chapter_ids"
@@ -123,25 +122,6 @@ def _get_storage_summary() -> StorageSummary | None:
 
 def _set_storage_summary(summary: StorageSummary) -> None:
     st.session_state[_SESSION_STORAGE_SUMMARY] = summary
-
-
-def _purge_confirm_ids() -> set[str]:
-    raw = st.session_state.get(_SESSION_PURGE_CONFIRM)
-    if isinstance(raw, set):
-        return raw
-    return set()
-
-
-def _request_purge_confirm(video_id: str) -> None:
-    ids = _purge_confirm_ids()
-    ids.add(video_id)
-    st.session_state[_SESSION_PURGE_CONFIRM] = ids
-
-
-def _clear_purge_confirm(video_id: str) -> None:
-    ids = _purge_confirm_ids()
-    ids.discard(video_id)
-    st.session_state[_SESSION_PURGE_CONFIRM] = ids
 
 
 def _open_chapter_ids() -> set[str]:
@@ -240,6 +220,102 @@ def _start_regenerate(video: ProcessedVideo, target: str, settings: Settings) ->
         return
     set_active_job_id(job_id)
     st.rerun()
+
+
+@st.dialog("成果物の再生成を確認")
+def _confirm_regenerate_dialog(
+    video: ProcessedVideo,
+    target: str,
+    settings: Settings,
+) -> None:
+    target_label = "チャプター" if target == "chapters" else "切り抜き候補"
+    st.warning(
+        f"{target_label}を再生成します。既存の成果物は退避された後に上書きされます。"
+    )
+    busy = is_busy()
+    if busy:
+        st.info(_BUSY_MESSAGE)
+    if st.button(
+        "再生成を実行",
+        key=f"history_confirm_regen_{target}_{video.video_id}",
+        type="primary",
+        disabled=busy,
+    ):
+        _start_regenerate(video, target, settings)
+
+
+@st.dialog("元動画の削除を確認")
+def _confirm_purge_dialog(
+    video: ProcessedVideo,
+    settings: Settings,
+) -> None:
+    st.warning(
+        "元動画と中間ファイルを削除します。チャプター・全文・切り抜き候補・"
+        "切り出し済み動画は残ります。"
+    )
+    busy = is_busy()
+    if busy:
+        st.info(_BUSY_MESSAGE)
+    if st.button(
+        "削除を実行",
+        key=f"history_confirm_purge_{video.video_id}",
+        type="primary",
+        disabled=busy,
+    ):
+        try:
+            deleted = purge_source(video.video_id, settings)
+        except StorageError as exc:
+            st.error(str(exc))
+        else:
+            summary = _get_storage_summary()
+            if summary is not None:
+                _set_storage_summary(summarize(settings))
+            _set_purge_success_message(
+                f"元動画と中間ファイルを削除しました（{format_bytes(deleted)}）。"
+            )
+            st.rerun()
+    if st.button(
+        "キャンセル",
+        key=f"history_cancel_purge_{video.video_id}",
+        disabled=busy,
+    ):
+        st.rerun()
+
+
+@st.dialog("古い元動画の一括削除を確認")
+def _confirm_bulk_purge_dialog(
+    days: int,
+    count: int,
+    total_bytes: int,
+    settings: Settings,
+) -> None:
+    st.warning(
+        f"{days} 日より前の元動画・中間ファイル {count} 件、"
+        f"合計 {format_bytes(total_bytes)} を削除します。"
+        "チャプター・全文・切り抜き候補・切り出し済み動画は残ります。"
+    )
+    busy = is_busy()
+    if busy:
+        st.info(_BUSY_MESSAGE)
+    if st.button(
+        "一括削除を実行",
+        key="history_confirm_bulk_purge",
+        type="primary",
+        disabled=busy,
+    ):
+        try:
+            results = purge_sources_older_than(days, settings)
+        except StorageError as exc:
+            st.error(str(exc))
+        else:
+            deleted_count = len(results)
+            deleted_bytes = sum(size for _, size in results)
+            _set_storage_summary(summarize(settings))
+            _clear_bulk_preview()
+            _set_purge_success_message(
+                f"{deleted_count} 件、合計 {format_bytes(deleted_bytes)} を削除しました。"
+            )
+            st.rerun()
 
 
 def _start_description_preview(video: ProcessedVideo, settings: Settings) -> None:
@@ -342,7 +418,7 @@ def _render_row_actions(
             disabled=regen_disabled,
             help=regen_help,
         ):
-            _start_regenerate(video, "chapters", settings)
+            _confirm_regenerate_dialog(video, "chapters", settings)
     with action_cols[1]:
         if st.button(
             clips_button_label(video.has_clips),
@@ -350,49 +426,14 @@ def _render_row_actions(
             disabled=regen_disabled,
             help=regen_help,
         ):
-            _start_regenerate(video, "clips", settings)
+            _confirm_regenerate_dialog(video, "clips", settings)
     with action_cols[2]:
-        confirming = video.video_id in _purge_confirm_ids()
-        if confirming:
-            st.warning(
-                "元動画と中間ファイルを削除します。チャプター・全文・切り抜き候補・"
-                "切り出し済み動画は残ります。"
-            )
-            confirm_cols = st.columns(2)
-            with confirm_cols[0]:
-                if st.button(
-                    "削除を実行",
-                    key=f"purge_exec_{video.video_id}",
-                    type="primary",
-                    disabled=busy,
-                ):
-                    try:
-                        deleted = purge_source(video.video_id, settings)
-                        _clear_purge_confirm(video.video_id)
-                        summary = _get_storage_summary()
-                        if summary is not None:
-                            _set_storage_summary(summarize(settings))
-                        _set_purge_success_message(
-                            f"元動画と中間ファイルを削除しました（{format_bytes(deleted)}）。"
-                        )
-                        st.rerun()
-                    except StorageError as exc:
-                        st.error(str(exc))
-            with confirm_cols[1]:
-                if st.button(
-                    "キャンセル",
-                    key=f"purge_cancel_{video.video_id}",
-                    disabled=busy,
-                ):
-                    _clear_purge_confirm(video.video_id)
-                    st.rerun()
-        elif st.button(
+        if st.button(
             "元動画を削除",
             key=f"purge_{video.video_id}",
             disabled=busy,
         ):
-            _request_purge_confirm(video.video_id)
-            st.rerun()
+            _confirm_purge_dialog(video, settings)
     with action_cols[3]:
         if st.button(
             "概要欄に反映",
@@ -509,19 +550,9 @@ def _render_storage_section(
                     type="primary",
                     disabled=busy,
                 ):
-                    try:
-                        results = purge_sources_older_than(int(days), settings)
-                    except StorageError as exc:
-                        st.error(str(exc))
-                    else:
-                        deleted_count = len(results)
-                        deleted_bytes = sum(size for _, size in results)
-                        _set_storage_summary(summarize(settings))
-                        _clear_bulk_preview()
-                        st.success(
-                            f"{deleted_count} 件、合計 {format_bytes(deleted_bytes)} "
-                            "を削除しました。"
-                        )
+                    _confirm_bulk_purge_dialog(
+                        int(days), count, total_bytes, settings
+                    )
 
 
 def render_history_page() -> None:

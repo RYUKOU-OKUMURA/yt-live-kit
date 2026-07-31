@@ -155,7 +155,7 @@ uv run pytest
 |--------|---------------------------|
 | U0 | `ui/pages/` を移動する前に `uv run pytest` のベースライン件数を記録し、移行後に同数（またはそれ以上）通ることを確認する |
 | U1 | `services/history.py` の `ProcessedVideo` にフィールドを追加しようとしていないか（services 不可侵）。アーカイブ状態を `st.session_state` のみで済ませていないか（`archived_videos.json` への永続化が必須） |
-| U2 | `render_highlights_section` / `render_shorts_section` の**呼び出し元だけ**を変更し、関数内部のロジックまで書き換えていないか |
+| U2 | `render_highlights_section` / `render_shorts_section` の既存表示・生成ロジックを維持しているか。既存成果物を上書きする場合の確認 `st.dialog` 追加だけは許可する |
 | U3 | `services/channel.py` の `list_archives()` を自動で呼んでいないか（レート制限対策・NFR-05 は v3 でも維持）。`_local_settings.py` は U1 で新設済みのため、重複して新規作成していないか |
 | U4 | `config.py` を変更しようとしていないか（設定ページは表示専用 + チャンネル既定ハンドルのみ編集可） |
 | U5 | 反映前後の対比を「反映後のみ」で済ませていないか（v2 の `_render_description_preview` の再発防止） |

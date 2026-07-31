@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 from yt_live_kit.config import Settings
 from yt_live_kit.ui.views.shorts import (
+    _confirm_build_short_dialog,
+    _start_or_confirm_build_short,
     LAYOUT_BLUR_LABEL,
     LAYOUT_CROP_LABEL,
     ShortInterval,
@@ -83,3 +86,86 @@ def test_short_output_path_matches_services_naming(tmp_path: Path) -> None:
 def test_short_meta_path_is_adjacent_to_output(tmp_path: Path) -> None:
     output = tmp_path / "short_10_40.mp4"
     assert short_meta_path(output) == tmp_path / "short_10_40.meta.json"
+
+
+def test_existing_short_output_opens_dialog_without_starting_job() -> None:
+    settings = MagicMock()
+    interval = ShortInterval(start=10.0, end=40.0)
+    with (
+        patch("yt_live_kit.ui.views.shorts._confirm_build_short_dialog") as dialog,
+        patch("yt_live_kit.ui.views.shorts._start_build_short") as start,
+    ):
+        _start_or_confirm_build_short(
+            video_id="vid123",
+            title="テスト",
+            interval=interval,
+            layout="blur",
+            burn_subtitles=True,
+            settings=settings,
+            output_exists=True,
+        )
+
+    dialog.assert_called_once_with(
+        video_id="vid123",
+        title="テスト",
+        interval=interval,
+        layout="blur",
+        burn_subtitles=True,
+        settings=settings,
+    )
+    start.assert_not_called()
+
+
+def test_missing_short_output_starts_without_dialog() -> None:
+    settings = MagicMock()
+    interval = ShortInterval(start=10.0, end=40.0)
+    with (
+        patch("yt_live_kit.ui.views.shorts._confirm_build_short_dialog") as dialog,
+        patch("yt_live_kit.ui.views.shorts._start_build_short") as start,
+    ):
+        _start_or_confirm_build_short(
+            video_id="vid123",
+            title="テスト",
+            interval=interval,
+            layout="crop",
+            burn_subtitles=False,
+            settings=settings,
+            output_exists=False,
+        )
+
+    start.assert_called_once_with(
+        video_id="vid123",
+        title="テスト",
+        interval=interval,
+        layout="crop",
+        burn_subtitles=False,
+        settings=settings,
+    )
+    dialog.assert_not_called()
+
+
+def test_short_build_dialog_requires_confirmation() -> None:
+    settings = MagicMock()
+    interval = ShortInterval(start=10.0, end=40.0)
+    with (
+        patch("yt_live_kit.ui.views.shorts.is_busy", return_value=False),
+        patch("yt_live_kit.ui.views.shorts.st.warning"),
+        patch(
+            "yt_live_kit.ui.views.shorts.st.button",
+            side_effect=[False, True],
+        ),
+        patch("yt_live_kit.ui.views.shorts._start_build_short") as start,
+    ):
+        kwargs = {
+            "video_id": "vid123",
+            "title": "テスト",
+            "interval": interval,
+            "layout": "blur",
+            "burn_subtitles": True,
+            "settings": settings,
+        }
+        _confirm_build_short_dialog.__wrapped__(**kwargs)
+        start.assert_not_called()
+        _confirm_build_short_dialog.__wrapped__(**kwargs)
+
+    start.assert_called_once_with(**kwargs)

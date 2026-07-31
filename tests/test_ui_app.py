@@ -58,6 +58,42 @@ def test_app_registers_japanese_navigation_after_page_config() -> None:
     }
 
 
+def test_app_pages_have_unique_explicit_url_paths() -> None:
+    app_path = Path(__file__).parents[1] / "src/yt_live_kit/ui/app.py"
+    tree = ast.parse(app_path.read_text(encoding="utf-8"))
+    page_calls = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "st"
+        and node.func.attr == "Page"
+    ]
+
+    url_paths: list[str] = []
+    for call in page_calls:
+        keyword = next(
+            (item for item in call.keywords if item.arg == "url_path"),
+            None,
+        )
+        assert keyword is not None, "すべての st.Page に url_path が必要です"
+        assert isinstance(keyword.value, ast.Constant)
+        assert isinstance(keyword.value.value, str)
+        assert keyword.value.value
+        url_paths.append(keyword.value.value)
+
+    assert len(url_paths) == 5
+    assert len(url_paths) == len(set(url_paths))
+    assert set(url_paths) == {
+        "library",
+        "run",
+        "video-detail",
+        "channel",
+        "history",
+    }
+
+
 def test_render_progress_shows_error_state() -> None:
     progress_state = {
         STAGE_FETCH: "complete",

@@ -10,20 +10,18 @@ from pathlib import Path
 from yt_live_kit.config import Settings, get_settings
 
 _ARCHIVED_VIDEOS_FILENAME = "archived_videos.json"
+_DESCRIPTION_APPLIED_VIDEOS_FILENAME = "description_applied_videos.json"
 
 
 def _archived_videos_path(settings: Settings) -> Path:
     return settings.data_dir / "_config" / _ARCHIVED_VIDEOS_FILENAME
 
 
-def load_archived_ids(settings: Settings | None = None) -> set[str]:
-    """保存済みのアーカイブ動画 ID を返す.
+def _description_applied_videos_path(settings: Settings) -> Path:
+    return settings.data_dir / "_config" / _DESCRIPTION_APPLIED_VIDEOS_FILENAME
 
-    ファイルが無い場合や内容が不正な場合は、
-    安全側に倒して空集合を返す。
-    """
-    settings = settings or get_settings()
-    path = _archived_videos_path(settings)
+
+def _load_id_set(path: Path) -> set[str]:
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError):
@@ -34,12 +32,7 @@ def load_archived_ids(settings: Settings | None = None) -> set[str]:
     return {video_id for video_id in raw if video_id}
 
 
-def save_archived_ids(
-    ids: set[str], settings: Settings | None = None
-) -> Path:
-    """アーカイブ動画 ID を JSON 配列として原子的に保存する."""
-    settings = settings or get_settings()
-    path = _archived_videos_path(settings)
+def _save_id_set(ids: set[str], path: Path) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
 
     temporary_path: Path | None = None
@@ -63,3 +56,45 @@ def save_archived_ids(
             temporary_path.unlink()
 
     return path
+
+
+def load_archived_ids(settings: Settings | None = None) -> set[str]:
+    """保存済みのアーカイブ動画 ID を返す.
+
+    ファイルが無い場合や内容が不正な場合は、
+    安全側に倒して空集合を返す。
+    """
+    settings = settings or get_settings()
+    return _load_id_set(_archived_videos_path(settings))
+
+
+def save_archived_ids(
+    ids: set[str], settings: Settings | None = None
+) -> Path:
+    """アーカイブ動画 ID を JSON 配列として原子的に保存する."""
+    settings = settings or get_settings()
+    return _save_id_set(ids, _archived_videos_path(settings))
+
+
+def load_description_applied_ids(settings: Settings | None = None) -> set[str]:
+    """概要欄への反映が成功した動画 ID を返す."""
+    settings = settings or get_settings()
+    return _load_id_set(_description_applied_videos_path(settings))
+
+
+def save_description_applied_ids(
+    ids: set[str], settings: Settings | None = None
+) -> Path:
+    """概要欄反映済み動画 ID を JSON 配列として原子的に保存する."""
+    settings = settings or get_settings()
+    return _save_id_set(ids, _description_applied_videos_path(settings))
+
+
+def mark_description_applied(
+    video_id: str, settings: Settings | None = None
+) -> Path:
+    """動画 ID を概要欄反映済みとして記録する（U5 成功時用）."""
+    settings = settings or get_settings()
+    ids = load_description_applied_ids(settings)
+    ids.add(video_id)
+    return save_description_applied_ids(ids, settings)

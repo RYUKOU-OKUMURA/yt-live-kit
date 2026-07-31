@@ -231,6 +231,57 @@ def _start_build_short(
     st.rerun()
 
 
+@st.dialog("ショート動画の再作成を確認")
+def _confirm_build_short_dialog(
+    *,
+    video_id: str,
+    title: str,
+    interval: ShortInterval,
+    layout: str,
+    burn_subtitles: bool,
+    settings: Settings,
+) -> None:
+    st.warning("同じ区間のショート動画を上書きして再作成します。")
+    busy = is_busy()
+    if busy:
+        st.info(_BUSY_MESSAGE)
+    if st.button(
+        "再作成を実行",
+        key=f"shorts_confirm_build_{video_id}_{interval.start:g}_{interval.end:g}",
+        type="primary",
+        disabled=busy,
+    ):
+        _start_build_short(
+            video_id=video_id,
+            title=title,
+            interval=interval,
+            layout=layout,
+            burn_subtitles=burn_subtitles,
+            settings=settings,
+        )
+
+
+def _start_or_confirm_build_short(
+    *,
+    video_id: str,
+    title: str,
+    interval: ShortInterval,
+    layout: str,
+    burn_subtitles: bool,
+    settings: Settings,
+    output_exists: bool,
+) -> None:
+    action = _confirm_build_short_dialog if output_exists else _start_build_short
+    action(
+        video_id=video_id,
+        title=title,
+        interval=interval,
+        layout=layout,
+        burn_subtitles=burn_subtitles,
+        settings=settings,
+    )
+
+
 def _render_existing_output(
     output_path: Path,
     *,
@@ -258,13 +309,17 @@ def _render_existing_output(
     st.caption(f"区間: {interval.start:g} 秒 → {interval.end:g} 秒（{duration:.1f} 秒）")
 
 
-def render_shorts_section(result: PipelineResult) -> None:
+def render_shorts_section(
+    result: PipelineResult,
+    *,
+    expanded: bool = False,
+) -> None:
     """結果画面の末尾に縦型ショート動画セクションを描画する."""
     settings = get_settings()
     video_id = result.video_id
     key_prefix = f"shorts_{video_id}"
 
-    with st.expander("縦型ショート動画", expanded=False):
+    with st.expander("縦型ショート動画", expanded=expanded):
         st.caption(_DURATION_NOTE)
 
         clip_doc = load_candidates_file(video_id, settings)
@@ -394,22 +449,7 @@ def render_shorts_section(result: PipelineResult) -> None:
             or not duration_ok
         )
 
-        if st.button(
-            "ショートを作成",
-            type="secondary",
-            key=f"{key_prefix}_create",
-            disabled=create_disabled,
-        ):
-            assert interval is not None
-            _start_build_short(
-                video_id=video_id,
-                title=result.title,
-                interval=interval,
-                layout=layout,
-                burn_subtitles=burn_subtitles,
-                settings=settings,
-            )
-
+        output_path = None
         if interval is not None and duration_ok:
             output_path = short_output_path(
                 video_id,
@@ -417,4 +457,23 @@ def render_shorts_section(result: PipelineResult) -> None:
                 interval.end,
                 settings,
             )
+
+        if st.button(
+            "ショートを作成",
+            type="secondary",
+            key=f"{key_prefix}_create",
+            disabled=create_disabled,
+        ):
+            assert interval is not None
+            _start_or_confirm_build_short(
+                video_id=video_id,
+                title=result.title,
+                interval=interval,
+                layout=layout,
+                burn_subtitles=burn_subtitles,
+                settings=settings,
+                output_exists=bool(output_path and output_path.is_file()),
+            )
+
+        if output_path is not None and interval is not None:
             _render_existing_output(output_path, interval=interval)
