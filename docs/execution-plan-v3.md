@@ -130,6 +130,8 @@ data/{video_id}/ ...
 - S3 `services/shorts.py` の複数区間連結拡張
 - P1 `services/youtube_api.py` のアップロード機能追加
 
+**進捗更新の共通例外:** 各タスクの「変更ファイル範囲」に個別記載がなくても、完了した事実を記録するための `docs/execution-plan-v3.md` のチェック更新は全タスクで許可する。実装内容や要件を変える編集はこの例外に含めず、先に計画変更として独立レビュー・コミットする。
+
 ---
 
 ## 4. v2 未完了タスクの扱い
@@ -190,6 +192,7 @@ data/{video_id}/ ...
 - [x] PLAN0-3. `docs/v3-agent-prompts.md` を新規作成する
 - [x] PLAN0-4. `AGENTS.md` を v3 体制に合わせて改訂する
 - [x] PLAN0-5. v2 未完了タスクの仕分け（§4）を完了する
+- [x] PLAN0-6. 実装前監査で判明した計画矛盾を補正する（現行 YouTube granular quota、進捗更新権限、概要欄完了判定、`clip_id` 規則、S4 確認境界、P1 ffprobe 範囲）
 
 **Done 条件:**
 
@@ -285,6 +288,7 @@ data/{video_id}/ ...
 - `src/yt_live_kit/ui/components/results.py`（クリップボード関数の移設に伴う import 整理。ハイライト・ショートのセクション呼び出しは `video_detail.py` に移す）
 - `src/yt_live_kit/ui/views/highlights.py` / `shorts.py`（`render_highlights_section` / `render_shorts_section` の呼び出し元を `video_detail.py` に変更。関数自体のロジックは変更しない）
 - `src/yt_live_kit/ui/app.py`（ナビゲーション登録）
+- `src/yt_live_kit/ui/views/_local_settings.py`（概要欄反映済み ID の軽量永続化を追加。U5 で成功時に記録する）
 - `tests/test_ui_video_detail_page.py`（新規）
 - （`services/` は変更しない）
 
@@ -292,9 +296,10 @@ data/{video_id}/ ...
 
 **作業:**
 
-- [ ] U2-1. ステッパー: 字幕 → チャプター → 候補 → ショート → 概要欄の 5 段階を、`ProcessedVideo` / `PipelineResult` / U1 の `count_shorts()` から計算する純粋関数として実装し、テストする
+- [ ] U2-1. ステッパー: 字幕 → チャプター → 候補 → ショート → 概要欄の 5 段階を、`ProcessedVideo` / `PipelineResult` / U1 の `count_shorts()` / UI 層の概要欄反映済み ID から計算する純粋関数として実装し、テストする
   - 記法は「✓ 完了」「● 次にやる」「○ 未着手」の 3 状態
   - 「次にやる」ステップのボタンを他より大きく・目立つ色で表示する
+  - 概要欄の完了状態は `data/_config/description_applied_videos.json` に video ID の配列として永続化する。U2 では `_local_settings.py` に読み書き関数を用意し、U5 の `update_video_description()` 成功後にのみ記録する
 - [ ] U2-2. パイプライン順セクションを実装する
   1. 字幕・文字起こし全文（`ui/components/clipboard.py` の共通コピー部品でコピー）
   2. チャプター（表示 + `regenerate(target="chapters")` を `jobs.start_job()` 経由で実行するボタンは expander 内）
@@ -397,6 +402,7 @@ data/{video_id}/ ...
 **目的:** 概要欄反映（YouTube 上の公開データを書き換える唯一の操作）に、他と異なる緊張感のある確認導線を実装し、フェーズ U 全体を受け入れる。
 **変更ファイル範囲:**
 - `src/yt_live_kit/ui/views/video_detail.py`（概要欄セクションの実装）
+- `src/yt_live_kit/ui/views/_local_settings.py`（`update_video_description()` 成功後に概要欄反映済み ID を記録）
 - `tests/test_ui_video_detail_page.py`（追記）
 - （`services/youtube_api.py` は変更しない。既存の `fetch_video_snippet` / `merge_chapters_into_description` / `update_video_description` をそのまま使う）
 
@@ -431,6 +437,7 @@ data/{video_id}/ ...
 - `prompts/telop_script.md`（新規）
 - `src/yt_live_kit/models/telop.py`（新規）
 - `src/yt_live_kit/services/telop.py`（新規）
+- `src/yt_live_kit/services/subtitle_burn.py`（VTT カット単位字幕を取得する既存非公開処理の公開ヘルパー化のみ）
 - `tests/test_telop.py`（新規）
 - （`ui/` は変更しない。UI からの呼び出しは S4 で行う）
 
@@ -446,7 +453,8 @@ data/{video_id}/ ...
 - [ ] S1-3. `services/telop.py` に以下を実装する
   - `generate_telop_script(video_id, segments, settings=None, *, on_progress=None, prompt_only=False, codex_path="codex") -> TelopScriptResult`
   - `validate_telop_script(doc, *, segments) -> ValidationResult`（各行が対応区間の尺内に収まる、半角 `<>` 不使用、`hook_text` 非空、`tags` が 1 件以上、行の文字数目安チェックは警告レベルに留める）
-  - 保存先: `data/{video_id}/shorts/telop/telop_{clip_id}.json`（`clip_id` は区間の組み合わせから決めるハッシュまたは連番。命名規則は S3 の出力ファイル名と揃える）
+  - `make_clip_id(segments) -> str`: 各区間をミリ秒単位に正規化した `start-end` 列を順序どおり連結し、SHA-256 の先頭 12 桁を返す決定論的関数として `services/telop.py` に定義する。S3 はこの関数を再利用する
+  - 保存先: `data/{video_id}/shorts/telop/telop_{clip_id}.json`（`clip_id` は上記 `make_clip_id()` を使い、S3 の出力ファイル名と揃える）
   - Codex 未導入時は `services/highlights.py` の `CODEX_INSTALL_HINT` と同じ形式のヒントを出す
 - [ ] S1-4. ユニットテスト
   - `validate_telop_script` の違反パターン（区間外の行、半角 `<>`、`hook_text` 空、`tags` 空）
@@ -550,6 +558,7 @@ data/{video_id}/ ...
 
 - [ ] S4-1. 候補選択 UI: ハイライト候補・切り抜き候補の一覧にチェックボックスを追加する。「選択した区間を個別に生成する」と「選択した区間をまとめて 1 本に連結する」をトグルで切り替えられるようにする（個別 = 各候補ごとに `build_short_from_segments([1区間])`、連結 = `build_short_from_segments([複数区間])`）
 - [ ] S4-2. 生成前の台本確認: 各生成対象（個別なら各候補、連結なら選択セット全体）について、`services.telop.generate_telop_script()` を呼び、結果をテキストエリアで表示・編集できるようにする。**確定操作を挟んでからでないとキューに積めない**
+  - v3 では選択した全生成対象の台本を確認・確定してからキュージョブを開始する。エンコード中に未確定台本を後から追加する最適化は次イテレーション候補とする
 - [ ] S4-3. `services/shorts_queue.py` に `run_shorts_queue(video_id, clip_specs, settings=None, *, on_progress=None) -> ShortsQueueResult` を実装する
   - `clip_specs` は確定済みの区間セット + 確定済みテロップ台本のリスト
   - 内部で `build_short_from_segments()` を順番に呼び、`on_progress(current, total, message)` で進捗を報告する（`cut_and_concat` の `on_progress` シグネチャと合わせる）
@@ -604,13 +613,14 @@ data/{video_id}/ ...
 **作業:**
 
 - [ ] P0-1. `services/youtube_api.py` に `upload_video(video_path, title, description, tags, settings, *, privacy_status="private", publish_at=None) -> str`（動画 ID を返す）を実装する。`googleapiclient.http.MediaFileUpload` を使い、`videos.insert(part="snippet,status", body=..., media_body=...)` を呼ぶ
-- [ ] P0-2. **実際に 1 本、非公開・`publishAt` 指定でテストアップロードする**（手動実施。自動テストでは検証できない）
+- [ ] P0-2. **実行内容・対象ファイル・タイトル・公開予定日時をユーザーに提示し、明示承認を得てから**、実際に 1 本、非公開・`publishAt` 指定でテストアップロードする（手動実施。自動テストでは検証できない。承認前は実行禁止）
 - [ ] P0-3. YouTube Studio 上で、指定時刻より前に動画が非公開のままか、意図せず公開されないかを確認する。あわせて「非公開ロック」（未審査プロジェクトの制限）が掛かっているかを確認する
-- [ ] P0-4. ロックが掛かっている場合、Google のコンプライアンス審査フォームを提出する。**審査待ちの間も P1・P2 の実装は止めない**（審査結果が出るまでは非公開のまま検証を続ける）
+- [ ] P0-4. ロックが掛かっている場合、提出内容をユーザーに提示し、**別途明示承認を得てから** Google のコンプライアンス審査フォームを提出する。承認前は提出しない。**審査待ちの間も P1・P2 の実装は止めない**（審査結果が出るまでは非公開のまま検証を続ける）
 - [ ] P0-5. 確認結果（ロックの有無、審査申請の有無と申請日）をタスク完了報告に記録する
 
 **Done 条件:**
 
+- [ ] 実アップロードと、必要な場合の審査フォーム提出について、各操作前にユーザーの明示承認を得た記録がある
 - [ ] 実アップロード 1 本のテスト結果が記録されている
 - [ ] ロックされていた場合、審査申請済みであることが記録されている
 - [ ] `uv run pytest` が全件通る（ユニットテストはモックのみ）
@@ -625,8 +635,9 @@ data/{video_id}/ ...
 **目的:** P0 の最小実装を、実運用に耐える形に拡張する。
 **変更ファイル範囲:**
 - `src/yt_live_kit/services/youtube_api.py`（`upload_video()` の拡張: バリデーション、エラーメッセージの日本語化、アップロード失敗時のリトライなし・明確なエラーで停止）
+- `src/yt_live_kit/services/ffmpeg.py`（動画尺を取得する公開 `probe_duration()` の追加）
 - `src/yt_live_kit/models/upload.py`（新規。`UploadResult`: `video_id`, `privacy_status`, `publish_at`, `uploaded_at`）
-- `tests/test_youtube_api.py`（追記）
+- `tests/test_youtube_api.py` / `tests/test_ffmpeg.py`（追記）
 
 **作業:**
 
@@ -664,7 +675,7 @@ data/{video_id}/ ...
 - [ ] P2-1. `SchedulePolicy`（`daily_time: str`, `interval_days: int`, `timezone: str`）を pydantic で定義し、`data/_config/schedule_policy.json` に保存・読み込みする関数を実装する
 - [ ] P2-2. 予約枠の管理: `data/_schedule/queue.json` に、割り当て済みの `(video_id, clip_id, publish_at)` を記録する
 - [ ] P2-3. `assign_next_slot(policy, existing_queue, *, now=None) -> datetime` を実装する（既存の予約枠と重複しない直近の空き枠を返す純粋関数、テストしやすい形にする）
-- [ ] P2-4. **クォータ上限のチェック**: `videos.insert` は 1,600 ユニット/回・無料枠 10,000 ユニット/日 → 1 日あたり 6 本が上限（[`docs/requirements-v3.md`](./requirements-v3.md) NFR-12）。当日分の割り当て件数が 6 件に達している場合、翌日以降の枠に回す
+- [ ] P2-4. **クォータ上限のチェック**: `videos.insert` は Video Uploads 専用バケットで 1 回 = 1、既定 100 回/日（[`docs/requirements-v3.md`](./requirements-v3.md) NFR-12）。当日分の割り当て件数が 100 件に達している場合、翌日以降の枠に回す
 - [ ] P2-5. 投稿確認 UI: `st.dialog` でタイトル・説明文・タグ・公開予定日時をプレビューし、確定すると `services.youtube_api.upload_video()` を `jobs.start_job()` 経由で呼ぶ。**概要欄反映（U5）と同じ「差分・内容プレビュー + 確認」の作法で統一する**
 - [ ] P2-6. ユニットテスト
   - `assign_next_slot` の空き枠計算（重複回避、日をまたぐケース）
@@ -674,7 +685,7 @@ data/{video_id}/ ...
 **Done 条件:**
 
 - [ ] `uv run pytest` が全件通る
-- [ ] 1 日 6 本を超える割り当てが発生しないことをテストで確認済み
+- [ ] 1 日 100 本を超える割り当てが発生しないことをテストで確認済み
 - [ ] タスク完了コミット済み
 
 **見積もり目安:** 1.5 日
@@ -688,19 +699,20 @@ data/{video_id}/ ...
 - `README.md`（チャンネル取り込み・ショート量産・予約投稿の使い方を追記）
 - `src/yt_live_kit/__init__.py`（版数を `0.3.0` に更新）
 - `pyproject.toml`（版数を `0.3.0` に更新）
-- `docs/execution-plan-v3.md`（進捗チェックの最終更新。**このタスクでのみ許可**）
+- `docs/execution-plan-v3.md`（進捗チェック・マイルストーンの最終更新。各タスクの局所的な進捗更新は §3.4 の共通例外で許可済み）
 
 **作業:**
 
-- [ ] P3-1. 近い将来の時刻を指定して 1 本を予約投稿し、**指定時刻に実際に公開されることを確認する**（手動実施。自動テストでは検証できない）
+- [ ] P3-1. 対象ファイル・タイトル・説明文・タグ・公開予定日時をユーザーに提示し、**明示承認を得てから**近い将来の時刻を指定して 1 本を予約投稿し、指定時刻に実際に公開されることを確認する（手動実施。自動テストでは検証できない。承認前は実行禁止）
 - [ ] P3-2. `docs/requirements-v3.md` の AC-18〜AC-28 を総点検し、結果をチェックリスト形式で報告する
-- [ ] P3-3. 実配信 1 本で、チャプター生成 → ショート複数本の生成 → 予約投稿までを通しで実行する（AC-28）
+- [ ] P3-3. 実配信 1 本で、チャプター生成 → ショート複数本の生成までを通しで実行し、予約投稿は対象・投稿内容・公開予定日時をユーザーに提示して明示承認を得てから実行する（AC-28）
 - [ ] P3-4. README を更新する（チャンネル取り込み、テロップ付きショートの作り方、キュー量産、予約投稿の設定と確認ダイアログ、YouTube API クォータの制約）
 - [ ] P3-5. 版数を `0.3.0` に更新する
 - [ ] P3-6. `docs/execution-plan-v3.md` の進捗チェック・マイルストーン表を最終更新する
 
 **Done 条件:**
 
+- [ ] 実予約投稿の操作前にユーザーの明示承認を得た記録がある
 - [ ] AC-18〜AC-28 が確認済み（未達は明示的に次イテレーションへ移す）
 - [ ] 予約投稿した動画が指定時刻に実際に公開されたことを確認済み
 - [ ] `uv run pytest` が全件通る
@@ -864,7 +876,7 @@ PLAN0 要件・計画の確定
 |--------|--------------|
 | フェーズ U で UI を作り替えている最中に、v2 機能が回帰する | 各タスクで `uv run pytest` を必須化し、`services/` を変更しないことで回帰の原因を UI 層に限定する |
 | 非公開ロックにより予約投稿が機能しない | P0 を P フェーズの最初に固定し、審査申請の要否を早期に判断する。審査待ちでも P1/P2 の実装は止めない |
-| YouTube Data API のクォータ超過 | P2 の `assign_next_slot` で 1 日 6 本の上限を機械的に守る（NFR-12） |
+| YouTube Data API のクォータ超過 | P2 の `assign_next_slot` で Video Uploads 専用バケットの既定 1 日 100 本上限を機械的に守る（NFR-12） |
 | ジャンプカット連結で累積オフセット計算を誤り、字幕がずれる | S3 のユニットテストで 3 区間以上・区間間隔ありのケースを必須検証項目にする |
 | Codex CLI の応答が不安定（テロップ台本） | S1 で softfail 方針を継続。台本生成に失敗しても他の成果物（チャプター・候補・ハイライト）に影響しない |
 | テロップの自動生成品質が低く、そのまま焼き込むと粗が目立つ | S1 で必ず人の確認・修正ステップを挟む（自動焼き込みにしない） |
@@ -905,4 +917,5 @@ PLAN0 要件・計画の確定
 
 | 日付 | 内容 |
 |------|------|
+| 2026-08-01 | PLAN0-6: 実装前監査の指摘を反映。YouTube granular quota を 100 uploads/day に更新し、進捗更新権限・概要欄完了記録・`clip_id`・S4 確認境界・P1 ffprobe 範囲を明確化 |
 | 2026-08-01 | v3 実行計画の初版作成。PLAN0、U0〜U5、S1〜S5、P0〜P3 を定義。v2 未完了タスクの仕分けを実施 |

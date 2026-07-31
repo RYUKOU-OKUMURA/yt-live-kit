@@ -116,7 +116,7 @@ uv run pytest
 
 - [ ] **実際の YouTube アップロードは、ユーザーの明示的な承認を得てから実行しているか。** `impl-sonnet` が自律的に実アップロードを実行していないか（P0 のテストアップロードも含め、必ずユーザーに実行前に確認する）
 - [ ] `privacyStatus="private"` が既定になっているか。即時公開（`public`）を許す実装になっていないか
-- [ ] クォータ計算（1 日 6 本上限、[`docs/requirements-v3.md`](./requirements-v3.md) NFR-12）が機械的に守られているか。テストで境界値（6 本目・7 本目）を確認しているか
+- [ ] Video Uploads 専用クォータ（既定 1 日 100 本上限、[`docs/requirements-v3.md`](./requirements-v3.md) NFR-12）が機械的に守られているか。テストで境界値（100 本目・101 本目）を確認しているか
 - [ ] `googleapiclient` の実呼び出しがユニットテストでモックされているか（実アップロードを伴うテストが CI 相当の自動実行に含まれていないか）
 
 ---
@@ -127,7 +127,7 @@ uv run pytest
 |----------|----------------|
 | **U** | `services/` を一切触らない。UI 層の並べ替えとテストの再構成だけで完結させる。新しい永続化が必要なら `ui/views/_local_settings.py` のような UI 層ヘルパーに留める（[execution-plan-v3.md](./execution-plan-v3.md) §3.2 参照） |
 | **S** | 従量課金 API を使わない。AI 生成は Codex CLI のみ、かつテロップ台本とメタデータは同じ呼び出しで一括生成する。**自動生成をそのまま焼き込まず、必ず人の確認ステップを挟む** |
-| **P** | 実アップロードはユーザー承認後のみ実行する。`privacyStatus="private"` を既定にし、クォータ上限（1 日 6 本）を超える割り当てをしない。P0 の非公開ロック確認結果次第で、後続タスクの前提が変わる可能性があるため、P0 の報告を必ず先に確認してから P1 に着手する |
+| **P** | 実アップロードはユーザー承認後のみ実行する。`privacyStatus="private"` を既定にし、Video Uploads 専用クォータの既定上限（1 日 100 本）を超える割り当てをしない。P0 の非公開ロック確認結果次第で、後続タスクの前提が変わる可能性があるため、P0 の報告を必ず先に確認してから P1 に着手する |
 
 ---
 
@@ -143,7 +143,7 @@ uv run pytest
 | クリップボード部品の移設（U2） | `build_clipboard_copy_html` / `render_copy_button` は **シグネチャ・実装を変えずに** `ui/components/results.py` から `ui/components/clipboard.py` へ移す。移設と機能追加を同時にやらない |
 | ライブラリのアーカイブ状態の保存先 | `data/_config/archived_videos.json`（`video_id` の配列）。`ui/views/_local_settings.py` を **U1 で新設**し `load_archived_ids()` / `save_archived_ids()` を実装する。`start.command` で毎回起動し直す運用のため、`st.session_state` のみの一時状態にはしない（永続化必須） |
 | チャンネル既定ハンドルの保存先 | `data/_config/channel_handle.txt`（1 行テキスト）。**U1 で新設済みの `ui/views/_local_settings.py` に U3 で追記**し、U4 が再利用する。`services/description.py` の `get_template_path()` と同じ発想だが、**フェーズ U の制約により `services/` には置かない** |
-| テロップ台本・出力ファイルの命名規則 | `data/{video_id}/shorts/telop/telop_{clip_id}.json` と `data/{video_id}/shorts/output/short_{clip_id}.mp4` の `clip_id` は S3 の実装時に確定する。S1 と S3 の担当が異なる場合、命名規則が食い違わないよう `execution-plan-v3.md` の該当タスクを事前にすり合わせる |
+| テロップ台本・出力ファイルの命名規則 | `services.telop.make_clip_id()` が、ミリ秒単位に正規化した区間列の SHA-256 先頭 12 桁を返す。S1 の `telop_{clip_id}.json` と S3 の `short_{clip_id}.mp4` は必ず同じ関数を使う |
 
 ---
 
@@ -165,8 +165,8 @@ uv run pytest
 | S4 | 台本確認を経ずにキューへ積める抜け道が無いか |
 | P0 | 実アップロードを `impl-sonnet` が独断で実行していないか（必ずユーザー承認後） |
 | P1 | `privacyStatus` の既定が `"private"` になっているか |
-| P2 | 1 日 6 本のクォータ上限をテストで境界確認しているか |
-| P3 | README・版数更新が「変更してよいファイル」の範囲内に収まっているか |
+| P2 | 1 日 100 本の Video Uploads 専用クォータ上限を 100 本目・101 本目で境界確認しているか |
+| P3 | README・版数更新が「変更してよいファイル」の範囲内に収まっているか。実予約投稿の対象・内容・公開予定日時を提示し、実行直前にユーザーの明示承認を得ているか |
 
 ---
 
@@ -174,4 +174,5 @@ uv run pytest
 
 | 日付 | 内容 |
 |------|------|
+| 2026-08-01 | 実装前監査を反映。Video Uploads 専用クォータを 100 回/日に更新し、`make_clip_id()` 規則を固定 |
 | 2026-08-01 | v3 初版。impl-sonnet 向け指示テンプレート、レビュー観点チェックリスト、フェーズ別注意点を定義 |
