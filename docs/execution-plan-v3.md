@@ -25,9 +25,9 @@
 | S3 | ジャンプカット連結ショート生成（services 拡張） | [x] 完了 |
 | S4 | キュー量産 UI + 台本確認フロー | [x] 完了 |
 | S5 | フェーズ S 受け入れ（実配信 1 本からショート複数本を通しで作る） | [x] 完了 |
-| P0 | テストアップロード検証 | [ ] 未着手 |
-| P1 | アップロードサービス（`videos.insert` + `publishAt`） | [ ] 未着手 |
-| P2 | スケジュールポリシー + キューからの自動割り当て + 投稿確認 UI | [ ] 未着手 |
+| P0 | 安全な実機 upload probe（P1 / P2 完了後） | [ ] 未着手 |
+| P1 | 安全なアップロードサービス | [ ] 未着手 |
+| P2 | スケジュールポリシー + 原子的な予約確定 + 投稿確認 UI | [ ] 未着手 |
 | P3 | フェーズ P 受け入れ（予約投稿が実際に公開される） | [ ] 未着手 |
 
 **状態の書き方:** `[ ] 未着手` / `[~] 進行中` / `[x] 完了`
@@ -170,9 +170,9 @@ data/{video_id}/ ...
 | **S3** | ジャンプカット連結ショート生成 | 複数区間連結 + レイアウト + テロップ焼き込み | FR-25, AC-25 |
 | **S4** | キュー量産 UI + 台本確認フロー | 複数本まとめ生成、結果グリッド | FR-26, AC-26 |
 | **S5** | フェーズ S 受け入れ | 実配信 1 本での通し確認 | AC-23〜26 全体受け入れ |
-| **P0** | テストアップロード検証 | 非公開ロックの有無確認、審査要否判断 | AC-27 の前提 |
-| **P1** | アップロードサービス | `videos.insert` + `publishAt` | FR-27, AC-27 |
-| **P2** | スケジュールポリシー + 自動割り当て | 予約枠の自動割り当て、投稿確認 UI | FR-28, AC-27 |
+| **P0** | 安全な実機 upload probe | P1 / P2 の本番経路で非公開ロックと processing を確認 | AC-27 の実機前提 |
+| **P1** | 安全なアップロードサービス | private 固定、resumable upload、永続 operation、試行台帳、reconciliation | FR-27, NFR-12, AC-27 |
+| **P2** | スケジュールポリシー + 原子的な予約確定 + 投稿確認 UI | 予約枠の自動割り当て、確認後再検証、ジョブ / UI 復元 | FR-28, AC-27 |
 | **P3** | フェーズ P 受け入れ | 実際の予約公開確認、README・版数更新 | AC-27, AC-28 |
 
 各タスクは「実装 → 単体確認 → Done 条件チェック → **タスク完了コミット**」で閉じる。フェーズ末（U5 / S5 / P3）は「フェーズ受け入れ」も兼ねる。
@@ -767,120 +767,154 @@ data/{video_id}/ ...
 
 ---
 
-### P0: テストアップロード検証
+### P0: 安全な実機 upload probe
 
-**目的:** 未審査の YouTube API プロジェクトからのアップロードが非公開ロックされ、`publishAt` が効かない可能性がある仕様を実機で確認する。**P1 の本実装より前に、最小限のアップロード経路で 1 本テストする。**
+**目的:** P1 / P2 で完成した本番安全契約をそのまま使い、未審査 API プロジェクトの private lock、processing、予約公開可否を実機で確認する。**P0 用の簡易 upload 経路は作らず、P1 / P2 のモック実装・全自動テスト完了後にだけ着手する。**
 **変更ファイル範囲:**
-- `src/yt_live_kit/services/youtube_api.py`（`upload_video()` の最小実装を追加。P1 で拡張・productionize する前提の土台とする）
-- `tests/test_youtube_api.py`（追記。ユニットテストは `googleapiclient` をモックし、実アップロードは行わない）
+- `docs/execution-plan-v3.md`（承認・operation ID・YouTube video ID・poll 結果・ロック判定・審査申請の事実だけを記録）
+- 不具合が見つかった場合は P0 を完了扱いにせず、P1 / P2 の変更範囲へ戻して修正・レビューする
 
 **作業:**
 
-- [ ] P0-1. `services/youtube_api.py` に `upload_video(video_path, title, description, tags, settings, *, privacy_status="private", publish_at=None) -> str`（動画 ID を返す）を実装する。`googleapiclient.http.MediaFileUpload` を使い、`videos.insert(part="snippet,status", body=..., media_body=...)` を呼ぶ
-- [ ] P0-2. **実行内容・対象ファイル・タイトル・公開予定日時をユーザーに提示し、明示承認を得てから**、実際に 1 本、非公開・`publishAt` 指定でテストアップロードする（手動実施。自動テストでは検証できない。承認前は実行禁止）
-- [ ] P0-3. YouTube Studio 上で、指定時刻より前に動画が非公開のままか、意図せず公開されないかを確認する。あわせて「非公開ロック」（未審査プロジェクトの制限）が掛かっているかを確認する
-- [ ] P0-4. ロックが掛かっている場合、提出内容をユーザーに提示し、**別途明示承認を得てから** Google のコンプライアンス審査フォームを提出する。承認前は提出しない。**審査待ちの間も P1・P2 の実装は止めない**（審査結果が出るまでは非公開のまま検証を続ける）
-- [ ] P0-5. 確認結果（ロックの有無、審査申請の有無と申請日）をタスク完了報告に記録する
+- [ ] P0-1. P1 / P2 の Done 条件と全モックテストが完了し、実 API を自動テストが呼ばないことを確認する。実操作の承認待ちでも P1 / P2 の開発・レビュー・コミットを止めない
+- [ ] P0-2. `channels.list(mine=true)` の実チャンネル ID / 名称、対象ファイル、絶対パス、サイズ、尺、タイトル、説明文、タグ、timezone 付き予約日時と UTC `Z`、`privacyStatus=private`、`notifySubscribers=false`、Made for Kids / synthetic media の選択、Community Guidelines 同意、当日 attempt 数をユーザーに提示する。**private lock が非該当なら、この probe 動画も指定時刻に public となり得る**ことを明記し、その外部公開まで含む P0 専用の明示承認を得るまで確定しない
+- [ ] P0-3. 承認後も P2 の確認後再検証を通し、operation ID を発行した本番経路から 1 本だけ upload する。operation の `reserved → uploading → uploaded` または `needs_reconciliation` / `failed`、job ID、YouTube video ID、attempt 台帳を記録する
+- [ ] P0-4. `videos.list(part="status,processingDetails")` の bounded poll と YouTube Studio で processing 状態、指定時刻前の private、公開予約可否、private lock の有無を確認する。**private lock は probe 成功や予約投稿成功として扱わない**
+- [ ] P0-5. private lock がある場合、審査フォームの提出内容をユーザーに提示し、実 upload の承認とは別の**審査フォーム提出専用の明示承認**を得てから提出する。承認前は提出しない。審査待ちは P1 / P2 のブロッカーにしない
+- [ ] P0-6. 承認時刻、operation ID、YouTube video ID、upload / processing / schedule status、private lock、審査申請の有無と申請日を受け入れ証跡へ記録する。動画削除等の追加操作はこの承認に含めない
 
 **Done 条件:**
 
-- [ ] 実アップロードと、必要な場合の審査フォーム提出について、各操作前にユーザーの明示承認を得た記録がある
-- [ ] 実アップロード 1 本のテスト結果が記録されている
-- [ ] ロックされていた場合、審査申請済みであることが記録されている
-- [ ] `uv run pytest` が全件通る（ユニットテストはモックのみ）
+- [ ] P1 / P2 の安全契約を迂回する P0 専用 upload コードが無い
+- [ ] 実 upload と審査フォーム提出について、対象を示した別々の明示承認記録がある（審査不要ならその判定記録がある）
+- [ ] operation / attempt / poll の実結果と private lock 判定が記録されている
+- [ ] 4xx / 結果不明が発生した場合に新しい `videos.insert` が自動実行されず、`needs_reconciliation` のまま手動照合へ止まる
+- [ ] `uv run pytest` が全件通る（実 API を呼ぶテストは含めない）
 - [ ] タスク完了コミット済み
 
 **見積もり目安:** 0.5 日（+ 審査待ち日数は開発のブロッカーにしない）
 
 ---
 
-### P1: アップロードサービス（`videos.insert` + `publishAt`）
+### P1: 安全なアップロードサービス（private 固定 + resumable + 永続 operation）
 
-**目的:** P0 の最小実装を、実運用に耐える形に拡張する。
+**目的:** 実 API を呼ばずに、本番 upload の入力・再試行・結果不明・日次試行数・ジョブ復元を安全な契約として先に完成させる。
 **変更ファイル範囲:**
-- `src/yt_live_kit/services/youtube_api.py`（`upload_video()` の拡張: バリデーション、エラーメッセージの日本語化、アップロード失敗時のリトライなし・明確なエラーで停止）
-- `src/yt_live_kit/services/ffmpeg.py`（動画尺を取得する公開 `probe_duration()` の追加）
-- `src/yt_live_kit/models/upload.py`（新規。`UploadResult`: `video_id`, `privacy_status`, `publish_at`, `uploaded_at`）
-- `tests/test_youtube_api.py` / `tests/test_ffmpeg.py`（追記）
+- `src/yt_live_kit/models/upload.py`（新規。channel / content snapshot / operation / result の frozen model）
+- `src/yt_live_kit/services/youtube_api.py`（実チャンネル取得、入力検証、resumable upload、status / processing poll）
+- `src/yt_live_kit/services/upload_queue.py`（新規。operation / attempt 台帳、状態遷移、冪等 job target、reconciliation）
+- `src/yt_live_kit/services/ffmpeg.py`（公開 `probe_duration()` の追加）
+- `src/yt_live_kit/services/jobs.py`（`"upload"` kind、`YouTubeAPIError` / `UploadQueueError` の既知例外化、target が設定した非 pipeline `result_ref` の保持）
+- `src/yt_live_kit/ui/components/status_bar.py`（kind 別の完了結果 dispatch。pipeline 以外を `load_result_from_disk()` へ渡さない）
+- `src/yt_live_kit/config.py`（`video_upload_daily_limit: int = 100`、1〜100、環境変数 `YTLK_VIDEO_UPLOAD_DAILY_LIMIT`）
+- `tests/test_youtube_api.py` / `tests/test_ffmpeg.py` / `tests/test_upload_queue.py`（新規または追記）
+- `tests/test_jobs.py` / `tests/test_ui_app.py`（jobs / status bar 契約の追記）
 
 **作業:**
 
-- [ ] P1-1. アップロード前チェック: ファイルの存在、拡張子、10〜180 秒の尺（`ffprobe` で確認、既存の `services/ffmpeg.py` のパターンを再利用）
-- [ ] P1-2. `privacyStatus="private"` を既定にし、`publishAt` を渡す場合は ISO 8601 形式であることを検証する
-- [ ] P1-3. HTTP エラー（`googleapiclient.errors.HttpError`）を日本語メッセージに変換する（クォータ超過・認証切れ・ファイルサイズ超過等、想定されるパターンごとに文言を用意する）
-- [ ] P1-4. `jobs.start_job()` 経由で呼べるよう、`upload_job_target(*, video_path, title, description, tags, publish_at, settings, report) -> UploadResult` のラッパーを用意する
-- [ ] P1-5. ユニットテスト
-  - `videos.insert` 呼び出しパラメータの組み立て（`googleapiclient` をモック）
-  - 尺バリデーション（9 秒 / 181 秒で拒否）
-  - HTTP エラーの日本語変換
+- [ ] P1-1. `models/upload.py` に frozen な `UploadChannel`、`UploadContentSnapshot`、`UploadStatusObservation`、`UploadOperation`、`UploadResult` を定義する。snapshot は `self_declared_made_for_kids: bool`、`contains_synthetic_media: bool`、`community_guidelines_confirmed: Literal[True]`、同意 UTC timestamp を必須とする。`UploadStatusObservation` は UTC `polled_at`、`phase: Literal["processing", "publication"]`、取得した `status` / `processing_details`、`classification`、日本語 `error` を持つ。operation は `operation_id`、`source_video_id`、`source_kind`、`clip_id`、絶対 `video_path`、content snapshot、`reserved/uploading/uploaded/failed/needs_reconciliation`、`job_id`、YouTube `video_id`、UTC の `created_at/updated_at/started_at/finished_at`、日本語 `error`、入力順の `poll_history: tuple[UploadStatusObservation, ...]` を必須 field として保持し、unknown / 欠落 field と不正状態遷移を拒否する。最新状態は poll history 末尾から導出し、履歴を上書きしない
+- [ ] P1-2. upload preflight を実装する。mp4 の存在・通常ファイル・絶対パス化、サイズと `mtime_ns`、`probe_duration()` の 10〜180 秒、title strip 後 1〜100 文字、description UTF-8 5000 bytes 以下、全 tag 非空かつ `",".join(tags)` 500 文字以下、全 metadata の半角山カッコ禁止を検証し、canonical content snapshot を作る
+- [ ] P1-3. publish 契約を固定する。`privacy_status` は引数で緩めず `private` のみ、`publish_at` は aware かつ `now + 10 分` 以上、`notify_subscribers` は `False` のみを許可し、API body は UTC RFC 3339 `Z` へ正規化する。`status.selfDeclaredMadeForKids` / `status.containsSyntheticMedia` は snapshot の必須 bool をそのまま反映する。Community Guidelines 未同意、naive / 過去 / リード不足 / `public` / `unlisted` / publishAt 無しを API 構築前に日本語で拒否する
+- [ ] P1-4. `fetch_mine_channel(settings) -> UploadChannel` を `channels.list(part="snippet", mine=True)` で実装し、0 件 / 複数件 / 欠落 field を日本語エラーにする。確認 snapshot に channel ID / 名称を含める
+- [ ] P1-5. `MediaFileUpload(..., resumable=True)` と単一 `videos.insert(part="snippet,status", notifySubscribers=False, ...)` request の `next_chunk()` loop を実装する。ネットワーク例外と HTTP 500 / 502 / 503 / 504 だけを同一 session で最大 5 回、1 / 2 / 4 / 8 / 16 秒に bounded retry し、retry 後は同じ request の `next_chunk()` を続ける。4xx、retry exhaustion、response 欠落 / video ID 欠落は新規 insert を作らず `needs_reconciliation` を返す。preflight の確定的失敗だけ `failed` とし、全例外を日本語 `YouTubeAPIError` または typed outcome にする
+- [ ] P1-6. `data/_schedule/queue.json` を full operation と予約 slot の単一正本、`upload_attempts.json` を試行台帳として、advisory file lock + process lock 下の一時ファイル + replace で各ファイルを atomic 保存する。queue record は P1-1 の全 operation field を保持し、別の operation JSON と二重管理しない。壊れた JSON、schema 不一致、重複 operation ID は fail closed の日本語 `UploadQueueError` とし、空配列へ回復しない。attempt は `America/Los_Angeles` の upload attempt 開始日、operation ID、job ID、UTC timestamp を **`MediaFileUpload` / `videos.insert` による resumable upload session 作成前**に 1 回記録し、失敗・結果不明も残す。事前の read-only `channels.list` は attempt に数えない。設定上限 1〜100 の境界を守り、予約公開日・予約件数は参照しない
+- [ ] P1-7. `upload_job_target(*, report, settings: Settings, job_id: str, operation_id: str) -> None` を jobs 契約に合わせる。confirm transaction は operation ID と job ID を先に生成し、同じ queue record へ `reserved` として atomic 保存する。`jobs.start_job()` は `requested_job_id` を受けてその ID の job JSON を thread 起動前に作り、既存 ID を黙って上書きしない。target は queue の job ID と受領 job ID の一致を確認し、`reserved` だけを `uploading` へ進めて attempt を 1 回記録後に upload session を作る。`uploading/uploaded/failed/needs_reconciliation` の再実行は insert せず既存結果を返すか手動照合を案内する。完了時に jobs の `result_ref=operation_id` を設定し、jobs worker は target が設定した `result_ref` を video ID で上書きしない
+- [ ] P1-8. 起動順を `jobs.close_orphans()` → upload recovery に固定し、attempt ledger を外部効果開始の正本とする。recovery の状態遷移対象は active state の `reserved` / `uploading` だけとし、当該 operation の attempt が無ければ upload session 未作成の契約により `failed` + slot 解放として新しい preview / 承認を要求する。attempt が 1 件以上、job / operation 不一致、または attempt ledger が壊れて有無を確定できない場合は `needs_reconciliation` + slot 保持として自動再送しない。terminal の `uploaded/failed/needs_reconciliation` は変更せず、ledger と不整合なら queue / slot を一切変更せず日本語 `UploadQueueError` で全新規 upload を fail closed にし、手動修復を要求する
+- [ ] P1-9. `videos.list(part="status,processingDetails", id=...)` の poll 契約を固定する。processing poll は sleep / clock 注入可能、10 秒間隔・最大 30 回とし、`processingStatus=succeeded` を成功 terminal、`failed/terminated` を失敗 terminal、30 回後を timeout とする。公開 poll は予約時刻到来後に 30 秒間隔・最大 20 回とし、`privacyStatus=public` を公開成功、processing の `failed/terminated` を失敗、20 回後も private を timeout とする。各 response と時刻を operation へ記録する
+- [ ] P1-10. private lock 判定表を固定する。予約時刻前の `privacyStatus=private` かつ期待する `publishAt` は正常な scheduled、processing 成功後に `publishAt` が欠落、または予約時刻 + 5 分を過ぎても private なら `suspected_private_lock`、public なら `published` とする。API だけで確定せず、P0 では YouTube Studio の表示を併用して `confirmed_private_lock / no_private_lock` を記録する。lock は `uploaded` と別の予約公開可否 field として保持する
+- [ ] P1-11. status bar は `single/regenerate` 等の pipeline kind だけを pipeline loader へ、`batch` は batch loader、`shorts_queue` は manifest UI、`upload` は operation loader へ dispatch する。未知 kind / result_ref 欠落 / operation 読込失敗も日本語で表示し、pipeline 読み込みを誤実行しない
+- [ ] P1-12. ユニットテスト
+  - metadata / file / duration / aware time / 10 分 lead / UTC `Z` / private 固定 / notify false、Made for Kids / synthetic media の必須 bool、Community Guidelines 同意の正常系と全境界
+  - `channels.list(mine=True)` と `videos.insert` body、`MediaFileUpload(resumable=True)`、`next_chunk()` 複数 chunk
+  - network と 500 / 502 / 503 / 504 の同一 request 内 5 回 retry、backoff 列、4xx / retry exhaustion / response 不明で insert 1 回かつ `needs_reconciliation`
+  - operation の全状態遷移、atomic write、process / file lock、壊れた JSON fail closed、LA 日付境界と DST、上限 1 / 100 / configured limit、失敗 attempt の算入、resumable upload session より先の記録、read-only channel lookup が attempt 非算入
+  - `job_id` 必須、同一 job / operation の二重実行、`uploading` で中断した再起動、`needs_reconciliation` の自動再送禁止、result_ref 保持
+  - queue record 保存前 / 保存後、job JSON 作成前 / 作成後、thread 起動前 / 起動後、`uploading` 保存前 / 保存後、attempt 保存前 / 保存後の fault injection。`close_orphans()` 後の active recovery が attempt 無しは failed + slot 解放、attempt 有りまたは ledger 読込不能は needs_reconciliation + slot 保持になり、insert call count が増えないこと。terminal state は不変で、ledger 不整合時は queue / slot 非変更 + 全新規 upload fail closed になること
+  - processing poll の 10 秒 × 30、公開 poll の 30 秒 × 20、全 terminal / timeout、予約前 private、publishAt 欠落、予約 + 5 分 private、public の判定表を fake clock / sleep で検証すること
+  - すべての processing / publication response が `UploadStatusObservation` として順序・時刻・phase・classification を保って round-trip し、unknown / 欠落 field を拒否して最新値だけに縮退しないこと
+  - status bar の kind 別 dispatch と upload / shorts_queue / batch で pipeline loader 未呼び出し
 
 **Done 条件:**
 
 - [ ] `uv run pytest` が全件通る
-- [ ] 実アップロードを伴わないユニットテストのみで完結している
+- [ ] 実 API・sleep・ffprobe subprocess はすべてモックされ、実 upload を行っていない
+- [ ] 4xx / 結果不明から新しい `videos.insert` が自動作成されないことを call count で確認済み
+- [ ] 壊れた永続 JSON、同時確定、再起動復元、同一 operation 再実行が fail closed / 冪等である
+- [ ] 全ユーザー向けエラーが日本語で、従量課金 AI API を追加していない
 - [ ] タスク完了コミット済み
 
-**見積もり目安:** 1 日
+**見積もり目安:** 2.5 日
 
 ---
 
-### P2: スケジュールポリシー + キューからの自動割り当て + 投稿確認 UI
+### P2: スケジュールポリシー + 原子的な予約確定 + 投稿確認 UI
 
-**目的:** 「毎日 18:00 に 1 本」のようなポリシーを設定し、量産キューから予約枠を自動割り当てする。
+**目的:** IANA timezone の予約枠を安全に割り当て、確認内容と upload operation を原子的に結び、二重クリック・確認中の競合・再起動でも重複 upload を起こさない。
 **変更ファイル範囲:**
-- `src/yt_live_kit/services/schedule.py`（新規）
-- `src/yt_live_kit/ui/views/settings.py`（スケジュールポリシー編集欄。U4 で用意したプレースホルダを実装する）
-- `src/yt_live_kit/ui/views/video_detail.py`（各ショートに「予約投稿」ボタン + `st.dialog` の投稿確認 UI を追加）
-- `tests/test_schedule.py`（新規）
-- `tests/test_ui_video_detail_page.py` / `tests/test_ui_settings_page.py`（追記）
+- `src/yt_live_kit/services/schedule.py`（新規。policy、予約 queue、slot snapshot、confirm transaction）
+- `src/yt_live_kit/services/upload_queue.py`（P1 の operation と confirm transaction の接続のみ）
+- `src/yt_live_kit/ui/views/settings.py`（スケジュールポリシー編集欄）
+- `src/yt_live_kit/ui/views/video_detail.py`（生成済みショートの予約投稿入口）
+- `src/yt_live_kit/ui/components/upload.py`（新規。preview / dialog / job 起動 / operation 復元の表示だけ）
+- `tests/test_schedule.py` / `tests/test_ui_upload.py`（新規）
+- `tests/test_ui_video_detail_page.py` / `tests/test_ui_settings_page.py` / `tests/test_ui_app.py`（追記）
 
 **作業:**
 
-- [ ] P2-1. `SchedulePolicy`（`daily_time: str`, `interval_days: int`, `timezone: str`）を pydantic で定義し、`data/_config/schedule_policy.json` に保存・読み込みする関数を実装する
-- [ ] P2-2. 予約枠の管理: `data/_schedule/queue.json` に、割り当て済みの `(video_id, clip_id, publish_at)` を記録する
-- [ ] P2-3. `assign_next_slot(policy, existing_queue, *, now=None) -> datetime` を実装する（既存の予約枠と重複しない直近の空き枠を返す純粋関数、テストしやすい形にする）
-- [ ] P2-4. **クォータ上限のチェック**: `videos.insert` は Video Uploads 専用バケットで 1 回 = 1、既定 100 回/日（[`docs/requirements-v3.md`](./requirements-v3.md) NFR-12）。当日分の割り当て件数が 100 件に達している場合、翌日以降の枠に回す
-- [ ] P2-5. 投稿確認 UI: `st.dialog` でタイトル・説明文・タグ・公開予定日時をプレビューし、確定すると `services.youtube_api.upload_video()` を `jobs.start_job()` 経由で呼ぶ。**概要欄反映（U5）と同じ「差分・内容プレビュー + 確認」の作法で統一する**
-- [ ] P2-6. ユニットテスト
-  - `assign_next_slot` の空き枠計算（重複回避、日をまたぐケース）
-  - クォータ上限に達した場合に翌日へ回ること
-  - ポリシーの保存・読み込み往復
+- [ ] P2-1. `SchedulePolicy(daily_time: str, interval_days: int, timezone: str = "Asia/Tokyo")` を pydantic で定義する。`daily_time` は ASCII の厳密な `HH:MM`、`interval_days >= 1`、timezone は `zoneinfo.ZoneInfo` で存在確認し、`data/_config/schedule_policy.json` を atomic 保存・fail closed 読み込みする
+- [ ] P2-2. `assign_next_slot(policy, existing_reservations, *, now: datetime) -> datetime` を pure に実装する。`now` は aware 必須、計算結果も policy timezone の aware datetime、現在から最低 10 分先、既存 slot と非重複、`interval_days` 間隔とする。DST の ambiguous / nonexistent local time は暗黙補正せず日本語で拒否する。API 変換 helper は UTC RFC 3339 `Z` を返す
+- [ ] P2-3. P1 の `data/_schedule/queue.json` を拡張せず同じ full operation record の `publish_at` / content snapshot / state を予約 slot と operation の単一正本として使う。upload attempt 台帳とは別 schema / 別集計にし、予約公開日が同じでも LA 当日の attempt 上限を消費した扱いにしない。全 read / write は同じ lock 順序、atomic replace、壊れた JSON fail closed を使う
+- [ ] P2-4. preview service は `channels.list(mine=true)`、file stat、`probe_duration()`、metadata、policy、slot、attempt count から immutable `UploadPreview` / fingerprint を作る。UI dialog は実チャンネル ID / 名称、絶対ファイル、サイズ / 尺、title、description 全文、tags、policy timezone の予約日時、UTC `Z`、`privacyStatus=private`、`notifySubscribers=false` を読み取り専用で表示する。Made for Kids と synthetic media は既定値なしの「はい / いいえ」を毎回必須選択し、Community Guidelines 同意 checkbox は既定未チェックとする。外側ボタン・通常 rerun・未選択・未同意・dialog 未確定では operation / job / attempt を作らない
+- [ ] P2-5. dialog 確定時の service transaction は固定 lock 順序で queue / attempt snapshot を再読込し、実チャンネル再取得、file identity、duration、Made for Kids / synthetic media / Community Guidelines 同意を含む content fingerprint、slot 空き、同一 source / clip の active operation、LA 当日 attempt 残数を再検証する。変化・競合・上限到達時は予約も job も作らず新しい preview を要求する。成功時だけ operation ID / job ID を生成し、slot + `reserved` operation + job ID を queue の単一 record として 1 回 atomic 保存してから、同じ ID を `start_job(..., requested_job_id=job_id, operation_id=operation_id)` へ渡す
+- [ ] P2-6. `start_job()` の同期失敗時は予約済み operation を日本語 error 付き `failed` にして slot を解放する。保存後のプロセスクラッシュは P1-8 の recovery table に従う。job target 開始後の slot は自動解放せず、`needs_reconciliation` を含む operation 状態から復元する。同じ preview / operation の二重クリック、同一 job の再入、プロセス再起動では新 operation / slot / insert を作らない
+- [ ] P2-7. UI は session state に video ID → operation ID を保持し、その operation だけを表示する。key が無い場合だけ source video / clip に限定した latest operation を復元する。`reserved/uploading/uploaded/failed/needs_reconciliation`、processing / private lock、job ID / YouTube video ID、エラーを日本語表示し、`needs_reconciliation` に自動再試行ボタンを出さない。ワーカースレッドから `st.*` を呼ばない
+- [ ] P2-8. settings UI は policy の `HH:MM`、interval、IANA timezone と、読み取り専用の `YTLK_VIDEO_UPLOAD_DAILY_LIMIT`、LA 当日 attempts を表示する。policy 保存は form submit 時だけ行い、不正値と壊れた JSON を日本語表示する
+- [ ] P2-9. ユニットテスト
+  - `HH:MM` の 00:00 / 23:59 と不正文字列、interval 0 / 1、IANA timezone / 不正 zone、aware now / naive 拒否、Asia/Tokyo と DST zone の slot / UTC `Z`
+  - slot 重複、10 分 lead、interval 跨ぎ、queue と attempt の独立、予約公開日と LA attempt 日が異なるケース
+  - preview 全項目表示、Made for Kids / synthetic media 未選択と Community Guidelines 既定未チェック、未確定時 side effect なし、確定後の channel / file / metadata / audience / synthetic / consent / slot / attempt 再検証、各 race で start_job / API 未呼び出し
+  - lock 順序と同時 confirm で勝者 1 件、単一 queue record の operation / slot / 先行 job ID、各境界の fault injection、start_job 同期失敗時 rollback、二重クリック、同一 job / operation、P1-8 に従う再起動復元
+  - status bar / upload component が upload operation を表示し pipeline result と混同しないこと、`needs_reconciliation` の自動再送導線が無いこと
 
 **Done 条件:**
 
 - [ ] `uv run pytest` が全件通る
-- [ ] 1 日 100 本を超える割り当てが発生しないことをテストで確認済み
+- [ ] 予約 slot と LA upload attempt が別概念として境界テストされている
+- [ ] 確認前および確認後再検証失敗時に operation / job / resumable upload session が作られない（preview の read-only `channels.list` は許容）
+- [ ] 同時 confirm・二重クリック・再起動で operation ID / job ID が一貫し、重複 insert が起きない
+- [ ] 実 API はすべてモック、ユーザー向けエラーは日本語、従量課金 AI API 追加なし
 - [ ] タスク完了コミット済み
 
-**見積もり目安:** 1.5 日
+**見積もり目安:** 2.5 日
 
 ---
 
 ### P3: フェーズ P 受け入れ（予約投稿が実際に公開される）
 
-**目的:** v3 全体を受け入れ、仕上げる。
+**目的:** P0 の private lock / 審査結果を前提に、v3 の予約公開を 1 本だけ別承認で受け入れ、公開前後の API status まで証跡化する。
 **変更ファイル範囲:**
-- `README.md`（チャンネル取り込み・ショート量産・予約投稿の使い方を追記）
+- `README.md`（安全な予約投稿、attempt / reconciliation、確認項目、private lock の説明）
 - `src/yt_live_kit/__init__.py`（版数を `0.3.0` に更新）
 - `pyproject.toml`（版数を `0.3.0` に更新）
-- `docs/execution-plan-v3.md`（進捗チェック・マイルストーンの最終更新。各タスクの局所的な進捗更新は §3.4 の共通例外で許可済み）
+- `docs/execution-plan-v3.md`（承認・poll 証跡、進捗・マイルストーン最終更新）
 
 **作業:**
 
-- [ ] P3-1. 対象ファイル・タイトル・説明文・タグ・公開予定日時をユーザーに提示し、**明示承認を得てから**近い将来の時刻を指定して 1 本を予約投稿し、指定時刻に実際に公開されることを確認する（手動実施。自動テストでは検証できない。承認前は実行禁止）
-- [ ] P3-2. `docs/requirements-v3.md` の AC-18〜AC-28 を総点検し、結果をチェックリスト形式で報告する
-- [ ] P3-3. 実配信 1 本で、チャプター生成 → ショート複数本の生成までを通しで実行し、予約投稿は対象・投稿内容・公開予定日時をユーザーに提示して明示承認を得てから実行する（AC-28）
-- [ ] P3-4. README を更新する（チャンネル取り込み、テロップ付きショートの作り方、キュー量産、予約投稿の設定と確認ダイアログ、YouTube API クォータの制約）
-- [ ] P3-5. 版数を `0.3.0` に更新する
-- [ ] P3-6. `docs/execution-plan-v3.md` の進捗チェック・マイルストーン表を最終更新する
+- [ ] P3-1. P0 の private lock が解消または非該当で、P1 / P2 の全テストが通ることを確認する。lock 中は予約公開成功を装わず P3 未完了のままにする
+- [ ] P3-2. 実チャンネル ID / 名称、対象ファイル、サイズ / 尺、タイトル、説明文、タグ、policy timezone / UTC `Z` の予約日時、private、notify false、Made for Kids / synthetic media の選択、Community Guidelines 同意、operation / slot / attempt snapshot をユーザーに提示し、**P0 upload や審査承認とは別の P3 実予約公開専用承認**を得る。承認前は確定しない
+- [ ] P3-3. 承認後の再検証を通して 1 本を予約 upload し、`videos.list(part="status,processingDetails")` を upload 後 processing 完了まで、予約時刻前、予約時刻後に bounded poll して operation に記録する。時刻前 private、時刻後 public と実視聴可能を確認する
+- [ ] P3-4. `docs/requirements-v3.md` の AC-18〜AC-28 を総点検する。4xx / unknown の reconciliation、LA attempt、再起動復元、status bar kind dispatch はモック証跡、実公開は P3 の operation 証跡を使う
+- [ ] P3-5. 実配信 1 本でチャプター生成 → ショート複数本生成までを通し、上記の承認済み 1 本だけを予約投稿対象にする（AC-28）
+- [ ] P3-6. README を更新する。private 固定、10 分 lead、IANA timezone、確認ダイアログ全項目、notify false、LA upload attempt 上限、`needs_reconciliation` は自動再送しないこと、private lock / 審査、実 API を自動テストしないことを記載する
+- [ ] P3-7. 版数を `0.3.0` に更新し、進捗サマリー、M14、受け入れ証跡を最終更新する
 
 **Done 条件:**
 
-- [ ] 実予約投稿の操作前にユーザーの明示承認を得た記録がある
+- [ ] P3 実予約公開の対象と全内容を提示した専用の明示承認記録がある
+- [ ] operation に upload 後、公開前、公開後の status / processingDetails と poll 時刻が記録されている
+- [ ] private lock を成功扱いにせず、予約時刻後に実際に public かつ視聴可能である
 - [ ] AC-18〜AC-28 が確認済み（未達は明示的に次イテレーションへ移す）
-- [ ] 予約投稿した動画が指定時刻に実際に公開されたことを確認済み
-- [ ] `uv run pytest` が全件通る
-- [ ] v1 / v2 の機能に回帰が無い
+- [ ] `uv run pytest` が全件通り、実 API を呼ぶ自動テストが無く、v1 / v2 に回帰が無い
 - [ ] v3 完了コミット済み
 
 **見積もり目安:** 1 日
@@ -907,8 +941,17 @@ src/yt_live_kit/ui/
   components/
     clipboard.py             ← v3（U2 で results.py から移設）
     storage_manager.py       ← v3（U5。旧 history.py のストレージ管理を設定ページから利用）
+    upload.py                ← v3（P2。予約 preview / confirm / operation 復元表示だけ）
     results.py                # v2 から継続。クリップボード関数は clipboard.py に委譲
     status_bar.py             # v2 から継続。U5 で案内先をライブラリへ更新
+
+src/yt_live_kit/models/
+  upload.py                  ← v3（P1。channel / content snapshot / operation / result）
+
+src/yt_live_kit/services/
+  youtube_api.py             # v2 から継続。P1 で mine channel / resumable upload / poll を追加
+  upload_queue.py            ← v3（P1。operation / attempt / job target / reconciliation）
+  schedule.py                ← v3（P2。IANA policy / slot queue / confirm transaction）
 ```
 
 ### 7.2 出力データ構成（v2 の構成に v3 分を追加）
@@ -923,7 +966,8 @@ data/
 │   ├── client_secret.json          # v2
 │   └── youtube_token.json          # v2
 ├── _schedule/                      ← v3（P2）
-│   └── queue.json                  # 割り当て済みの予約投稿枠
+│   ├── queue.json                  # full operation + 予約枠の単一正本（snapshot / 状態 / job・video ID / poll 履歴）
+│   └── upload_attempts.json        # America/Los_Angeles の実試行日で数える全 attempt
 └── {video_id}/
     ├── ...（v1/v2 と同じ）
     └── shorts/
@@ -958,11 +1002,11 @@ PLAN0 要件・計画の確定
              ├─ S2 ASS テロップスタイルプリセット
              └─ S3 ジャンプカット連結ショート生成（S1/S2 の両方に依存）
                  └─ S4 キュー量産 UI
-                     └─ S5 フェーズ S 受け入れ
-                         └─ P0 テストアップロード検証
-                             └─ P1 アップロードサービス
-                                 └─ P2 スケジュールポリシー + 自動割り当て
-                                     └─ P3 フェーズ P 受け入れ（v3 完了）
+                    └─ S5 フェーズ S 受け入れ
+                        └─ P1 安全な upload 契約・永続 operation（全 API mock）
+                            └─ P2 スケジュール・原子的 confirm・UI（全 API mock）
+                                ├─ P0 同じ本番経路で実機 probe（明示承認待ちは開発を止めない）
+                                └─ P3 実予約公開受け入れ（P0 の lock 解消後、別承認）
 ```
 
 **順序の根拠:**
@@ -972,7 +1016,8 @@ PLAN0 要件・計画の確定
 | U0 を最優先 | サイドバー事故を残したまま機能を積むと、あとで UI 全体を作り直す二度手間になる |
 | U2 を U フェーズの中核に置く | フェーズ S の全機能（テロップ確認・キュー量産・予約投稿ボタン）はこのページに積まれる。土台が粗いと S フェーズが総崩れになる |
 | S1・S2 を S3 より先に | S3（連結ショート生成）はテロップ台本（S1）とスタイルプリセット（S2）の両方を利用する |
-| P0 を P フェーズの最初に固定する | 非公開ロックの有無は実装方針（リトライ・エラーメッセージ設計）に影響するため、本実装（P1）より先に確認する |
+| P1 / P2 を P0 より先にする | 実機 probe のための危険な最小経路を作らず、private / publishAt / resumable / attempt / operation / confirm race をモックで完成させた同じ本番経路だけを実操作に使う |
+| P0 と P3 を分ける | P0 は lock / processing の probe、P3 は実公開の受け入れで目的と承認対象が異なる。審査待ちでも P1 / P2 は止めない |
 
 ---
 
@@ -992,11 +1037,11 @@ PLAN0 要件・計画の確定
 | S3 ジャンプカット連結ショート生成 | 2 日 |
 | S4 キュー量産 UI | 1.5 日 |
 | S5 フェーズ S 受け入れ | 1 日 |
-| P0 テストアップロード検証 | 0.5 日 |
-| P1 アップロードサービス | 1 日 |
-| P2 スケジュールポリシー + 自動割り当て | 1.5 日 |
+| P1 安全なアップロードサービス | 2.5 日 |
+| P2 スケジュールポリシー + 原子的な予約確定 | 2.5 日 |
+| P0 安全な実機 upload probe | 0.5 日 |
 | P3 フェーズ P 受け入れ | 1 日 |
-| **合計** | **約 17.5 日**（1 人、AI 支援あり。P0 の審査待ち日数は含まない） |
+| **合計** | **約 20 日**（1 人、AI 支援あり。P0 の承認・審査待ち日数は含まない） |
 
 **段階リリース案:**
 
@@ -1004,7 +1049,7 @@ PLAN0 要件・計画の確定
 |----------|-------------|------|------|
 | **0.2.1** | U0〜U5 | 6.5 日 | 迷わない UI に生まれ変わる |
 | **0.2.2** | + S1〜S5 | 13.5 日 | テロップ付きショートが量産できる |
-| **0.3.0** | + P0〜P3 | 17.5 日 | 予約投稿まで含む v3 完了 |
+| **0.3.0** | + P1 → P2 → P0 → P3 | 20 日 | 安全契約・実機 probe・予約公開まで含む v3 完了 |
 
 ---
 
@@ -1023,7 +1068,7 @@ PLAN0 要件・計画の確定
 
 | 種類 | 対象 | タイミング |
 |------|------|------------|
-| ユニット | ステッパー計算、`_local_settings` の永続化、テロップ台本バリデータ、累積タイムオフセット計算、`assign_next_slot`、アップロードパラメータ組み立て | 各タスク内 |
+| ユニット | ステッパー計算、`_local_settings` の永続化、テロップ台本バリデータ、累積タイムオフセット計算、`assign_next_slot`、metadata / audience / synthetic / consent、resumable retry、operation / attempt / confirm race、kind 別 status bar | 各タスク内 |
 | 回帰 | v1 / v2 の既存テスト（`tests/` 全件）が通ること | 各タスク末 |
 | 実機結合 | 公開アーカイブ 2 本（V7-2 を U5 / S5 で同じ 2 本を通して確認）、実アップロード 1 本（P0 / P3） | U5 / S5 / P0 / P3 |
 | 目視確認 | サイドバー導線（U0）、ステッパー・確認ダイアログ（U5）、テロップ可読性・つなぎ目（S5）、YouTube 上の実際の公開挙動（P3） | 各フェーズ受け入れ |
@@ -1031,7 +1076,7 @@ PLAN0 要件・計画の確定
 
 **方針:**
 
-- yt-dlp / ffmpeg / Codex CLI / `googleapiclient` の実行は**すべてモックする**（`subprocess.run` および `googleapiclient` のクライアントをパッチ）
+- yt-dlp / ffmpeg / Codex CLI / `googleapiclient` の実行は**すべてモックする**（`subprocess.run` および `googleapiclient` のクライアントをパッチ）。P0 / P3 の実 API はユーザー承認後の手動受け入れだけで行い、自動テストへ含めない
 - 動画を実際に生成・アップロードするテストは CI 必須にしない（手動・任意）
 - **v1 / v2 の既存テストを 1 件も壊さないこと。** 壊れた場合は後方互換の設計ミスとして扱う
 
@@ -1042,8 +1087,13 @@ PLAN0 要件・計画の確定
 | リスク | 計画上の扱い |
 |--------|--------------|
 | フェーズ U で UI を作り替えている最中に、v2 機能が回帰する | 各タスクで `uv run pytest` を必須化し、`services/` を原則変更しないことで回帰の原因を UI 層に限定する。U3 の例外は `services/batch.py` の引数追加・全呼び出し伝播・両方 `False` の入力検証に限定し、`tests/test_batch.py` で後方互換・伝播・入力検証を固定する |
-| 非公開ロックにより予約投稿が機能しない | P0 を P フェーズの最初に固定し、審査申請の要否を早期に判断する。審査待ちでも P1/P2 の実装は止めない |
-| YouTube Data API のクォータ超過 | P2 の `assign_next_slot` で Video Uploads 専用バケットの既定 1 日 100 本上限を機械的に守る（NFR-12） |
+| 非公開ロックにより予約投稿が機能しない | P1 / P2 の安全契約を先に完成し、P0 は同じ経路で probe する。private lock は成功扱いにせず、審査待ちでも P1 / P2 の実装は止めない |
+| YouTube Data API の upload 上限超過 | 予約公開日でなく America/Los_Angeles の実 attempt 日を API session 前に atomic 記録し、失敗も数える。`YTLK_VIDEO_UPLOAD_DAILY_LIMIT`（1〜100）を守り、予約 slot と別集計にする |
+| network / 5xx retry が重複動画を作る | 同一 resumable session の `next_chunk()` だけを bounded retry し、4xx / 結果不明は新規 insert を行わず `needs_reconciliation` へ止める |
+| 確認後に channel / file / slot / quota が変わる | immutable preview を確定後に再検証し、固定 lock 順序の atomic transaction で slot と operation を確定する。競合時は新しい preview を要求する |
+| confirm 保存後に process が落ち、job / attempt と食い違う | operation ID / job ID を queue の単一 record へ先行保存し、job JSON は thread 前に同じ ID で作る。attempt ledger を外部効果開始の正本とし、`close_orphans()` 後の active state は attempt 無しを failed + slot 解放、attempt 有りまたは ledger 読込不能を needs_reconciliation + slot 保持へ倒す。terminal 不整合は非変更 + 全新規 upload fail closed とする |
+| 一般 uploader の要件と scheduled-only scope が混同される | 本機能は AGENTS.md / requirements-v3 の予約投稿専用 feature であり、`private + publishAt` 固定を維持する。即時 `public` / `unlisted` は実装せず、将来一般 uploader を作る場合は別要件・別安全レビューにする |
+| 子ども向け / 合成メディア / ガイドライン確認が暗黙値になる | Made for Kids と synthetic media は毎回必須選択し、Community Guidelines checkbox は既定未チェックにする。preview / snapshot / API body の一致をテストする |
 | ジャンプカット連結で累積オフセット計算を誤り、字幕がずれる | S3 のユニットテストで 3 区間以上・区間間隔ありのケースを必須検証項目にする |
 | Codex CLI の応答が不安定（テロップ台本） | S1 は例外を送出し、S4 等の呼び出し側が生成対象単位で局所捕捉する。失敗時は既存の同一 telop と他の成果物（チャプター・候補・ハイライト）を変更しない |
 | テロップの自動生成品質が低く、そのまま焼き込むと粗が目立つ | S1 で必ず人の確認・修正ステップを挟む（自動焼き込みにしない） |
@@ -1074,9 +1124,10 @@ PLAN0 要件・計画の確定
 
 ## 14. 直近の次アクション
 
-1. **U0 に着手する**（2026-08-02 予定）。`ui/pages/` → `ui/views/` のリネームと `st.navigation` 導入から始める
-2. U0 完了後、U1〜U4 は依存関係が緩いため、必要に応じて着手順を前後させてよい（ただし本計画は単一ワーカー運用を想定しており、並列化は行わない）
-3. フェーズ U 完了（U5）後、S1 着手前に `docs/requirements-v3.md` の AC-18〜22 が満たされていることを確認する
+1. **P1 に着手する。** 実 API をすべてモックし、安全な upload / operation / attempt / jobs / status bar 契約を完成させる
+2. P1 完了後に P2 の schedule / confirm transaction / UI を実装し、同時確定・二重クリック・再起動をモックで検証する
+3. P1 / P2 のレビュー・コミット後、実 upload の明示承認が得られた時だけ P0 を行う。承認・審査待ち中も開発完了状態を維持する
+4. private lock 解消後、P0 とは別の明示承認を得て P3 の予約公開受け入れを行う
 
 ---
 
@@ -1084,6 +1135,8 @@ PLAN0 要件・計画の確定
 
 | 日付 | 内容 |
 |------|------|
+| 2026-08-01 | P 安全監査の独立レビューを反映。P0 の公開可能性を承認範囲へ追加し、slot + full operation を単一 queue record へ統合、job ID 先行予約とクラッシュ recovery / fault injection、poll 回数・間隔・terminal・private lock 判定表、P1 → P2 → P0 → P3 の必須順序を固定 |
+| 2026-08-01 | P0〜P3 着手前安全監査を反映。P1 / P2 の本番安全契約を実機 probe より先に変更し、private 固定、aware `publishAt`、Made for Kids / synthetic media 必須選択、Community Guidelines 同意、metadata 制約、resumable / reconciliation、LA attempt 台帳、永続 operation、confirm race、jobs / status bar、polling、実操作別承認を固定。一般 uploader ではなく scheduled-only feature として即時 public / unlisted を対象外のまま維持 |
 | 2026-08-01 | S4 着手前監査・計画レビューを反映。form 外 source と表示順、明示 Codex submit、pure service、deep immutable spec、完全 fingerprint、正規化台本返却、manifest 単独 writer、job ID / latest 表示境界、決定的出力名とテスト境界を固定 |
 | 2026-08-01 | S3 着手前監査・計画レビューを反映。共通整数 ms 正規化 API、入力順、二重検証境界、累積字幕、VTT / Hook fallback、全入力 preflight、進捗契約、force_style 分離、安全な出力名、固定ログ名、atomic replace、中間物 cleanup、既存出力保護を固定 |
 | 2026-08-01 | S2 着手前監査・計画レビューを反映。`TimedCue.emphasis`、ASS プリセットの完全な型・色導出、既定出力互換、フック固定時間、安全化順序、同一 ASS 統合、S3 への preset 伝播と `force_style` 分離を固定 |

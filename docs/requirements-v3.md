@@ -46,7 +46,7 @@ v3 は次の 3 フェーズで構成する。
 | **新着の取り込み** | 取り込みページを開くと、登録済みチャンネルの新着一覧が自動で表示される。未処理分を選んで「処理開始」を押すだけでよい（URL の手入力は例外ルート） |
 | **1 本を仕上げる** | ライブラリページで動画を選ぶと動画詳細ページに遷移し、ステッパーに従って「次にやること」だけを進める。チャプター確認 → ハイライト候補選定 → ショート作成 → 概要欄反映まで、1 画面で完結する |
 | **ショートの量産** | 動画詳細ページで複数のハイライト候補にチェックを入れ、生成前に 1 本ずつテロップ台本を生成・確認・修正する。全対象を確定してから「まとめて生成」を押し、単一のバックグラウンドジョブが入力順に処理する |
-| **量産物の投稿** | 生成済みショートのカードから「予約投稿」を押すと、タイトル・説明文・タグ・公開予定日時のプレビューが表示される。確認して確定すると、スケジュールポリシーに従った枠で非公開アップロードされる |
+| **量産物の投稿** | 生成済みショートのカードから「予約投稿」を押すと、実チャンネル、対象ファイル、サイズ・尺、タイトル・説明文・タグ、公開予定日時、通知設定を含むプレビューが表示される。確認して確定すると、同じ内容を再検証したうえでスケジュールポリシーに従った枠へ非公開アップロードされる |
 | **誤操作からの保護** | 削除・再生成・概要欄反映・投稿は、すべて確認ダイアログ（`st.dialog`）を経由する。特に概要欄反映と投稿は反映前後の内容比較を必須で表示する |
 
 ---
@@ -245,21 +245,39 @@ Streamlit は、エントリスクリプト（[`src/yt_live_kit/ui/app.py`](../s
 
 | 項目 | 内容 |
 |------|------|
-| **入力** | 生成済みショート mp4、タイトル・説明文・タグ（FR-23）、公開予定日時 |
-| **処理** | YouTube Data API の `videos.insert` を `privacyStatus=private` + `publishAt` 指定で呼び出す。既存 OAuth は `youtube.force-ssl` スコープ（[`services/youtube_api.py`](../src/yt_live_kit/services/youtube_api.py) の `SCOPES`）で、アップロード権限も既にカバーしている（再認証不要） |
-| **出力** | アップロード結果（動画 ID、公開予定日時） |
-| **スコープ** | 縦 3 分以内の動画は自動的に Shorts 扱いになる（専用 API は無い）。**投稿は外部へ公開される操作のため、概要欄反映（FR-21）と同じ「確認ダイアログ + 差分表示」の作法で統一する** |
+| **入力** | 生成済みショート mp4、タイトル・説明文・タグ（FR-23）、timezone-aware な公開予定日時 |
+| **処理** | YouTube Data API の `videos.insert` を **`privacyStatus=private` 固定**、`publishAt` 指定、`notifySubscribers=false` 固定で呼び出す。ユーザーが毎回必須選択した `status.selfDeclaredMadeForKids` と `status.containsSyntheticMedia` も body に反映する。`public` / `unlisted` / `publishAt` 無しは受け付けない。公開予定日時は現在より最低 10 分先を必須とし、IANA timezone を持つ aware datetime として検証後、UTC の RFC 3339 `Z` 形式へ正規化する。過去またはリードタイム未満の日時を即時公開へフォールバックせず日本語で拒否する。既存 OAuth は `youtube.force-ssl` スコープ（[`services/youtube_api.py`](../src/yt_live_kit/services/youtube_api.py) の `SCOPES`）を使う |
+| **出力** | 永続 upload operation（operation ID、動画 ID、公開予定日時、処理状態、job ID、エラー、時刻）とアップロード結果 |
+| **スコープ** | 縦 3 分以内の動画は自動的に Shorts 扱いになる（専用 API は無い）。**投稿は外部へ公開される操作のため、概要欄反映（FR-21）と同じ「確認ダイアログ + 内容プレビュー」の作法で統一する。** P0 は lock 非該当なら probe 動画が指定時刻に public となり得ることまで提示して承認を得る。P0 実アップロード、必要な審査フォーム提出、P3 の実予約公開はそれぞれ別のユーザー明示承認を必要とし、承認前は実行しない |
+
+アップロード前の安全契約を次のとおり固定する。
+
+- `channels.list(part="snippet", mine=true)` で取得した実チャンネル ID・名称、対象ファイルの絶対パス、サイズ、`ffprobe` 尺、タイトル、説明文、タグ、予約日時、`notifySubscribers=false`、`selfDeclaredMadeForKids`、`containsSyntheticMedia` を確認ダイアログにすべて表示する。後二者は既定値を推測せず、ユーザーに「はい / いいえ」を毎回必須選択させる
+- 確認ダイアログに「YouTube Community Guidelines に準拠する内容であることを確認した」チェックを**既定未チェック**で置く。未チェックでは確定できず、この同意の真偽と確認時刻を content snapshot に記録するが、YouTube status field へは送らない
+- タイトルは strip 後に非空かつ 100 文字以下、説明文は UTF-8 で 5000 bytes 以下、タグは各要素を strip 後に非空とし `",".join(tags)` が 500 文字以下、すべて半角山カッコ禁止とする
+- 確定ボタン後、API session を作る前に、実チャンネル、ファイル identity（絶対パス・サイズ・更新時刻）、尺、content snapshot、予約枠、当日試行枠を再検証する。プレビューから変化していれば upload を開始せず、新しい確認を要求する
+- `MediaFileUpload(..., resumable=True)` と同一 `videos.insert` request の `next_chunk()` を使う。ネットワーク例外と HTTP 500 / 502 / 503 / 504 だけを、同一 resumable session 内で最大 5 回、1・2・4・8・16 秒（上限 16 秒）の bounded exponential backoff で再試行する。4xx、再試行上限到達、応答喪失等で結果が確定できない場合、新しい `videos.insert` を自動実行せず `needs_reconciliation` とする
+- `data/_schedule/queue.json` を予約 slot と full operation の単一正本とする。各 record は `reserved` / `uploading` / `uploaded` / `failed` / `needs_reconciliation` の状態、operation ID、元動画 ID、source 種別、clip ID、ファイルパス、`selfDeclaredMadeForKids` / `containsSyntheticMedia` / Community Guidelines 同意を含む確認済み content snapshot、job ID、YouTube video ID、作成・更新・開始・完了時刻、エラー、入力順の `poll_history` を保持する。各 `UploadStatusObservation` は UTC 時刻、processing / publication phase、取得 status / processingDetails、判定、日本語エラーを持ち、最新値で過去履歴を上書きしない。別の operation JSON と二重管理せず、lock 下の一時ファイル + replace で原子的に更新し、壊れた JSON は空扱いにせず fail closed で停止する
+- upload 完了後は `videos.list(part="status,processingDetails")` を bounded poll して processing 状態と公開前後の status を operation に記録する。processing は 10 秒間隔・最大 30 回で `succeeded` を成功、`failed/terminated` を失敗、上限到達を timeout とする。公開は予約時刻後に 30 秒間隔・最大 20 回で `privacyStatus=public` を成功、processing failure を失敗、private のまま上限到達を timeout とする。sleep / clock はテストで注入可能にする
+- private lock 判定は、予約時刻前の private + 期待 `publishAt` を正常 scheduled、processing 成功後の `publishAt` 欠落または予約時刻 + 5 分後も private を `suspected_private_lock`、public を `published` とする。API だけで確定せず P0 の YouTube Studio 確認で `confirmed_private_lock / no_private_lock` を記録し、`uploaded` と予約公開可否を分ける。結果不明時は operation ID / channel ID / file snapshot から手動照合できる案内を出す
 
 ### FR-28: 投稿スケジュールポリシー
 
 | 項目 | 内容 |
 |------|------|
-| **入力** | スケジュールポリシー（例: 毎日 18:00 に 1 本）、量産済みショートのキュー |
-| **処理** | 設定ページ（FR-20）にポリシーを保存し、「次の空き枠に自動割り当て」を提供する。5 本作れば 5 日分の予約枠が埋まる |
-| **出力** | 割り当て結果（動画ごとの予約日時） |
-| **スコープ** | クォータ制約（NFR-12）の範囲内でのみ割り当てる。1 日あたりのアップロード可能本数を超える割り当ては行わない |
+| **入力** | `daily_time`（厳密な `HH:MM`）、`interval_days >= 1`、IANA timezone（既定 `Asia/Tokyo`）からなるスケジュールポリシー、量産済みショートのキュー、timezone-aware な現在時刻 |
+| **処理** | 設定ページ（FR-20）にポリシーを保存し、「次の空き枠に自動割り当て」を提供する。計算は `zoneinfo.ZoneInfo` で行い、DST を含むローカル予約枠を aware datetime として扱う。YouTube API へ渡すときだけ UTC RFC 3339 `Z` へ変換する。予約枠と full operation は `data/_schedule/queue.json` の同一 record、upload attempt は `data/_schedule/upload_attempts.json` で別管理する |
+| **出力** | 割り当て結果と、再起動後にも復元できる永続 upload operation |
+| **スコープ** | 予約枠の件数と upload attempt の日次上限を混同しない。upload attempt は公開日ではなく、**実際に API session を開始しようとした日の `America/Los_Angeles` 暦日**で数える。`YTLK_VIDEO_UPLOAD_DAILY_LIMIT` は 1〜100、既定 100 とし、失敗・結果不明も 1 試行に含める |
 
-**P0（テストアップロード検証）について:** 予約投稿の実装に着手する前に、実アップロードで 1 本テストし、非公開ロック（未審査 API プロジェクトからのアップロードが自動的に非公開ロックされ `publishAt` が効かない可能性がある仕様）の有無を確認する。ロックされる場合は Google のコンプライアンス審査（フォーム提出、数日待ち）を申請し、**審査待ちの間も開発は止めない**。この検証はユーザー向け機能ではなく実装前提の確認作業のため、FR ではなく [`docs/execution-plan-v3.md`](./execution-plan-v3.md) の P0 タスクとして扱う。
+予約確定と upload attempt の競合制御を次のとおり固定する。
+
+- プレビュー時に slot / quota snapshot を作り、確定後に lock を取り直して予約枠の空き、operation の重複、America/Los_Angeles 当日試行数を再検証する
+- `MediaFileUpload` / `videos.insert` の resumable upload session 前に `upload_attempts.json` へ試行を atomic 記録する。事前の read-only `channels.list` は attempt に数えない。記録に失敗した場合は upload を開始しない。上限到達後は同日中の実 upload を拒否し、予約公開日をずらすことで試行枠を空いたことにはしない
+- 同一 `job_id` / `operation_id` / content snapshot の再送は冪等に扱い、二重クリック、ジョブ再実行、アプリ再起動で新しい operation や `videos.insert` を重複作成しない。`needs_reconciliation` は自動再送せず、人の照合後に明示的な新 operation として再試行する
+- confirm 時に operation ID と job ID を先行生成して単一 queue record へ atomic 保存し、jobs は同じ requested job ID の JSON を worker thread 起動前に作る。起動時は `jobs.close_orphans()` の後に upload recovery を行い、attempt ledger を外部効果開始の正本とする。active state（`reserved/uploading`）だけを recovery 遷移対象とし、attempt 無しは `failed` + slot 解放として新しい preview / 承認を要求し、attempt 有りまたは ledger が壊れて有無を確定できない場合は `needs_reconciliation` + slot 保持として自動再送しない。terminal state（`uploaded/failed/needs_reconciliation`）は変更せず、ledger 不整合時は queue / slot 非変更のまま日本語エラーで全新規 upload を fail closed にして手動修復を要求する
+
+**P0（テストアップロード検証）について:** P0 を危険な最小経路にはしない。FR-27 / FR-28 の安全契約、永続 operation、冪等性、試行上限、resumable upload、reconciliation、polling を P1 / P2 でモック実装・自動テストした後に、その同じ本番経路で実 upload を 1 本だけ行う。ロックされる場合は Google のコンプライアンス審査を別承認で申請し、**P1 / P2 の開発とテストは実操作の承認・審査待ちで止めない**。この検証は [`docs/execution-plan-v3.md`](./execution-plan-v3.md) の P0 タスクとして扱う。
 
 ---
 
@@ -275,8 +293,9 @@ Streamlit は、エントリスクリプト（[`src/yt_live_kit/ui/app.py`](../s
 **公式仕様の確認日:** 2026-08-01（[Quota Calculator](https://developers.google.com/youtube/v3/determine_quota_cost) / [Videos: insert](https://developers.google.com/youtube/v3/docs/videos/insert)）
 
 - 2026-06-01 以降、`videos.insert` は共通 10,000 ユニット枠ではなく **Video Uploads 専用クォータバケット**で管理される
-- `videos.insert`（アップロード）は **1 回 = 1、既定 100 回/日**。P2 の自動割り当ては、保守的な既定上限として **1 日 100 本まで**を機械的に守る
-- Google Cloud Console でプロジェクト固有の上限が 100 未満に設定されている場合は、そちらを優先する。v3 では UI から上限変更する機能は持たない
+- `videos.insert`（アップロード）は **1 回 = 1、既定 100 回/日**。上限は `YTLK_VIDEO_UPLOAD_DAILY_LIMIT`（整数 1〜100、既定 100）でより小さく設定できる
+- 日次判定は公開予定日ではなく upload attempt を開始する `America/Los_Angeles` の暦日で行う。resumable upload session 前に lock + atomic write で記録し、成功・失敗・結果不明をすべて数える。read-only API は数えず、予約枠件数とは別集計にする
+- Google Cloud Console でプロジェクト固有の上限が 100 未満の場合は、その値を環境変数へ設定する。UI からの上限変更は持たない
 - `videos.update`（概要欄反映）は **50 ユニット/回**
 - `videos.update` 等のその他エンドポイントは、従来どおり共通 **1 日 10,000 ユニット**枠で管理される。Video Uploads 専用バケットとは別に扱う
 - 必要になった場合は Google Cloud Console でクォータ増枠を申請する。FR-28 の自動割り当ては上限を超えないこと
@@ -295,6 +314,7 @@ Streamlit は、エントリスクリプト（[`src/yt_live_kit/ui/app.py`](../s
 
 - 削除（元動画・成果物）、再生成（既存成果物の上書き）、概要欄への反映、YouTube への投稿は、**すべて確認ステップを経てから実行する。** 特に概要欄反映と投稿は公開データを書き換える操作であるため、差分プレビュー（FR-21）または投稿内容プレビューを必須とする
 - 確認 UI には `st.dialog` を用いることを既定とする（v2 の行内 2 段階ボタン方式より視覚的に独立させる）
+- 投稿確認は `channels.list(mine=true)` で得た実チャンネル ID / 名称、ファイル、サイズ / 尺、全 metadata、UTC 変換前後の予約日時、`notifySubscribers=false`、Made for Kids / synthetic media の必須選択を表示し、Community Guidelines 同意は既定未チェックとする。確定後にも同じ snapshot と slot / attempt 上限を再検証する
 
 ### NFR-14: 素材の尺制約の継続
 
@@ -390,15 +410,24 @@ Streamlit は、エントリスクリプト（[`src/yt_live_kit/ui/app.py`](../s
 ### AC-27: 予約投稿
 
 - [ ] 予約投稿した動画が指定時刻に公開される
-- [ ] 投稿前に確認ダイアログでタイトル・説明文・公開予定日時を確認できる
-- [ ] Video Uploads 専用クォータの既定上限（1 日 100 本）を超える予約は自動割り当てされない
+- [ ] upload は `privacyStatus=private`、未来 10 分以上の aware `publishAt`、UTC RFC 3339 `Z`、`notifySubscribers=false` 以外を拒否し、過去時刻を即時公開へ変換しない
+- [ ] 投稿前に確認ダイアログで実チャンネル ID / 名称、対象ファイル、サイズ / 尺、タイトル、説明文、タグ、予約日時、`notifySubscribers=false`、Made for Kids / synthetic media の選択、Community Guidelines 同意を確認でき、確定後の再検証で変更・枠競合を検出すると upload が始まらない
+- [ ] metadata のタイトル非空・100 文字、説明文 UTF-8 5000 bytes、タグ合計 500 文字、半角山カッコ禁止の境界が自動テストされている
+- [ ] `selfDeclaredMadeForKids` と `containsSyntheticMedia` は未選択を拒否し、ユーザー選択値が preview / snapshot / `videos.insert.status` で一致する。Community Guidelines 同意は既定未チェックで、未同意では upload を開始できない
+- [ ] resumable upload は同一 session の `next_chunk()` だけを限定再試行し、4xx / 結果不明時に新規 `videos.insert` を自動再実行せず `needs_reconciliation` を永続化する
+- [ ] upload operation が全必須 field と状態遷移を atomic / lock 付きで保持し、壊れた JSON は fail closed、同一 job / operation の重複実行と再起動復元が自動テストされている
+- [ ] upload attempt は America/Los_Angeles の実試行日で resumable upload session 前に記録され、失敗も数え、`YTLK_VIDEO_UPLOAD_DAILY_LIMIT` の 1・上限・上限超過境界を超えない。read-only API と予約枠件数は別に扱われる
+- [ ] upload job target が `job_id` を受け、`YouTubeAPIError` が jobs の既知例外として日本語表示され、status bar が upload / shorts queue 等の非 pipeline 完了結果を誤って pipeline として読まない
+- [ ] `videos.list(part="status,processingDetails")` が processing 10 秒 × 30、公開 30 秒 × 20 の terminal / timeout 契約と fake clock でテストされ、判定表により private lock を予約投稿成功として扱わない
 - [ ] P0 のテストアップロードで非公開ロックの有無が確認され、記録されている
+- [ ] P0 の専用承認に、private lock 非該当時は probe 動画が指定時刻に public となり得ることまで含まれている
 
 ### AC-28: v3 総合受け入れ
 
 - [ ] AC-18〜AC-27 がすべて満たされている（未達は明示的に「次イテレーション」へ移す）
 - [ ] v1 / v2 の機能に回帰が無い（`uv run pytest` が全件通過する）
 - [ ] 実配信 1 本から、チャプター生成 → ショート複数本の生成 → 予約投稿までを通しで実行できる
+- [ ] 実 upload、審査フォーム提出、P3 の実予約公開について、各操作ごとの対象と内容を提示した別々の明示承認記録がある
 
 ---
 
@@ -419,7 +448,9 @@ Streamlit は、エントリスクリプト（[`src/yt_live_kit/ui/app.py`](../s
 
 | 日付 | 内容 |
 |------|------|
+| 2026-08-01 | P 安全監査の独立レビューを反映。P0 probe の公開可能性、単一 queue record、job ID 先行予約と crash recovery、poll 上限・terminal・private lock 判定表、P1 → P2 → P0 → P3 の依存順を明確化 |
 | 2026-08-01 | S4 計画レビューを反映。候補ソースの form 外切替、表示順、明示 Codex submit、deep immutable spec、完全 fingerprint、manifest 単独所有、job ID 表示境界、決定的出力名を FR-26 / AC-26 に固定 |
+| 2026-08-01 | P0〜P3 着手前安全監査を反映。private 固定、aware `publishAt`、metadata 制約、実チャンネル確認、Made for Kids / synthetic media 必須選択、Community Guidelines 同意、resumable / reconciliation、America/Los_Angeles 基準の試行上限、永続 operation、確認後再検証、polling、実操作ごとの個別承認を FR-27 / FR-28 / NFR-12 / NFR-13 / AC-27 / AC-28 に固定。一般 uploader ではなく scheduled-only feature として即時 public / unlisted を引き続き対象外とした |
 | 2026-08-01 | S4 着手前監査を反映。不変選択 snapshot、台本確定と atomic 保存、単一ジョブの対象単位 softfail、job ID 付き manifest、上書き確認、再起動可能な結果表示を FR-26 / AC-26 に固定 |
 | 2026-08-01 | S3 着手前監査を反映。整数ミリ秒の単一正規化基準、入力順、二重境界検証、ffmpeg 前の全入力検証、クリップ ID 単位の cleanup、atomic replace、再生成失敗時の既存 mp4 保護を FR-25 に追加 |
 | 2026-08-01 | S2 着手前監査・計画レビューを反映。`emphasis` を行全体の強調行フラグとして統一し、プリセット色、ASS 文字列安全化、S3 へのスタイル伝播契約を明確化 |

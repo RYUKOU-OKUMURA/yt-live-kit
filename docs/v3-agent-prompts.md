@@ -15,7 +15,7 @@ v2 は Cursor 上で Grok 4.5（オーケストレーター）+ Composer 2.5（�
 | **オーケストレーター + レビュー** | Claude（Fable 5） | 進捗確認、タスク分解、ワーカーへの指示、品質判定、コミット判断。軽微な docs 修正・進捗チェック更新は直接行ってよいが、**大きなコード変更は自分で書かない** |
 | **実装ワーカー** | `impl-sonnet` サブエージェント（Sonnet 5、Agent ツールで呼び出し） | 指示されたファイル範囲内での実装・テスト |
 
-**v2 のような並列ウェーブ運用は行わない。** [`docs/execution-plan-v3.md`](./execution-plan-v3.md) のタスク（PLAN0, U0〜U5, S1〜S5, P0〜P3）は依存関係が強く、1 本の動画詳細ページ（U2）に後続のショート機能（S フェーズ）が積まれる構造になっているため、基本は上から順に 1 タスクずつ進める。並列化してよいのは、依存関係の無いことが明確な場合（例: U1 ライブラリページと U4 設定ページは互いに依存しない）に限り、オーケストレーターが個別に判断する。
+**v2 のような並列ウェーブ運用は行わない。** [`docs/execution-plan-v3.md`](./execution-plan-v3.md) のタスクは依存関係が強く、基本は依存順に 1 タスクずつ進める。U / S は計画どおり進め、**P フェーズだけは ID の見かけ順ではなく P1 → P2 → P0 → P3 を必須順序とする。** P1 / P2 の安全契約と全 API mock テストより前に P0 実機 probe を行ってはならない。並列化してよいのは、依存関係の無いことが明確な場合（例: U1 ライブラリページと U4 設定ページは互いに依存しない）に限り、オーケストレーターが個別に判断する。
 
 **進捗更新:** `impl-sonnet` ワーカーは `docs/execution-plan-v3.md` のチェックボックスを更新してよい（v2 のウェーブ運用と異なり、並列競合が起きないため）。ただし更新前後で `git diff` を確認し、意図しない箇所を変更していないかレビューする。
 
@@ -57,6 +57,11 @@ v2 は Cursor 上で Grok 4.5（オーケストレーター）+ Composer 2.5（�
   services/batch.py における do_chapters / do_clips の引数追加・全呼び出しへの伝播・両方 False の入力検証だけとする
 - 【フェーズ P の実アップロードを伴うタスクのみ】実際に YouTube へアップロードする操作は、
   ユーザーの明示的な承認を得てから実行する。ユニットテストでは googleapiclient を必ずモックする
+- 【フェーズ P】本機能は一般 uploader ではなく scheduled-only feature である。privacyStatus=private、
+  timezone-aware かつ最低 10 分先の publishAt、notifySubscribers=false を固定し、即時 public / unlisted、
+  過去時刻からの即時公開 fallback を実装しない
+- 【フェーズ P】Made for Kids と synthetic media は既定値を推測せず毎回ユーザーに必須選択させ、
+  Community Guidelines 準拠確認は既定未チェックにする。未選択・未同意では operation / job / API を開始しない
 - 【U5 のみ】フェーズ受け入れでは実際の YouTube 概要欄を書き換えない。更新前 / 更新後の表示と
   確定前に update が呼ばれないことを安全に手動確認し、update / mark の成功・失敗はモックと
   隔離した一時 data_dir で検証する
@@ -137,8 +142,19 @@ uv run pytest
 ### 3.4 フェーズ P 特有の観点
 
 - [ ] **実際の YouTube アップロードは、ユーザーの明示的な承認を得てから実行しているか。** `impl-sonnet` が自律的に実アップロードを実行していないか（P0 のテストアップロードも含め、必ずユーザーに実行前に確認する）
-- [ ] `privacyStatus="private"` が既定になっているか。即時公開（`public`）を許す実装になっていないか
-- [ ] Video Uploads 専用クォータ（既定 1 日 100 本上限、[`docs/requirements-v3.md`](./requirements-v3.md) NFR-12）が機械的に守られているか。テストで境界値（100 本目・101 本目）を確認しているか
+- [ ] P1 / P2 の安全契約と全モックテストが P0 より先に完了し、P0 用の簡易 upload 経路が無いか。P0 実 upload、審査フォーム提出、P3 実予約公開に別々の明示承認があるか
+- [ ] P0 承認には、private lock が非該当なら probe 動画が指定時刻に public となり得ることまで明示されているか
+- [ ] `privacyStatus="private"`、未来 10 分以上の aware `publishAt`、UTC RFC 3339 `Z`、`notifySubscribers=false` が固定か。即時 `public` / `unlisted`、publishAt 無し、過去時刻 fallback を許していないか
+- [ ] Made for Kids / synthetic media が毎回必須選択で、preview / snapshot / `status.selfDeclaredMadeForKids` / `status.containsSyntheticMedia` が一致するか。Community Guidelines checkbox は既定未チェックで、未同意時に side effect が無いか
+- [ ] channel ID / 名称、ファイル、size / duration、title / description / tags、schedule、audience / synthetic / consent、notify false が preview にあり、確定後に channel / file / content / slot / attempt を再検証するか
+- [ ] title 非空・100 文字、description UTF-8 5000 bytes、`",".join(tags)` 500 文字、全 metadata の半角山カッコ禁止を API 前に検証するか
+- [ ] `MediaFileUpload(resumable=True)` と同一 request の `next_chunk()` を使い、network と 500 / 502 / 503 / 504 だけを bounded backoff するか。4xx / result unknown で新しい `videos.insert` を自動実行せず `needs_reconciliation` にするか
+- [ ] operation が全必須 field と状態を atomic / lock 付きで保持し、壊れた JSON が fail closed か。同一 job / operation の二重実行、再起動時の `uploading` / `needs_reconciliation` が insert を再送しないか
+- [ ] 予約 slot と full operation が単一 `queue.json` record の正本で、operation ID / job ID を先行保存しているか。`jobs.close_orphans()` → upload recovery の順で、queue 保存、job JSON 作成、thread 起動、uploading 保存、attempt 記録の各クラッシュ境界を検証し、attempt ledger を正本として active state だけを recovery するか。active は attempt 無しで failed + slot 解放、attempt 有りまたは ledger 読込不能で needs_reconciliation + slot 保持、terminal は不変、terminal / ledger 不整合は queue / slot 非変更 + 全新規 upload fail closed か
+- [ ] `upload_job_target` が jobs 契約どおり `job_id` を受け、`YouTubeAPIError` / upload queue error が既知例外か。status bar は upload / shorts queue / batch の完了結果を pipeline loader へ渡さないか
+- [ ] Video Uploads 専用上限を公開予定日でなく America/Los_Angeles の upload attempt 開始日で数え、resumable upload session 前に attempt を atomic 記録し、失敗も数えるか。read-only `channels.list` は数えず、`YTLK_VIDEO_UPLOAD_DAILY_LIMIT` の 1〜100 と上限超過、予約 slot との分離をテストしているか
+- [ ] `SchedulePolicy` が厳密な `HH:MM`、`interval_days >= 1`、IANA `ZoneInfo`（既定 Asia/Tokyo）、aware now、DST、API UTC `Z` を検証するか。confirm race を固定 lock 順序で 1 operation に直列化するか
+- [ ] `videos.list(part="status,processingDetails")` が processing 10 秒 × 30、公開 30 秒 × 20、明示 terminal / timeout、fake clock / sleep の契約を持つか。全応答を時刻・phase・status / processingDetails・classification 付き typed history へ追記し round-trip するか。publishAt 欠落または予約 + 5 分 private を suspected とし、Studio 確認まで private lock を確定・成功扱いしていないか
 - [ ] `googleapiclient` の実呼び出しがユニットテストでモックされているか（実アップロードを伴うテストが CI 相当の自動実行に含まれていないか）
 
 ---
@@ -149,7 +165,7 @@ uv run pytest
 |----------|----------------|
 | **U** | `services/` を原則触らない。UI 層の並べ替えとテストの再構成だけで完結させる。新しい永続化が必要なら `ui/views/_local_settings.py` のような UI 層ヘルパーに留める。U3 の `services/batch.py` における引数追加・全呼び出し伝播・両方 `False` の入力検証だけは最小例外（[execution-plan-v3.md](./execution-plan-v3.md) §3.2 参照） |
 | **S** | 従量課金 API を使わない。AI 生成は Codex CLI のみ、かつテロップ台本とメタデータは同じ呼び出しで一括生成する。**自動生成をそのまま焼き込まず、必ず人の確認ステップを挟む** |
-| **P** | 実アップロードはユーザー承認後のみ実行する。`privacyStatus="private"` を既定にし、Video Uploads 専用クォータの既定上限（1 日 100 本）を超える割り当てをしない。P0 の非公開ロック確認結果次第で、後続タスクの前提が変わる可能性があるため、P0 の報告を必ず先に確認してから P1 に着手する |
+| **P** | P1 / P2 を全 API mock で完成してから、同じ本番経路だけを P0 / P3 で別承認により実操作する。private + future publishAt + notify false、audience / synthetic / consent、LA attempt、resumable / reconciliation、永続 operation、confirm race、polling を固定する。private lock 中は P3 を成功扱いにしない |
 
 ---
 
@@ -189,10 +205,10 @@ uv run pytest
 | S2 | `TimedCue.emphasis=False` の追加が既存 3 引数構築を壊していないか。プリセット省略 + フックなしで `build_segment_subtitle()` と既存 ASS 出力が v2 完全互換か。通常字幕 / Hook の `\`・波括弧・C0 制御文字・実改行を指定順で安全化してから、選択 preset の強調色と本文復帰色を導出して行全体へ管理タグを付けているか。不明 preset / 不正色 / 空 hook を日本語エラーにし、通常字幕と Hook を同一 ASS に出せるか |
 | S3 | 公開 `NormalizedSegmentBounds` / 正規化 helper の整数 ms を ID・尺（10,000 / 180,000 ms）・encode・字幕 offset / clip の唯一の基準にし、0.5 ms 境界でも一貫するか。入力順を再生・ID・encode 順として保持し、全区間・layout・output 名・明示 hook・preset を source 取得前に検証するか。telop は ffmpeg 前と `build_concatenated_subtitle()` 直呼び境界の両方で tuple 入力に対して再検証し、直呼びでも明示 hook の空文字・半角山カッコを拒否するか。VTT の区間相対 cue に累積 ms を加え、1 回だけ読む fallback、Hook 単独、preset 全伝播、`force_style` なしの 1 回焼き込み、`len(segments) + 3` の進捗契約を満たすか。安全な output 名、`{正式出力stem}.ffmpeg.log`、atomic replace、失敗時の既存 mp4 保護、専用中間ディレクトリ単位の cleanup / keep、エラー型変換、font warning、既存 `build_short()` 不変を確認する |
 | S4 | form 外の source 切替と表示順、明示 Codex submit、不変 fingerprint と全台本確定が一致する時だけ開始するか。pure service、deep immutable spec、正規化台本、決定的出力名、softfail、単独 writer manifest、非永続 `manifest_path`、video ID 別 job ID と A → B → A 表示分離、latest tie-break、上書き dialog、busy / 二重開始防止まで確認する |
-| P0 | 実アップロードを `impl-sonnet` が独断で実行していないか（必ずユーザー承認後） |
-| P1 | `privacyStatus` の既定が `"private"` になっているか |
-| P2 | 1 日 100 本の Video Uploads 専用クォータ上限を 100 本目・101 本目で境界確認しているか |
-| P3 | README・版数更新が「変更してよいファイル」の範囲内に収まっているか。実予約投稿の対象・内容・公開予定日時を提示し、実行直前にユーザーの明示承認を得ているか |
+| P0 | P1 / P2 の安全経路だけを使い、実 upload と審査フォームが別承認か。private lock / processing を poll し、lock を成功扱いにしていないか |
+| P1 | private / aware future publishAt / notify false、metadata、audience / synthetic / consent、resumable、LA attempt、operation、job_id、kind dispatch を API mock で固定したか |
+| P2 | IANA policy、slot と attempt の分離、全項目 preview、既定未同意、確定後再検証、同時 confirm、operation / job ID の再起動復元を検証したか |
+| P3 | README・版数更新が変更範囲内か。P0 / 審査とは別の専用承認後だけ実予約公開し、upload 後・公開前後の status / processingDetails を記録したか |
 
 ---
 
@@ -200,6 +216,8 @@ uv run pytest
 
 | 日付 | 内容 |
 |------|------|
+| 2026-08-01 | P 安全監査の独立レビューを反映。P1 → P2 → P0 → P3 の必須順序、P0 公開可能性の承認、単一 queue record、job crash recovery / fault injection、具体的 poll / lock 判定をレビュー観点へ追加 |
+| 2026-08-01 | P0〜P3 着手前安全監査を反映。P1 / P2 先行、scheduled-only の private + future publishAt、Made for Kids / synthetic media 必須選択、Community Guidelines 既定未同意、metadata、resumable / reconciliation、LA attempt、永続 operation、confirm race、jobs / status bar、polling、実操作別承認をレビュー観点へ追加 |
 | 2026-08-01 | S4 計画レビューを反映。form 外 source、表示順、明示 Codex submit、deep immutable spec、完全 fingerprint、manifest 単独 writer、job ID / latest 表示境界、決定的出力名をレビュー観点へ追加 |
 | 2026-08-01 | S4 着手前監査を反映。Streamlit form / 確定状態、修正台本の再検証・atomic 保存、単一ジョブ softfail、job ID 付き manifest、上書き dialog、遅延 download とテスト境界をレビュー観点へ追加 |
 | 2026-08-01 | S3 着手前監査を反映。共通整数 ms 正規化、入力順・全境界検証、二重 telop 再検証と累積字幕、VTT / Hook fallback、全入力 preflight、固定ログ名、進捗、atomic replace、cleanup、既存出力保護をレビュー観点へ追加 |
