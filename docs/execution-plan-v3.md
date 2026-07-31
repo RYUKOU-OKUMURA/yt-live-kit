@@ -389,6 +389,7 @@ data/{video_id}/ ...
 - `src/yt_live_kit/ui/views/settings.py`（新規）
 - `src/yt_live_kit/ui/app.py`（ナビゲーション登録）
 - `tests/test_ui_settings_page.py`（新規）
+- `tests/test_ui_app.py`（「設定」ページの title / `url_path` 追加に伴うナビゲーション期待値の更新）
 - （`services/` は変更しない。`config.py` も変更しない）
 
 **設計メモ:** `Settings`（[`config.py`](../src/yt_live_kit/config.py)）の `ffmpeg_path` / `subtitle_font` / `data_dir` は環境変数（`.env`）経由の設定であり、UI からの永続化編集機能は v3 のスコープに含めない（`config.py` を変更しないという制約と、環境変数運用を崩さないための判断）。設定ページではこれらを **表示専用** とし、変更方法（`.env` の書き方）を案内文で示す。**編集可能な項目は、U3 で実装した「チャンネル既定ハンドル」のみ**とする。フェーズ P では投稿スケジュールポリシー（P2 で `services/schedule.py` を新設）の編集をこのページに追加する。
@@ -402,11 +403,13 @@ data/{video_id}/ ...
 - [ ] U4-5. ユニットテスト
   - `is_codex_available` の結果に応じた表示文言（モックして検証）
   - 既定ハンドルの保存フォームが `_local_settings` の関数を正しく呼ぶこと
+  - 「設定」の `st.Page`（または代入した `settings_page`）が `st.navigation` へ渡すページ列に実際に含まれることを AST で検証し、全ページの `url_path` が一意であること
 
 **Done 条件:**
 
 - [ ] `uv run pytest` が全件通る
 - [ ] Codex CLI の状態が画面に表示される（実環境で確認）
+- [ ] 自動テストで「設定」が `st.navigation` へ実際に登録され、`url_path="settings"` が他ページと重複しないことを確認済み
 - [ ] `services/` / `config.py` に変更が無い
 - [ ] タスク完了コミット済み
 
