@@ -603,36 +603,58 @@ data/{video_id}/ ...
 **目的:** 複数の小区間を 1 本の縦型ショートに連結し、テロップとフックタイトルを焼き込む。v3 の中核機能。
 **変更ファイル範囲:**
 - `src/yt_live_kit/services/shorts.py`（新関数 `build_short_from_segments()` を追加）
-- `src/yt_live_kit/services/subtitle_burn.py`（複数区間の累積タイムオフセット計算を行う `build_concatenated_subtitle()` を追加）
-- `tests/test_shorts.py` / `tests/test_subtitle_burn.py`（追記）
-- （`services/ffmpeg.py` は変更しない。既存の `encode_segment` / `build_concat_list` / `concat_segments` をそのまま使う）
+- `src/yt_live_kit/services/subtitle_burn.py`（複数区間の累積タイムオフセット計算を行う `build_concatenated_subtitle()` を追加し、既存 `_get_preset()` を副作用なく preset 名を事前検証できる公開 `get_telop_preset(name: str) -> TelopPreset` へ refactor）
+- `src/yt_live_kit/services/telop.py`（共通の整数ミリ秒正規化 API を公開し、`make_clip_id()` / `validate_telop_script()` を同 API 利用へ refactor。`validate_telop_script()` の `segments` 型注釈も `Sequence[HighlightSegment | tuple[float, float]]` へ広げる）
+- `tests/test_shorts.py` / `tests/test_subtitle_burn.py` / `tests/test_telop.py`（追記）
+- （`services/ffmpeg.py` は変更しない。既存の `encode_segment` / `concat_segments` をそのまま使う。`concat_segments()` が内部で `build_concat_list()` を呼ぶため、S3 から `build_concat_list()` を直接二重呼び出ししない）
 
 **背景:** 既存の `cut_and_concat()`（[`services/ffmpeg.py`](../src/yt_live_kit/services/ffmpeg.py)）は横型のハイライト動画向けに「複数区間を再エンコードして連結する」処理を持ち、既存の `build_short()`（[`services/shorts.py`](../src/yt_live_kit/services/shorts.py)）は単一区間向けに「2 パス（精密シークで切り出し → レイアウト + 字幕焼き込み）」を持つ。S3 はこの 2 つを組み合わせる。
 
 **作業:**
 
-- [ ] S3-1. `build_short_from_segments(video_id, segments: list[tuple[float, float]], settings=None, *, layout="blur", telop_script: TelopScriptDocument | None = None, hook_text: str | None = None, preset="default", hook_preset="hook", output_name: str | None = None, ffmpeg_path=FFMPEG_DEFAULT, on_progress=None, keep_intermediate=False) -> ShortResult` を実装する
+- [ ] S3-1. `build_short_from_segments(video_id, segments: list[tuple[float, float]], settings=None, *, layout="blur", telop_script: TelopScriptDocument | None = None, hook_text: str | None = None, preset="default", hook_preset="hook", output_name: str | None = None, ffmpeg_path=FFMPEG_DEFAULT, on_progress: ShortsProgressCallback = None, keep_intermediate=False) -> ShortResult` を実装する。`ShortsProgressCallback` は `Callable[[int, int, str], None] | None` とし、`total = len(segments) + 3`、各区間を `i`、連結を `n + 1`、字幕準備を `n + 2`、焼き込みを `n + 3` として通知する
+  - `services/telop.py` に `NormalizedSegmentBounds` frozen dataclass（`start_ms` / `end_ms` と、それらから導出する `start_sec` / `end_sec` / `duration_ms` / `duration_sec` property）、公開 `normalize_seconds_to_milliseconds(value: float | int) -> int`、`normalize_segment_bounds(segments: Sequence[HighlightSegment | tuple[float, float]]) -> tuple[NormalizedSegmentBounds, ...]` を追加する。既存 `_to_milliseconds` / `_normalized_bounds` 相当の実装をここへ一本化し、`make_clip_id()`、`validate_telop_script()`、S3 の全処理が同じ `Decimal(str(value))` + `ROUND_HALF_UP` を使う
+  - 入力順を再生順・`make_clip_id()` の ID 生成順・`encode_segment()` の呼び出し順としてそのまま保持し、自動で sort / dedupe しない
+  - 空配列、数値でない値、NaN / 無限、負値、逆転区間、ミリ秒への `ROUND_HALF_UP` 後に開始・終了が同値になる区間は、ffmpeg を呼ぶ前に日本語の `ShortsError` にする
+  - ID、合計尺、`encode_segment()` へ渡す秒、字幕の累積 offset / 区間 clip はすべて `NormalizedSegmentBounds` の整数ミリ秒を唯一の基準とする。合計尺も整数ミリ秒で `10_000 <= total_ms <= 180_000` を比較し、浮動小数の元入力から別計算しない
+  - 次の手順へ入る前の preflight で、全区間、`layout`、`output_name`、明示 `hook_text`、`preset` / `hook_preset` と、`telop_script` があれば `validate_telop_script(..., segments=segments)` を検証する。明示 hook は strip 後の空文字と半角山カッコを拒否し、preset は公開 `get_telop_preset()` を使う。区間数・ミリ秒境界・行の区間内配置・時系列順・行の非重複・全テキスト規則を満たす正規化済み document を得られない限り、`ensure_source_video()` を含む ffmpeg / ダウンロード処理を一切始めない
   - 手順:
     1. `ensure_source_video()` で元動画を確保
-    2. 各区間を `encode_segment(..., crf=INTERMEDIATE_CRF)` で切り出す → `data/{video_id}/shorts/segments/{clip_id}/seg_001.mp4` …
-    3. `build_concat_list()` → `concat_segments()` で 0 秒始まりの中間ファイルに連結する → `.../segments/{clip_id}/concat.mp4`
-    4. `subtitle_burn.build_concatenated_subtitle()`（新規）へ `preset` / `hook_preset` を渡し、区間ごとのテロップ行を**連結後のタイムライン**に合わせて再計算する。さらに S2 の `write_ass(..., preset=preset, hook_text=..., hook_preset=hook_preset)` を使って通常字幕とフックを同一 ASS に生成する
+    2. 各区間を正規化済み `start_sec` / `end_sec` で `encode_segment(..., crf=INTERMEDIATE_CRF)` へ渡して切り出す → `data/{video_id}/shorts/segments/{clip_id}/seg_001.mp4` …
+    3. `concat_segments()` で 0 秒始まりの中間ファイルに連結する → `.../segments/{clip_id}/concat.mp4`。concat list は同関数が内部生成するため、S3 から `build_concat_list()` を直接呼ばない
+    4. preflight で得た正規化済み document を `subtitle_burn.build_concatenated_subtitle()`（新規）へ渡し、`preset` / `hook_preset` を維持して区間ごとの行を**連結後のタイムライン**へ再計算する。さらに S2 の `write_ass(..., preset=preset, hook_text=..., hook_preset=hook_preset)` を使って通常字幕とフックを同一 ASS に生成する
     5. パス 2（[`build_short()`](../src/yt_live_kit/services/shorts.py) と同じ考え方）: レイアウト（blur / crop）+ 字幕焼き込みを連結済み中間ファイルに対して実行する。S3 の字幕フィルタは ASS 内の `Default` / `Hook` スタイルを優先するため `subtitles=...` を `force_style` なしで使う。既存 `build_short()` の単一区間向け `force_style` 経路は変更しない
-    6. `keep_intermediate=False`（既定）なら中間ファイルを削除する
-  - 出力: `data/{video_id}/shorts/output/short_{clip_id}.mp4`（単一区間の従来命名 `short_{start}_{end}.mp4` とは区別する）
-- [ ] S3-2. `subtitle_burn.build_concatenated_subtitle(video_id, segments, settings, *, telop_script=None, hook_text=None, preset="default", hook_preset="hook") -> Path` を実装する
-  - 各区間のカットは元動画のタイムコードを持つが、連結後は「その区間より前にある区間の合計尺」だけ後ろにずれる。**累積オフセット**を区間ごとに計算し、`TelopLine` の時刻をずらしてから ASS に書き出す
-  - `telop_script` が無い場合（S1 を経ずに生成する場合）は VTT 由来の字幕（既存の `filter_cues_for_segment`）にフォールバックする
+    6. 最終動画は同じ output ディレクトリ内の一時 `.mp4` に書き、ファイル存在・非ゼロを確認してから正式出力へ atomic replace する。途中失敗時は一時出力だけを削除し、同名の既存正式 mp4 を維持する。最終 ffmpeg ログは `output/{正式出力stem}.ffmpeg.log` の固定名で残し、custom `output_name` にも追従させる
+    7. `keep_intermediate=False`（既定）なら成功・失敗のどちらでも `segments/{clip_id}/` 全体（`seg_*.mp4`、各ログ、`concat.mp4`、concat ログ、失敗時の `concat.txt`）を削除する。`True` ならその時点で存在する中間物を成功・失敗とも残す。元動画、ASS、S1 JSON、最終 mp4、最終ログは削除しない
+  - 出力: 既定は `data/{video_id}/shorts/output/short_{clip_id}.mp4`（単一区間の従来命名 `short_{start}_{end}.mp4` とは区別する）。`output_name` は空、絶対パス、パス区切り文字を含む値、`.` / `..`、`.mp4` 以外を日本語エラーで拒否する
+  - `make_clip_id()` / `validate_telop_script()` の `TelopError`、`FfmpegError`、`SubtitleBurnError` は公開境界で日本語の `ShortsError` へ変換する。ASS を焼き込むため `ShortResult.burned_subtitles=True` とし、日本語フォント未解決時は既存 `build_short()` と同じ `font_warning` 文言を返す
+- [ ] S3-2. `subtitle_burn.build_concatenated_subtitle(video_id: str, segments: Sequence[tuple[float, float]], settings: Settings | None = None, *, telop_script: TelopScriptDocument | None = None, hook_text: str | None = None, preset: str = "default", hook_preset: str = "hook") -> Path` を実装する
+  - 関数単独で呼ばれた場合も、関数内 import した `normalize_seconds_to_milliseconds()` / `normalize_segment_bounds()` / `make_clip_id()` / `validate_telop_script()` へ一本化し、区間正規化と telop 再検証を必ず行う。S3-1 との二重検証は公開境界の安全性のため許容し、呼び出し側から `clip_id` や正規化結果を受け取る別経路は作らない
+  - 明示 `hook_text` はこの公開境界自身でも検証し、strip 後の空文字と半角山カッコを拒否する。これにより `telop_script=None` の直呼びでも固定出力ルールを迂回できないようにする
+  - 出力先は `data/{video_id}/shorts/subtitles/short_{clip_id}.ass`。上記の関数内 import により `telop.py` → `subtitle_burn.py` の既存 import との循環を避ける
+  - 各区間のカットは元動画のタイムコードを持つため、連結後の行時刻を整数ミリ秒で `先行区間の累積 ms + 行の絶対 ms - 元区間開始 ms` と計算する。防御的に各相対時刻を `0..区間尺 ms` へ clip し、clip 後に終了が開始以下なら日本語エラーにする
+  - `telop_script` がある場合は関数内再検証で得た正規化済み document を使う。`hook_text` の明示値を優先し、`None` なら document の `hook_text` を使う
+  - `telop_script` が無い場合（S1 を経ずに生成する場合）は `subtitles/ja.vtt` を 1 回だけ読み、VTT 由来の字幕（既存の `parse_vtt_with_end` / `filter_cues_for_segment`）へフォールバックする。各 filter 結果の区間相対 cue を共通 helper で整数ミリ秒へ正規化し、先行区間の累積 ms を加えて連結 timeline へ変換する。VTT 不在は日本語エラー、個々の区間で cue が 0 件なのは許容し、VTT が存在して `hook_text` があれば Hook 単独 ASS も生成できる
   - 通常字幕と `hook_text`、`preset`、`hook_preset` は S2 の同一 ASS API へ一度に渡し、ffmpeg の字幕焼き込みも 1 回だけ行う。フック用の別 ASS を後段で重ねず、選択プリセットを全呼び出し段で欠落させない
-- [ ] S3-3. 尺バリデーション: 合計尺が `MIN_DURATION_SEC`（10 秒）未満、または `MAX_DURATION_SEC`（180 秒）超なら `ShortsError` にする。**エラーメッセージには「区間を減らすか短くしてください」という具体的な対処を含める**（UI 側の分割・短縮誘導は S4 で実装する）
+- [ ] S3-3. 尺バリデーション: 正規化済み整数ミリ秒の合計で 10,000 ms・180,000 ms を許可し、9,000 ms は `MIN_DURATION_SEC` 未満、181,000 ms は `MAX_DURATION_SEC` 超として `ShortsError` にする。180 秒超の**エラーメッセージには「区間を減らすか短くしてください」という具体的な対処を含める**（UI 側の分割・短縮誘導は S4 で実装する）
 - [ ] S3-4. ユニットテスト
-  - `build_short_from_segments` が区間数ぶん `encode_segment` を呼ぶこと
-  - 累積オフセット計算（3 区間以上、区間間に間隔がある場合）
-  - 合計尺の境界値（9 秒 / 10 秒 / 180 秒 / 181 秒）
-  - `on_progress` が区間ごと・連結時・焼き込み時に呼ばれること
+  - 3 区間で `encode_segment(..., crf=INTERMEDIATE_CRF)` が入力順に 3 回呼ばれ、その 3 パスが順番どおり `concat_segments()` へ渡ること。S3 が `build_concat_list()` を直接二重呼び出ししないこと
+  - 入力順を変えても sort / dedupe されず、ID・encode・再生順が入力どおりであること
+  - 空配列、非数値、NaN / 無限、負値、逆転、ミリ秒丸め後の同値を ffmpeg 前に拒否すること
+  - 公開正規化 helper、`make_clip_id()`、`validate_telop_script()` が同じ整数ミリ秒を使うこと。`0.00049` / `0.0005` / `9.99949` / `9.99951` 等の 0.5 ms 境界で ID、合計尺、encode 引数、累積 offset / clip が一貫すること
+  - 合計尺の整数 ms 境界（9,000 / 10,000 / 180,000 / 181,000 ms）と、181 秒の案内文言
+  - 累積オフセット計算（3 区間以上、区間間に間隔がある場合）、区間境界での clip、clip 後に無効になる行の日本語エラー
+  - telop の区間数・ミリ秒境界・行範囲・行順序・行重複・テキスト規則の不一致を ffmpeg 前に拒否し、正規化済み document を使うこと
+  - `build_concatenated_subtitle()` 直呼びでも不正 tuple / telop と、strip 後に空または半角山カッコを含む明示 hook を拒否すること。VTT を 1 回だけ読み、間隔のある 3 区間の相対 cue に累積 ms を加えた連結 timeline を直接検証すること。cue 0 件の許容、VTT 不在の日本語エラー、VTT あり + Hook 単独 ASS
+  - 不正な layout / output_name / 明示 hook（strip 空・半角山カッコ）/ preset / hook_preset を preflight で拒否し、`ensure_source_video()` / ffmpeg が呼ばれないこと
+  - `on_progress` の total が `len(segments) + 3` で、各区間 `i`、連結 `n + 1`、字幕準備 `n + 2`、焼き込み `n + 3` の順に呼ばれること
   - `preset` / `hook_preset` が `build_short_from_segments()` → `build_concatenated_subtitle()` → `write_ass()` へ欠落なく伝播すること
-  - S3 の ffmpeg コマンドが `subtitles=...` を使い `force_style` を含まないこと。既存 `build_short()` の `force_style` 付きコマンド契約は変わらないこと
-  - subprocess はすべてモックする
+  - S3 の blur / crop 両コマンドが `subtitles=...` を 1 回だけ使い `force_style` を含まず、パス 2 に `-ss` / `-t` が無いこと。既存 `build_short()` の `force_style` 付きコマンド契約は変わらないこと
+  - unsafe な `output_name` を拒否し、既定の mp4 / ASS が同じ `clip_id` を使うこと
+  - encode / concat / ASS / パス 2 の各失敗と成功で、`keep_intermediate=False` は中間ディレクトリ全体を削除し、`True` は存在分を保持すること
+  - パス 2 失敗時は一時 mp4 だけを削除して既存正式 mp4 を維持し、成功時だけ atomic replace すること。最終ログが `output/{正式出力stem}.ffmpeg.log` となり custom 名にも追従すること
+  - `TelopError` / `FfmpegError` / `SubtitleBurnError` の `ShortsError` 変換、`burned_subtitles=True`、既存と同じ `font_warning` 条件・文言
+  - subprocess はすべてモックし、実 ffmpeg を呼ばない
 
 **Done 条件:**
 
@@ -870,10 +892,12 @@ data/
         │       ├── seg_001.mp4 ...
         │       └── concat.mp4
         ├── subtitles/
-        │   └── short_{start}_{end}.ass  # v2。S2 でプリセット・強調色に対応拡張
+        │   ├── short_{start}_{end}.ass  # v2。S2 でプリセット・強調色に対応拡張
+        │   └── short_{clip_id}.ass      ← v3（S3。連結後タイムラインの通常字幕 + Hook）
         └── output/
             ├── short_{start}_{end}.mp4  # 単一区間（v2 から継続）
-            └── short_{clip_id}.mp4      ← v3（S3。複数区間を連結したショート）
+            ├── short_{clip_id}.mp4      ← v3（S3。複数区間を連結したショート）
+            └── {正式出力stem}.ffmpeg.log ← v3（S3。最終焼き込みコマンドログ）
 ```
 
 ---
@@ -1018,6 +1042,7 @@ PLAN0 要件・計画の確定
 
 | 日付 | 内容 |
 |------|------|
+| 2026-08-01 | S3 着手前監査・計画レビューを反映。共通整数 ms 正規化 API、入力順、二重検証境界、累積字幕、VTT / Hook fallback、全入力 preflight、進捗契約、force_style 分離、安全な出力名、固定ログ名、atomic replace、中間物 cleanup、既存出力保護を固定 |
 | 2026-08-01 | S2 着手前監査・計画レビューを反映。`TimedCue.emphasis`、ASS プリセットの完全な型・色導出、既定出力互換、フック固定時間、安全化順序、同一 ASS 統合、S3 への preset 伝播と `force_style` 分離を固定 |
 | 2026-08-01 | S1 着手前監査を反映。テロップ JSON の絶対秒スキーマ、公開シグネチャ、検証結果型、プロンプト保存先、`make_clip_id()` のミリ秒丸め、VTT parser の公開互換、softfail 境界を固定 |
 | 2026-08-01 | PLAN0-7: U5 着手前監査を反映。正式 IA を公開 3 画面 + 非表示詳細に固定し、旧処理済み一覧の削除、ストレージ管理の設定画面移設、概要欄更新経路・成功記録・安全な受け入れ境界を明確化 |

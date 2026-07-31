@@ -118,6 +118,8 @@ uv run pytest
 - [ ] Codex CLI 呼び出しが 1 区間セットあたり 1 回で完結しているか（テロップ台本とメタデータを別々に 2 回呼んでいないか、S1）
 - [ ] `-ss` を `-i` の後ろに置く精密シークになっているか（`encode_segment` を正しく使っているか、S3）
 - [ ] 複数区間連結時の字幕タイムオフセットが、区間の**累積**尺で正しく計算されているか（区間ごとの `start_sec` だけを引くと連結後にズレる、S3）
+- [ ] S3 が `NormalizedSegmentBounds` / 公開正規化 helper の整数 ms を ID・尺・encode・字幕 offset / clip の唯一の基準にし、入力順を再生・ID・encode 順として保持して sort / dedupe していないか。ffmpeg 前と `build_concatenated_subtitle()` の公開境界で全区間と確認済み telop document を再検証しているか
+- [ ] S3 の最終 mp4 が一時 `.mp4` への生成成功後だけ atomic replace され、失敗時に既存正式 mp4 が維持されるか。`keep_intermediate` が専用中間ディレクトリ全体へ成功・失敗とも適用され、元動画・ASS・S1 JSON・最終 mp4 / ログを削除していないか
 - [ ] テロップ焼き込みが「Codex の生成結果をそのまま焼き込む」のではなく、**人が確認・修正できるステップを経てから**焼き込む設計になっているか（S1・S4）
 - [ ] 180 秒超の区間選択が、エラーで落ちるだけでなく分割・短縮を促す案内になっているか（S3 のエラーメッセージ + S4 の UI 誘導）
 
@@ -172,7 +174,7 @@ uv run pytest
 | U5 | 正式 IA が公開 3 画面 + 非表示詳細になり旧 history が削除されているか。ストレージ管理を設定へ移し、全動画への到達性、個別 / 一括ダイアログの対象情報、未確定 / 確定境界、StorageError、成果物保持まで AC-15 を維持しているか。概要欄は外側 primary → 検証 → fetch / merge → large dialog の更新前後別表示 → 確認時だけ update → 成功後だけ mark の一本化された流れか。確定時の既存 update 内部 fetch を残し、実 YouTube 書き込みを受け入れ試験で実行していないか |
 | S1 | テロップ台本とメタデータを 1 回の Codex 呼び出しで生成しているか。入力字幕が開始・終了・ミリ秒を保持し、区間・行の `start_sec` / `end_sec` が元動画基準の絶対秒で、`TelopSegmentScript` 自身にも区間境界があり、S3 の `累積尺 + 行の絶対秒 - 元区間開始秒` へ一意に変換できるか。S1 は失敗時に例外を送出し、呼び出し側が局所捕捉して既存 telop と他成果物を維持する softfail になっているか |
 | S2 | `TimedCue.emphasis=False` の追加が既存 3 引数構築を壊していないか。プリセット省略 + フックなしで `build_segment_subtitle()` と既存 ASS 出力が v2 完全互換か。通常字幕 / Hook の `\`・波括弧・C0 制御文字・実改行を指定順で安全化してから、選択 preset の強調色と本文復帰色を導出して行全体へ管理タグを付けているか。不明 preset / 不正色 / 空 hook を日本語エラーにし、通常字幕と Hook を同一 ASS に出せるか |
-| S3 | 累積タイムオフセットの計算に、区間ごとの `start_sec` だけを使っていないか（連結後にズレる）。`preset` / `hook_preset` を S2 の同一 ASS API まで全伝播し、S3 は `force_style` なしの `subtitles=...` で 1 回だけ焼き込み、既存 `build_short()` の `force_style` 経路を変えていないか |
+| S3 | 公開 `NormalizedSegmentBounds` / 正規化 helper の整数 ms を ID・尺（10,000 / 180,000 ms）・encode・字幕 offset / clip の唯一の基準にし、0.5 ms 境界でも一貫するか。入力順を再生・ID・encode 順として保持し、全区間・layout・output 名・明示 hook・preset を source 取得前に検証するか。telop は ffmpeg 前と `build_concatenated_subtitle()` 直呼び境界の両方で tuple 入力に対して再検証し、直呼びでも明示 hook の空文字・半角山カッコを拒否するか。VTT の区間相対 cue に累積 ms を加え、1 回だけ読む fallback、Hook 単独、preset 全伝播、`force_style` なしの 1 回焼き込み、`len(segments) + 3` の進捗契約を満たすか。安全な output 名、`{正式出力stem}.ffmpeg.log`、atomic replace、失敗時の既存 mp4 保護、専用中間ディレクトリ単位の cleanup / keep、エラー型変換、font warning、既存 `build_short()` 不変を確認する |
 | S4 | 台本確認を経ずにキューへ積める抜け道が無いか。`ClipCandidate` は既存 `clip_to_highlight_segment()` と同等に `HighlightSegment` へ正規化してから S1 を呼び、S1 例外を生成対象単位で局所捕捉して残りの既存成果物を維持しているか |
 | P0 | 実アップロードを `impl-sonnet` が独断で実行していないか（必ずユーザー承認後） |
 | P1 | `privacyStatus` の既定が `"private"` になっているか |
@@ -185,6 +187,7 @@ uv run pytest
 
 | 日付 | 内容 |
 |------|------|
+| 2026-08-01 | S3 着手前監査を反映。共通整数 ms 正規化、入力順・全境界検証、二重 telop 再検証と累積字幕、VTT / Hook fallback、全入力 preflight、固定ログ名、進捗、atomic replace、cleanup、既存出力保護をレビュー観点へ追加 |
 | 2026-08-01 | S2 着手前監査・計画レビューを反映。`TimedCue.emphasis` の後方互換、既定 ASS 完全互換、入力安全化、preset 色導出、同一 ASS への Hook 統合、S3 への preset 伝播と `force_style` 分離をクイックリファレンスへ追加 |
 | 2026-08-01 | S1 着手前監査を反映。テロップ時刻の絶対秒基準、連結後変換式、`make_clip_id()` の入力型・丸め・連結規則を固定 |
 | 2026-08-01 | U5 着手前監査を反映。正式 IA、ストレージ管理移設、概要欄更新経路の一本化、update / mark 順序、安全な受け入れ境界をレビュー観点へ追加 |

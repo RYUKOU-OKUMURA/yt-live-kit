@@ -218,9 +218,11 @@ Streamlit は、エントリスクリプト（[`src/yt_live_kit/ui/app.py`](../s
 | 項目 | 内容 |
 |------|------|
 | **入力** | 複数の小区間（人が選択、または AI 候補から選択）、テロップ台本、テロップスタイル |
-| **処理** | 既存の `encode_segment` + `concat_segments`（[`services/ffmpeg.py`](../src/yt_live_kit/services/ffmpeg.py)）と [`services/shorts.py`](../src/yt_live_kit/services/shorts.py) の縦型レイアウト処理（blur / crop、2 パス方式、`INTERMEDIATE_CRF=16`）を組み合わせ、複数の小区間を 1 本のショートに連結する。フックタイトルは冒頭 1〜2 秒の大テロップとして ASS で載せる |
+| **処理** | 既存の `encode_segment` + `concat_segments`（[`services/ffmpeg.py`](../src/yt_live_kit/services/ffmpeg.py)）と [`services/shorts.py`](../src/yt_live_kit/services/shorts.py) の縦型レイアウト処理（blur / crop、2 パス方式、`INTERMEDIATE_CRF=16`）を組み合わせ、複数の小区間を 1 本のショートに連結する。区間境界は共通 API で `Decimal(str(value))` + `ROUND_HALF_UP` により整数ミリ秒へ正規化し、以後その値を ID、合計尺、エンコード引数、字幕の累積 offset / clip の唯一の基準とする。公開境界では同じ共通 API により冪等に再検証する。入力順を再生順・ID 生成順・エンコード順として保持し、自動で並べ替え・重複除去しない。確認済みテロップ台本は ffmpeg 実行前と字幕関数の公開境界で入力区間との一致を再検証し、フックタイトルは冒頭 1〜2 秒の大テロップとして同じ ASS に載せる |
 | **出力** | 1 本の縦型 mp4（1080x1920）とコマンドログ |
 | **スコープ** | ショートは **10〜180 秒**（[`shorts.py`](../src/yt_live_kit/services/shorts.py) の `MIN_DURATION_SEC` / `MAX_DURATION_SEC`）を維持する。ハイライト候補は最大 300 秒（`highlights.py` の `MAX_DURATION_SEC`）なので、**180 秒を超える区間を選んだ場合はエラーで止めず、分割・短縮を促す導線にする** |
+
+連結処理の中間物はクリップ ID ごとの専用ディレクトリへ隔離し、既定では成功・失敗のどちらでも削除する。最終 mp4 は同じ出力ディレクトリ内の一時 `.mp4` へ生成し、非ゼロの生成成功を確認してから正式出力へ原子的に置換する。再生成失敗時は既存の正式 mp4 を維持し、最終 ffmpeg コマンドログは正式出力名に追従する `{正式出力stem}.ffmpeg.log` として出力ディレクトリへ残す。元動画の取得や ffmpeg を始める前に、区間・レイアウト・出力名・フック文言・通常 / Hook プリセットをすべて検証する。
 
 ### FR-26: キュー量産 UI
 
@@ -404,6 +406,7 @@ Streamlit は、エントリスクリプト（[`src/yt_live_kit/ui/app.py`](../s
 
 | 日付 | 内容 |
 |------|------|
+| 2026-08-01 | S3 着手前監査を反映。整数ミリ秒の単一正規化基準、入力順、二重境界検証、ffmpeg 前の全入力検証、クリップ ID 単位の cleanup、atomic replace、再生成失敗時の既存 mp4 保護を FR-25 に追加 |
 | 2026-08-01 | S2 着手前監査・計画レビューを反映。`emphasis` を行全体の強調行フラグとして統一し、プリセット色、ASS 文字列安全化、S3 へのスタイル伝播契約を明確化 |
 | 2026-08-01 | S1 着手前監査を反映。FR-22 の JSON 例を元動画基準の絶対秒 `start_sec` / `end_sec` に統一し、連結後タイムラインへの変換式を明記 |
 | 2026-08-01 | U5 着手前監査を反映。正式 IA を公開 3 画面 + 非表示詳細に固定し、ストレージ管理の設定画面移設、旧概要欄更新経路の廃止、update / mark の成功境界を明確化 |
