@@ -6,6 +6,7 @@ import streamlit as st
 
 from yt_live_kit.config import Settings, get_settings
 from yt_live_kit.services.ai_prompt import is_codex_available
+from yt_live_kit.ui.components.storage_manager import render_storage_manager
 from yt_live_kit.ui.views._local_settings import (
     get_default_channel_handle,
     save_default_channel_handle,
@@ -106,4 +107,5 @@ def render_settings_page() -> None:
     _render_channel_settings(settings)
     _render_environment_settings(settings)
     _render_codex_status()
+    render_storage_manager(settings)
     _render_schedule_placeholder()

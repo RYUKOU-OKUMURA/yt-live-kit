@@ -181,3 +181,26 @@ def test_schedule_placeholder_is_visible(
 
     subheader.assert_called_once_with("投稿スケジュール")
     assert "フェーズ P" in caption.call_args.args[0]
+
+
+@patch.object(settings_page, "_render_schedule_placeholder")
+@patch.object(settings_page, "render_storage_manager")
+@patch.object(settings_page, "_render_codex_status")
+@patch.object(settings_page, "_render_environment_settings")
+@patch.object(settings_page, "_render_channel_settings")
+@patch.object(settings_page, "get_settings")
+def test_settings_page_connects_storage_manager(
+    get_settings: MagicMock,
+    channel: MagicMock,
+    environment: MagicMock,
+    codex: MagicMock,
+    storage: MagicMock,
+    schedule: MagicMock,
+    tmp_path: Path,
+) -> None:
+    settings = _settings(tmp_path)
+    get_settings.return_value = settings
+
+    settings_page.render_settings_page()
+
+    storage.assert_called_once_with(settings)

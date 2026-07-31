@@ -53,7 +53,6 @@ def test_app_registers_japanese_navigation_after_page_config() -> None:
         "ライブラリ",
         "動画詳細",
         "取り込み",
-        "処理済み一覧",
         "設定",
     }
 
@@ -83,15 +82,55 @@ def test_app_pages_have_unique_explicit_url_paths() -> None:
         assert keyword.value.value
         url_paths.append(keyword.value.value)
 
-    assert len(url_paths) == 5
+    assert len(url_paths) == 4
     assert len(url_paths) == len(set(url_paths))
     assert set(url_paths) == {
         "library",
         "intake",
         "video-detail",
-        "history",
         "settings",
     }
+
+
+def test_app_has_four_pages_and_no_legacy_history_route() -> None:
+    app_path = Path(__file__).parents[1] / "src/yt_live_kit/ui/app.py"
+    source = app_path.read_text(encoding="utf-8")
+    tree = ast.parse(source)
+
+    navigation_call = next(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "navigation"
+    )
+    assert isinstance(navigation_call.args[0], ast.List)
+    assert len(navigation_call.args[0].elts) == 4
+    assert "ui.views.history" not in source
+    assert 'url_path="history"' not in source
+
+
+def test_video_detail_page_is_hidden_from_public_navigation() -> None:
+    app_path = Path(__file__).parents[1] / "src/yt_live_kit/ui/app.py"
+    tree = ast.parse(app_path.read_text(encoding="utf-8"))
+
+    detail_assignment = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.Assign)
+        and any(
+            isinstance(target, ast.Name) and target.id == "detail_page"
+            for target in node.targets
+        )
+    )
+    assert isinstance(detail_assignment.value, ast.Call)
+    visibility = next(
+        keyword
+        for keyword in detail_assignment.value.keywords
+        if keyword.arg == "visibility"
+    )
+    assert isinstance(visibility.value, ast.Constant)
+    assert visibility.value.value == "hidden"
 
 
 def test_settings_page_is_included_in_navigation_list() -> None:
@@ -294,7 +333,7 @@ def test_handle_finished_job_shows_error_when_result_missing() -> None:
         status_bar._handle_finished_job(job)
 
     set_error.assert_called_once_with(
-        "成果物を読み込めませんでした。処理済み一覧から開き直してください。"
+        "成果物を読み込めませんでした。ライブラリから開き直してください。"
     )
     set_result.assert_not_called()
     clear_active.assert_called_once()

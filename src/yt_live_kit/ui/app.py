@@ -10,7 +10,6 @@ from yt_live_kit import __version__
 from yt_live_kit.services.ytdlp import check_ytdlp_version_warning
 from yt_live_kit.ui.components.results import render_results
 from yt_live_kit.ui.components.status_bar import render_status_bar
-from yt_live_kit.ui.views.history import render_history_page
 from yt_live_kit.ui.views.intake import render_intake_page
 from yt_live_kit.ui.views.library import render_library_page
 from yt_live_kit.ui.views.settings import render_settings_page
@@ -84,12 +83,6 @@ page = st.navigation(
     [
         library_page,
         intake_page,
-        st.Page(
-            render_history_page,
-            title="処理済み一覧",
-            icon=":material/history:",
-            url_path="history",
-        ),
         settings_page,
         detail_page,
     ]

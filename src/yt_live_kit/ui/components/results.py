@@ -24,7 +24,7 @@ _TEMPLATE_NOT_SET_MESSAGE = (
     "{{timeline}} を含むテンプレートを置くと、まとめてコピーできます。"
 )
 _CHAPTERS_NOT_GENERATED_MESSAGE = (
-    "チャプターは生成されていません。処理済み一覧から生成できます。"
+    "チャプターは生成されていません。ライブラリから生成できます。"
 )
 _CLIPS_EMPTY_NOT_REQUESTED_MESSAGE = "この実行では切り抜き候補を生成していません。"
 _CLIPS_EMPTY_REQUESTED_MESSAGE = (
