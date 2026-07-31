@@ -28,7 +28,7 @@
 | P0 | 安全な実機 upload probe（P1 / P2 完了後） | [~] 進行中 |
 | P1 | 安全なアップロードサービス | [x] 完了 |
 | P2 | スケジュールポリシー + 原子的な予約確定 + 投稿確認 UI | [x] 完了 |
-| P3 | フェーズ P 受け入れ（予約投稿が実際に公開される） | [ ] 未着手 |
+| P3 | フェーズ P 受け入れ（予約投稿が実際に公開される） | [~] 進行中 |
 
 **状態の書き方:** `[ ] 未着手` / `[~] 進行中` / `[x] 完了`
 
@@ -916,6 +916,20 @@ data/{video_id}/ ...
 - [ ] P3-5. 実配信 1 本でチャプター生成 → ショート複数本生成までを通し、上記の承認済み 1 本だけを予約投稿対象にする（AC-28）
 - [x] P3-6. README を更新する。private 固定、10 分 lead、IANA timezone、確認ダイアログ全項目、notify false、LA upload attempt 上限、`needs_reconciliation` は自動再送しないこと、private lock / 審査、実 API を自動テストしないことを記載する
 - [ ] P3-7. 版数を `0.3.0` に更新し、進捗サマリー、M14、受け入れ証跡を最終更新する
+
+**P3-4 事前 AC 監査（2026-08-01、実 API 未実行）:**
+
+- AC-27 の安全な公開契約は `TestUploadPreflight.test_rejects_unsafe_boundaries`、`TestUploadPreflight.test_publish_at_none_and_lead_boundary`、`test_upload_body_is_private_utc_z_and_contains_required_booleans` で確認した
+- AC-27 の確認 UI と確定後再検証は `test_dialog_displays_complete_preview_and_defaults_are_unselected`、`test_confirm_revalidates_preview_and_starts_no_job_on_change`、`test_slot_race_and_needs_reconciliation_hold_slot_and_source` で確認した
+- AC-27 の metadata 境界は `TestUploadPreflight.test_metadata_boundaries` と `test_build_upload_body_revalidates_tampered_snapshot` で確認した
+- AC-27 の audience / synthetic / consent は `test_confirm_rejects_unselected_audience_synthetic_and_consent_without_writes`、`test_confirm_saves_single_record_then_starts_same_ids`、`test_dialog_confirm_passes_explicit_choices_and_stores_operation` で確認した
+- AC-27 の resumable / reconciliation は `test_resumable_upload_retries_same_request_and_never_reinserts`、`test_upload_error_never_creates_second_insert`、`test_missing_response_or_video_id_never_reinserts`、`test_crash_after_attempt_save_recovers_without_resend` で確認した
+- AC-27 の operation / atomic / lock / fail closed / recovery は `test_operation_models_are_frozen_and_reject_unknown_fields`、`test_queue_is_single_full_operation_record_and_atomic_temp_is_removed`、`test_broken_queue_fails_closed`、`test_advisory_file_lock_is_used`、`test_recovery_with_attempt_requires_reconciliation_and_never_resends` で確認した
+- AC-27 の LA attempt と上限は `test_attempt_is_idempotent_and_uses_los_angeles_date`、`test_upload_limit_environment_boundaries`、`test_attempt_limit_counts_failed_or_unknown_attempts`、`test_job_target_records_attempt_before_session_and_is_idempotent`、`test_attempt_race_is_independent_from_publish_date` で確認した
+- AC-27 の job / error / kind dispatch は `test_job_target_records_attempt_before_session_and_is_idempotent`、`test_start_job_passes_job_id_to_target_fn`、`test_start_job_preserves_japanese_youtube_api_error_without_log`、`test_non_pipeline_finished_jobs_never_use_pipeline_loader` で確認した。`YouTubeAPIError` の日本語 message は実 `start_job` worker 経路で failed job の error / message に保持され、汎用エラー表示や不要な error log に落ちない
+- AC-27 の bounded poll / private lock 判定は `test_processing_poll_has_fixed_interval_limit_and_typed_history`、`test_publication_poll_has_fixed_interval_limit_and_preserves_responses`、`test_processing_poll_stops_on_each_terminal`、`test_publication_poll_stops_on_terminal`、`test_private_lock_decision_table` で確認した
+- AC-28 の v1 / v2 回帰なしは `uv run pytest -q` の全 821 件通過で確認した
+- 実予約公開、P0 private lock / 専用承認、AC-28 の総合充足・実通し・操作別承認は実機証跡がないため未チェックを維持した。P3-4 本体も実公開 operation 証跡を得るまで未完了とする
 
 **Done 条件:**
 

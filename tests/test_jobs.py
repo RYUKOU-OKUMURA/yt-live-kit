@@ -28,6 +28,7 @@ from yt_live_kit.services.jobs import (
 )
 from yt_live_kit.services.pipeline import PipelineError
 from yt_live_kit.services.shorts import ShortsError
+from yt_live_kit.services.youtube_api import YouTubeAPIError
 
 
 @contextmanager
@@ -231,6 +232,26 @@ def test_start_job_marks_failed_on_exception(tmp_path):
     assert state.status == "failed"
     assert state.error == "処理に失敗しました"
     assert state.finished_at is not None
+
+
+def test_start_job_preserves_japanese_youtube_api_error_without_log(tmp_path):
+    settings = Settings(data_dir=tmp_path)
+    expected_message = "YouTube の予約投稿を開始できませんでした。"
+
+    def target_fn(*, report, settings, job_id, **_kwargs):
+        raise YouTubeAPIError(expected_message)
+
+    with _patch_real_thread() as (_mock_thread, threads):
+        job_id = start_job("upload", target_fn, settings=settings)
+        threads[-1].join(timeout=5)
+
+    state = read_job(job_id, settings)
+    assert state is not None
+    assert state.status == "failed"
+    assert state.error == expected_message
+    assert state.message == expected_message
+    assert "予期しないエラー" not in state.error
+    assert not (tmp_path / "_jobs" / f"{job_id}.log").exists()
 
 
 def test_start_job_writes_log_for_unexpected_exception(tmp_path):
