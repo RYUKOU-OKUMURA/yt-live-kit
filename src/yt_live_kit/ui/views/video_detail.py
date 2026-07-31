@@ -25,6 +25,7 @@ from yt_live_kit.services.youtube_api import (
     update_video_description,
 )
 from yt_live_kit.ui.components.clipboard import render_copy_button
+from yt_live_kit.ui.components.upload import render_upload_section
 from yt_live_kit.ui.state import get_selected_video_id, set_active_job_id
 from yt_live_kit.ui.views._local_settings import (
     load_description_applied_ids,
@@ -633,6 +634,8 @@ def render_video_detail_page(
         settings,
         busy=busy,
     )
+
+    render_upload_section(video.video_id, settings)
 
     with st.expander("元動画と中間ファイルの管理", expanded=False):
         st.caption(

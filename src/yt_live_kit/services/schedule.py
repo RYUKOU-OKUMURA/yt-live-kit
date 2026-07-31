@@ -1,0 +1,521 @@
+"""予約投稿ポリシー、プレビュー、原子的な確定トランザクション."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import re
+import uuid
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import Any, Callable, Literal
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+
+from yt_live_kit.config import Settings
+from yt_live_kit.models.upload import UploadChannel, UploadContentSnapshot, UploadOperation
+from yt_live_kit.services.jobs import start_job
+from yt_live_kit.services.upload_queue import (
+    UploadQueueError,
+    count_upload_attempts,
+    create_reserved_operation,
+    list_operations,
+    load_operation,
+    schedule_lock,
+    transition_operation,
+    upload_job_target,
+)
+from yt_live_kit.services.youtube_api import (
+    YouTubeAPIError,
+    build_upload_snapshot,
+    fetch_mine_channel,
+)
+
+_DAILY_TIME_RE = re.compile(r"^(?:[01][0-9]|2[0-3]):[0-5][0-9]$", re.ASCII)
+_MIN_LEAD = timedelta(minutes=10)
+
+
+class ScheduleError(Exception):
+    """予約投稿の安全な準備・確定に失敗したエラー."""
+
+
+class SchedulePolicy(BaseModel):
+    """IANA timezone 上の投稿時刻と日間隔."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
+
+    daily_time: str = "09:00"
+    interval_days: int = Field(default=1, ge=1)
+    timezone: str = "Asia/Tokyo"
+
+    @field_validator("daily_time")
+    @classmethod
+    def _valid_daily_time(cls, value: str) -> str:
+        if not isinstance(value, str) or _DAILY_TIME_RE.fullmatch(value) is None:
+            raise ValueError("投稿時刻は半角数字の HH:MM 形式で指定してください。")
+        return value
+
+    @field_validator("timezone")
+    @classmethod
+    def _valid_timezone(cls, value: str) -> str:
+        try:
+            ZoneInfo(value)
+        except (ZoneInfoNotFoundError, ValueError, TypeError) as exc:
+            raise ValueError("存在する IANA timezone を指定してください。") from exc
+        return value
+
+
+class UploadPreview(BaseModel):
+    """UI と確定時再検証を結ぶ不変の read-only preview."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    source_video_id: str = Field(min_length=1)
+    source_kind: str = Field(min_length=1)
+    clip_id: str = Field(min_length=1)
+    channel: UploadChannel
+    video_path: Path
+    file_size: int = Field(gt=0)
+    file_mtime_ns: int = Field(ge=0)
+    duration_sec: float = Field(ge=10, le=180)
+    title: str = Field(min_length=1, max_length=100)
+    description: str
+    tags: tuple[str, ...]
+    policy: SchedulePolicy
+    publish_at: datetime
+    publish_at_utc_z: str
+    privacy_status: Literal["private"]
+    notify_subscribers: Literal[False]
+    attempt_count_la: int = Field(ge=0)
+    attempt_limit: int = Field(ge=1, le=100)
+    fingerprint: str = Field(min_length=64, max_length=64)
+
+    @field_validator("video_path")
+    @classmethod
+    def _absolute(cls, value: Path) -> Path:
+        if not value.is_absolute():
+            raise ValueError("動画ファイルは絶対パスで指定してください。")
+        return value
+
+    @field_validator("publish_at")
+    @classmethod
+    def _aware(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("予約日時はタイムゾーン付きで指定してください。")
+        return value
+
+
+def _config_path(settings: Settings) -> Path:
+    return settings.data_dir / "_config" / "schedule_policy.json"
+
+
+def _atomic_write(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.parent / f".{path.name}.{uuid.uuid4().hex}.tmp"
+    try:
+        with temporary.open("w", encoding="utf-8") as handle:
+            json.dump(payload, handle, ensure_ascii=False, indent=2)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    except OSError as exc:
+        raise ScheduleError(f"投稿スケジュールを安全に保存できませんでした: {exc}") from exc
+    finally:
+        try:
+            temporary.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def load_schedule_policy(settings: Settings) -> SchedulePolicy:
+    """保存済み policy を読む。未作成だけ既定値、破損は fail closed."""
+    with schedule_lock(settings):
+        path = _config_path(settings)
+        if not path.exists():
+            return SchedulePolicy()
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            return SchedulePolicy.model_validate(raw)
+        except (OSError, UnicodeError, json.JSONDecodeError, ValidationError) as exc:
+            raise ScheduleError(
+                "投稿スケジュール設定が壊れているため読み込めません。手動で修復してください。"
+            ) from exc
+
+
+def save_schedule_policy(policy: SchedulePolicy, settings: Settings) -> Path:
+    if not isinstance(policy, SchedulePolicy):
+        raise ScheduleError("投稿スケジュールの入力が正しくありません。")
+    with schedule_lock(settings):
+        path = _config_path(settings)
+        _atomic_write(path, policy.model_dump(mode="json"))
+        return path
+
+
+def make_schedule_policy(
+    *, daily_time: str, interval_days: int, timezone_name: str
+) -> SchedulePolicy:
+    """UI 入力を検証し、Pydantic の内部詳細を日本語エラーへ正規化する."""
+    try:
+        return SchedulePolicy(
+            daily_time=daily_time,
+            interval_days=interval_days,
+            timezone=timezone_name,
+        )
+    except ValidationError as exc:
+        raise ScheduleError(
+            "投稿スケジュールの入力が正しくありません。"
+            "時刻は半角 HH:MM、間隔は 1 以上の整数、timezone は IANA 名で指定してください。"
+        ) from exc
+
+
+def _validated_local_datetime(day, hour: int, minute: int, zone: ZoneInfo) -> datetime:
+    naive = datetime(day.year, day.month, day.day, hour, minute)
+    candidates: list[datetime] = []
+    for fold in (0, 1):
+        candidate = naive.replace(tzinfo=zone, fold=fold)
+        round_trip = candidate.astimezone(timezone.utc).astimezone(zone)
+        if round_trip.replace(tzinfo=None) == naive and round_trip.fold == fold:
+            candidates.append(candidate)
+    offsets = {item.utcoffset() for item in candidates}
+    if not candidates:
+        raise ScheduleError(
+            "投稿時刻が DST により存在しません。別の時刻へ設定してください。"
+        )
+    if len(offsets) > 1:
+        raise ScheduleError(
+            "投稿時刻が DST により重複します。曖昧でない時刻へ設定してください。"
+        )
+    return candidates[0]
+
+
+def assign_next_slot(
+    policy: SchedulePolicy,
+    existing_reservations: tuple[datetime, ...] | list[datetime],
+    *,
+    now: datetime,
+) -> datetime:
+    """現在から 10 分以上先の非重複 slot を policy 間隔で返す pure 関数."""
+    if now.tzinfo is None or now.utcoffset() is None:
+        raise ScheduleError("現在日時はタイムゾーン付きで指定してください。")
+    zone = ZoneInfo(policy.timezone)
+    local_now = now.astimezone(zone)
+    threshold = now.astimezone(timezone.utc) + _MIN_LEAD
+    hour, minute = (int(value) for value in policy.daily_time.split(":"))
+    occupied: set[datetime] = set()
+    occupied_local_days = []
+    for reservation in existing_reservations:
+        if reservation.tzinfo is None or reservation.utcoffset() is None:
+            raise ScheduleError("既存の予約日時にタイムゾーンがありません。")
+        occupied.add(reservation.astimezone(timezone.utc))
+        occupied_local_days.append(reservation.astimezone(zone).date())
+
+    day = (
+        max(occupied_local_days) + timedelta(days=policy.interval_days)
+        if occupied_local_days
+        else local_now.date()
+    )
+    for _ in range(36600):
+        candidate = _validated_local_datetime(day, hour, minute, zone)
+        if candidate.astimezone(timezone.utc) >= threshold and candidate.astimezone(timezone.utc) not in occupied:
+            return candidate
+        day += timedelta(days=policy.interval_days)
+    raise ScheduleError("次の空き予約枠を計算できませんでした。")
+
+
+def to_utc_rfc3339_z(value: datetime) -> str:
+    if value.tzinfo is None or value.utcoffset() is None:
+        raise ScheduleError("予約日時はタイムゾーン付きで指定してください。")
+    return value.astimezone(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def _slot_holding_operations(
+    operations: tuple[UploadOperation, ...],
+) -> tuple[UploadOperation, ...]:
+    # failed だけが P2-6 で明示的に slot 解放される。結果不明や upload 済みを
+    # 空き扱いにすると、再起動・照合中に同一 slot を二重確定してしまう。
+    return tuple(item for item in operations if item.state != "failed")
+
+
+def _canonical_fingerprint(payload: dict[str, Any]) -> str:
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def make_content_fingerprint(snapshot: UploadContentSnapshot) -> str:
+    """選択値と同意時刻を含む P1 content snapshot の canonical hash."""
+    return _canonical_fingerprint(snapshot.model_dump(mode="json"))
+
+
+def _preview_payload(preview: UploadPreview | None = None, **values: Any) -> dict[str, Any]:
+    if preview is not None:
+        values = {
+            "source_video_id": preview.source_video_id,
+            "source_kind": preview.source_kind,
+            "clip_id": preview.clip_id,
+            "channel": preview.channel.model_dump(mode="json"),
+            "video_path": str(preview.video_path),
+            "file_size": preview.file_size,
+            "file_mtime_ns": preview.file_mtime_ns,
+            "duration_sec": preview.duration_sec,
+            "title": preview.title,
+            "description": preview.description,
+            "tags": list(preview.tags),
+            "policy": preview.policy.model_dump(mode="json"),
+            "publish_at": preview.publish_at.isoformat(),
+            "publish_at_utc_z": preview.publish_at_utc_z,
+            "privacy_status": preview.privacy_status,
+            "notify_subscribers": preview.notify_subscribers,
+            "attempt_count_la": preview.attempt_count_la,
+            "attempt_limit": preview.attempt_limit,
+        }
+    return values
+
+
+def build_upload_preview(
+    *,
+    source_video_id: str,
+    source_kind: str,
+    clip_id: str,
+    video_path: Path,
+    title: str,
+    description: str,
+    tags: tuple[str, ...] | list[str],
+    settings: Settings,
+    now: datetime | None = None,
+) -> UploadPreview:
+    """read-only API とローカル検証だけで immutable preview を作る."""
+    reference = now or datetime.now(timezone.utc)
+    if reference.tzinfo is None or reference.utcoffset() is None:
+        raise ScheduleError("現在日時はタイムゾーン付きで指定してください。")
+    try:
+        policy = load_schedule_policy(settings)
+        operations = list_operations(settings)
+        slot_holders = _slot_holding_operations(operations)
+        slot = assign_next_slot(
+            policy,
+            [item.content.publish_at for item in slot_holders],
+            now=reference,
+        )
+        channel = fetch_mine_channel(settings)
+        # audience / synthetic は preview では決めない。ここでは共通部分だけを
+        # P1 validator に通し、値は UploadPreview へ保存しない。
+        checked = build_upload_snapshot(
+            channel=channel,
+            video_path=video_path,
+            title=title,
+            description=description,
+            tags=tags,
+            publish_at=slot,
+            self_declared_made_for_kids=False,
+            contains_synthetic_media=False,
+            community_guidelines_confirmed=True,
+            community_guidelines_confirmed_at=reference,
+            settings=settings,
+            now=reference,
+        )
+        attempts = count_upload_attempts(settings, now=reference)
+    except (UploadQueueError, YouTubeAPIError) as exc:
+        raise ScheduleError(str(exc)) from exc
+    values = {
+        "source_video_id": source_video_id,
+        "source_kind": source_kind,
+        "clip_id": clip_id,
+        "channel": checked.channel.model_dump(mode="json"),
+        "video_path": str(checked.video_path),
+        "file_size": checked.file_size,
+        "file_mtime_ns": checked.file_mtime_ns,
+        "duration_sec": checked.duration_sec,
+        "title": checked.title,
+        "description": checked.description,
+        "tags": list(checked.tags),
+        "policy": policy.model_dump(mode="json"),
+        "publish_at": slot.isoformat(),
+        "publish_at_utc_z": to_utc_rfc3339_z(slot),
+        "privacy_status": "private",
+        "notify_subscribers": False,
+        "attempt_count_la": attempts,
+        "attempt_limit": settings.video_upload_daily_limit,
+    }
+    try:
+        return UploadPreview.model_validate(
+            {**values, "fingerprint": _canonical_fingerprint(values)}
+        )
+    except ValidationError as exc:
+        raise ScheduleError("投稿プレビューの内容が正しくありません。入力を確認してください。") from exc
+
+
+def _same_preview(expected: UploadPreview, actual: UploadPreview) -> bool:
+    return expected.fingerprint == actual.fingerprint and _canonical_fingerprint(
+        _preview_payload(expected)
+    ) == expected.fingerprint
+
+
+def latest_operation_for_source(
+    source_video_id: str,
+    clip_id: str,
+    settings: Settings,
+) -> UploadOperation | None:
+    matches = [
+        item for item in list_operations(settings)
+        if item.source_video_id == source_video_id and item.clip_id == clip_id
+    ]
+    return max(matches, key=lambda item: (item.created_at, item.operation_id)) if matches else None
+
+
+def _mark_failed_or_raise_unknown(
+    operation_id: str,
+    settings: Settings,
+    *,
+    error: str,
+    now: datetime,
+) -> None:
+    """slot 解放を永続確認できた場合だけ failed として扱う."""
+    try:
+        transition_operation(
+            operation_id,
+            "failed",
+            settings,
+            error=error,
+            now=now,
+        )
+    except UploadQueueError as exc:
+        raise ScheduleError(
+            "投稿 operation の状態を更新できず、予約枠の状態を確定できません。"
+            "自動再送せず、投稿キューを手動修復してください。"
+        ) from exc
+
+
+def confirm_and_start_upload(
+    preview: UploadPreview,
+    *,
+    self_declared_made_for_kids: bool | None,
+    contains_synthetic_media: bool | None,
+    community_guidelines_confirmed: bool,
+    settings: Settings,
+    now: datetime | None = None,
+    operation_id_factory: Callable[[], str] | None = None,
+    job_id_factory: Callable[[], str] | None = None,
+    start_job_fn: Callable[..., str] | None = None,
+) -> UploadOperation:
+    """再検証、単一 record 保存、同一 ID の job 起動を順に行う."""
+    if type(self_declared_made_for_kids) is not bool:
+        raise ScheduleError("子ども向けかどうかを「はい」または「いいえ」で選択してください。")
+    if type(contains_synthetic_media) is not bool:
+        raise ScheduleError("合成メディアを含むか「はい」または「いいえ」で選択してください。")
+    if community_guidelines_confirmed is not True:
+        raise ScheduleError("YouTube Community Guidelines への準拠を確認してください。")
+    reference = now or datetime.now(timezone.utc)
+    if reference.tzinfo is None or reference.utcoffset() is None:
+        raise ScheduleError("現在日時はタイムゾーン付きで指定してください。")
+
+    with schedule_lock(settings):
+        current = build_upload_preview(
+            source_video_id=preview.source_video_id,
+            source_kind=preview.source_kind,
+            clip_id=preview.clip_id,
+            video_path=preview.video_path,
+            title=preview.title,
+            description=preview.description,
+            tags=preview.tags,
+            settings=settings,
+            now=reference,
+        )
+        if not _same_preview(preview, current):
+            raise ScheduleError("確認後に投稿内容・予約枠・試行枠が変わりました。新しく確認してください。")
+        operations = list_operations(settings)
+        if any(
+            item.source_video_id == preview.source_video_id
+            and item.clip_id == preview.clip_id
+            and item.state != "failed"
+            for item in operations
+        ):
+            raise ScheduleError("同じショートの投稿処理が既に進行中です。")
+        if current.attempt_count_la >= current.attempt_limit:
+            raise ScheduleError("本日の YouTube upload 試行上限に達しました。")
+        try:
+            content: UploadContentSnapshot = build_upload_snapshot(
+                channel=current.channel,
+                video_path=current.video_path,
+                title=current.title,
+                description=current.description,
+                tags=current.tags,
+                publish_at=current.publish_at,
+                self_declared_made_for_kids=self_declared_made_for_kids,
+                contains_synthetic_media=contains_synthetic_media,
+                community_guidelines_confirmed=True,
+                community_guidelines_confirmed_at=reference,
+                settings=settings,
+                now=reference,
+            )
+        except YouTubeAPIError as exc:
+            raise ScheduleError(str(exc)) from exc
+        content_fingerprint = make_content_fingerprint(content)
+        operation_id = (operation_id_factory or (lambda: uuid.uuid4().hex))()
+        job_id = (job_id_factory or (lambda: uuid.uuid4().hex))()
+        try:
+            create_reserved_operation(
+                operation_id=operation_id,
+                job_id=job_id,
+                source_video_id=current.source_video_id,
+                source_kind=current.source_kind,
+                clip_id=current.clip_id,
+                content=content,
+                now=reference,
+                settings=settings,
+            )
+        except UploadQueueError as exc:
+            raise ScheduleError(str(exc)) from exc
+
+        try:
+            operation = load_operation(operation_id, settings)
+        except UploadQueueError as exc:
+            raise ScheduleError("保存した投稿内容を再確認できませんでした。投稿を停止します。") from exc
+        if make_content_fingerprint(operation.content) != content_fingerprint:
+            # queue 保存時に選択値・同意時刻を含む snapshot が変わることはない。
+            # 万一の schema / serializer 不整合では worker を起動しない。
+            _mark_failed_or_raise_unknown(
+                operation_id,
+                settings,
+                error="確認内容を安全に保存できなかったため予約枠を解放しました。",
+                now=reference,
+            )
+            raise ScheduleError("確認内容を安全に保存できませんでした。新しく確認してください。")
+
+    try:
+        starter = start_job_fn or start_job
+        returned_job_id = starter(
+            "upload",
+            upload_job_target,
+            video_id=preview.source_video_id,
+            title=preview.title,
+            requested_job_id=job_id,
+            operation_id=operation_id,
+            settings=settings,
+        )
+        if returned_job_id != job_id:
+            try:
+                transition_operation(
+                    operation_id,
+                    "needs_reconciliation",
+                    settings,
+                    error="投稿ジョブの開始結果を確定できません。自動再送せず手動照合してください。",
+                    now=reference,
+                )
+            except UploadQueueError:
+                pass
+            raise ScheduleError("投稿ジョブ ID が予約内容と一致しないため手動照合が必要です。")
+    except Exception as exc:
+        if isinstance(exc, ScheduleError):
+            raise
+        _mark_failed_or_raise_unknown(
+            operation_id,
+            settings,
+            error="投稿ジョブを開始できなかったため予約枠を解放しました。新しく確認してください。",
+            now=reference,
+        )
+        raise ScheduleError(
+            "投稿ジョブを開始できなかったため予約枠を解放しました。新しく確認してください。"
+        ) from exc
+    return operation

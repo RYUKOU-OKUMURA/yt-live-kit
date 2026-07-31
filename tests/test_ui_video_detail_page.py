@@ -370,6 +370,9 @@ def test_render_detail_calls_pipeline_sections_from_saved_result(tmp_path: Path)
         shorts = stack.enter_context(
             patch("yt_live_kit.ui.views.video_detail.render_shorts_section")
         )
+        upload_section = stack.enter_context(
+            patch("yt_live_kit.ui.views.video_detail.render_upload_section")
+        )
         stack.enter_context(
             patch("yt_live_kit.ui.views.video_detail.st.expander", side_effect=expander)
         )
@@ -395,6 +398,7 @@ def test_render_detail_calls_pipeline_sections_from_saved_result(tmp_path: Path)
     clips.assert_called_once()
     highlights.assert_called_once_with(result)
     shorts.assert_called_once_with(result, expanded=False)
+    upload_section.assert_called_once_with(video.video_id, settings)
 
 
 _VALID_CHAPTERS = "0:00 はじめに\n0:10 本題\n0:20 まとめ"

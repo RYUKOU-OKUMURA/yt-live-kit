@@ -6,6 +6,13 @@ import streamlit as st
 
 from yt_live_kit.config import Settings, get_settings
 from yt_live_kit.services.ai_prompt import is_codex_available
+from yt_live_kit.services.schedule import (
+    ScheduleError,
+    load_schedule_policy,
+    make_schedule_policy,
+    save_schedule_policy,
+)
+from yt_live_kit.services.upload_queue import UploadQueueError, count_upload_attempts
 from yt_live_kit.ui.components.storage_manager import render_storage_manager
 from yt_live_kit.ui.views._local_settings import (
     get_default_channel_handle,
@@ -94,9 +101,74 @@ def _render_codex_status() -> None:
         )
 
 
-def _render_schedule_placeholder() -> None:
+def _save_schedule_policy(
+    daily_time: str,
+    interval_days: int,
+    timezone_name: str,
+    settings: Settings,
+) -> None:
+    try:
+        policy = make_schedule_policy(
+            daily_time=daily_time,
+            interval_days=interval_days,
+            timezone_name=timezone_name,
+        )
+        save_schedule_policy(policy, settings)
+    except ScheduleError as exc:
+        st.error(str(exc))
+    else:
+        st.success("投稿スケジュールを保存しました。")
+
+
+def _render_schedule_placeholder(settings: Settings) -> None:
+    """投稿 policy と read-only upload attempt 情報を表示する."""
     st.subheader("投稿スケジュール")
-    st.caption("投稿スケジュールの設定はフェーズ P で追加します。")
+    st.caption("生成済みショートを次の空き枠へ予約するときの設定です。")
+    try:
+        policy = load_schedule_policy(settings)
+    except ScheduleError as exc:
+        st.error(str(exc))
+        return
+    try:
+        attempts = count_upload_attempts(settings)
+    except UploadQueueError as exc:
+        st.error(str(exc))
+        return
+
+    with st.form("schedule_policy_form"):
+        daily_time = st.text_input(
+            "投稿時刻（HH:MM）",
+            value=policy.daily_time,
+            help="半角数字の24時間表記で入力してください。",
+        )
+        interval_days = st.number_input(
+            "投稿間隔（日）",
+            min_value=1,
+            step=1,
+            value=policy.interval_days,
+        )
+        timezone_name = st.text_input(
+            "IANA timezone",
+            value=policy.timezone,
+            help="例: Asia/Tokyo",
+        )
+        submitted = st.form_submit_button(
+            "投稿スケジュールを保存",
+            type="primary",
+            icon=":material/save:",
+        )
+    if submitted:
+        _save_schedule_policy(
+            daily_time or "",
+            int(interval_days),
+            timezone_name or "",
+            settings,
+        )
+
+    with st.container(border=True):
+        st.markdown("**YouTube upload 試行上限（読み取り専用）**")
+        st.write(f"America/Los_Angeles 当日: {attempts} / {settings.video_upload_daily_limit}")
+        st.caption("上限は環境変数 YTLK_VIDEO_UPLOAD_DAILY_LIMIT で設定します。")
 
 
 def render_settings_page() -> None:
@@ -108,4 +180,4 @@ def render_settings_page() -> None:
     _render_environment_settings(settings)
     _render_codex_status()
     render_storage_manager(settings)
-    _render_schedule_placeholder()
+    _render_schedule_placeholder(settings)

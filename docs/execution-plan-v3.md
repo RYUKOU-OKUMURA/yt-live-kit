@@ -861,15 +861,15 @@ data/{video_id}/ ...
 
 **作業:**
 
-- [ ] P2-1. `SchedulePolicy(daily_time: str, interval_days: int, timezone: str = "Asia/Tokyo")` を pydantic で定義する。`daily_time` は ASCII の厳密な `HH:MM`、`interval_days >= 1`、timezone は `zoneinfo.ZoneInfo` で存在確認し、`data/_config/schedule_policy.json` を atomic 保存・fail closed 読み込みする
-- [ ] P2-2. `assign_next_slot(policy, existing_reservations, *, now: datetime) -> datetime` を pure に実装する。`now` は aware 必須、計算結果も policy timezone の aware datetime、現在から最低 10 分先、既存 slot と非重複、`interval_days` 間隔とする。DST の ambiguous / nonexistent local time は暗黙補正せず日本語で拒否する。API 変換 helper は UTC RFC 3339 `Z` を返す
-- [ ] P2-3. P1 の `data/_schedule/queue.json` を拡張せず同じ full operation record の `publish_at` / content snapshot / state を予約 slot と operation の単一正本として使う。upload attempt 台帳とは別 schema / 別集計にし、予約公開日が同じでも LA 当日の attempt 上限を消費した扱いにしない。全 read / write は同じ lock 順序、atomic replace、壊れた JSON fail closed を使う
-- [ ] P2-4. preview service は `channels.list(mine=true)`、file stat、`probe_duration()`、metadata、policy、slot、attempt count から immutable `UploadPreview` / fingerprint を作る。UI dialog は実チャンネル ID / 名称、絶対ファイル、サイズ / 尺、title、description 全文、tags、policy timezone の予約日時、UTC `Z`、`privacyStatus=private`、`notifySubscribers=false` を読み取り専用で表示する。Made for Kids と synthetic media は既定値なしの「はい / いいえ」を毎回必須選択し、Community Guidelines 同意 checkbox は既定未チェックとする。外側ボタン・通常 rerun・未選択・未同意・dialog 未確定では operation / job / attempt を作らない
-- [ ] P2-5. dialog 確定時の service transaction は固定 lock 順序で queue / attempt snapshot を再読込し、実チャンネル再取得、file identity、duration、Made for Kids / synthetic media / Community Guidelines 同意を含む content fingerprint、slot 空き、同一 source / clip の active operation、LA 当日 attempt 残数を再検証する。変化・競合・上限到達時は予約も job も作らず新しい preview を要求する。成功時だけ operation ID / job ID を生成し、slot + `reserved` operation + job ID を queue の単一 record として 1 回 atomic 保存してから、同じ ID を `start_job(..., requested_job_id=job_id, operation_id=operation_id)` へ渡す
-- [ ] P2-6. `start_job()` の同期失敗時は予約済み operation を日本語 error 付き `failed` にして slot を解放する。保存後のプロセスクラッシュは P1-8 の recovery table に従う。job target 開始後の slot は自動解放せず、`needs_reconciliation` を含む operation 状態から復元する。同じ preview / operation の二重クリック、同一 job の再入、プロセス再起動では新 operation / slot / insert を作らない
-- [ ] P2-7. UI は session state に video ID → operation ID を保持し、その operation だけを表示する。key が無い場合だけ source video / clip に限定した latest operation を復元する。`reserved/uploading/uploaded/failed/needs_reconciliation`、processing / private lock、job ID / YouTube video ID、エラーを日本語表示し、`needs_reconciliation` に自動再試行ボタンを出さない。ワーカースレッドから `st.*` を呼ばない
-- [ ] P2-8. settings UI は policy の `HH:MM`、interval、IANA timezone と、読み取り専用の `YTLK_VIDEO_UPLOAD_DAILY_LIMIT`、LA 当日 attempts を表示する。policy 保存は form submit 時だけ行い、不正値と壊れた JSON を日本語表示する
-- [ ] P2-9. ユニットテスト
+- [x] P2-1. `SchedulePolicy(daily_time: str, interval_days: int, timezone: str = "Asia/Tokyo")` を pydantic で定義する。`daily_time` は ASCII の厳密な `HH:MM`、`interval_days >= 1`、timezone は `zoneinfo.ZoneInfo` で存在確認し、`data/_config/schedule_policy.json` を atomic 保存・fail closed 読み込みする
+- [x] P2-2. `assign_next_slot(policy, existing_reservations, *, now: datetime) -> datetime` を pure に実装する。`now` は aware 必須、計算結果も policy timezone の aware datetime、現在から最低 10 分先、既存 slot と非重複、`interval_days` 間隔とする。DST の ambiguous / nonexistent local time は暗黙補正せず日本語で拒否する。API 変換 helper は UTC RFC 3339 `Z` を返す
+- [x] P2-3. P1 の `data/_schedule/queue.json` を拡張せず同じ full operation record の `publish_at` / content snapshot / state を予約 slot と operation の単一正本として使う。upload attempt 台帳とは別 schema / 別集計にし、予約公開日が同じでも LA 当日の attempt 上限を消費した扱いにしない。全 read / write は同じ lock 順序、atomic replace、壊れた JSON fail closed を使う
+- [x] P2-4. preview service は `channels.list(mine=true)`、file stat、`probe_duration()`、metadata、policy、slot、attempt count から immutable `UploadPreview` / fingerprint を作る。UI dialog は実チャンネル ID / 名称、絶対ファイル、サイズ / 尺、title、description 全文、tags、policy timezone の予約日時、UTC `Z`、`privacyStatus=private`、`notifySubscribers=false` を読み取り専用で表示する。Made for Kids と synthetic media は既定値なしの「はい / いいえ」を毎回必須選択し、Community Guidelines 同意 checkbox は既定未チェックとする。外側ボタン・通常 rerun・未選択・未同意・dialog 未確定では operation / job / attempt を作らない
+- [x] P2-5. dialog 確定時の service transaction は固定 lock 順序で queue / attempt snapshot を再読込し、実チャンネル再取得、file identity、duration、Made for Kids / synthetic media / Community Guidelines 同意を含む content fingerprint、slot 空き、同一 source / clip の active operation、LA 当日 attempt 残数を再検証する。変化・競合・上限到達時は予約も job も作らず新しい preview を要求する。成功時だけ operation ID / job ID を生成し、slot + `reserved` operation + job ID を queue の単一 record として 1 回 atomic 保存してから、同じ ID を `start_job(..., requested_job_id=job_id, operation_id=operation_id)` へ渡す
+- [x] P2-6. `start_job()` の同期失敗時は予約済み operation を日本語 error 付き `failed` にして slot を解放する。保存後のプロセスクラッシュは P1-8 の recovery table に従う。job target 開始後の slot は自動解放せず、`needs_reconciliation` を含む operation 状態から復元する。同じ preview / operation の二重クリック、同一 job の再入、プロセス再起動では新 operation / slot / insert を作らない
+- [x] P2-7. UI は session state に video ID → operation ID を保持し、その operation だけを表示する。key が無い場合だけ source video / clip に限定した latest operation を復元する。`reserved/uploading/uploaded/failed/needs_reconciliation`、processing / private lock、job ID / YouTube video ID、エラーを日本語表示し、`needs_reconciliation` に自動再試行ボタンを出さない。ワーカースレッドから `st.*` を呼ばない
+- [x] P2-8. settings UI は policy の `HH:MM`、interval、IANA timezone と、読み取り専用の `YTLK_VIDEO_UPLOAD_DAILY_LIMIT`、LA 当日 attempts を表示する。policy 保存は form submit 時だけ行い、不正値と壊れた JSON を日本語表示する
+- [x] P2-9. ユニットテスト
   - `HH:MM` の 00:00 / 23:59 と不正文字列、interval 0 / 1、IANA timezone / 不正 zone、aware now / naive 拒否、Asia/Tokyo と DST zone の slot / UTC `Z`
   - slot 重複、10 分 lead、interval 跨ぎ、queue と attempt の独立、予約公開日と LA attempt 日が異なるケース
   - preview 全項目表示、Made for Kids / synthetic media 未選択と Community Guidelines 既定未チェック、未確定時 side effect なし、確定後の channel / file / metadata / audience / synthetic / consent / slot / attempt 再検証、各 race で start_job / API 未呼び出し
@@ -878,11 +878,11 @@ data/{video_id}/ ...
 
 **Done 条件:**
 
-- [ ] `uv run pytest` が全件通る
-- [ ] 予約 slot と LA upload attempt が別概念として境界テストされている
-- [ ] 確認前および確認後再検証失敗時に operation / job / resumable upload session が作られない（preview の read-only `channels.list` は許容）
-- [ ] 同時 confirm・二重クリック・再起動で operation ID / job ID が一貫し、重複 insert が起きない
-- [ ] 実 API はすべてモック、ユーザー向けエラーは日本語、従量課金 AI API 追加なし
+- [x] `uv run pytest` が全件通る
+- [x] 予約 slot と LA upload attempt が別概念として境界テストされている
+- [x] 確認前および確認後再検証失敗時に operation / job / resumable upload session が作られない（preview の read-only `channels.list` は許容）
+- [x] 同時 confirm・二重クリック・再起動で operation ID / job ID が一貫し、重複 insert が起きない
+- [x] 実 API はすべてモック、ユーザー向けエラーは日本語、従量課金 AI API 追加なし
 - [ ] タスク完了コミット済み
 
 **見積もり目安:** 2.5 日

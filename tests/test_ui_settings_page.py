@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, call, patch
 
 from yt_live_kit.config import Settings
+from yt_live_kit.services.schedule import ScheduleError, SchedulePolicy
 from yt_live_kit.ui.views import settings as settings_page
 
 
@@ -176,11 +177,75 @@ def test_channel_form_does_not_save_before_submit(
 def test_schedule_placeholder_is_visible(
     subheader: MagicMock,
     caption: MagicMock,
+    tmp_path: Path,
 ) -> None:
-    settings_page._render_schedule_placeholder()
+    with (
+        patch.object(
+            settings_page,
+            "load_schedule_policy",
+            side_effect=ScheduleError("設定が壊れています。"),
+        ),
+        patch.object(settings_page.st, "error"),
+    ):
+        settings_page._render_schedule_placeholder(_settings(tmp_path))
 
     subheader.assert_called_once_with("投稿スケジュール")
-    assert "フェーズ P" in caption.call_args.args[0]
+    assert "次の空き枠" in caption.call_args.args[0]
+
+
+@patch.object(settings_page, "_save_schedule_policy")
+@patch.object(settings_page.st, "container")
+@patch.object(settings_page.st, "form")
+@patch.object(settings_page.st, "form_submit_button", return_value=False)
+@patch.object(settings_page.st, "text_input", side_effect=["09:00", "Asia/Tokyo"])
+@patch.object(settings_page.st, "number_input", return_value=1)
+@patch.object(settings_page, "count_upload_attempts", return_value=3)
+@patch.object(settings_page, "load_schedule_policy", return_value=SchedulePolicy())
+def test_schedule_form_does_not_save_before_submit(
+    load: MagicMock,
+    attempts: MagicMock,
+    number: MagicMock,
+    text_input: MagicMock,
+    submit: MagicMock,
+    form: MagicMock,
+    container: MagicMock,
+    save: MagicMock,
+    tmp_path: Path,
+) -> None:
+    form.return_value.__enter__.return_value = form.return_value
+    container.return_value.__enter__.return_value = container.return_value
+    settings_page._render_schedule_placeholder(_settings(tmp_path))
+    save.assert_not_called()
+
+
+@patch.object(settings_page.st, "success")
+@patch.object(settings_page, "save_schedule_policy")
+def test_save_schedule_policy_validates_and_saves_only_valid_values(
+    save: MagicMock,
+    success: MagicMock,
+    tmp_path: Path,
+) -> None:
+    settings = _settings(tmp_path)
+    settings_page._save_schedule_policy("18:30", 2, "Asia/Tokyo", settings)
+    policy = save.call_args.args[0]
+    assert policy == SchedulePolicy(daily_time="18:30", interval_days=2)
+    assert save.call_args.args[1] == settings
+    success.assert_called_once()
+
+
+@patch.object(settings_page.st, "error")
+@patch.object(settings_page, "save_schedule_policy")
+def test_save_schedule_policy_shows_japanese_validation_error(
+    save: MagicMock,
+    error: MagicMock,
+    tmp_path: Path,
+) -> None:
+    settings_page._save_schedule_policy("9:00", 0, "bad-zone", _settings(tmp_path))
+    save.assert_not_called()
+    message = error.call_args.args[0]
+    assert "入力が正しくありません" in message
+    assert "errors.pydantic.dev" not in message
+    assert "validation error" not in message.lower()
 
 
 @patch.object(settings_page, "_render_schedule_placeholder")
@@ -204,3 +269,4 @@ def test_settings_page_connects_storage_manager(
     settings_page.render_settings_page()
 
     storage.assert_called_once_with(settings)
+    schedule.assert_called_once_with(settings)
