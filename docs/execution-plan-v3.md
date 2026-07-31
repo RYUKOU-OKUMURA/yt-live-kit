@@ -520,25 +520,32 @@ data/{video_id}/ ...
 **作業:**
 
 - [ ] S1-1. `prompts/telop_script.md` を作成する
-  - 入力: 区間ごとの `[HH:MM:SS] テキスト` 形式のカット単位字幕（圧縮版ではなく原文に近い粒度）
-  - 出力 JSON: 区間ごとのテロップ行（開始・終了・本文・強調フラグ）+ `hook_text`（1 本）+ `title_candidates`（複数）+ `description` + `tags`
+  - 入力: 区間ごとの `[HH:MM:SS.mmm --> HH:MM:SS.mmm] テキスト` 形式のカット単位字幕（圧縮版ではなく原文に近い粒度）。開始・終了の両方とミリ秒を保持し、Codex が行の絶対秒を区間内へ配置できるようにする
+  - 出力 JSON: 区間ごとのテロップ行（元動画基準の絶対秒 `start_sec` / `end_sec`、本文、強調フラグ）+ `hook_text`（1 本）+ `title_candidates`（複数）+ `description` + `tags`
   - 出力ルール: 半角 `<` `>` 禁止、各行は画面に収まる短さ（目安 13〜16 文字）に分割すること、誤字脱字・固有名詞の誤変換は補正してよいが**話していない内容を追加しない**こと
-- [ ] S1-2. `models/telop.py` に `TelopLine`（`text`, `start_sec`, `end_sec`, `emphasis: bool`）、`TelopSegmentScript`（区間ごとの `TelopLine` リスト）、`TelopScriptDocument`（`hook_text`, `title_candidates`, `description`, `tags`, `segments`）を pydantic で定義する
+- [ ] S1-2. `models/telop.py` に `TelopLine`（`text`, `start_sec`, `end_sec`, `emphasis: bool`）、`TelopSegmentScript`（元動画基準の絶対秒 `start_sec`, `end_sec` と区間ごとの `TelopLine` リスト）、`TelopScriptDocument`（`hook_text`, `title_candidates`, `description`, `tags`, `segments`）を pydantic で定義する
 - [ ] S1-3. `services/telop.py` に以下を実装する
-  - `generate_telop_script(video_id, segments, settings=None, *, on_progress=None, prompt_only=False, codex_path="codex") -> TelopScriptResult`
-  - `validate_telop_script(doc, *, segments) -> ValidationResult`（各行が対応区間の尺内に収まる、半角 `<>` 不使用、`hook_text` 非空、`tags` が 1 件以上、行の文字数目安チェックは警告レベルに留める）
-  - `make_clip_id(segments) -> str`: 各区間をミリ秒単位に正規化した `start-end` 列を順序どおり連結し、SHA-256 の先頭 12 桁を返す決定論的関数として `services/telop.py` に定義する。S3 はこの関数を再利用する
-  - 保存先: `data/{video_id}/shorts/telop/telop_{clip_id}.json`（`clip_id` は上記 `make_clip_id()` を使い、S3 の出力ファイル名と揃える）
+  - `generate_telop_script(video_id: str, segments: Sequence[HighlightSegment], settings=None, *, on_progress=None, prompt_only=False, codex_path="codex") -> TelopScriptResult`
+  - `TelopScriptResult` は `video_id: str`, `clip_id: str`, `prompt_path: Path`, `script_path: Path | None`, `used_codex: bool`, `document: TelopScriptDocument | None` を持つ frozen dataclass とする。`prompt_only=True` はプロンプトを保存し、`script_path=None`, `used_codex=False`, `document=None` で正常終了する
+  - `validate_telop_script(doc: dict | TelopScriptDocument, *, segments: Sequence[HighlightSegment]) -> TelopValidationResult`
+  - `TelopValidationResult` は `ok: bool`, `errors: tuple[str, ...]`, `warnings: tuple[str, ...]`, `document: TelopScriptDocument | None = None` を持つ frozen dataclass とする
+  - 検証では、入力との区間数一致、入力順での区間境界のミリ秒単位一致、各区間 1 行以上、各行の `end_sec > start_sec`、対応区間内への収まり、行の時系列順と非重複、`title_candidates` 1 件以上、`tags` 1 件以上を必須とする。`hook_text`・行本文・各タイトル案・`description`・各タグは strip 後に非空でなければならない。半角 `<` `>` 禁止はこれら全生成文字列に適用する。行本文が 16 文字を超える場合だけ `warnings` に記録し、検証エラーにはしない。pydantic の詳細はそのまま出さず日本語のスキーマエラーへ変換する
+  - `make_clip_id(segments: Sequence[HighlightSegment | tuple[float, float]]) -> str`: `HighlightSegment` の `start` / `end` は既存 `parse_timestamp_to_seconds()` で数値化してから、tuple と同じ正規化へ渡す。各秒値を `Decimal(str(value))` と `ROUND_HALF_UP` でミリ秒の整数へ正規化し、各区間を `start_ms-end_ms`、入力順の区間列を `|` で連結した UTF-8 文字列の SHA-256 先頭 12 桁を返す。空配列、非有限値、負値、`end <= start` は日本語エラーにする。S3 はこの関数を再利用する
+  - プロンプト保存先: `data/{video_id}/shorts/telop/prompt_telop_{clip_id}.txt`
+  - 台本保存先: `data/{video_id}/shorts/telop/telop_{clip_id}.json`（`clip_id` は上記 `make_clip_id()` を使い、S3 の出力ファイル名と揃える）
+  - Codex 出力 JSON の抽出は、コードフェンス付き・前後テキスト付き出力に対応する非公開ヘルパーを `services/telop.py` 内に局所実装する。`highlights.py` の非公開関数は import せず、S1 では共通化のために `highlights.py` / `ai_prompt.py` を変更しない
+  - `services/subtitle_burn.py` の `_parse_vtt_with_end()` を `parse_vtt_with_end()` として公開し、既存呼び出し互換のため旧名 alias を残す。S1 では公開 parser と `filter_cues_for_segment()` を使い、区間内相対秒へ元区間開始秒を足して絶対秒へ戻す
   - Codex 未導入時は `services/highlights.py` の `CODEX_INSTALL_HINT` と同じ形式のヒントを出す
 - [ ] S1-4. ユニットテスト
-  - `validate_telop_script` の違反パターン（区間外の行、半角 `<>`、`hook_text` 空、`tags` 空）
+  - `validate_telop_script` の違反パターン（入力との区間数不一致・境界不一致、行なし、区間外の行、行の逆転・重複、strip 後の空本文、`hook_text` 空、`title_candidates` なし・空文字、`description` 空、`tags` なし・空文字、全生成文字列の半角 `<>`）と、16 文字超が error ではなく warning になること、pydantic 詳細を漏らさない日本語スキーマエラー
+  - `make_clip_id` が同じ境界の `HighlightSegment` / tuple で同じ ID、順序を変えると異なる ID になること。`ROUND_HALF_UP` の 0.5 ミリ秒境界と、空配列・非有限値・負値・`end <= start` の日本語エラー
   - Codex 出力 JSON の抽出（コードフェンス付き / 前後にテキストがある場合）
   - Codex 未導入時のヒント文言
 
 **Done 条件:**
 
 - [ ] `uv run pytest` が全件通る
-- [ ] Codex CLI が失敗しても、他の成果物（チャプター・候補・ハイライト）に影響しない（softfail、既存方針と同じ）
+- [ ] Codex CLI が失敗した場合は既存方針どおり例外を送出するが、既存の同一 `telop_{clip_id}.json` と他の成果物（チャプター・候補・ハイライト）を変更しない。S1 単体では AC-23 の UI 修正・焼き込み反映を完了扱いにせず、後続 S3 / S4 で閉じる
 - [ ] タスク完了コミット済み
 
 **見積もり目安:** 1.5 日
@@ -632,6 +639,7 @@ data/{video_id}/ ...
 
 - [ ] S4-1. 候補選択 UI: ハイライト候補・切り抜き候補の一覧にチェックボックスを追加する。「選択した区間を個別に生成する」と「選択した区間をまとめて 1 本に連結する」をトグルで切り替えられるようにする（個別 = 各候補ごとに `build_short_from_segments([1区間])`、連結 = `build_short_from_segments([複数区間])`）
 - [ ] S4-2. 生成前の台本確認: 各生成対象（個別なら各候補、連結なら選択セット全体）について、`services.telop.generate_telop_script()` を呼び、結果をテキストエリアで表示・編集できるようにする。**確定操作を挟んでからでないとキューに積めない**
+  - `ClipCandidate` を入力する場合は、既存 `ui/views/highlights.py` の `clip_to_highlight_segment()` と同等の変換で `HighlightSegment` へ正規化してから S1 を呼ぶ。S1 の公開入力型に候補型ごとの分岐を持ち込まない
   - v3 では選択した全生成対象の台本を確認・確定してからキュージョブを開始する。エンコード中に未確定台本を後から追加する最適化は次イテレーション候補とする
 - [ ] S4-3. `services/shorts_queue.py` に `run_shorts_queue(video_id, clip_specs, settings=None, *, on_progress=None) -> ShortsQueueResult` を実装する
   - `clip_specs` は確定済みの区間セット + 確定済みテロップ台本のリスト
@@ -953,7 +961,7 @@ PLAN0 要件・計画の確定
 | 非公開ロックにより予約投稿が機能しない | P0 を P フェーズの最初に固定し、審査申請の要否を早期に判断する。審査待ちでも P1/P2 の実装は止めない |
 | YouTube Data API のクォータ超過 | P2 の `assign_next_slot` で Video Uploads 専用バケットの既定 1 日 100 本上限を機械的に守る（NFR-12） |
 | ジャンプカット連結で累積オフセット計算を誤り、字幕がずれる | S3 のユニットテストで 3 区間以上・区間間隔ありのケースを必須検証項目にする |
-| Codex CLI の応答が不安定（テロップ台本） | S1 で softfail 方針を継続。台本生成に失敗しても他の成果物（チャプター・候補・ハイライト）に影響しない |
+| Codex CLI の応答が不安定（テロップ台本） | S1 は例外を送出し、S4 等の呼び出し側が生成対象単位で局所捕捉する。失敗時は既存の同一 telop と他の成果物（チャプター・候補・ハイライト）を変更しない |
 | テロップの自動生成品質が低く、そのまま焼き込むと粗が目立つ | S1 で必ず人の確認・修正ステップを挟む（自動焼き込みにしない） |
 | 180 秒を超える区間選択でユーザーが詰まる | S3 のエラーメッセージに具体的な対処を含め、S4 の UI で分割・短縮を誘導する |
 
@@ -992,6 +1000,7 @@ PLAN0 要件・計画の確定
 
 | 日付 | 内容 |
 |------|------|
+| 2026-08-01 | S1 着手前監査を反映。テロップ JSON の絶対秒スキーマ、公開シグネチャ、検証結果型、プロンプト保存先、`make_clip_id()` のミリ秒丸め、VTT parser の公開互換、softfail 境界を固定 |
 | 2026-08-01 | PLAN0-7: U5 着手前監査を反映。正式 IA を公開 3 画面 + 非表示詳細に固定し、旧処理済み一覧の削除、ストレージ管理の設定画面移設、概要欄更新経路・成功記録・安全な受け入れ境界を明確化 |
 | 2026-08-01 | PLAN0-6: 実装前監査の指摘を反映。YouTube granular quota を 100 uploads/day に更新し、進捗更新権限・概要欄完了記録・`clip_id`・S4 確認境界・P1 ffprobe 範囲を明確化 |
 | 2026-08-01 | v3 実行計画の初版作成。PLAN0、U0〜U5、S1〜S5、P0〜P3 を定義。v2 未完了タスクの仕分けを実施 |

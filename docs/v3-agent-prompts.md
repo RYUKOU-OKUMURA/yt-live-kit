@@ -154,7 +154,7 @@ uv run pytest
 | U5 の概要欄反映 | ステッパー CTA と通常ボタンを同じフローに統一する。取得済みの更新前 / 更新後を large dialog の引数に渡し、確定前のダイアログ再描画では再取得しない。確定時は既存 `update_video_description` 内部の fetch を維持し、確認時だけ update、成功後だけ `mark_description_applied` を呼ぶ。`services/youtube_api.py` は変更せず、受け入れでは実 YouTube 書き込みを行わない |
 | ライブラリのアーカイブ状態の保存先 | `data/_config/archived_videos.json`（`video_id` の配列）。`ui/views/_local_settings.py` を **U1 で新設**し `load_archived_ids()` / `save_archived_ids()` を実装する。`start.command` で毎回起動し直す運用のため、`st.session_state` のみの一時状態にはしない（永続化必須） |
 | チャンネル既定ハンドルの保存先 | `data/_config/channel_handle.txt`（1 行テキスト）。**U1 で新設済みの `ui/views/_local_settings.py` に U3 で追記**し、U4 が再利用する。`services/description.py` の `get_template_path()` と同じ発想だが、**フェーズ U の制約により `services/` には置かない** |
-| テロップ台本・出力ファイルの命名規則 | `services.telop.make_clip_id()` が、ミリ秒単位に正規化した区間列の SHA-256 先頭 12 桁を返す。S1 の `telop_{clip_id}.json` と S3 の `short_{clip_id}.mp4` は必ず同じ関数を使う |
+| テロップ台本・出力ファイルの命名規則 | `services.telop.make_clip_id()` は `HighlightSegment` と `(start_sec, end_sec)` tuple の両方を受ける。`HighlightSegment.start/end` は `parse_timestamp_to_seconds()` で数値化してから、各秒値を `Decimal(str(value))` + `ROUND_HALF_UP` で整数ミリ秒化し、入力順の `start_ms-end_ms` を `|` 連結した UTF-8 文字列の SHA-256 先頭 12 桁を返す。空配列・非有限値・負値・逆転区間は日本語エラーにする。S1 の `telop_{clip_id}.json` と S3 の `short_{clip_id}.mp4` は必ず同じ関数を使う |
 
 ---
 
@@ -170,10 +170,10 @@ uv run pytest
 | U3 | `services/channel.py` の `list_archives()` を自動で呼んでいないか（レート制限対策・NFR-05 は v3 でも維持）。`services/batch.py` の変更が `do_chapters` / `do_clips` の引数追加・既定 `True` / `True`・`run_batch_job_target()` → `run_batch()` → `pipeline.run()` の全呼び出し伝播・両方 `False` の入力検証だけか。UI 3 ルートからの `start_job()` kwargs もテストされているか。`_local_settings.py` は U1 で新設済みのため、重複して新規作成していないか |
 | U4 | `config.py` を変更しようとしていないか（設定ページは表示専用 + チャンネル既定ハンドルのみ編集可） |
 | U5 | 正式 IA が公開 3 画面 + 非表示詳細になり旧 history が削除されているか。ストレージ管理を設定へ移し、全動画への到達性、個別 / 一括ダイアログの対象情報、未確定 / 確定境界、StorageError、成果物保持まで AC-15 を維持しているか。概要欄は外側 primary → 検証 → fetch / merge → large dialog の更新前後別表示 → 確認時だけ update → 成功後だけ mark の一本化された流れか。確定時の既存 update 内部 fetch を残し、実 YouTube 書き込みを受け入れ試験で実行していないか |
-| S1 | テロップ台本とメタデータを別々の Codex 呼び出しにしていないか（コスト・待ち時間の両方に効く） |
+| S1 | テロップ台本とメタデータを 1 回の Codex 呼び出しで生成しているか。入力字幕が開始・終了・ミリ秒を保持し、区間・行の `start_sec` / `end_sec` が元動画基準の絶対秒で、`TelopSegmentScript` 自身にも区間境界があり、S3 の `累積尺 + 行の絶対秒 - 元区間開始秒` へ一意に変換できるか。S1 は失敗時に例外を送出し、呼び出し側が局所捕捉して既存 telop と他成果物を維持する softfail になっているか |
 | S2 | プリセット追加によって `build_segment_subtitle()` の既定挙動（v2 互換）が変わっていないか |
 | S3 | 累積タイムオフセットの計算に、区間ごとの `start_sec` だけを使っていないか（連結後にズレる） |
-| S4 | 台本確認を経ずにキューへ積める抜け道が無いか |
+| S4 | 台本確認を経ずにキューへ積める抜け道が無いか。`ClipCandidate` は既存 `clip_to_highlight_segment()` と同等に `HighlightSegment` へ正規化してから S1 を呼び、S1 例外を生成対象単位で局所捕捉して残りの既存成果物を維持しているか |
 | P0 | 実アップロードを `impl-sonnet` が独断で実行していないか（必ずユーザー承認後） |
 | P1 | `privacyStatus` の既定が `"private"` になっているか |
 | P2 | 1 日 100 本の Video Uploads 専用クォータ上限を 100 本目・101 本目で境界確認しているか |
@@ -185,6 +185,7 @@ uv run pytest
 
 | 日付 | 内容 |
 |------|------|
+| 2026-08-01 | S1 着手前監査を反映。テロップ時刻の絶対秒基準、連結後変換式、`make_clip_id()` の入力型・丸め・連結規則を固定 |
 | 2026-08-01 | U5 着手前監査を反映。正式 IA、ストレージ管理移設、概要欄更新経路の一本化、update / mark 順序、安全な受け入れ境界をレビュー観点へ追加 |
 | 2026-08-01 | 実装前監査を反映。Video Uploads 専用クォータを 100 回/日に更新し、`make_clip_id()` 規則を固定 |
 | 2026-08-01 | v3 初版。impl-sonnet 向け指示テンプレート、レビュー観点チェックリスト、フェーズ別注意点を定義 |
