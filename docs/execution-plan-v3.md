@@ -905,7 +905,7 @@ data/{video_id}/ ...
 - [ ] P3-3. 承認後の再検証を通して 1 本を予約 upload し、`videos.list(part="status,processingDetails")` を upload 後 processing 完了まで、予約時刻前、予約時刻後に bounded poll して operation に記録する。時刻前 private、時刻後 public と実視聴可能を確認する
 - [ ] P3-4. `docs/requirements-v3.md` の AC-18〜AC-28 を総点検する。4xx / unknown の reconciliation、LA attempt、再起動復元、status bar kind dispatch はモック証跡、実公開は P3 の operation 証跡を使う
 - [ ] P3-5. 実配信 1 本でチャプター生成 → ショート複数本生成までを通し、上記の承認済み 1 本だけを予約投稿対象にする（AC-28）
-- [ ] P3-6. README を更新する。private 固定、10 分 lead、IANA timezone、確認ダイアログ全項目、notify false、LA upload attempt 上限、`needs_reconciliation` は自動再送しないこと、private lock / 審査、実 API を自動テストしないことを記載する
+- [x] P3-6. README を更新する。private 固定、10 分 lead、IANA timezone、確認ダイアログ全項目、notify false、LA upload attempt 上限、`needs_reconciliation` は自動再送しないこと、private lock / 審査、実 API を自動テストしないことを記載する
 - [ ] P3-7. 版数を `0.3.0` に更新し、進捗サマリー、M14、受け入れ証跡を最終更新する
 
 **Done 条件:**
