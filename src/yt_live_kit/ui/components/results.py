@@ -215,3 +215,7 @@ def render_results(result: PipelineResult) -> None:
             st.markdown(f"**コマンドログ:** `{cut_result.command_log_path}`")
     elif not result.clips_error:
         st.info(clips_empty_message(result.clips_requested))
+
+    from yt_live_kit.ui.pages.shorts import render_shorts_section
+
+    render_shorts_section(result)
