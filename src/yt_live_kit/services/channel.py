@@ -168,6 +168,8 @@ def list_archives(
         [
             "--flat-playlist",
             "--dump-json",
+            "--extractor-args",
+            "youtube:lang=ja",
             "--playlist-end",
             str(limit),
             normalized_url,

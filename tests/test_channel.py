@@ -145,6 +145,8 @@ def test_list_archives_parses_json_lines(mock_run):
     assert "--dump-json" in args
     assert "--playlist-end" in args
     assert "50" in args
+    assert "--extractor-args" in args
+    assert "youtube:lang=ja" in args
 
 
 @patch("yt_live_kit.services.channel._run_ytdlp")
