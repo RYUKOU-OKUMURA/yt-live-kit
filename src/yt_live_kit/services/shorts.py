@@ -104,25 +104,38 @@ def validate_short_duration(start: float, end: float) -> float:
 
 
 def escape_ffmpeg_subtitles_path(path: Path) -> str:
-    """ffmpeg subtitles フィルタ用にパスをエスケープする."""
+    """ffmpeg filtergraph 内の subtitles filename 用にパスをエスケープする.
+
+    libavfilter は filter option と filtergraph の 2 段階で文字列を解析する。
+    subprocess には argv を直接渡しているため shell 用の追加 escape は行わない。
+    """
     raw = str(path)
-    if len(raw) >= 2 and raw[1] == ":":
-        escaped = raw.replace("\\", "/")
+    is_windows_drive = (
+        len(raw) >= 3 and raw[1] == ":" and raw[2] in {"/", "\\"}
+    )
+    is_windows_unc = raw.startswith("\\\\")
+    if is_windows_drive or is_windows_unc:
+        normalized = raw.replace("\\", "/")
     else:
-        escaped = path.resolve().as_posix()
-    escaped = escaped.replace("'", "\\'")
-    if len(escaped) >= 2 and escaped[1] == ":":
-        escaped = escaped[0] + "\\:" + escaped[2:].replace(":", "\\:")
-    else:
-        escaped = escaped.replace(":", "\\:")
-    return escaped
+        normalized = path.resolve().as_posix()
+
+    # 第 1 段: filename option の区切り文字と quote / escape 自体を保護する。
+    option_escaped = "".join(
+        f"\\{character}" if character in "\\':" else character
+        for character in normalized
+    )
+    # 第 2 段: option を含む filtergraph 全体で特別扱いされる文字を保護する。
+    return "".join(
+        f"\\{character}" if character in "\\'[],;" else character
+        for character in option_escaped
+    )
 
 
 def build_subtitle_filter(ass_path: Path, font_name: str) -> str:
     """字幕焼き込みフィルタ文字列を返す."""
     escaped_path = escape_ffmpeg_subtitles_path(ass_path)
     return (
-        f"subtitles={escaped_path}:force_style="
+        f"subtitles=filename={escaped_path}:force_style="
         f"'FontName={font_name},FontSize=54,"
         "PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,"
         "Outline=3,Alignment=2,MarginV=180'"
@@ -131,7 +144,7 @@ def build_subtitle_filter(ass_path: Path, font_name: str) -> str:
 
 def build_ass_subtitle_filter(ass_path: Path) -> str:
     """ASS 内のスタイルを維持する字幕焼き込みフィルタを返す."""
-    return f"subtitles={escape_ffmpeg_subtitles_path(ass_path)}"
+    return f"subtitles=filename={escape_ffmpeg_subtitles_path(ass_path)}"
 
 
 def build_layout_filter(layout: str) -> str:

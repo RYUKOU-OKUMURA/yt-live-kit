@@ -1,5 +1,8 @@
 """shorts サービスのユニットテスト."""
 
+import os
+import shutil
+import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -76,28 +79,140 @@ def test_build_video_filter_chain_blur_with_subtitles(tmp_path):
 
 
 def test_escape_ffmpeg_subtitles_path_colon_and_backslash(tmp_path):
-    ass_path = tmp_path / "dir" / "file:test.ass"
+    ass_path = tmp_path / "subtitle dir" / "file:it's\\test.ass"
     ass_path.parent.mkdir(parents=True)
     ass_path.write_text("ass", encoding="utf-8")
 
     escaped = escape_ffmpeg_subtitles_path(ass_path)
-    assert "\\:" in escaped or "file\\:test" in escaped
+    assert "subtitle dir" in escaped
+    assert "file\\\\:it\\\\\\'s\\\\\\\\test.ass" in escaped
 
 
 def test_escape_ffmpeg_subtitles_path_windows_drive():
-    path = Path("C:/Videos/sub/file.ass")
+    path = Path(r"C:\Videos\subtitle dir\file:it's.ass")
     escaped = escape_ffmpeg_subtitles_path(path)
-    assert escaped.startswith("C\\:")
+    assert escaped == "C\\\\:/Videos/subtitle dir/file\\\\:it\\\\\\'s.ass"
+
+
+def test_escape_ffmpeg_subtitles_path_windows_unc():
+    path = Path(r"\\server\share\subtitle dir\file:it's.ass")
+    escaped = escape_ffmpeg_subtitles_path(path)
+    assert escaped == "//server/share/subtitle dir/file\\\\:it\\\\\\'s.ass"
 
 
 def test_build_subtitle_filter_contains_force_style(tmp_path):
     ass_path = tmp_path / "test.ass"
     ass_path.write_text("ass", encoding="utf-8")
     filt = build_subtitle_filter(ass_path, "Noto Sans CJK JP")
-    assert filt.startswith("subtitles=")
+    assert filt.startswith("subtitles=filename=")
     assert "force_style=" in filt
     assert "FontName=Noto Sans CJK JP" in filt
     assert "MarginV=180" in filt
+
+
+def _ffmpeg_with_subtitles_filter() -> str | None:
+    ffmpeg = shutil.which("ffmpeg")
+    if ffmpeg is None:
+        return None
+    probe = subprocess.run(
+        [ffmpeg, "-hide_banner", "-filters"],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+    filters = f"{probe.stdout}\n{probe.stderr}"
+    if probe.returncode != 0 or not any(
+        len(parts) >= 2 and parts[1] == "subtitles"
+        for line in filters.splitlines()
+        if (parts := line.split())
+    ):
+        return None
+    return ffmpeg
+
+
+@pytest.mark.skipif(
+    os.environ.get("YTLK_RUN_FFMPEG_INTEGRATION") != "1",
+    reason="実 ffmpeg 統合テストは明示実行時だけ有効です",
+)
+@pytest.mark.parametrize("with_force_style", [False, True])
+def test_real_ffmpeg_burns_ass_from_escaped_path(tmp_path, with_force_style):
+    ffmpeg = _ffmpeg_with_subtitles_filter()
+    if ffmpeg is None:
+        pytest.skip("subtitles フィルタを利用できる ffmpeg がありません")
+
+    source_path = tmp_path / "color source.mp4"
+    source = subprocess.run(
+        [
+            ffmpeg,
+            "-v",
+            "error",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=black:s=320x240:r=10:d=1",
+            "-an",
+            "-c:v",
+            "mpeg4",
+            str(source_path),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=15,
+    )
+    assert source.returncode == 0, source.stderr
+    assert source_path.is_file()
+    assert source_path.stat().st_size > 0
+
+    ass_path = tmp_path / "subtitle dir" / "clip:it's\\safe.ass"
+    ass_path.parent.mkdir(parents=True)
+    ass_path.write_text(
+        """[Script Info]
+ScriptType: v4.00+
+PlayResX: 320
+PlayResY: 240
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,Arial,24,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,2,10,10,10,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:00.00,0:00:01.00,Default,,0,0,0,,字幕テスト
+""",
+        encoding="utf-8",
+    )
+    subtitle_filter = (
+        build_subtitle_filter(ass_path, "Arial")
+        if with_force_style
+        else build_ass_subtitle_filter(ass_path)
+    )
+    output_path = tmp_path / f"burned-{with_force_style}.mp4"
+    burned = subprocess.run(
+        [
+            ffmpeg,
+            "-v",
+            "error",
+            "-y",
+            "-i",
+            str(source_path),
+            "-vf",
+            subtitle_filter,
+            "-an",
+            "-c:v",
+            "mpeg4",
+            str(output_path),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=15,
+    )
+    assert burned.returncode == 0, burned.stderr
+    assert output_path.is_file()
+    assert output_path.stat().st_size > 0
 
 
 @pytest.mark.parametrize(
@@ -757,7 +872,7 @@ def _install_s3_success_mocks(monkeypatch, tmp_path: Path):
 
 def test_build_ass_subtitle_filter_has_no_force_style(tmp_path):
     result = build_ass_subtitle_filter(tmp_path / "style.ass")
-    assert result.startswith("subtitles=")
+    assert result.startswith("subtitles=filename=")
     assert "force_style" not in result
 
 
@@ -803,7 +918,7 @@ def test_build_short_from_segments_preserves_order_progress_and_presets(
     cmd = calls["run"][0]
     filter_flag = "-filter_complex" if layout == "blur" else "-vf"
     filter_value = cmd[cmd.index(filter_flag) + 1]
-    assert filter_value.count("subtitles=") == 1
+    assert filter_value.count("subtitles=filename=") == 1
     assert "force_style" not in filter_value
     assert "-ss" not in cmd and "-t" not in cmd
     assert result.output_path.is_file()
