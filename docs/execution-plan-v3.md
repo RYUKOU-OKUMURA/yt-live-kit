@@ -64,7 +64,7 @@ v1/v2 で作った `services/` 分離、Codex CLI 連携、ジョブ機構（[`s
 | 項目 | 内容 | v3 での変更 |
 |------|------|--------------|
 | 主要 UI | Streamlit（localhost のみ） | 情報設計（IA）を作り替える。動作環境は変更なし |
-| 処理層 | `services/` 共通。CLI は補助 | 変更なし。ただしフェーズ U 中は `services/` を一切変更しない（§3.2 参照） |
+| 処理層 | `services/` 共通。CLI は補助 | 変更なし。フェーズ U 中は原則 `services/` を変更しない。U3 の引数追加・全呼び出し伝播・両方 `False` 入力検証に限る最小例外は §3.2 参照 |
 | コスト | 従量課金 API 禁止。Codex CLI（主） | 変更なし（NFR-11）。YouTube Data API は無料枠クォータ内（NFR-12） |
 | 依存パッケージ | yt-dlp / ffmpeg / Streamlit / pydantic / typer / google-api-python-client | **新規追加なし**。google-api-python-client は v2 で導入済み |
 | 自動編集 | v2 でジャンプカット・テロップ・自動投稿はスコープ外 | **v3 で解禁**（[requirements-v3.md §2](./requirements-v3.md#2-v2-からのスコープ改訂) 参照） |
@@ -99,7 +99,8 @@ data/{video_id}/ ...
 ```
 
 - UI にビジネスロジックを書かない（v1/v2 と同じ）
-- **フェーズ U では `services/` を一切変更しない。** UI 層の並べ替えとテストの再構成だけで完結させる。これは「まず土台を安全に作り替え、業務ロジックの変更と混ぜて事故を起こさない」ための意図的な制約である
+- **フェーズ U では原則 `services/` を変更しない。** UI 層の並べ替えとテストの再構成だけで完結させる。これは「まず土台を安全に作り替え、業務ロジックの変更と混ぜて事故を起こさない」ための意図的な制約である
+  - **U3 のみの最小例外:** 既存バッチ処理で「チャプターを作る」「切り抜き候補を出す」の選択を実効させるため、`services/batch.py` の `run_batch()` / `run_batch_job_target()` へ `do_chapters` / `do_clips` 引数を追加し、`run_batch_job_target()` → `run_batch()` → 各 URL の `pipeline.run()` の全呼び出しへ伝播し、両方 `False` を service 入力でも拒否する変更だけは許可する。既定値はどちらも `True` とし、既存 CLI / UI との後方互換を維持する。この例外をその他の `services/` 変更に拡大しない
   - この制約により、ページをまたいで永続化したい **UI 固有の軽量な状態**（例: チャンネル既定ハンドル、ライブラリのアーカイブ表示切り替え）は、新しい `services/` モジュールを作らずに UI 層内で完結させる。具体的な方針は U1・U3 のタスク詳細に明記する
   - フェーズ S・P では通常どおり `services/` を拡張してよい
 - ワーカースレッドから `st.*` を一切呼ばない（v2 の原則を継続）
@@ -337,10 +338,16 @@ data/{video_id}/ ...
 **目的:** 「登録済みチャンネルの新着を確認 → 1 クリックで処理開始」を基本導線にし、URL 手入力を例外ルートに格下げする。
 **変更ファイル範囲:**
 - `src/yt_live_kit/ui/views/intake.py`（新規。`ui/views/channel.py` と旧「実行」ページの単本/一括 URL 入力を統合する）
+- `src/yt_live_kit/ui/views/channel.py`（`intake.py` へ移設後に削除）
+- `src/yt_live_kit/ui/views/run.py`（`intake.py` へ移設後に削除）
 - `src/yt_live_kit/ui/views/_local_settings.py`（**U1 で新設済み**。チャンネル既定ハンドルの永続化関数を追記する。U4 も参照する）
-- `src/yt_live_kit/ui/app.py`（ナビゲーション登録）
+- `src/yt_live_kit/ui/app.py`（「取り込み」を登録し、旧「実行」「チャンネル」導線を外す）
+- `src/yt_live_kit/services/batch.py`（**U3 に限るフェーズ U の最小例外**。`do_chapters` / `do_clips` の引数追加、`run_batch_job_target()` → `run_batch()` → `pipeline.run()` の全呼び出し伝播、両方 `False` の入力検証のみ）
 - `tests/test_ui_intake_page.py`（新規）
-- （`services/` は変更しない）
+- `tests/test_ui_app.py`（「取り込み」登録と旧導線の撤去に合わせてナビゲーション期待を更新）
+- `tests/test_ui_channel_page.py` / `tests/test_ui_run_page.py`（有効な検証を `tests/test_ui_intake_page.py` へ移行後に削除）
+- `tests/test_batch.py`（既定値の後方互換、全呼び出し伝播、両方 `False` の入力検証を追加検証）
+- （上記以外の `services/` は変更しない）
 
 **設計メモ:** チャンネルの既定ハンドルは `Settings`（`config.py`）のフィールドではなく、UI からその場で編集したい値のため、`data/_config/channel_handle.txt`（1 行テキスト）に UI 層の関数で直接読み書きする。`services/description.py` の `get_template_path()` / `save_template()` と同じ発想だが、**U フェーズの制約により `services/` には置かず** `ui/views/_local_settings.py` に置く。この考え方は U1 で先に実装したアーカイブ状態の永続化（`data/_config/archived_videos.json`）と同一であり、`_local_settings.py` はこの 2 つ目の用途として関数を追記するだけでよい（新規ファイル作成は不要）。U4（設定ページ）はこのファイルの関数を再利用する。
 
@@ -349,19 +356,26 @@ data/{video_id}/ ...
 - [ ] U3-1. `_local_settings.py` に `get_default_channel_handle(settings) -> str | None` / `save_default_channel_handle(handle, settings) -> Path` を実装する
 - [ ] U3-2. ページ初期状態: 既定ハンドルが保存済みなら、そのチャンネルの新着一覧を自動取得（[`services/channel.py`](../src/yt_live_kit/services/channel.py) の `load_cache()` を優先し、無ければ案内を出す。**自動で `list_archives()` を呼ばない**（NFR-05 のレート制限対策を維持）
 - [ ] U3-3. 「未処理の新着」を [`services/channel.py`](../src/yt_live_kit/services/channel.py) の `mark_processed()` で絞り込み、チェックボックス付きで表示する
-- [ ] U3-4. 「選択した N 本を処理開始」ボタン（既存の `run_batch_job_target` を `jobs.start_job()` 経由で実行するロジックを `ui/views/channel.py` から移設）
+- [ ] U3-4. 「選択した N 本を処理開始」ボタン（既存の `run_batch_job_target` を `jobs.start_job()` 経由で実行するロジックを `ui/views/channel.py` から移設し、`do_chapters` / `do_clips` をジョブへ渡す）
 - [ ] U3-5. URL 入力（単本 / 複数行一括）を、ページ下部の折りたたみに「例外ルート」として配置する（旧「実行」ページの内容を移設）
-- [ ] U3-6. 「チャプターを作る」「切り抜き候補を出す」チェックを、新着一括処理・URL 入力の両方の実行ボタンと同じカード内に配置する
+- [ ] U3-6. 「チャプターを作る」「切り抜き候補を出す」チェックを、新着一括処理・URL 入力（単本 / 複数行一括）のすべてで実行ボタンと同じカード内に配置し、選択値を実処理へ反映する
+  - `run_batch()` / `run_batch_job_target()` に `do_chapters: bool = True` / `do_clips: bool = True` を追加し、`run_batch_job_target()` → `run_batch()` →各 URL の `pipeline.run()` の全呼び出しへそのまま渡す
+  - 両方 `False` の場合は UI で実行ボタンを無効化して日本語で選択を促し、service 側でも明示的に拒否する
 - [ ] U3-7. ユニットテスト
   - `_local_settings` の保存・読み込み往復
   - 新着一覧が既定ハンドル未設定時に案内を出すこと
   - URL 入力ルートが折りたたみ内にあること（純粋関数化できる部分のみ検証）
+  - UI 3 ルートのジョブ起動: 新着一括 / URL 複数行一括は `intake` → `start_job()` → `run_batch_job_target` の kwargs、URL 単本は `intake` → `start_job()` → `run_single_job_target` の kwargs に両 flag が反映されること
+  - service の全呼び出し: `run_batch_job_target()` → `run_batch()`、`run_batch()` →各 URL の `pipeline.run()` に両 flag の有効な全組み合わせ（`True` / `True`、`True` / `False`、`False` / `True`）が伝播されること
+  - バッチの既定 `True` / `True` が従来挙動を維持し、両方 `False` は `run_batch_job_target()` / `run_batch()` の各 service 入力で明示的に拒否されること
+- [ ] U3-8. `app.py` のナビゲーションを「取り込み」へ統合し、旧「実行」「チャンネル」導線を外す。移行後の `ui/views/channel.py` / `ui/views/run.py` と対応する旧 UI テストを削除する
 
 **Done 条件:**
 
 - [ ] `uv run pytest` が全件通る
 - [ ] チャンネルのハンドルを毎回入力しなくてよいことを実データで確認
-- [ ] `services/` に変更が無い
+- [ ] `services/` の変更が `services/batch.py` の引数追加・全呼び出し伝播・両方 `False` の入力検証のみで、その他の処理ロジックに変更が無い
+- [ ] ナビゲーションに旧「実行」「チャンネル」導線が残らず、`ui/views/channel.py` / `ui/views/run.py` が存在しない
 - [ ] タスク完了コミット済み
 
 **見積もり目安:** 1 日
@@ -877,7 +891,7 @@ PLAN0 要件・計画の確定
 
 | リスク | 計画上の扱い |
 |--------|--------------|
-| フェーズ U で UI を作り替えている最中に、v2 機能が回帰する | 各タスクで `uv run pytest` を必須化し、`services/` を変更しないことで回帰の原因を UI 層に限定する |
+| フェーズ U で UI を作り替えている最中に、v2 機能が回帰する | 各タスクで `uv run pytest` を必須化し、`services/` を原則変更しないことで回帰の原因を UI 層に限定する。U3 の例外は `services/batch.py` の引数追加・全呼び出し伝播・両方 `False` の入力検証に限定し、`tests/test_batch.py` で後方互換・伝播・入力検証を固定する |
 | 非公開ロックにより予約投稿が機能しない | P0 を P フェーズの最初に固定し、審査申請の要否を早期に判断する。審査待ちでも P1/P2 の実装は止めない |
 | YouTube Data API のクォータ超過 | P2 の `assign_next_slot` で Video Uploads 専用バケットの既定 1 日 100 本上限を機械的に守る（NFR-12） |
 | ジャンプカット連結で累積オフセット計算を誤り、字幕がずれる | S3 のユニットテストで 3 区間以上・区間間隔ありのケースを必須検証項目にする |

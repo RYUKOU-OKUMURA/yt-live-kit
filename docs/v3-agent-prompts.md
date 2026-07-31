@@ -52,8 +52,9 @@ v2 は Cursor 上で Grok 4.5（オーケストレーター）+ Composer 2.5（�
 - 新規依存パッケージを追加しない（yt-dlp / ffmpeg / Streamlit / pydantic / typer /
   google-api-python-client で完結させる）
 - 既存のテストを壊さない
-- 【フェーズ U のタスクのみ】services/ を一切変更しない。新しい永続化が必要な場合は、
-  execution-plan-v3.md の該当タスクの「設計メモ」に従い ui/ 層内で完結させる
+- 【フェーズ U のタスクのみ】services/ を原則変更しない。新しい永続化が必要な場合は、
+  execution-plan-v3.md の該当タスクの「設計メモ」に従い ui/ 層内で完結させる。例外は U3 の
+  services/batch.py における do_chapters / do_clips の引数追加・全呼び出しへの伝播・両方 False の入力検証だけとする
 - 【フェーズ P の実アップロードを伴うタスクのみ】実際に YouTube へアップロードする操作は、
   ユーザーの明示的な承認を得てから実行する。ユニットテストでは googleapiclient を必ずモックする
 
@@ -99,7 +100,7 @@ uv run pytest
 
 ### 3.2 フェーズ U 特有の観点
 
-- [ ] `git diff --stat` に `src/yt_live_kit/services/` 配下のファイルが含まれていないこと（U0〜U4 は原則違反。U5 も `services/youtube_api.py` は変更しない）
+- [ ] `git diff --stat` に `src/yt_live_kit/services/` 配下のファイルが含まれていないこと（U0〜U4 は原則違反。ただし U3 の `services/batch.py` は `do_chapters` / `do_clips` の引数追加・`run_batch_job_target()` → `run_batch()` → `pipeline.run()` の全呼び出し伝播・両方 `False` の入力検証に限り許可。U5 も `services/youtube_api.py` は変更しない）
 - [ ] 新しい永続化（チャンネル既定ハンドル等）が `services/` を新設せず、`ui/views/_local_settings.py` のような UI 層のヘルパーで完結しているか
 - [ ] `ui/pages/` に相当する旧ディレクトリ・旧 import パスが残っていないか（U0 完了後は全タスクで確認）
 - [ ] ステッパー・確認ダイアログ・共通コピー部品が、複数ページで同じ実装を再発明していないか（`ui/components/clipboard.py` を再利用しているか）
@@ -125,7 +126,7 @@ uv run pytest
 
 | フェーズ | 最重要の注意点 |
 |----------|----------------|
-| **U** | `services/` を一切触らない。UI 層の並べ替えとテストの再構成だけで完結させる。新しい永続化が必要なら `ui/views/_local_settings.py` のような UI 層ヘルパーに留める（[execution-plan-v3.md](./execution-plan-v3.md) §3.2 参照） |
+| **U** | `services/` を原則触らない。UI 層の並べ替えとテストの再構成だけで完結させる。新しい永続化が必要なら `ui/views/_local_settings.py` のような UI 層ヘルパーに留める。U3 の `services/batch.py` における引数追加・全呼び出し伝播・両方 `False` の入力検証だけは最小例外（[execution-plan-v3.md](./execution-plan-v3.md) §3.2 参照） |
 | **S** | 従量課金 API を使わない。AI 生成は Codex CLI のみ、かつテロップ台本とメタデータは同じ呼び出しで一括生成する。**自動生成をそのまま焼き込まず、必ず人の確認ステップを挟む** |
 | **P** | 実アップロードはユーザー承認後のみ実行する。`privacyStatus="private"` を既定にし、Video Uploads 専用クォータの既定上限（1 日 100 本）を超える割り当てをしない。P0 の非公開ロック確認結果次第で、後続タスクの前提が変わる可能性があるため、P0 の報告を必ず先に確認してから P1 に着手する |
 
@@ -156,7 +157,7 @@ uv run pytest
 | U0 | `ui/pages/` を移動する前に `uv run pytest` のベースライン件数を記録し、移行後に同数（またはそれ以上）通ることを確認する |
 | U1 | `services/history.py` の `ProcessedVideo` にフィールドを追加しようとしていないか（services 不可侵）。アーカイブ状態を `st.session_state` のみで済ませていないか（`archived_videos.json` への永続化が必須） |
 | U2 | `render_highlights_section` / `render_shorts_section` の既存表示・生成ロジックを維持しているか。既存成果物を上書きする場合の確認 `st.dialog` 追加だけは許可する |
-| U3 | `services/channel.py` の `list_archives()` を自動で呼んでいないか（レート制限対策・NFR-05 は v3 でも維持）。`_local_settings.py` は U1 で新設済みのため、重複して新規作成していないか |
+| U3 | `services/channel.py` の `list_archives()` を自動で呼んでいないか（レート制限対策・NFR-05 は v3 でも維持）。`services/batch.py` の変更が `do_chapters` / `do_clips` の引数追加・既定 `True` / `True`・`run_batch_job_target()` → `run_batch()` → `pipeline.run()` の全呼び出し伝播・両方 `False` の入力検証だけか。UI 3 ルートからの `start_job()` kwargs もテストされているか。`_local_settings.py` は U1 で新設済みのため、重複して新規作成していないか |
 | U4 | `config.py` を変更しようとしていないか（設定ページは表示専用 + チャンネル既定ハンドルのみ編集可） |
 | U5 | 反映前後の対比を「反映後のみ」で済ませていないか（v2 の `_render_description_preview` の再発防止） |
 | S1 | テロップ台本とメタデータを別々の Codex 呼び出しにしていないか（コスト・待ち時間の両方に効く） |
