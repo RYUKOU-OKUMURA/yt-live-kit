@@ -925,7 +925,7 @@ data/{video_id}/ ...
 - [x] P3-2. 実チャンネル ID / 名称、対象ファイル、サイズ / 尺、タイトル、説明文、タグ、policy timezone / UTC `Z` の予約日時、private、notify false、Made for Kids / synthetic media の選択、Community Guidelines 同意、operation / slot / attempt snapshot をユーザーに提示し、**P0 upload や審査承認とは別の P3 実予約公開専用承認**を得る。承認前は確定しない
 - [ ] P3-3. 承認後の再検証を通して 1 本を予約 upload し、`videos.list(part="status,processingDetails")` を upload 後 processing 完了まで、予約時刻前、予約時刻後に bounded poll して operation に記録する。時刻前 private、時刻後 public と実視聴可能を確認する
 - [ ] P3-4. `docs/requirements-v3.md` の AC-18〜AC-28 を総点検する。4xx / unknown の reconciliation、LA attempt、再起動復元、status bar kind dispatch はモック証跡、実公開は P3 の operation 証跡を使う
-- [ ] P3-5. 実配信 1 本でチャプター生成 → ショート複数本生成までを通し、上記の承認済み 1 本だけを予約投稿対象にする（AC-28）
+- [x] P3-5. 実配信 1 本でチャプター生成 → ショート複数本生成までを通し、上記の承認済み 1 本だけを予約投稿対象にする（AC-28）
 - [x] P3-6. README を更新する。private 固定、10 分 lead、IANA timezone、確認ダイアログ全項目、notify false、LA upload attempt 上限、`needs_reconciliation` は自動再送しないこと、private lock / 審査、実 API を自動テストしないことを記載する
 - [ ] P3-7. 版数を `0.3.0` に更新し、進捗サマリー、M14、受け入れ証跡を最終更新する
 
@@ -951,6 +951,14 @@ data/{video_id}/ ...
 - policy は毎日 09:00、1 日間隔、`Asia/Tokyo`。slot は 2026-08-02 09:00 JST / 2026-08-02 00:00 UTC、private 固定、notify false、LA 当日 attempt は 1 / 100、fingerprint は `1677a3b1f97285ae614ceea2280474b1cc0e4787b1af3119e9a4271fe5ac4df7`。承認前のため operation / job ID は未発行
 - ユーザーから P0 と別の P3 実予約公開、Made for Kids「いいえ」、synthetic media「いいえ」、Community Guidelines「確認済み」、実 upload と外部公開、upload 後に 10 分 lead を保つ最短時刻へ前倒しして検証することへの明示承認を取得した
 - 承認後の本番 preview 再検証で、上記の全項目、attempt、fingerprint が一致した
+
+**P3 実 upload・公開前確認記録（2026-08-01 07:57〜07:58 JST）:**
+
+- 全 821 tests 通過と独立レビュー APPROVE 後、本番経路から承認済み `short_5ea2b4ff8e08.mp4` だけを 1 本 upload した。operation ID は `7a6bb640baf74362b83a06625c08f7c9`、job ID は `500950330a6942bd98af9d6389428e45`、YouTube video ID は `1bxDoF52DEs`、URL は `https://youtube.com/shorts/1bxDoF52DEs`
+- operation は `reserved → uploading → uploaded`、job は `done`。LA 当日 attempt は upload 前 1 / 100、upload 後 2 / 100 で、追加の `videos.insert` は実行していない
+- processing poll は 2026-07-31 22:57:06、22:57:16、22:57:26、22:57:36 UTC の 4 回で `processing → processing → processing → processing_succeeded`。最終 `uploadStatus=processed`、`processingStatus=succeeded`、`privacyStatus=private`、upload 時 `publishAt=2026-08-02T00:00:00Z`
+- 前倒し承認に基づき、10 分 lead を維持して 2026-08-01 08:15 JST / 2026-07-31 23:15 UTC へ変更した。YouTube Studio の「すべての変更を保存しました」と API の `privacyStatus=private`、`processingStatus=succeeded`、`publishAt=2026-07-31T23:15:00Z` を照合した。operation の upload 時 snapshot は元の slot を不変記録として保持し、公開 poll には実際の 08:15 を使う
+- 元の実配信 `IJvd6k6ZmUo` は S5 でチャプター生成からショート複数本生成まで完了済みで、P3ではそのうち専用承認を得た clip `5ea2b4ff8e08` だけを投稿対象にした
 
 **Done 条件:**
 
