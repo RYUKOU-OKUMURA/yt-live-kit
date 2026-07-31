@@ -1263,6 +1263,50 @@ tests/test_ui_run_page.py:
 
 **前提:** W4 マージ済み
 
+### W5 着手前の確認事項（オーケストレーターがワーカーに伝えること）
+
+W4 のレビュー修正（`d517c92` / `655c542`）で、W5 が使う公開 API が変わっている。
+**プロンプト本文より実コードを正とすること。** 以下は実装から転記した現物である。
+
+```python
+# services/highlights.py
+suggest_highlights(video_id, settings=None, *, on_progress=None,
+                   prompt_only: bool = False, codex_path: str = "codex") -> HighlightsResult
+# HighlightsResult: video_id / prompt_path / segments_path / used_codex / segments
+load_segments_file(video_id, settings) -> HighlightsDocument | None   # 保存済み候補の読み込み
+
+# services/ffmpeg.py
+cut_and_concat(video_id, segments: list[HighlightSegment], settings=None, *,
+               output_name="highlight.mp4", ffmpeg_path=FFMPEG_DEFAULT,
+               ffprobe_path=FFPROBE_DEFAULT, keep_segments: bool = False,
+               on_progress=None) -> ConcatResult
+# on_progress は (current: int, total: int, message: str) の 3 引数。
+# 区間ごとに前後 2 回 + 連結開始時に 1 回呼ばれる。
+# ConcatResult: video_id / output_path / command_log_path / segment_count / total_duration_sec
+
+# services/shorts.py
+build_short(video_id, start: float, end: float, settings=None, *,
+            layout: str = "blur", burn_subtitles: bool = True,
+            output_name: str | None = None, ffmpeg_path=FFMPEG_DEFAULT,
+            on_progress: Callable[[str], None] | None = None,
+            keep_intermediate: bool = False) -> ShortResult
+# on_progress は (message: str) の 1 引数。cut_and_concat とは形が違うので注意。
+# ShortResult: video_id / output_path / command_log_path / layout /
+#              burned_subtitles / duration_sec / font_warning
+```
+
+**W5-A / W5-B が必ず対応すること（W4 レビューの申し送り）:**
+
+| 対象 | 内容 |
+|------|------|
+| W5-A | **`PipelineResult.highlights_error` を表示すること。** `regenerate(target="highlights")` の失敗はこのフィールドに日本語メッセージとして入る。**表示しないと、Codex 失敗時にユーザーには何も起きていないように見える**（成功表示のまま候補 0 件になる）。`ui/components/results.py` の `clips_error` の `st.warning` と同じパターンで出す |
+| W5-B | **`ShortResult.font_warning` を `st.warning` で表示すること。** 日本語フォントが解決できなかった場合にここへ日本語の警告が入る。`build_short` は `on_progress` 経由で警告を出さなくなった（進捗メッセージと警告を混ぜないため）。生成前の事前警告（`is_japanese_font_available()`）と、生成後の実績警告（`font_warning`）は別物なので両方出すこと |
+
+**ショート生成の所要時間について（W5-B が UI 文言を書くときの前提）:**
+`build_short()` は 2 パス（精密シークで中間ファイルを切り出す → レイアウトと字幕を焼き込む）で
+動作するため、再エンコードが 2 回走る。60 秒のショートでも待ち時間は短くない。
+「数十秒〜数分かかります」程度の注記を UI に置くこと。
+
 ### W5-A: ハイライト UI
 
 **ブランチ:** `v2/w5-a-highlights-ui`
@@ -1309,12 +1353,19 @@ tests/test_ui_run_page.py:
 - 保存先パスとコマンドログパスを表示
 - 「中間ファイルは削除済みです」の注記
 
-### 5. エラー
+### 5. エラー ★W4 レビューの申し送り
 - Codex CLI 失敗時も、タイムラインと切り抜き候補の表示が壊れないこと
   （softfail。services/pipeline.py の clips_error と同じ扱い）
+- **PipelineResult.highlights_error を必ず表示すること。**
+  regenerate(video_id, target="highlights") が失敗すると、例外ではなく
+  このフィールドに日本語メッセージが入る（clips_error と同じ設計）。
+  **表示を実装しないと、Codex 未導入やバリデーション失敗のときに
+  ジョブは成功扱いのまま候補 0 件になり、ユーザーに原因が一切伝わらない。**
+  ui/components/results.py の clips_error 表示（st.warning）と同じパターンで出す。
 
 ## Done 条件
 - uv run pytest が全件通る
+- **Codex を意図的に失敗させたとき、日本語の原因メッセージが画面に出る** ★必須
 - 実機で、5 区間・合計 5 分程度のハイライトを生成し、
   **繋ぎ目でフリーズ・音ズレが無いことを目視確認して報告に書く** ★必須
 ```
@@ -1354,6 +1405,8 @@ tests/test_ui_run_page.py:
 - 「字幕を焼き込む」チェックボックス（既定 ON）
 - 日本語フォントが見つからない環境では、字幕チェックの下に日本語で警告を出す
   （services.subtitle_burn.is_japanese_font_available() を使う）
+- **生成に時間がかかる旨を注記する。** build_short は 2 パス構成で
+  再エンコードが 2 回走るため、60 秒のショートでも待ち時間は短くない。
 
 ### 3. 生成
 - 「ショートを作成」ボタン
@@ -1362,14 +1415,21 @@ tests/test_ui_run_page.py:
 - 区間が 10 秒未満 / 180 秒超のときはボタンを無効化し、理由を日本語で表示する
   （services 側でも弾かれるが、UI で先に止める）
 
-### 4. 結果表示
+### 4. 結果表示 ★W4 レビューの申し送り
 - st.video() でその場再生（縦動画もそのまま再生できる）
 - 保存先パスとコマンドログパスを表示
+- **ShortResult.font_warning が None でなければ st.warning で表示すること。**
+  build_short は on_progress 経由でフォント警告を出さなくなった
+  （進捗メッセージと警告を混ぜないため）。ここで拾わないと警告がどこにも出ない。
+  生成前の事前警告（is_japanese_font_available）と、生成後の実績警告
+  （font_warning）は別物なので、**両方実装すること。**
 
 ## Done 条件
 - uv run pytest が全件通る
 - 実機で 60 秒のショートを「ぼかし / クロップ」×「字幕あり / なし」の 4 通り生成し、
   **日本語字幕が豆腐にならず、タイミングがズレないことを目視確認して報告に書く** ★必須
+  （字幕のタイミングは W4 で 2 パス化して構造的にズレない設計にしたが、
+   実映像で確認したのはこの W5-B が初めてになる。ここで必ず目視すること）
 - 出力が 1080x1920 であることを ffprobe で確認して報告に書く
 ```
 
@@ -1502,7 +1562,7 @@ docs/execution-plan-v2.md の全チェックボックスとフェーズ状態・
 | W2 | **ワーカーから st.\* を呼んでいないか**（最重要）。v1 機能の回帰。責務分離 |
 | W3 | UI にロジックが漏れていないか。容量計算の呼び出し頻度 |
 | W4 | **-ss の位置**（-i の後ろか）。連結が再エンコード経由か。字幕の時刻オフセット。W4-C は削除プレビューの集計と行バッジを取り違えていないか |
-| W5 | 実機での目視確認結果（繋ぎ目・日本語字幕）が報告にあるか |
+| W5 | 実機での目視確認結果（繋ぎ目・日本語字幕）が報告にあるか。**失敗が無音になっていないか**（highlights_error / font_warning を UI が拾っているか） |
 | W6 | AC の未達が正直に報告されているか |
 
 **全ウェーブ共通:**
