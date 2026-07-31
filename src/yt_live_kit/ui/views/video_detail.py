@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Literal
 import streamlit as st
 
 from yt_live_kit.config import Settings, get_settings
+from yt_live_kit.services.chapter_validator import validate_chapters
 from yt_live_kit.services.history import ProcessedVideo, list_processed_videos
 from yt_live_kit.services.jobs import JobBusyError, is_busy, start_job
 from yt_live_kit.services.pipeline import (
@@ -17,9 +18,18 @@ from yt_live_kit.services.pipeline import (
     regenerate_job_target,
 )
 from yt_live_kit.services.storage import StorageError, format_bytes, purge_source
+from yt_live_kit.services.youtube_api import (
+    fetch_video_snippet,
+    is_configured,
+    merge_chapters_into_description,
+    update_video_description,
+)
 from yt_live_kit.ui.components.clipboard import render_copy_button
 from yt_live_kit.ui.state import get_selected_video_id, set_active_job_id
-from yt_live_kit.ui.views._local_settings import load_description_applied_ids
+from yt_live_kit.ui.views._local_settings import (
+    load_description_applied_ids,
+    mark_description_applied,
+)
 from yt_live_kit.ui.views.highlights import render_highlights_section
 from yt_live_kit.ui.views.library import count_shorts
 from yt_live_kit.ui.views.shorts import render_shorts_section
@@ -36,6 +46,8 @@ _STATUS_LABELS: dict[StepStatus, str] = {
     "next": "● 次にやる",
     "pending": "○ 未着手",
 }
+_DESCRIPTION_UPDATED_IDS_KEY = "detail_description_updated_ids"
+_DESCRIPTION_SUCCESS_KEY = "detail_description_success"
 
 
 @dataclass(frozen=True)
@@ -173,12 +185,235 @@ def _render_stepper(steps: tuple[ProgressStep, ...]) -> str | None:
     return None
 
 
+def _description_updated_ids() -> set[str]:
+    value = st.session_state.get(_DESCRIPTION_UPDATED_IDS_KEY, set())
+    return set(value) if isinstance(value, (set, list, tuple)) else set()
+
+
+def _safe_user_text(value: object) -> str:
+    """ユーザー表示用テキストの半角山カッコを全角へ置換する."""
+    return str(value).replace("<", "〈").replace(">", "〉")
+
+
+def _mark_description_update_started(video_id: str) -> None:
+    updated_ids = _description_updated_ids()
+    updated_ids.add(video_id)
+    st.session_state[_DESCRIPTION_UPDATED_IDS_KEY] = updated_ids
+
+
+def _clear_description_update_started(video_id: str) -> None:
+    updated_ids = _description_updated_ids()
+    updated_ids.discard(video_id)
+    if updated_ids:
+        st.session_state[_DESCRIPTION_UPDATED_IDS_KEY] = updated_ids
+    else:
+        st.session_state.pop(_DESCRIPTION_UPDATED_IDS_KEY, None)
+
+
+def _save_description_completion(
+    video: ProcessedVideo,
+    settings: Settings,
+) -> bool:
+    """ローカル完了記録だけを保存し、成功時に再描画する."""
+    try:
+        mark_description_applied(video.video_id, settings)
+    # ファイル I/O 境界では認証ラッパー等の例外型も一定しないため、
+    # BaseException を除く全例外を日本語メッセージへ変換する。
+    except Exception as exc:
+        _mark_description_update_started(video.video_id)
+        st.warning(
+            "YouTube 側は更新済みですが、完了状態を保存できませんでした。"
+            "データ保存先の権限を確認し、完了状態の保存を再試行してください。"
+            f"（詳細: {_safe_user_text(exc)}）"
+        )
+        return False
+
+    _clear_description_update_started(video.video_id)
+    st.session_state[_DESCRIPTION_SUCCESS_KEY] = (
+        f"{_safe_user_text(video.title)} の YouTube 概要欄を更新しました。"
+    )
+    st.rerun()
+    return True
+
+
+@st.dialog("YouTube 概要欄への反映確認", width="large")
+def _description_preview_dialog(
+    video: ProcessedVideo,
+    before: str,
+    after: str,
+    settings: Settings,
+) -> None:
+    """取得済みの更新前後を表示し、確定時だけ YouTube を更新する."""
+    st.warning(
+        "YouTube 上の公開データを書き換えます。"
+        "更新前と更新後を確認してから確定してください。"
+    )
+    before_column, after_column = st.columns(2)
+    with before_column:
+        st.markdown("**更新前**")
+        st.text_area(
+            "現在の概要欄",
+            value=_safe_user_text(before),
+            height=360,
+            disabled=True,
+            key=f"detail_description_before_{video.video_id}",
+        )
+    with after_column:
+        st.markdown("**更新後**")
+        st.text_area(
+            "反映後の概要欄",
+            value=_safe_user_text(after),
+            height=360,
+            disabled=True,
+            key=f"detail_description_after_{video.video_id}",
+        )
+
+    busy = is_busy()
+    already_updated = video.video_id in _description_updated_ids()
+    completion_only = already_updated or before == after
+    if busy:
+        st.info(_BUSY_MESSAGE)
+    if already_updated:
+        st.warning(
+            "YouTube 側は更新済みですが、完了状態を保存できていません。"
+            "YouTube は再更新せず、完了状態の保存だけを再試行できます。"
+        )
+    elif completion_only:
+        st.info(
+            "YouTube の概要欄には同じタイムラインが既に反映されています。"
+            "YouTube は更新せず、完了状態だけを保存します。"
+        )
+
+    with st.container(horizontal=True):
+        cancel_clicked = st.button(
+            "キャンセル",
+            key=f"detail_description_cancel_{video.video_id}",
+        )
+        confirm_clicked = st.button(
+            (
+                "完了状態の保存を再試行"
+                if completion_only
+                else "この内容を概要欄に反映"
+            ),
+            key=f"detail_description_confirm_{video.video_id}",
+            type="primary",
+            disabled=busy,
+        )
+
+    if cancel_clicked:
+        st.rerun()
+    if not confirm_clicked or busy:
+        return
+
+    if completion_only:
+        _mark_description_update_started(video.video_id)
+        _save_description_completion(video, settings)
+        return
+
+    try:
+        update_video_description(video.video_id, after, settings)
+    # YouTube クライアント境界では I/O・認証ライブラリ由来の例外型が
+    # 一定しないため、BaseException を除く全例外を安全な表示へ変換する。
+    except Exception as exc:
+        st.error(
+            "YouTube の概要欄を更新できませんでした。"
+            f"時間をおいて再試行してください（詳細: {_safe_user_text(exc)}）。"
+        )
+        return
+
+    # YouTube 更新直後に記録し、ローカル保存失敗時の二重更新を防ぐ。
+    _mark_description_update_started(video.video_id)
+    _save_description_completion(video, settings)
+
+
+def _start_description_preview(
+    video: ProcessedVideo,
+    chapters_text: str,
+    settings: Settings,
+) -> None:
+    """検証後に概要欄の更新前後を取得し、共通ダイアログを開く."""
+    if is_busy():
+        st.info(_BUSY_MESSAGE)
+        return
+    if video.video_id in _description_updated_ids():
+        _description_preview_dialog(video, "", "", settings)
+        return
+    try:
+        configured = is_configured(settings)
+    # OAuth 設定確認もファイル I/O 境界のため、予期可能な外部例外を
+    # スタックトレースではなく日本語の案内へ変換する。
+    except Exception as exc:
+        st.error(
+            "YouTube OAuth 設定を確認できませんでした。"
+            f"設定ファイルを確認してください（詳細: {_safe_user_text(exc)}）。"
+        )
+        return
+    if not configured:
+        st.error(
+            "YouTube OAuth が設定されていません。"
+            "設定ファイルを配置してから、もう一度お試しください。"
+        )
+        return
+    if not chapters_text.strip():
+        st.error(
+            "反映できるチャプターがありません。"
+            "先にチャプターを生成してください。"
+        )
+        return
+
+    validation = validate_chapters(chapters_text)
+    if not validation.ok:
+        st.error(
+            "チャプターの形式が不正なため、概要欄プレビューを開始できません。\n\n"
+            + "\n".join(
+                f"・{_safe_user_text(error)}" for error in validation.errors
+            )
+        )
+        return
+
+    try:
+        snippet = fetch_video_snippet(video.video_id, settings)
+        before = str(snippet.get("description") or "")
+        after = merge_chapters_into_description(before, chapters_text)
+    # YouTube API・認証・I/O の外部境界では例外型が一定しないため、
+    # BaseException を除く全例外をサニタイズした日本語表示へ変換する。
+    except Exception as exc:
+        st.error(
+            "概要欄プレビューを作成できませんでした。"
+            f"時間をおいて再試行してください（詳細: {_safe_user_text(exc)}）。"
+        )
+        return
+    _description_preview_dialog(video, before, after, settings)
+
+
+def _render_description_control(
+    video: ProcessedVideo,
+    chapters_text: str,
+    settings: Settings,
+    *,
+    busy: bool,
+) -> None:
+    st.warning(
+        "概要欄への反映は YouTube 上の公開データを書き換えます。"
+        "確定前に更新前後を必ず確認できます。"
+    )
+    clicked = st.button(
+        "概要欄に反映",
+        key=f"detail_description_open_{video.video_id}",
+        type="primary",
+        disabled=busy,
+    )
+    if clicked and not busy:
+        _start_description_preview(video, chapters_text, settings)
+
+
 def _handle_next_action(
     next_action: str | None,
     video: ProcessedVideo,
     settings: Settings,
     *,
     run_page: StreamlitPage | None,
+    chapters_text: str = "",
 ) -> bool:
     """次ステップ CTA を実行し、ショート UI を開くか返す."""
     if next_action == "字幕":
@@ -191,7 +426,7 @@ def _handle_next_action(
     elif next_action == "候補":
         _confirm_regenerate_dialog(video, "clips", settings)
     elif next_action == "概要欄":
-        st.info("概要欄への反映は U5 で追加します。")
+        _start_description_preview(video, chapters_text, settings)
     return next_action == "ショート"
 
 
@@ -334,6 +569,9 @@ def render_video_detail_page(
 
     st.markdown(f"**{video.title}**")
     st.caption(video.video_id)
+    description_success = st.session_state.pop(_DESCRIPTION_SUCCESS_KEY, None)
+    if description_success:
+        st.success(description_success)
     busy = is_busy()
     if busy:
         st.info(_BUSY_MESSAGE)
@@ -355,6 +593,7 @@ def render_video_detail_page(
         video,
         settings,
         run_page=run_page,
+        chapters_text=result.chapters_text if result is not None else "",
     )
 
     st.divider()
@@ -388,7 +627,12 @@ def render_video_detail_page(
     render_shorts_section(result, expanded=shorts_expanded)
 
     st.subheader("6. 概要欄反映")
-    st.info("概要欄への差分プレビューと反映は U5 で追加します。")
+    _render_description_control(
+        video,
+        result.chapters_text,
+        settings,
+        busy=busy,
+    )
 
     with st.expander("元動画と中間ファイルの管理", expanded=False):
         st.caption(

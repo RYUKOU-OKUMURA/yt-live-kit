@@ -448,16 +448,16 @@ data/{video_id}/ ...
   - 旧 `history.py` のストレージ容量集計、全動画の内訳、個別削除、N 日以上前の一括削除を `ui/components/storage_manager.py` へ移し、設定ページから呼ぶ。全件表示、検索またはページングにより全動画へ到達可能にし、各動画に元動画容量と個別削除導線を表示する
   - 個別削除ダイアログには動画識別子・対象 1 件・削除対象バイト数（元動画 + 中間）・残る成果物を表示する。一括削除はプレビュー時に対象動画 ID の不変スナップショットを作り、ダイアログにはその件数・総容量・残る成果物を表示する。いずれも確定前は purge を呼ばず、確定後だけダイアログへ渡した動画 ID を削除し、確認後の再走査で対象を増やさない。`StorageError` は日本語で表示する。削除後もチャプター・全文・候補・切り出し済み動画を残す
   - `status_bar.py` / `results.py` の「処理済み一覧から」という案内を「ライブラリから」へ更新する
-- [ ] U5-2. 概要欄プレビューを開く共通フローを `video_detail.py` に実装する
+- [x] U5-2. 概要欄プレビューを開く共通フローを `video_detail.py` に実装する
   - 外側の「概要欄に反映」は `type="primary"` と警告表示で強調する
   - OAuth 設定、チャプター存在・形式を検証し、不正時は日本語で案内してプレビュー / 更新を開始しない。検証成功後に `fetch_video_snippet` で反映前を取得し、`merge_chapters_into_description` で反映後を作る
   - ステッパーの「次にやる: 概要欄」CTA と通常の概要欄ボタンは、同じプレビュー開始関数を呼ぶ
-- [ ] U5-3. `st.dialog(width="large")` 内に「更新前」「更新後」を別々の読み取り専用表示として並べる。**確定前のダイアログ再描画**では API を再取得しないよう、取得済みの更新前 / 更新後をダイアログ引数として渡す。確定時は既存 `update_video_description()` 内部の `fetch_video_snippet()` を維持し、`services/youtube_api.py` は変更しない
-- [ ] U5-4. 確認ボタンを押した場合だけ `update_video_description()` を呼び、成功後に限り `mark_description_applied()` を呼ぶ
+- [x] U5-3. `st.dialog(width="large")` 内に「更新前」「更新後」を別々の読み取り専用表示として並べる。**確定前のダイアログ再描画**では API を再取得しないよう、取得済みの更新前 / 更新後をダイアログ引数として渡す。確定時は既存 `update_video_description()` 内部の `fetch_video_snippet()` を維持し、`services/youtube_api.py` は変更しない
+- [x] U5-4. 確認ボタンを押した場合だけ `update_video_description()` を呼び、成功後に限り `mark_description_applied()` を呼ぶ
   - update 失敗時は mark せず、日本語エラーを表示する
   - YouTube 更新成功後にローカル mark だけ失敗した場合は、「YouTube 側は更新済みだが完了状態を保存できなかった」と日本語で明示する
   - 成功時は再描画後にステッパーの概要欄が完了になる
-- [ ] U5-5. ユニットテスト
+- [x] U5-5. ユニットテスト
   - 外側ボタン未クリック時は snippet 取得 / update / mark のいずれも呼ばれない
   - プレビュー開始時は OAuth・チャプター検証後に fetch / merge だけが呼ばれ、update は呼ばれない
   - ダイアログに更新前 / 更新後が別々に表示され、確定前は update / mark が呼ばれない
