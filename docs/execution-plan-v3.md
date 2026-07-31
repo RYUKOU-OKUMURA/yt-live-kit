@@ -25,7 +25,7 @@
 | S3 | ジャンプカット連結ショート生成（services 拡張） | [x] 完了 |
 | S4 | キュー量産 UI + 台本確認フロー | [x] 完了 |
 | S5 | フェーズ S 受け入れ（実配信 1 本からショート複数本を通しで作る） | [x] 完了 |
-| P0 | 安全な実機 upload probe（P1 / P2 完了後） | [ ] 未着手 |
+| P0 | 安全な実機 upload probe（P1 / P2 完了後） | [~] 進行中 |
 | P1 | 安全なアップロードサービス | [x] 完了 |
 | P2 | スケジュールポリシー + 原子的な予約確定 + 投稿確認 UI | [x] 完了 |
 | P3 | フェーズ P 受け入れ（予約投稿が実際に公開される） | [ ] 未着手 |
@@ -776,7 +776,7 @@ data/{video_id}/ ...
 
 **作業:**
 
-- [ ] P0-1. P1 / P2 の Done 条件と全モックテストが完了し、実 API を自動テストが呼ばないことを確認する。実操作の承認待ちでも P1 / P2 の開発・レビュー・コミットを止めない
+- [x] P0-1. P1 / P2 の Done 条件と全モックテストが完了し、実 API を自動テストが呼ばないことを確認する。実操作の承認待ちでも P1 / P2 の開発・レビュー・コミットを止めない
 - [ ] P0-2. `channels.list(mine=true)` の実チャンネル ID / 名称、対象ファイル、絶対パス、サイズ、尺、タイトル、説明文、タグ、timezone 付き予約日時と UTC `Z`、`privacyStatus=private`、`notifySubscribers=false`、Made for Kids / synthetic media の選択、Community Guidelines 同意、当日 attempt 数をユーザーに提示する。**private lock が非該当なら、この probe 動画も指定時刻に public となり得る**ことを明記し、その外部公開まで含む P0 専用の明示承認を得るまで確定しない
 - [ ] P0-3. 承認後も P2 の確認後再検証を通し、operation ID を発行した本番経路から 1 本だけ upload する。operation の `reserved → uploading → uploaded` または `needs_reconciliation` / `failed`、job ID、YouTube video ID、attempt 台帳を記録する
 - [ ] P0-4. `videos.list(part="status,processingDetails")` の bounded poll と YouTube Studio で processing 状態、指定時刻前の private、公開予約可否、private lock の有無を確認する。**private lock は probe 成功や予約投稿成功として扱わない**
