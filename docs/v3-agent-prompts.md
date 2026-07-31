@@ -57,6 +57,9 @@ v2 は Cursor 上で Grok 4.5（オーケストレーター）+ Composer 2.5（�
   services/batch.py における do_chapters / do_clips の引数追加・全呼び出しへの伝播・両方 False の入力検証だけとする
 - 【フェーズ P の実アップロードを伴うタスクのみ】実際に YouTube へアップロードする操作は、
   ユーザーの明示的な承認を得てから実行する。ユニットテストでは googleapiclient を必ずモックする
+- 【U5 のみ】フェーズ受け入れでは実際の YouTube 概要欄を書き換えない。更新前 / 更新後の表示と
+  確定前に update が呼ばれないことを安全に手動確認し、update / mark の成功・失敗はモックと
+  隔離した一時 data_dir で検証する
 
 ## Done 条件
 （execution-plan-v3.md の当該タスクの「Done 条件」をそのまま転記する）
@@ -94,6 +97,7 @@ uv run pytest
 - [ ] **スコープ外への逸脱がないか**: [`docs/requirements-v3.md` §2](./requirements-v3.md) で明示的にスコープ外としたもの（BGM・SE・ズーム・トランジション、即時公開投稿、Cookie 認証等）に手を出していないか
 - [ ] **変更ファイル範囲の逸脱がないか**: `git diff --stat` が、指示した「変更してよいファイル範囲」に収まっているか
 - [ ] **破壊的操作の確認ダイアログ有無**: 削除・上書き・概要欄反映・投稿を伴う実装では、`st.dialog` による確認、または差分プレビューが実装されているか（U2 以降のタスクに適用）
+- [ ] **概要欄更新経路の一本化**: U5 以降、旧 `history.py`、公開ナビゲーション、別の UI ヘルパーに、差分プレビューを迂回して `update_video_description()` を呼べる経路が残っていないか
 - [ ] **日本語エラーメッセージ**: 新規追加したエラーパスがすべて日本語で、原因と対処が書かれているか。スタックトレースの直接表示が無いか
 - [ ] **半角 `<>` の混入がないか**: プロンプトテンプレート・生成テキストの出力ルールに半角山カッコ禁止が明記され、バリデーションされているか（S1 のテロップ台本・メタデータ生成で特に重要）
 - [ ] **従量課金 API を呼んでいないか**: AI 生成はすべて Codex CLI 経由か。新しい HTTP API 呼び出しを追加していないか
@@ -103,6 +107,10 @@ uv run pytest
 - [ ] `git diff --stat` に `src/yt_live_kit/services/` 配下のファイルが含まれていないこと（U0〜U4 は原則違反。ただし U3 の `services/batch.py` は `do_chapters` / `do_clips` の引数追加・`run_batch_job_target()` → `run_batch()` → `pipeline.run()` の全呼び出し伝播・両方 `False` の入力検証に限り許可。U5 も `services/youtube_api.py` は変更しない）
 - [ ] 新しい永続化（チャンネル既定ハンドル等）が `services/` を新設せず、`ui/views/_local_settings.py` のような UI 層のヘルパーで完結しているか
 - [ ] `ui/pages/` に相当する旧ディレクトリ・旧 import パスが残っていないか（U0 完了後は全タスクで確認）
+- [ ] U5 完了時の IA が公開 3 画面（ライブラリ / 取り込み / 設定）+ `visibility="hidden"` の動画詳細 1 画面であり、`history.py` / `url_path="history"` が残っていないか
+- [ ] 旧「処理済み一覧」を削除しても、v1 / v2 のストレージ管理が `ui/components/storage_manager.py` 経由で設定ページから利用できるか。10 件を超えても 11 件目以降を含む全動画へ到達でき、各動画の元動画容量と個別削除導線、個別 / 一括削除の確認ダイアログ、成果物保持が回帰していないか
+- [ ] U5 の概要欄反映が、外側 primary ボタン → OAuth / チャプター検証 → fetch / merge → `st.dialog(width="large")` の更新前 / 更新後表示 → 確認時だけ update → 成功後だけ mark、の順になっているか。確定前のダイアログ再描画だけは取得済みプレビューを再利用し、確定時は既存 update 内部の fetch を維持しているか
+- [ ] update 失敗時に mark されず、YouTube 更新成功後のローカル mark 失敗は「YouTube 側は更新済み」と分かる日本語警告になるか
 - [ ] ステッパー・確認ダイアログ・共通コピー部品が、複数ページで同じ実装を再発明していないか（`ui/components/clipboard.py` を再利用しているか）
 
 ### 3.3 フェーズ S 特有の観点
@@ -142,6 +150,8 @@ uv run pytest
 | `PipelineResult.highlights_error` / `clips_error` | 既存のこれらのフィールドは softfail の結果を保持する。動画詳細ページ（U2）で表示を移設する際、表示を落とさないよう注意する（v2 の W4 レビューで一度発生した不具合パターン） |
 | `ShortResult.font_warning` | `build_short()` / S3 で新設する `build_short_from_segments()` のどちらも、日本語フォントが解決できなかった場合にこのフィールドへ日本語警告を入れる。UI 側で `st.warning` として拾うことを忘れない |
 | クリップボード部品の移設（U2） | `build_clipboard_copy_html` / `render_copy_button` は **シグネチャ・実装を変えずに** `ui/components/results.py` から `ui/components/clipboard.py` へ移す。移設と機能追加を同時にやらない |
+| U5 の正式 IA とストレージ管理 | 公開ナビゲーションはライブラリ / 取り込み / 設定の 3 画面だけとし、動画詳細は hidden のままにする。旧 `history.py` は削除するが、ストレージ管理は `ui/components/storage_manager.py` へ移し、設定ページから利用できるようにして v1 / v2 の AC-15 を維持する。全動画へ到達可能にし、個別ダイアログには動画識別子・1 件・削除対象バイト数（元動画 + 中間）・残る成果物を表示する。一括は対象動画 ID の不変スナップショットを渡して件数・総容量・残る成果物を表示する。双方で未確定時 purge なし、確定時だけダイアログへ渡した正確な ID、確認後の対象増加なし、`StorageError` の日本語表示、成果物保持をテストする |
+| U5 の概要欄反映 | ステッパー CTA と通常ボタンを同じフローに統一する。取得済みの更新前 / 更新後を large dialog の引数に渡し、確定前のダイアログ再描画では再取得しない。確定時は既存 `update_video_description` 内部の fetch を維持し、確認時だけ update、成功後だけ `mark_description_applied` を呼ぶ。`services/youtube_api.py` は変更せず、受け入れでは実 YouTube 書き込みを行わない |
 | ライブラリのアーカイブ状態の保存先 | `data/_config/archived_videos.json`（`video_id` の配列）。`ui/views/_local_settings.py` を **U1 で新設**し `load_archived_ids()` / `save_archived_ids()` を実装する。`start.command` で毎回起動し直す運用のため、`st.session_state` のみの一時状態にはしない（永続化必須） |
 | チャンネル既定ハンドルの保存先 | `data/_config/channel_handle.txt`（1 行テキスト）。**U1 で新設済みの `ui/views/_local_settings.py` に U3 で追記**し、U4 が再利用する。`services/description.py` の `get_template_path()` と同じ発想だが、**フェーズ U の制約により `services/` には置かない** |
 | テロップ台本・出力ファイルの命名規則 | `services.telop.make_clip_id()` が、ミリ秒単位に正規化した区間列の SHA-256 先頭 12 桁を返す。S1 の `telop_{clip_id}.json` と S3 の `short_{clip_id}.mp4` は必ず同じ関数を使う |
@@ -159,7 +169,7 @@ uv run pytest
 | U2 | `render_highlights_section` / `render_shorts_section` の既存表示・生成ロジックを維持しているか。既存成果物を上書きする場合の確認 `st.dialog` 追加だけは許可する |
 | U3 | `services/channel.py` の `list_archives()` を自動で呼んでいないか（レート制限対策・NFR-05 は v3 でも維持）。`services/batch.py` の変更が `do_chapters` / `do_clips` の引数追加・既定 `True` / `True`・`run_batch_job_target()` → `run_batch()` → `pipeline.run()` の全呼び出し伝播・両方 `False` の入力検証だけか。UI 3 ルートからの `start_job()` kwargs もテストされているか。`_local_settings.py` は U1 で新設済みのため、重複して新規作成していないか |
 | U4 | `config.py` を変更しようとしていないか（設定ページは表示専用 + チャンネル既定ハンドルのみ編集可） |
-| U5 | 反映前後の対比を「反映後のみ」で済ませていないか（v2 の `_render_description_preview` の再発防止） |
+| U5 | 正式 IA が公開 3 画面 + 非表示詳細になり旧 history が削除されているか。ストレージ管理を設定へ移し、全動画への到達性、個別 / 一括ダイアログの対象情報、未確定 / 確定境界、StorageError、成果物保持まで AC-15 を維持しているか。概要欄は外側 primary → 検証 → fetch / merge → large dialog の更新前後別表示 → 確認時だけ update → 成功後だけ mark の一本化された流れか。確定時の既存 update 内部 fetch を残し、実 YouTube 書き込みを受け入れ試験で実行していないか |
 | S1 | テロップ台本とメタデータを別々の Codex 呼び出しにしていないか（コスト・待ち時間の両方に効く） |
 | S2 | プリセット追加によって `build_segment_subtitle()` の既定挙動（v2 互換）が変わっていないか |
 | S3 | 累積タイムオフセットの計算に、区間ごとの `start_sec` だけを使っていないか（連結後にズレる） |
@@ -175,5 +185,6 @@ uv run pytest
 
 | 日付 | 内容 |
 |------|------|
+| 2026-08-01 | U5 着手前監査を反映。正式 IA、ストレージ管理移設、概要欄更新経路の一本化、update / mark 順序、安全な受け入れ境界をレビュー観点へ追加 |
 | 2026-08-01 | 実装前監査を反映。Video Uploads 専用クォータを 100 回/日に更新し、`make_clip_id()` 規則を固定 |
 | 2026-08-01 | v3 初版。impl-sonnet 向け指示テンプレート、レビュー観点チェックリスト、フェーズ別注意点を定義 |
