@@ -8,13 +8,19 @@ import pytest
 
 from yt_live_kit.config import Settings
 from yt_live_kit.models.meta import VideoMeta
+from yt_live_kit.models.telop import TelopScriptDocument
+from yt_live_kit.services.ffmpeg import FfmpegError, concat_segments as real_concat_segments
+from yt_live_kit.services.subtitle_burn import SubtitleBurnError
+from yt_live_kit.services.telop import TelopError, make_clip_id
 from yt_live_kit.services.shorts import (
     BLUR_LAYOUT_FILTER,
     CROP_LAYOUT_FILTER,
     INTERMEDIATE_CRF,
     ShortsError,
+    build_ass_subtitle_filter,
     build_layout_filter,
     build_short,
+    build_short_from_segments,
     build_subtitle_filter,
     build_video_filter_chain,
     escape_ffmpeg_subtitles_path,
@@ -673,3 +679,499 @@ def test_build_short_removes_intermediate_when_subtitle_build_fails(
         build_short("vid123", 10, 40, settings)
 
     assert not intermediate.exists()
+
+
+# --- S3: ジャンプカット連結ショート ---------------------------------------
+
+
+def _valid_s3_document(segments: list[tuple[float, float]]) -> TelopScriptDocument:
+    return TelopScriptDocument.model_validate(
+        {
+            "hook_text": "冒頭フック",
+            "title_candidates": ["タイトル"],
+            "description": "説明文",
+            "tags": ["タグ"],
+            "segments": [
+                {
+                    "start_sec": start,
+                    "end_sec": end,
+                    "lines": [
+                        {
+                            "start_sec": start,
+                            "end_sec": min(start + 1.0, end),
+                            "text": f"字幕{index}",
+                            "emphasis": index == 1,
+                        }
+                    ],
+                }
+                for index, (start, end) in enumerate(segments, start=1)
+            ],
+        }
+    )
+
+
+def _install_s3_success_mocks(monkeypatch, tmp_path: Path):
+    calls: dict[str, list] = {"encode": [], "concat": [], "subtitle": [], "run": []}
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"source")
+
+    monkeypatch.setattr(
+        "yt_live_kit.services.shorts.ensure_source_video", lambda *args: source
+    )
+
+    def encode(source_path, output, start, end, **kwargs):
+        calls["encode"].append((source_path, output, start, end, kwargs))
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_bytes(b"segment")
+        return output
+
+    def concat(paths, output, **kwargs):
+        calls["concat"].append((list(paths), output, kwargs))
+        output.write_bytes(b"concat")
+        return output
+
+    def subtitle(video_id, segments, settings, **kwargs):
+        calls["subtitle"].append((video_id, list(segments), kwargs))
+        output = settings.data_dir / video_id / "shorts" / "subtitles" / "result.ass"
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text("ass", encoding="utf-8")
+        return output
+
+    def run(cmd, **kwargs):
+        calls["run"].append(cmd)
+        Path(cmd[-1]).write_bytes(b"final")
+        return MagicMock(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr("yt_live_kit.services.shorts.encode_segment", encode)
+    monkeypatch.setattr("yt_live_kit.services.shorts.concat_segments", concat)
+    monkeypatch.setattr(
+        "yt_live_kit.services.shorts.build_concatenated_subtitle", subtitle
+    )
+    monkeypatch.setattr("yt_live_kit.services.shorts.find_ffmpeg", lambda path: path)
+    monkeypatch.setattr("yt_live_kit.services.shorts.subprocess.run", run)
+    monkeypatch.setattr(
+        "yt_live_kit.services.shorts.is_japanese_font_available", lambda preferred: True
+    )
+    return calls
+
+
+def test_build_ass_subtitle_filter_has_no_force_style(tmp_path):
+    result = build_ass_subtitle_filter(tmp_path / "style.ass")
+    assert result.startswith("subtitles=")
+    assert "force_style" not in result
+
+
+@pytest.mark.parametrize("layout", ["blur", "crop"])
+def test_build_short_from_segments_preserves_order_progress_and_presets(
+    tmp_path, monkeypatch, layout
+):
+    video_id = "testvid1234"
+    _setup_video_dir(tmp_path, video_id)
+    settings = Settings(data_dir=tmp_path)
+    calls = _install_s3_success_mocks(monkeypatch, tmp_path)
+    segments = [(20.0, 24.0), (5.0, 9.0), (20.0, 24.0)]
+    progress = []
+
+    result = build_short_from_segments(
+        video_id,
+        segments,
+        settings,
+        layout=layout,
+        telop_script=_valid_s3_document(segments),
+        preset="boxed",
+        hook_preset="hook",
+        ffmpeg_path="ffmpeg-test",
+        on_progress=lambda current, total, message: progress.append(
+            (current, total, message)
+        ),
+    )
+
+    assert [(call[2], call[3]) for call in calls["encode"]] == segments
+    assert all(call[4]["crf"] == INTERMEDIATE_CRF for call in calls["encode"])
+    encoded_paths = [call[1] for call in calls["encode"]]
+    assert calls["concat"][0][0] == encoded_paths
+    assert [item[:2] for item in progress] == [
+        (1, 6),
+        (2, 6),
+        (3, 6),
+        (4, 6),
+        (5, 6),
+        (6, 6),
+    ]
+    assert calls["subtitle"][0][2]["preset"] == "boxed"
+    assert calls["subtitle"][0][2]["hook_preset"] == "hook"
+    cmd = calls["run"][0]
+    filter_flag = "-filter_complex" if layout == "blur" else "-vf"
+    filter_value = cmd[cmd.index(filter_flag) + 1]
+    assert filter_value.count("subtitles=") == 1
+    assert "force_style" not in filter_value
+    assert "-ss" not in cmd and "-t" not in cmd
+    assert result.output_path.is_file()
+    assert result.output_path.name == f"short_{make_clip_id(segments)}.mp4"
+    assert result.burned_subtitles is True
+    assert result.duration_sec == pytest.approx(12.0)
+    assert result.command_log_path.name == f"{result.output_path.stem}.ffmpeg.log"
+    assert not any((tmp_path / video_id / "shorts" / "segments").iterdir())
+
+
+@pytest.mark.parametrize(
+    ("segments", "message"),
+    [
+        ([], "1 件以上"),
+        ([("x", 10.0)], "数値"),
+        ([(float("nan"), 10.0)], "有限"),
+        ([(-0.0004, 10.0)], "負"),
+        ([(2.0, 1.0)], "開始時刻より後"),
+        ([(1.0, 1.0004)], "開始時刻より後"),
+        ([(0.0, 9.0)], "10 秒以上"),
+        ([(0.0, 181.0)], "区間を減らすか短くしてください"),
+    ],
+)
+def test_build_short_from_segments_rejects_bad_segments_before_source(
+    tmp_path, monkeypatch, segments, message
+):
+    video_id = "testvid1234"
+    _setup_video_dir(tmp_path, video_id)
+    ensure = MagicMock()
+    monkeypatch.setattr("yt_live_kit.services.shorts.ensure_source_video", ensure)
+    with pytest.raises(ShortsError, match=message):
+        build_short_from_segments(video_id, segments, Settings(data_dir=tmp_path))
+    ensure.assert_not_called()
+
+
+@pytest.mark.parametrize("duration", [10.0, 180.0])
+def test_build_short_from_segments_accepts_integer_ms_duration_boundaries(
+    tmp_path, monkeypatch, duration
+):
+    video_id = "testvid1234"
+    _setup_video_dir(tmp_path, video_id)
+    calls = _install_s3_success_mocks(monkeypatch, tmp_path)
+    result = build_short_from_segments(
+        video_id, [(0.00049, duration + 0.00049)], Settings(data_dir=tmp_path)
+    )
+    assert result.duration_sec == duration
+    assert calls["encode"][0][2:4] == (0.0, duration)
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"layout": "square"},
+        {"output_name": ""},
+        {"output_name": "../bad.mp4"},
+        {"output_name": "bad.mov"},
+        {"output_name": "bad\x00name.mp4"},
+        {"output_name": "bad\nname.mp4"},
+        {"output_name": "bad\x1fname.mp4"},
+        {"hook_text": "   "},
+        {"hook_text": "禁止<文字>"},
+        {"preset": "missing"},
+        {"hook_preset": "missing"},
+    ],
+)
+def test_build_short_from_segments_preflight_rejects_options_before_source(
+    tmp_path, monkeypatch, kwargs
+):
+    video_id = "testvid1234"
+    _setup_video_dir(tmp_path, video_id)
+    ensure = MagicMock()
+    encode = MagicMock()
+    monkeypatch.setattr("yt_live_kit.services.shorts.ensure_source_video", ensure)
+    monkeypatch.setattr("yt_live_kit.services.shorts.encode_segment", encode)
+    with pytest.raises(ShortsError):
+        build_short_from_segments(
+            video_id, [(0.0, 10.0)], Settings(data_dir=tmp_path), **kwargs
+        )
+    ensure.assert_not_called()
+    encode.assert_not_called()
+
+
+def test_build_short_from_segments_rejects_invalid_telop_before_source(
+    tmp_path, monkeypatch
+):
+    video_id = "testvid1234"
+    _setup_video_dir(tmp_path, video_id)
+    ensure = MagicMock()
+    monkeypatch.setattr("yt_live_kit.services.shorts.ensure_source_video", ensure)
+    document = _valid_s3_document([(0.0, 10.0)])
+    invalid = document.model_copy(
+        update={"segments": [document.segments[0].model_copy(update={"end_sec": 9.0})]}
+    )
+    with pytest.raises(ShortsError, match="入力区間"):
+        build_short_from_segments(
+            video_id,
+            [(0.0, 10.0)],
+            Settings(data_dir=tmp_path),
+            telop_script=invalid,
+        )
+    ensure.assert_not_called()
+
+
+def test_build_short_from_segments_converts_telop_validation_error_before_source(
+    tmp_path, monkeypatch
+):
+    video_id = "testvid1234"
+    _setup_video_dir(tmp_path, video_id)
+    ensure = MagicMock()
+    monkeypatch.setattr("yt_live_kit.services.shorts.ensure_source_video", ensure)
+    monkeypatch.setattr(
+        "yt_live_kit.services.shorts.validate_telop_script",
+        MagicMock(side_effect=TelopError("台本検証失敗")),
+    )
+    with pytest.raises(ShortsError, match="台本検証失敗"):
+        build_short_from_segments(
+            video_id,
+            [(0.0, 10.0)],
+            Settings(data_dir=tmp_path),
+            telop_script=_valid_s3_document([(0.0, 10.0)]),
+        )
+    ensure.assert_not_called()
+
+
+def test_build_short_from_segments_custom_name_atomic_replace_and_keep(
+    tmp_path, monkeypatch
+):
+    video_id = "testvid1234"
+    video_dir = _setup_video_dir(tmp_path, video_id)
+    settings = Settings(data_dir=tmp_path)
+    _install_s3_success_mocks(monkeypatch, tmp_path)
+    existing = video_dir / "shorts" / "output" / "custom.mp4"
+    existing.parent.mkdir(parents=True)
+    existing.write_bytes(b"old")
+
+    result = build_short_from_segments(
+        video_id,
+        [(0.0, 10.0)],
+        settings,
+        output_name="custom.mp4",
+        keep_intermediate=True,
+    )
+
+    assert existing.read_bytes() == b"final"
+    assert result.command_log_path.name == "custom.ffmpeg.log"
+    assert any((video_dir / "shorts" / "segments").iterdir())
+
+
+def test_build_short_from_segments_pass2_failure_preserves_existing_and_cleans(
+    tmp_path, monkeypatch
+):
+    video_id = "testvid1234"
+    video_dir = _setup_video_dir(tmp_path, video_id)
+    settings = Settings(data_dir=tmp_path)
+    _install_s3_success_mocks(monkeypatch, tmp_path)
+    existing = video_dir / "shorts" / "output" / "custom.mp4"
+    existing.parent.mkdir(parents=True)
+    existing.write_bytes(b"old")
+
+    monkeypatch.setattr(
+        "yt_live_kit.services.shorts.subprocess.run",
+        lambda *args, **kwargs: MagicMock(returncode=1, stdout="", stderr="失敗"),
+    )
+    with pytest.raises(ShortsError, match="生成に失敗"):
+        build_short_from_segments(
+            video_id,
+            [(0.0, 10.0)],
+            settings,
+            output_name="custom.mp4",
+        )
+
+    assert existing.read_bytes() == b"old"
+    assert not any((video_dir / "shorts" / "segments").iterdir())
+    assert not list(existing.parent.glob(".custom.*.mp4"))
+
+
+def test_build_short_from_segments_font_warning_matches_legacy(tmp_path, monkeypatch):
+    video_id = "testvid1234"
+    _setup_video_dir(tmp_path, video_id)
+    _install_s3_success_mocks(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        "yt_live_kit.services.shorts.is_japanese_font_available",
+        lambda preferred: False,
+    )
+    result = build_short_from_segments(
+        video_id, [(0.0, 10.0)], Settings(data_dir=tmp_path)
+    )
+    assert result.font_warning == ("日本語フォントが見つかりません。字幕が正しく表示されない可能性があります。")
+
+
+@pytest.mark.parametrize(
+    ("stage", "keep_intermediate"),
+    [
+        ("encode", False),
+        ("concat", False),
+        ("subtitle", False),
+        ("pass2_setup", False),
+        ("encode", True),
+        ("concat", True),
+        ("subtitle", True),
+        ("pass2_setup", True),
+    ],
+)
+def test_build_short_from_segments_stage_failures_convert_and_apply_cleanup_policy(
+    tmp_path, monkeypatch, stage, keep_intermediate
+):
+    video_id = "testvid1234"
+    video_dir = _setup_video_dir(tmp_path, video_id)
+    settings = Settings(data_dir=tmp_path)
+    _install_s3_success_mocks(monkeypatch, tmp_path)
+
+    if stage == "encode":
+
+        def fail_encode(source, output, *args, **kwargs):
+            output.parent.mkdir(parents=True, exist_ok=True)
+            (output.parent / "marker.txt").write_text("keep", encoding="utf-8")
+            raise FfmpegError("区間エンコード失敗")
+
+        monkeypatch.setattr("yt_live_kit.services.shorts.encode_segment", fail_encode)
+    elif stage == "concat":
+        monkeypatch.setattr(
+            "yt_live_kit.services.shorts.concat_segments",
+            MagicMock(side_effect=FfmpegError("連結失敗")),
+        )
+    elif stage == "subtitle":
+        monkeypatch.setattr(
+            "yt_live_kit.services.shorts.build_concatenated_subtitle",
+            MagicMock(side_effect=SubtitleBurnError("字幕失敗")),
+        )
+    else:
+        monkeypatch.setattr(
+            "yt_live_kit.services.shorts.find_ffmpeg",
+            MagicMock(side_effect=FfmpegError("ffmpeg 未検出")),
+        )
+
+    with pytest.raises(ShortsError):
+        build_short_from_segments(
+            video_id,
+            [(0.0, 10.0)],
+            settings,
+            keep_intermediate=keep_intermediate,
+        )
+
+    clip_dirs = list((video_dir / "shorts" / "segments").glob("*"))
+    if keep_intermediate:
+        assert len(clip_dirs) == 1
+        assert any(clip_dirs[0].iterdir())
+    else:
+        assert clip_dirs == []
+
+
+def test_build_short_from_segments_success_cleanup_failure_is_reported(
+    tmp_path, monkeypatch
+):
+    video_id = "testvid1234"
+    _setup_video_dir(tmp_path, video_id)
+    settings = Settings(data_dir=tmp_path)
+    _install_s3_success_mocks(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        "yt_live_kit.services.shorts.shutil.rmtree",
+        MagicMock(side_effect=OSError("削除拒否")),
+    )
+
+    with pytest.raises(ShortsError, match="中間ファイルの削除に失敗"):
+        build_short_from_segments(video_id, [(0.0, 10.0)], settings)
+
+
+def test_build_short_from_segments_primary_failure_survives_cleanup_failure(
+    tmp_path, monkeypatch, caplog
+):
+    video_id = "testvid1234"
+    _setup_video_dir(tmp_path, video_id)
+    settings = Settings(data_dir=tmp_path)
+    _install_s3_success_mocks(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        "yt_live_kit.services.shorts.subprocess.run",
+        lambda *args, **kwargs: MagicMock(returncode=1, stdout="", stderr="本体失敗"),
+    )
+    monkeypatch.setattr(
+        "yt_live_kit.services.shorts.shutil.rmtree",
+        MagicMock(side_effect=OSError("削除拒否")),
+    )
+
+    with caplog.at_level("WARNING", logger="yt_live_kit.services.shorts"):
+        with pytest.raises(ShortsError, match="ショート動画の生成に失敗") as error:
+            build_short_from_segments(video_id, [(0.0, 10.0)], settings)
+
+    assert "本体失敗" in str(error.value)
+    assert "中間ファイルを削除できませんでした" in caplog.text
+
+
+@pytest.mark.parametrize("keep_intermediate", [False, True])
+def test_build_short_from_segments_real_concat_failure_keeps_or_cleans_all_artifacts(
+    tmp_path, monkeypatch, keep_intermediate
+):
+    video_id = "testvid1234"
+    video_dir = _setup_video_dir(tmp_path, video_id)
+    settings = Settings(data_dir=tmp_path)
+    _install_s3_success_mocks(monkeypatch, tmp_path)
+
+    def encode_with_log(source, output, start, end, **kwargs):
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_bytes(b"segment")
+        output.with_suffix(".ffmpeg.log").write_text("区間ログ", encoding="utf-8")
+        return output
+
+    monkeypatch.setattr("yt_live_kit.services.shorts.encode_segment", encode_with_log)
+    monkeypatch.setattr(
+        "yt_live_kit.services.shorts.concat_segments", real_concat_segments
+    )
+    monkeypatch.setattr(
+        "yt_live_kit.services.ffmpeg.find_ffmpeg", lambda ffmpeg_path: ffmpeg_path
+    )
+    monkeypatch.setattr(
+        "yt_live_kit.services.ffmpeg.subprocess.run",
+        lambda *args, **kwargs: MagicMock(
+            returncode=1, stdout="", stderr="concat failure"
+        ),
+    )
+
+    with pytest.raises(ShortsError, match="ffmpeg の連結に失敗"):
+        build_short_from_segments(
+            video_id,
+            [(0.0, 10.0)],
+            settings,
+            keep_intermediate=keep_intermediate,
+        )
+
+    clip_dirs = list((video_dir / "shorts" / "segments").glob("*"))
+    if keep_intermediate:
+        assert len(clip_dirs) == 1
+        names = {path.name for path in clip_dirs[0].iterdir()}
+        assert {
+            "seg_001.mp4",
+            "seg_001.ffmpeg.log",
+            "concat.txt",
+            "concat.ffmpeg.log",
+        } <= names
+    else:
+        assert clip_dirs == []
+
+
+@pytest.mark.parametrize("keep_intermediate", [False, True])
+def test_build_short_from_segments_pass2_returncode_failure_keeps_or_cleans(
+    tmp_path, monkeypatch, keep_intermediate
+):
+    video_id = "testvid1234"
+    video_dir = _setup_video_dir(tmp_path, video_id)
+    settings = Settings(data_dir=tmp_path)
+    _install_s3_success_mocks(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        "yt_live_kit.services.shorts.subprocess.run",
+        lambda *args, **kwargs: MagicMock(returncode=1, stdout="", stderr="pass2 failure"),
+    )
+
+    with pytest.raises(ShortsError, match="ショート動画の生成に失敗"):
+        build_short_from_segments(
+            video_id,
+            [(0.0, 10.0)],
+            settings,
+            keep_intermediate=keep_intermediate,
+        )
+
+    clip_dirs = list((video_dir / "shorts" / "segments").glob("*"))
+    if keep_intermediate:
+        assert len(clip_dirs) == 1
+        assert {"seg_001.mp4", "concat.mp4"} <= {
+            path.name for path in clip_dirs[0].iterdir()
+        }
+    else:
+        assert clip_dirs == []

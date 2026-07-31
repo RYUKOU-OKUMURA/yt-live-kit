@@ -6,20 +6,24 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from yt_live_kit.models.telop import TelopScriptDocument
 from yt_live_kit.services import subtitle_burn
 from yt_live_kit.services.subtitle_burn import (
     TELOP_PRESETS,
     SubtitleBurnError,
     TelopPreset,
     TimedCue,
+    build_concatenated_subtitle,
     build_segment_subtitle,
     filter_cues_for_segment,
+    get_telop_preset,
     is_japanese_font_available,
     resolve_font,
     write_ass,
     write_hook_ass,
 )
 from yt_live_kit.services.vtt_parser import Cue, deduplicate_progressive
+from yt_live_kit.services.telop import TelopValidationResult, make_clip_id
 
 # YouTube 自動字幕によくある「前の行 + 新しい語」が積み上がるプログレッシブ形式。
 PROGRESSIVE_VTT = """WEBVTT
@@ -508,3 +512,272 @@ def test_write_ass_combines_default_and_hook_styles_and_layers(tmp_path):
     assert subtitle_burn._style_line("Hook", "Font", TELOP_PRESETS["boxed"]) in content
     assert "Dialogue: 0,0:00:02.00,0:00:03.00,Default" in content
     assert "Dialogue: 1,0:00:00.00,0:00:02.00,Hook" in content
+
+
+# --- S3: 複数区間の連結字幕 -----------------------------------------------
+
+
+def _s3_settings(tmp_path: Path, vtt: str = "WEBVTT\n"):
+    from yt_live_kit.config import Settings
+
+    subtitle_dir = tmp_path / "video" / "subtitles"
+    subtitle_dir.mkdir(parents=True)
+    (subtitle_dir / "ja.vtt").write_text(vtt, encoding="utf-8")
+    return Settings(data_dir=tmp_path)
+
+
+def test_get_telop_preset_is_public_and_validates_name():
+    assert get_telop_preset("boxed") is TELOP_PRESETS["boxed"]
+    with pytest.raises(SubtitleBurnError, match="利用可能"):
+        get_telop_preset("missing")
+
+
+def test_build_concatenated_subtitle_vtt_uses_cumulative_timeline(tmp_path):
+    vtt = """WEBVTT
+
+1
+00:00:10.500 --> 00:00:11.500
+一つ目
+
+2
+00:00:20.500 --> 00:00:21.500
+二つ目
+
+3
+00:00:30.500 --> 00:00:31.500
+三つ目
+"""
+    settings = _s3_settings(tmp_path, vtt)
+    segments = [(10.0, 14.0), (20.0, 24.0), (30.0, 34.0)]
+
+    def capture(cues, output_path, **kwargs):
+        assert [(cue.start_seconds, cue.end_seconds) for cue in cues] == [
+            (0.5, 1.5),
+            (4.5, 5.5),
+            (8.5, 9.5),
+        ]
+        assert [cue.text for cue in cues] == ["一つ目", "二つ目", "三つ目"]
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text("ass", encoding="utf-8")
+        return output_path
+
+    with (
+        patch(
+            "yt_live_kit.services.subtitle_burn.write_ass", side_effect=capture
+        ) as writer,
+        patch(
+            "yt_live_kit.services.subtitle_burn.parse_vtt_with_end",
+            wraps=subtitle_burn.parse_vtt_with_end,
+        ) as parser,
+        patch("yt_live_kit.services.subtitle_burn.resolve_font", return_value="Font"),
+    ):
+        result = build_concatenated_subtitle("video", segments, settings)
+
+    writer.assert_called_once()
+    parser.assert_called_once()
+    assert result.name == f"short_{make_clip_id(segments)}.ass"
+
+
+def test_build_concatenated_subtitle_telop_clips_and_propagates_presets(tmp_path):
+    settings = _s3_settings(tmp_path)
+    segments = [(10.00049, 15.99951), (30.0, 34.0)]
+    document = TelopScriptDocument.model_validate(
+        {
+            "hook_text": "台本フック",
+            "title_candidates": ["題"],
+            "description": "説明",
+            "tags": ["タグ"],
+            "segments": [
+                {
+                    "start_sec": 10.0,
+                    "end_sec": 16.0,
+                    "lines": [
+                        {
+                            "start_sec": 10.0,
+                            "end_sec": 16.0,
+                            "text": "一つ目",
+                            "emphasis": True,
+                        }
+                    ],
+                },
+                {
+                    "start_sec": 30.0,
+                    "end_sec": 34.0,
+                    "lines": [
+                        {
+                            "start_sec": 30.0,
+                            "end_sec": 31.0,
+                            "text": "二つ目",
+                            "emphasis": False,
+                        }
+                    ],
+                },
+            ],
+        }
+    )
+    with patch("yt_live_kit.services.subtitle_burn.write_ass") as writer:
+        writer.side_effect = lambda cues, output_path, **kwargs: output_path
+        build_concatenated_subtitle(
+            "video",
+            segments,
+            settings,
+            telop_script=document,
+            preset="boxed",
+            hook_preset="bold_outline",
+        )
+
+    cues = writer.call_args.args[0]
+    assert [(cue.start_seconds, cue.end_seconds) for cue in cues] == [
+        (0.0, 6.0),
+        (6.0, 7.0),
+    ]
+    assert cues[0].emphasis is True
+    assert writer.call_args.kwargs["hook_text"] == "台本フック"
+    assert writer.call_args.kwargs["preset"] == "boxed"
+    assert writer.call_args.kwargs["hook_preset"] == "bold_outline"
+
+
+def test_build_concatenated_subtitle_explicit_hook_wins_over_document(tmp_path):
+    settings = _s3_settings(tmp_path)
+    document = TelopScriptDocument.model_validate(
+        {
+            "hook_text": "台本フック",
+            "title_candidates": ["題"],
+            "description": "説明",
+            "tags": ["タグ"],
+            "segments": [
+                {
+                    "start_sec": 0.0,
+                    "end_sec": 10.0,
+                    "lines": [
+                        {
+                            "start_sec": 0.0,
+                            "end_sec": 1.0,
+                            "text": "本文",
+                            "emphasis": False,
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+    with patch("yt_live_kit.services.subtitle_burn.write_ass") as writer:
+        writer.side_effect = lambda cues, output_path, **kwargs: output_path
+        build_concatenated_subtitle(
+            "video",
+            [(0.0, 10.0)],
+            settings,
+            telop_script=document,
+            hook_text="明示フック",
+        )
+    assert writer.call_args.kwargs["hook_text"] == "明示フック"
+
+
+def test_build_concatenated_subtitle_rejects_invalid_telop_document(tmp_path):
+    settings = _s3_settings(tmp_path)
+    document = TelopScriptDocument.model_validate(
+        {
+            "hook_text": "フック",
+            "title_candidates": ["題"],
+            "description": "説明",
+            "tags": ["タグ"],
+            "segments": [
+                {
+                    "start_sec": 0.0,
+                    "end_sec": 9.0,
+                    "lines": [
+                        {
+                            "start_sec": 0.0,
+                            "end_sec": 1.0,
+                            "text": "本文",
+                            "emphasis": False,
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+    with pytest.raises(SubtitleBurnError, match="入力区間"):
+        build_concatenated_subtitle(
+            "video", [(0.0, 10.0)], settings, telop_script=document
+        )
+
+
+def test_build_concatenated_subtitle_rejects_line_invalid_after_defensive_clip(
+    tmp_path,
+):
+    settings = _s3_settings(tmp_path)
+    document = TelopScriptDocument.model_validate(
+        {
+            "hook_text": "フック",
+            "title_candidates": ["題"],
+            "description": "説明",
+            "tags": ["タグ"],
+            "segments": [
+                {
+                    "start_sec": 0.0,
+                    "end_sec": 10.0,
+                    "lines": [
+                        {
+                            "start_sec": 11.0,
+                            "end_sec": 12.0,
+                            "text": "範囲外",
+                            "emphasis": False,
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+    forced_validation = TelopValidationResult(
+        ok=True,
+        errors=(),
+        warnings=(),
+        document=document,
+    )
+    with patch(
+        "yt_live_kit.services.telop.validate_telop_script",
+        return_value=forced_validation,
+    ):
+        with pytest.raises(SubtitleBurnError, match="補正した結果"):
+            build_concatenated_subtitle(
+                "video", [(0.0, 10.0)], settings, telop_script=document
+            )
+
+
+def test_build_concatenated_subtitle_allows_empty_cues_and_hook_only(tmp_path):
+    settings = _s3_settings(tmp_path)
+    with patch("yt_live_kit.services.subtitle_burn.write_ass") as writer:
+        writer.side_effect = lambda cues, output_path, **kwargs: output_path
+        build_concatenated_subtitle(
+            "video", [(10.0, 20.0)], settings, hook_text="冒頭フック"
+        )
+    assert writer.call_args.args[0] == []
+    assert writer.call_args.kwargs["hook_text"] == "冒頭フック"
+
+
+def test_build_concatenated_subtitle_missing_vtt_is_japanese(tmp_path):
+    from yt_live_kit.config import Settings
+
+    (tmp_path / "video").mkdir()
+    with pytest.raises(SubtitleBurnError, match="字幕ファイルが見つかりません"):
+        build_concatenated_subtitle(
+            "video", [(10.0, 20.0)], Settings(data_dir=tmp_path)
+        )
+
+
+@pytest.mark.parametrize("hook", [" ", "禁止<文字>"])
+def test_build_concatenated_subtitle_rejects_invalid_explicit_hook(tmp_path, hook):
+    settings = _s3_settings(tmp_path)
+    with pytest.raises(SubtitleBurnError):
+        build_concatenated_subtitle("video", [(10.0, 20.0)], settings, hook_text=hook)
+
+
+@pytest.mark.parametrize(
+    "segments",
+    [[], [("bad", 10.0)], [(float("nan"), 10.0)], [(1.0, 1.0004)]],
+)
+def test_build_concatenated_subtitle_revalidates_tuple_input(tmp_path, segments):
+    settings = _s3_settings(tmp_path)
+    with pytest.raises(SubtitleBurnError):
+        build_concatenated_subtitle("video", segments, settings)

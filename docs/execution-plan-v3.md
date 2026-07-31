@@ -22,7 +22,7 @@
 | U5 | 正式 4 画面 IA + ストレージ管理移設 + 概要欄差分プレビュー + フェーズ U 受け入れ | [x] 完了 |
 | S1 | テロップ台本 + メタデータ生成 | [x] 完了 |
 | S2 | ASS テロップスタイルプリセット + フックタイトル | [x] 完了 |
-| S3 | ジャンプカット連結ショート生成（services 拡張） | [ ] 未着手 |
+| S3 | ジャンプカット連結ショート生成（services 拡張） | [~] 進行中 |
 | S4 | キュー量産 UI + 台本確認フロー | [ ] 未着手 |
 | S5 | フェーズ S 受け入れ（実配信 1 本からショート複数本を通しで作る） | [ ] 未着手 |
 | P0 | テストアップロード検証 | [ ] 未着手 |
@@ -612,7 +612,7 @@ data/{video_id}/ ...
 
 **作業:**
 
-- [ ] S3-1. `build_short_from_segments(video_id, segments: list[tuple[float, float]], settings=None, *, layout="blur", telop_script: TelopScriptDocument | None = None, hook_text: str | None = None, preset="default", hook_preset="hook", output_name: str | None = None, ffmpeg_path=FFMPEG_DEFAULT, on_progress: ShortsProgressCallback = None, keep_intermediate=False) -> ShortResult` を実装する。`ShortsProgressCallback` は `Callable[[int, int, str], None] | None` とし、`total = len(segments) + 3`、各区間を `i`、連結を `n + 1`、字幕準備を `n + 2`、焼き込みを `n + 3` として通知する
+- [x] S3-1. `build_short_from_segments(video_id, segments: list[tuple[float, float]], settings=None, *, layout="blur", telop_script: TelopScriptDocument | None = None, hook_text: str | None = None, preset="default", hook_preset="hook", output_name: str | None = None, ffmpeg_path=FFMPEG_DEFAULT, on_progress: ShortsProgressCallback = None, keep_intermediate=False) -> ShortResult` を実装する。`ShortsProgressCallback` は `Callable[[int, int, str], None] | None` とし、`total = len(segments) + 3`、各区間を `i`、連結を `n + 1`、字幕準備を `n + 2`、焼き込みを `n + 3` として通知する
   - `services/telop.py` に `NormalizedSegmentBounds` frozen dataclass（`start_ms` / `end_ms` と、それらから導出する `start_sec` / `end_sec` / `duration_ms` / `duration_sec` property）、公開 `normalize_seconds_to_milliseconds(value: float | int) -> int`、`normalize_segment_bounds(segments: Sequence[HighlightSegment | tuple[float, float]]) -> tuple[NormalizedSegmentBounds, ...]` を追加する。既存 `_to_milliseconds` / `_normalized_bounds` 相当の実装をここへ一本化し、`make_clip_id()`、`validate_telop_script()`、S3 の全処理が同じ `Decimal(str(value))` + `ROUND_HALF_UP` を使う
   - 入力順を再生順・`make_clip_id()` の ID 生成順・`encode_segment()` の呼び出し順としてそのまま保持し、自動で sort / dedupe しない
   - 空配列、数値でない値、NaN / 無限、負値、逆転区間、ミリ秒への `ROUND_HALF_UP` 後に開始・終了が同値になる区間は、ffmpeg を呼ぶ前に日本語の `ShortsError` にする
@@ -628,7 +628,7 @@ data/{video_id}/ ...
     7. `keep_intermediate=False`（既定）なら成功・失敗のどちらでも `segments/{clip_id}/` 全体（`seg_*.mp4`、各ログ、`concat.mp4`、concat ログ、失敗時の `concat.txt`）を削除する。`True` ならその時点で存在する中間物を成功・失敗とも残す。元動画、ASS、S1 JSON、最終 mp4、最終ログは削除しない
   - 出力: 既定は `data/{video_id}/shorts/output/short_{clip_id}.mp4`（単一区間の従来命名 `short_{start}_{end}.mp4` とは区別する）。`output_name` は空、絶対パス、パス区切り文字を含む値、`.` / `..`、`.mp4` 以外を日本語エラーで拒否する
   - `make_clip_id()` / `validate_telop_script()` の `TelopError`、`FfmpegError`、`SubtitleBurnError` は公開境界で日本語の `ShortsError` へ変換する。ASS を焼き込むため `ShortResult.burned_subtitles=True` とし、日本語フォント未解決時は既存 `build_short()` と同じ `font_warning` 文言を返す
-- [ ] S3-2. `subtitle_burn.build_concatenated_subtitle(video_id: str, segments: Sequence[tuple[float, float]], settings: Settings | None = None, *, telop_script: TelopScriptDocument | None = None, hook_text: str | None = None, preset: str = "default", hook_preset: str = "hook") -> Path` を実装する
+- [x] S3-2. `subtitle_burn.build_concatenated_subtitle(video_id: str, segments: Sequence[tuple[float, float]], settings: Settings | None = None, *, telop_script: TelopScriptDocument | None = None, hook_text: str | None = None, preset: str = "default", hook_preset: str = "hook") -> Path` を実装する
   - 関数単独で呼ばれた場合も、関数内 import した `normalize_seconds_to_milliseconds()` / `normalize_segment_bounds()` / `make_clip_id()` / `validate_telop_script()` へ一本化し、区間正規化と telop 再検証を必ず行う。S3-1 との二重検証は公開境界の安全性のため許容し、呼び出し側から `clip_id` や正規化結果を受け取る別経路は作らない
   - 明示 `hook_text` はこの公開境界自身でも検証し、strip 後の空文字と半角山カッコを拒否する。これにより `telop_script=None` の直呼びでも固定出力ルールを迂回できないようにする
   - 出力先は `data/{video_id}/shorts/subtitles/short_{clip_id}.ass`。上記の関数内 import により `telop.py` → `subtitle_burn.py` の既存 import との循環を避ける
@@ -636,8 +636,8 @@ data/{video_id}/ ...
   - `telop_script` がある場合は関数内再検証で得た正規化済み document を使う。`hook_text` の明示値を優先し、`None` なら document の `hook_text` を使う
   - `telop_script` が無い場合（S1 を経ずに生成する場合）は `subtitles/ja.vtt` を 1 回だけ読み、VTT 由来の字幕（既存の `parse_vtt_with_end` / `filter_cues_for_segment`）へフォールバックする。各 filter 結果の区間相対 cue を共通 helper で整数ミリ秒へ正規化し、先行区間の累積 ms を加えて連結 timeline へ変換する。VTT 不在は日本語エラー、個々の区間で cue が 0 件なのは許容し、VTT が存在して `hook_text` があれば Hook 単独 ASS も生成できる
   - 通常字幕と `hook_text`、`preset`、`hook_preset` は S2 の同一 ASS API へ一度に渡し、ffmpeg の字幕焼き込みも 1 回だけ行う。フック用の別 ASS を後段で重ねず、選択プリセットを全呼び出し段で欠落させない
-- [ ] S3-3. 尺バリデーション: 正規化済み整数ミリ秒の合計で 10,000 ms・180,000 ms を許可し、9,000 ms は `MIN_DURATION_SEC` 未満、181,000 ms は `MAX_DURATION_SEC` 超として `ShortsError` にする。180 秒超の**エラーメッセージには「区間を減らすか短くしてください」という具体的な対処を含める**（UI 側の分割・短縮誘導は S4 で実装する）
-- [ ] S3-4. ユニットテスト
+- [x] S3-3. 尺バリデーション: 正規化済み整数ミリ秒の合計で 10,000 ms・180,000 ms を許可し、9,000 ms は `MIN_DURATION_SEC` 未満、181,000 ms は `MAX_DURATION_SEC` 超として `ShortsError` にする。180 秒超の**エラーメッセージには「区間を減らすか短くしてください」という具体的な対処を含める**（UI 側の分割・短縮誘導は S4 で実装する）
+- [x] S3-4. ユニットテスト
   - 3 区間で `encode_segment(..., crf=INTERMEDIATE_CRF)` が入力順に 3 回呼ばれ、その 3 パスが順番どおり `concat_segments()` へ渡ること。S3 が `build_concat_list()` を直接二重呼び出ししないこと
   - 入力順を変えても sort / dedupe されず、ID・encode・再生順が入力どおりであること
   - 空配列、非数値、NaN / 無限、負値、逆転、ミリ秒丸め後の同値を ffmpeg 前に拒否すること
@@ -658,8 +658,8 @@ data/{video_id}/ ...
 
 **Done 条件:**
 
-- [ ] `uv run pytest` が全件通る
-- [ ] 出力パスの命名規則が S1（`telop_{clip_id}.json`）と揃っている
+- [x] `uv run pytest` が全件通る
+- [x] 出力パスの命名規則が S1（`telop_{clip_id}.json`）と揃っている
 - [ ] タスク完了コミット済み
 
 **見積もり目安:** 2 日

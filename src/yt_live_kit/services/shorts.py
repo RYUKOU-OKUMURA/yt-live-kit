@@ -2,25 +2,41 @@
 
 from __future__ import annotations
 
+import logging
+import shutil
 import subprocess
+import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
 from yt_live_kit.config import Settings, get_settings
+from yt_live_kit.models.telop import TelopScriptDocument
 from yt_live_kit.services.ffmpeg import (
     FFMPEG_DEFAULT,
     FfmpegError,
+    concat_segments,
     encode_segment,
     ensure_source_video,
     find_ffmpeg,
     save_command_log,
 )
 from yt_live_kit.services.subtitle_burn import (
+    SubtitleBurnError,
+    build_concatenated_subtitle,
     build_segment_subtitle,
+    get_telop_preset,
     is_japanese_font_available,
     resolve_font,
 )
+from yt_live_kit.services.telop import (
+    TelopError,
+    make_clip_id,
+    normalize_segment_bounds,
+    validate_telop_script,
+)
+
+logger = logging.getLogger(__name__)
 
 MIN_DURATION_SEC = 10.0
 MAX_DURATION_SEC = 180.0
@@ -53,6 +69,9 @@ class ShortResult:
     burned_subtitles: bool
     duration_sec: float
     font_warning: str | None = None
+
+
+ShortsProgressCallback = Callable[[int, int, str], None] | None
 
 
 def _segment_output_name(start: float, end: float, output_name: str | None) -> str:
@@ -108,6 +127,11 @@ def build_subtitle_filter(ass_path: Path, font_name: str) -> str:
         "PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,"
         "Outline=3,Alignment=2,MarginV=180'"
     )
+
+
+def build_ass_subtitle_filter(ass_path: Path) -> str:
+    """ASS 内のスタイルを維持する字幕焼き込みフィルタを返す."""
+    return f"subtitles={escape_ffmpeg_subtitles_path(ass_path)}"
 
 
 def build_layout_filter(layout: str) -> str:
@@ -176,6 +200,268 @@ def _build_short_layout_command(
         ]
     )
     return cmd
+
+
+def _validate_segments_output_name(output_name: str | None, clip_id: str) -> str:
+    if output_name is None:
+        return f"short_{clip_id}.mp4"
+    if not isinstance(output_name, str):
+        raise ShortsError("出力ファイル名は文字列で指定してください。")
+    if not output_name.strip():
+        raise ShortsError("出力ファイル名を入力してください。")
+    if any(ord(character) < 32 for character in output_name):
+        raise ShortsError("出力ファイル名に制御文字は使えません。")
+    if output_name in {".", ".."}:
+        raise ShortsError("出力ファイル名にドットだけの名前は使えません。")
+    path = Path(output_name)
+    if path.is_absolute() or "/" in output_name or "\\" in output_name:
+        raise ShortsError("出力ファイル名にパスは指定できません。")
+    if path.suffix != ".mp4":
+        raise ShortsError("出力ファイル名は .mp4 で終わる名前にしてください。")
+    return output_name
+
+
+def _validate_explicit_hook(hook_text: str | None) -> str | None:
+    if hook_text is None:
+        return None
+    cleaned = hook_text.strip()
+    if not cleaned:
+        raise ShortsError("フックタイトルを入力してください。")
+    if "<" in cleaned or ">" in cleaned:
+        raise ShortsError("フックタイトルに半角の山カッコは使えません。")
+    return cleaned
+
+
+def build_short_from_segments(
+    video_id: str,
+    segments: list[tuple[float, float]],
+    settings: Settings | None = None,
+    *,
+    layout: str = "blur",
+    telop_script: TelopScriptDocument | None = None,
+    hook_text: str | None = None,
+    preset: str = "default",
+    hook_preset: str = "hook",
+    output_name: str | None = None,
+    ffmpeg_path: str = FFMPEG_DEFAULT,
+    on_progress: ShortsProgressCallback = None,
+    keep_intermediate: bool = False,
+) -> ShortResult:
+    """複数区間を入力順に連結し、ASS テロップ付き縦型動画を生成する."""
+    settings = settings or get_settings()
+
+    # ダウンロードや ffmpeg を始める前に、安価な入力検証をすべて完了する。
+    try:
+        normalized_segments = normalize_segment_bounds(segments)
+        clip_id = make_clip_id(segments)
+    except TelopError as exc:
+        raise ShortsError(str(exc)) from exc
+
+    total_ms = sum(bounds.duration_ms for bounds in normalized_segments)
+    if total_ms < int(MIN_DURATION_SEC * 1000):
+        raise ShortsError(
+            f"ショート動画の長さは {int(MIN_DURATION_SEC)} 秒以上である必要があります。"
+            f"（指定: {total_ms / 1000:.1f} 秒）"
+        )
+    if total_ms > int(MAX_DURATION_SEC * 1000):
+        raise ShortsError(
+            f"ショート動画の長さは {int(MAX_DURATION_SEC)} 秒以下である必要があります。"
+            f"（指定: {total_ms / 1000:.1f} 秒）"
+            "区間を減らすか短くしてください。"
+        )
+
+    build_layout_filter(layout)
+    formal_name = _validate_segments_output_name(output_name, clip_id)
+    explicit_hook = _validate_explicit_hook(hook_text)
+    try:
+        get_telop_preset(preset)
+        get_telop_preset(hook_preset)
+    except SubtitleBurnError as exc:
+        raise ShortsError(str(exc)) from exc
+
+    validated_document: TelopScriptDocument | None = None
+    if telop_script is not None:
+        try:
+            validation = validate_telop_script(telop_script, segments=segments)
+        except TelopError as exc:
+            raise ShortsError(str(exc)) from exc
+        if not validation.ok or validation.document is None:
+            detail = "、".join(validation.errors)
+            raise ShortsError(f"テロップ台本が入力区間と一致しません: {detail}")
+        validated_document = validation.document
+
+    video_dir = settings.data_dir / video_id
+    if not video_dir.is_dir():
+        raise ShortsError(f"動画ディレクトリが見つかりません: {video_dir}")
+
+    output_dir = video_dir / "shorts" / "output"
+    output_path = output_dir / formal_name
+    log_path = output_dir / f"{output_path.stem}.ffmpeg.log"
+    intermediate_dir = video_dir / "shorts" / "segments" / clip_id
+    temporary_output: Path | None = None
+    total_steps = len(normalized_segments) + 3
+    processing_succeeded = False
+
+    try:
+        try:
+            source_path = ensure_source_video(video_id, settings)
+        except FfmpegError as exc:
+            raise ShortsError(str(exc)) from exc
+
+        segment_paths: list[Path] = []
+        for index, bounds in enumerate(normalized_segments, start=1):
+            if on_progress is not None:
+                on_progress(index, total_steps, f"区間 {index} を切り出しています…")
+            segment_path = intermediate_dir / f"seg_{index:03d}.mp4"
+            try:
+                encode_segment(
+                    source_path,
+                    segment_path,
+                    bounds.start_sec,
+                    bounds.end_sec,
+                    ffmpeg_path=ffmpeg_path,
+                    crf=INTERMEDIATE_CRF,
+                )
+            except FfmpegError as exc:
+                raise ShortsError(str(exc)) from exc
+            segment_paths.append(segment_path)
+
+        if on_progress is not None:
+            on_progress(
+                len(normalized_segments) + 1,
+                total_steps,
+                "区間を連結しています…",
+            )
+        concat_path = intermediate_dir / "concat.mp4"
+        try:
+            concat_segments(
+                segment_paths,
+                concat_path,
+                ffmpeg_path=ffmpeg_path,
+                log_dir=intermediate_dir,
+            )
+        except FfmpegError as exc:
+            raise ShortsError(str(exc)) from exc
+
+        if on_progress is not None:
+            on_progress(
+                len(normalized_segments) + 2,
+                total_steps,
+                "字幕を準備しています…",
+            )
+        try:
+            ass_path = build_concatenated_subtitle(
+                video_id,
+                segments,
+                settings,
+                telop_script=validated_document,
+                hook_text=explicit_hook,
+                preset=preset,
+                hook_preset=hook_preset,
+            )
+        except SubtitleBurnError as exc:
+            raise ShortsError(str(exc)) from exc
+
+        font_warning = None
+        if not is_japanese_font_available(settings.subtitle_font):
+            font_warning = (
+                "日本語フォントが見つかりません。"
+                "字幕が正しく表示されない可能性があります。"
+            )
+
+        filter_chain = (
+            f"{build_layout_filter(layout)},{build_ass_subtitle_filter(ass_path)}"
+        )
+        use_filter_complex = layout == "blur"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(
+            dir=output_dir,
+            prefix=f".{output_path.stem}.",
+            suffix=".mp4",
+            delete=False,
+        ) as temporary:
+            temporary_output = Path(temporary.name)
+        temporary_output.unlink(missing_ok=True)
+
+        if on_progress is not None:
+            on_progress(
+                len(normalized_segments) + 3,
+                total_steps,
+                "字幕を焼き込んでいます…",
+            )
+        try:
+            cmd = _build_short_layout_command(
+                concat_path,
+                temporary_output,
+                filter_chain,
+                use_filter_complex=use_filter_complex,
+                ffmpeg_path=ffmpeg_path,
+            )
+            result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        except FfmpegError as exc:
+            raise ShortsError(str(exc)) from exc
+        except OSError as exc:
+            raise ShortsError(f"ffmpeg の実行に失敗しました: {exc}") from exc
+        log_path = save_command_log(
+            output_dir,
+            cmd,
+            returncode=result.returncode,
+            stdout=result.stdout,
+            stderr=result.stderr,
+            filename=f"{output_path.stem}.ffmpeg.log",
+        )
+        if result.returncode != 0:
+            stderr = (result.stderr or "").strip()
+            raise ShortsError(
+                f"ショート動画の生成に失敗しました。ログ: {log_path}"
+                + (f"\n（詳細: {stderr}）" if stderr else "")
+            )
+        if not temporary_output.is_file() or temporary_output.stat().st_size == 0:
+            raise ShortsError(
+                f"ショート動画ファイルが生成されませんでした。ログ: {log_path}"
+            )
+        try:
+            temporary_output.replace(output_path)
+        except OSError as exc:
+            raise ShortsError(f"ショート動画の保存に失敗しました: {exc}") from exc
+        temporary_output = None
+        processing_succeeded = True
+    finally:
+        if temporary_output is not None:
+            try:
+                temporary_output.unlink(missing_ok=True)
+            except OSError:
+                logger.warning(
+                    "失敗した一時出力を削除できませんでした: %s",
+                    temporary_output,
+                    exc_info=True,
+                )
+        if not keep_intermediate:
+            try:
+                shutil.rmtree(intermediate_dir)
+            except FileNotFoundError:
+                pass
+            except OSError as exc:
+                if processing_succeeded:
+                    raise ShortsError(
+                        "中間ファイルの削除に失敗しました。"
+                        f"手動で削除してください: {intermediate_dir}"
+                    ) from exc
+                logger.warning(
+                    "主処理の失敗後、中間ファイルを削除できませんでした: %s",
+                    intermediate_dir,
+                    exc_info=True,
+                )
+
+    return ShortResult(
+        video_id=video_id,
+        output_path=output_path,
+        command_log_path=log_path,
+        layout=layout,
+        burned_subtitles=True,
+        duration_sec=total_ms / 1000,
+        font_warning=font_warning,
+    )
 
 
 def build_short(

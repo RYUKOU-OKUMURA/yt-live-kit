@@ -21,6 +21,8 @@ from yt_live_kit.services.telop import (
     build_telop_prompt,
     generate_telop_script,
     make_clip_id,
+    normalize_seconds_to_milliseconds,
+    normalize_segment_bounds,
     validate_telop_script,
 )
 
@@ -230,6 +232,51 @@ def test_make_clip_id_rounds_half_millisecond_up():
     expected = hashlib.sha256(b"1-1001").hexdigest()[:12]
     assert make_clip_id([(0.0005, 1.0005)]) == expected
     assert make_clip_id([(0.0005, 1.0005)]) == make_clip_id([(0.001, 1.001)])
+
+
+def test_public_segment_normalization_uses_half_up_and_derived_properties():
+    assert normalize_seconds_to_milliseconds(0.00049) == 0
+    assert normalize_seconds_to_milliseconds(0.0005) == 1
+    bounds = normalize_segment_bounds([(0.0005, 9.99951)])[0]
+    assert bounds.start_ms == 1
+    assert bounds.end_ms == 10_000
+    assert bounds.start_sec == pytest.approx(0.001)
+    assert bounds.end_sec == pytest.approx(10.0)
+    assert bounds.duration_ms == 9_999
+    assert bounds.duration_sec == pytest.approx(9.999)
+
+
+def test_public_segment_normalization_preserves_input_order_and_duplicates():
+    segments = [(20.0, 24.0), (10.0, 16.0), (20.0, 24.0)]
+    normalized = normalize_segment_bounds(segments)
+    assert [(item.start_ms, item.end_ms) for item in normalized] == [
+        (20_000, 24_000),
+        (10_000, 16_000),
+        (20_000, 24_000),
+    ]
+
+
+@pytest.mark.parametrize(
+    "value", ["1", None, True, float("nan"), float("inf"), -0.0004]
+)
+def test_public_seconds_normalization_rejects_invalid_values(value):
+    with pytest.raises(TelopError):
+        normalize_seconds_to_milliseconds(value)
+
+
+@pytest.mark.parametrize("value", [10**100, 1e308])
+def test_public_seconds_normalization_rejects_unrepresentable_large_values(value):
+    with pytest.raises(TelopError, match="整数ミリ秒へ変換できません"):
+        normalize_seconds_to_milliseconds(value)
+
+
+def test_validate_telop_tuple_segments_uses_same_millisecond_boundaries():
+    data = _valid_document()
+    result = validate_telop_script(data, segments=[(10.00049, 15.99951), (20.0, 24.0)])
+    assert result.ok
+    assert result.document is not None
+    assert result.document.segments[0].start_sec == 10.0
+    assert result.document.segments[0].end_sec == 16.0
 
 
 @pytest.mark.parametrize(

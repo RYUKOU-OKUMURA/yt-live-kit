@@ -5,11 +5,16 @@ from __future__ import annotations
 import re
 import shutil
 import subprocess
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from yt_live_kit.config import Settings, get_settings
 from yt_live_kit.services.vtt_parser import clean_vtt_text
+
+if TYPE_CHECKING:
+    from yt_live_kit.models.telop import TelopScriptDocument
 
 _TIMESTAMP_RE = re.compile(
     r"^(?:(\d{2}):)?(\d{2}):(\d{2})(?:\.(\d{3}))?\s*-->\s*"
@@ -330,7 +335,8 @@ def _sanitize_ass_text(text: str) -> str:
     return normalized.replace("\n", r"\N")
 
 
-def _get_preset(name: str) -> TelopPreset:
+def get_telop_preset(name: str) -> TelopPreset:
+    """名前でテロッププリセットを取得し、定義内容も検証する."""
     try:
         preset = TELOP_PRESETS[name]
     except KeyError as exc:
@@ -340,6 +346,10 @@ def _get_preset(name: str) -> TelopPreset:
         ) from exc
     _validate_preset_colours(name, preset)
     return preset
+
+
+# S2 までの内部参照との互換性を維持する。
+_get_preset = get_telop_preset
 
 
 def _validate_preset_colours(name: str, preset: TelopPreset) -> None:
@@ -443,13 +453,13 @@ def write_ass(
     play_res_y: int = _ASS_PLAY_RES_Y,
 ) -> Path:
     """ASS 字幕ファイルを書き出す（既定は縦型ショート 1080x1920 基準）."""
-    selected_preset = _get_preset(preset)
+    selected_preset = get_telop_preset(preset)
     selected_hook_preset: TelopPreset | None = None
     clean_hook: str | None = None
     if hook_text is not None:
         if not hook_text.strip():
             raise SubtitleBurnError("フックタイトルを入力してください。")
-        selected_hook_preset = _get_preset(hook_preset)
+        selected_hook_preset = get_telop_preset(hook_preset)
         clean_hook = _sanitize_ass_text(hook_text)
 
     events: list[str] = []
@@ -488,7 +498,7 @@ def write_hook_ass(
     """冒頭 2 秒に表示するフックタイトル ASS を書き出す."""
     if not hook_text.strip():
         raise SubtitleBurnError("フックタイトルを入力してください。")
-    selected_preset = _get_preset(preset)
+    selected_preset = get_telop_preset(preset)
     clean_hook = _sanitize_ass_text(hook_text)
     return _serialize_ass(
         output_path,
@@ -532,6 +542,147 @@ def build_segment_subtitle(
     )
     font_name = resolve_font(settings.subtitle_font)
     return write_ass(segment_cues, output_path, font_name=font_name)
+
+
+def build_concatenated_subtitle(
+    video_id: str,
+    segments: Sequence[tuple[float, float]],
+    settings: Settings | None = None,
+    *,
+    telop_script: TelopScriptDocument | None = None,
+    hook_text: str | None = None,
+    preset: str = "default",
+    hook_preset: str = "hook",
+) -> Path:
+    """複数区間の字幕を連結後の時刻へ変換して 1 本の ASS にする."""
+    # telop.py は本モジュールを import するため、公開境界の共通検証は関数内 import にする。
+    from yt_live_kit.services.telop import (
+        TelopError,
+        make_clip_id,
+        normalize_seconds_to_milliseconds,
+        normalize_segment_bounds,
+        validate_telop_script,
+    )
+
+    settings = settings or get_settings()
+    try:
+        normalized_segments = normalize_segment_bounds(segments)
+        clip_id = make_clip_id(segments)
+    except TelopError as exc:
+        raise SubtitleBurnError(str(exc)) from exc
+
+    if hook_text is not None:
+        effective_hook = hook_text.strip()
+        if not effective_hook:
+            raise SubtitleBurnError("フックタイトルを入力してください。")
+        if "<" in effective_hook or ">" in effective_hook:
+            raise SubtitleBurnError("フックタイトルに半角の山カッコは使えません。")
+    else:
+        effective_hook = None
+
+    # VTT を読む前に副作用のないプリセット検証を完了する。
+    get_telop_preset(preset)
+    get_telop_preset(hook_preset)
+
+    normalized_document = None
+    if telop_script is not None:
+        try:
+            validation = validate_telop_script(telop_script, segments=segments)
+        except TelopError as exc:
+            raise SubtitleBurnError(str(exc)) from exc
+        if not validation.ok or validation.document is None:
+            detail = "、".join(validation.errors)
+            raise SubtitleBurnError(f"テロップ台本が入力区間と一致しません: {detail}")
+        normalized_document = validation.document
+        if effective_hook is None:
+            effective_hook = normalized_document.hook_text
+
+    cues: list[TimedCue] = []
+    cumulative_ms = 0
+    if normalized_document is not None:
+        for bounds, script_segment in zip(
+            normalized_segments, normalized_document.segments, strict=True
+        ):
+            for line in script_segment.lines:
+                try:
+                    absolute_start_ms = normalize_seconds_to_milliseconds(
+                        line.start_sec
+                    )
+                    absolute_end_ms = normalize_seconds_to_milliseconds(line.end_sec)
+                except TelopError as exc:
+                    raise SubtitleBurnError(str(exc)) from exc
+                relative_start_ms = min(
+                    bounds.duration_ms,
+                    max(0, absolute_start_ms - bounds.start_ms),
+                )
+                relative_end_ms = min(
+                    bounds.duration_ms,
+                    max(0, absolute_end_ms - bounds.start_ms),
+                )
+                if relative_end_ms <= relative_start_ms:
+                    raise SubtitleBurnError(
+                        "テロップ行を区間内へ補正した結果、"
+                        "終了時刻が開始時刻以下になりました。"
+                    )
+                cues.append(
+                    TimedCue(
+                        start_seconds=(cumulative_ms + relative_start_ms) / 1000,
+                        end_seconds=(cumulative_ms + relative_end_ms) / 1000,
+                        text=line.text,
+                        emphasis=line.emphasis,
+                    )
+                )
+            cumulative_ms += bounds.duration_ms
+    else:
+        vtt_path = settings.data_dir / video_id / "subtitles" / "ja.vtt"
+        if not vtt_path.is_file():
+            raise SubtitleBurnError(f"字幕ファイルが見つかりません: {vtt_path}")
+        all_cues = parse_vtt_with_end(vtt_path.read_text(encoding="utf-8"))
+        for bounds in normalized_segments:
+            relative_cues = filter_cues_for_segment(
+                all_cues, bounds.start_sec, bounds.end_sec
+            )
+            for cue in relative_cues:
+                try:
+                    relative_start_ms = normalize_seconds_to_milliseconds(
+                        cue.start_seconds
+                    )
+                    relative_end_ms = normalize_seconds_to_milliseconds(cue.end_seconds)
+                except TelopError as exc:
+                    raise SubtitleBurnError(str(exc)) from exc
+                relative_start_ms = min(bounds.duration_ms, relative_start_ms)
+                relative_end_ms = min(bounds.duration_ms, relative_end_ms)
+                if relative_end_ms <= relative_start_ms:
+                    raise SubtitleBurnError(
+                        "字幕を区間内へ補正した結果、"
+                        "終了時刻が開始時刻以下になりました。"
+                    )
+                cues.append(
+                    TimedCue(
+                        start_seconds=(cumulative_ms + relative_start_ms) / 1000,
+                        end_seconds=(cumulative_ms + relative_end_ms) / 1000,
+                        text=cue.text,
+                        emphasis=cue.emphasis,
+                    )
+                )
+            cumulative_ms += bounds.duration_ms
+
+    output_path = (
+        settings.data_dir
+        / video_id
+        / "shorts"
+        / "subtitles"
+        / f"short_{clip_id}.ass"
+    )
+    font_name = resolve_font(settings.subtitle_font)
+    return write_ass(
+        cues,
+        output_path,
+        font_name=font_name,
+        preset=preset,
+        hook_text=effective_hook,
+        hook_preset=hook_preset,
+    )
 
 
 def _font_available_via_fc_list(font_name: str) -> bool:

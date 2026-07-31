@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import math
 import tempfile
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -91,20 +90,60 @@ class TelopScriptResult:
     document: TelopScriptDocument | None
 
 
-def _to_milliseconds(value: float | int) -> int:
+@dataclass(frozen=True)
+class NormalizedSegmentBounds:
+    """整数ミリ秒へ正規化した区間境界."""
+
+    start_ms: int
+    end_ms: int
+
+    @property
+    def start_sec(self) -> float:
+        return self.start_ms / 1000
+
+    @property
+    def end_sec(self) -> float:
+        return self.end_ms / 1000
+
+    @property
+    def duration_ms(self) -> int:
+        return self.end_ms - self.start_ms
+
+    @property
+    def duration_sec(self) -> float:
+        return self.duration_ms / 1000
+
+
+def normalize_seconds_to_milliseconds(value: float | int) -> int:
     """秒を十進表現の四捨五入で整数ミリ秒へ変換する."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise TelopError("区間時刻は数値で指定してください。")
     try:
         decimal_value = Decimal(str(value))
-    except (InvalidOperation, ValueError) as exc:
-        raise TelopError("区間時刻は有限の数値で指定してください。") from exc
-    if not decimal_value.is_finite():
-        raise TelopError("区間時刻は有限の数値で指定してください。")
-    if decimal_value < 0:
-        raise TelopError("区間時刻に負の値は指定できません。")
-    return int((decimal_value * 1000).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+        if not decimal_value.is_finite():
+            raise TelopError("区間時刻は有限の数値で指定してください。")
+        if decimal_value < 0:
+            raise TelopError("区間時刻に負の値は指定できません。")
+        return int(
+            (decimal_value * 1000).quantize(
+                Decimal("1"), rounding=ROUND_HALF_UP
+            )
+        )
+    except TelopError:
+        raise
+    except (InvalidOperation, OverflowError, ValueError) as exc:
+        raise TelopError(
+            "区間時刻が大きすぎるため、整数ミリ秒へ変換できません。"
+        ) from exc
 
 
-def _segment_bounds(segment: HighlightSegment | tuple[float, float]) -> tuple[float, float]:
+# S1 までの内部参照との互換性を維持する。
+_to_milliseconds = normalize_seconds_to_milliseconds
+
+
+def _segment_bounds(
+    segment: HighlightSegment | tuple[float, float]
+) -> tuple[float, float]:
     if isinstance(segment, HighlightSegment):
         try:
             return (
@@ -115,37 +154,48 @@ def _segment_bounds(segment: HighlightSegment | tuple[float, float]) -> tuple[fl
             raise TelopError(f"ハイライト区間の時刻形式が正しくありません: {exc}") from None
     if not isinstance(segment, tuple) or len(segment) != 2:
         raise TelopError("区間はハイライト区間または開始秒と終了秒の組で指定してください。")
-    try:
-        return float(segment[0]), float(segment[1])
-    except (TypeError, ValueError) as exc:
-        raise TelopError("区間時刻は数値で指定してください。") from exc
+    if any(
+        isinstance(value, bool) or not isinstance(value, (int, float))
+        for value in segment
+    ):
+        raise TelopError("区間時刻は数値で指定してください。")
+    return segment[0], segment[1]
 
 
 def _normalized_bounds(
     segment: HighlightSegment | tuple[float, float],
 ) -> tuple[float, float, int, int]:
     start_sec, end_sec = _segment_bounds(segment)
-    if not math.isfinite(start_sec) or not math.isfinite(end_sec):
-        raise TelopError("区間時刻は有限の数値で指定してください。")
-    start_ms = _to_milliseconds(start_sec)
-    end_ms = _to_milliseconds(end_sec)
-    if start_ms < 0 or end_ms < 0:
-        raise TelopError("区間時刻に負の値は指定できません。")
-    if end_ms <= start_ms:
-        raise TelopError("区間の終了時刻は開始時刻より後にしてください。")
-    return start_sec, end_sec, start_ms, end_ms
+    bounds = normalize_segment_bounds([segment])[0]
+    return start_sec, end_sec, bounds.start_ms, bounds.end_ms
+
+
+def normalize_segment_bounds(
+    segments: Sequence[HighlightSegment | tuple[float, float]],
+) -> tuple[NormalizedSegmentBounds, ...]:
+    """区間列を入力順の整数ミリ秒境界へ正規化する."""
+    if not segments:
+        raise TelopError("区間を 1 件以上指定してください。")
+
+    normalized: list[NormalizedSegmentBounds] = []
+    for segment in segments:
+        start_sec, end_sec = _segment_bounds(segment)
+        start_ms = normalize_seconds_to_milliseconds(start_sec)
+        end_ms = normalize_seconds_to_milliseconds(end_sec)
+        if end_ms <= start_ms:
+            raise TelopError("区間の終了時刻は開始時刻より後にしてください。")
+        normalized.append(NormalizedSegmentBounds(start_ms=start_ms, end_ms=end_ms))
+    return tuple(normalized)
 
 
 def make_clip_id(
     segments: Sequence[HighlightSegment | tuple[float, float]],
 ) -> str:
     """入力順の区間境界から安定したクリップ ID を生成する."""
-    if not segments:
-        raise TelopError("区間を 1 件以上指定してください。")
-    parts = []
-    for segment in segments:
-        _start, _end, start_ms, end_ms = _normalized_bounds(segment)
-        parts.append(f"{start_ms}-{end_ms}")
+    parts = [
+        f"{bounds.start_ms}-{bounds.end_ms}"
+        for bounds in normalize_segment_bounds(segments)
+    ]
     source = "|".join(parts).encode("utf-8")
     return hashlib.sha256(source).hexdigest()[:12]
 
@@ -255,7 +305,7 @@ def _has_halfwidth_angle(text: str) -> bool:
 def validate_telop_script(
     doc: dict | TelopScriptDocument,
     *,
-    segments: Sequence[HighlightSegment],
+    segments: Sequence[HighlightSegment | tuple[float, float]],
 ) -> TelopValidationResult:
     """台本のスキーマ、区間境界、文字列、行配置を検証する."""
     if not segments:
@@ -320,11 +370,13 @@ def validate_telop_script(
         if index > len(segments):
             continue
         try:
-            _input_start, _input_end, input_start_ms, input_end_ms = _normalized_bounds(
-                segments[index - 1]
+            input_bounds = normalize_segment_bounds([segments[index - 1]])[0]
+            input_start_ms = input_bounds.start_ms
+            input_end_ms = input_bounds.end_ms
+            script_start_ms = normalize_seconds_to_milliseconds(
+                script_segment.start_sec
             )
-            script_start_ms = _to_milliseconds(script_segment.start_sec)
-            script_end_ms = _to_milliseconds(script_segment.end_sec)
+            script_end_ms = normalize_seconds_to_milliseconds(script_segment.end_sec)
         except TelopError as exc:
             errors.append(f"{prefix}: {exc}")
             continue
@@ -341,8 +393,8 @@ def validate_telop_script(
             line_prefix = f"{prefix} の行 {line_index}"
             text = clean_required(line.text, f"{line_prefix} の本文")
             try:
-                line_start_ms = _to_milliseconds(line.start_sec)
-                line_end_ms = _to_milliseconds(line.end_sec)
+                line_start_ms = normalize_seconds_to_milliseconds(line.start_sec)
+                line_end_ms = normalize_seconds_to_milliseconds(line.end_sec)
             except TelopError as exc:
                 errors.append(f"{line_prefix}: {exc}")
                 continue
