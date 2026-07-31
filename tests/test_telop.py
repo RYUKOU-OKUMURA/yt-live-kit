@@ -15,6 +15,7 @@ from yt_live_kit.services.ai_prompt import AiPromptError, CodexNotFoundError
 from yt_live_kit.services.subtitle_burn import parse_vtt_with_end
 from yt_live_kit.services.telop import (
     CODEX_INSTALL_HINT,
+    ConfirmedTelopScriptResult,
     TelopError,
     TelopValidationError,
     _extract_json_object,
@@ -23,6 +24,7 @@ from yt_live_kit.services.telop import (
     make_clip_id,
     normalize_seconds_to_milliseconds,
     normalize_segment_bounds,
+    save_confirmed_telop_script,
     validate_telop_script,
 )
 
@@ -113,6 +115,52 @@ def _prepare_video(tmp_path: Path, video_id: str = "video123") -> Settings:
     subtitles.mkdir(parents=True)
     (subtitles / "ja.vtt").write_text(SAMPLE_VTT, encoding="utf-8")
     return Settings(data_dir=tmp_path)
+
+
+def test_save_confirmed_telop_script_returns_path_and_normalized_document(
+    tmp_path: Path,
+):
+    settings = _prepare_video(tmp_path)
+    data = _valid_document()
+    data["hook_text"] = "  大事なポイント  "
+    result = save_confirmed_telop_script(
+        "video123", _segments(), data, settings
+    )
+    assert isinstance(result, ConfirmedTelopScriptResult)
+    assert result.path.is_file()
+    assert result.document.hook_text == "大事なポイント"
+    assert json.loads(result.path.read_text(encoding="utf-8"))["hook_text"] == "大事なポイント"
+
+
+def test_save_confirmed_telop_script_failure_preserves_existing_json(tmp_path: Path):
+    settings = _prepare_video(tmp_path)
+    valid = save_confirmed_telop_script(
+        "video123", _segments(), _valid_document(), settings
+    )
+    before = valid.path.read_text(encoding="utf-8")
+    invalid = _valid_document()
+    invalid["hook_text"] = "禁止<文字>"
+    with pytest.raises(TelopValidationError):
+        save_confirmed_telop_script("video123", _segments(), invalid, settings)
+    assert valid.path.read_text(encoding="utf-8") == before
+
+
+def test_save_confirmed_telop_script_replace_failure_is_japanese_and_preserves_existing(
+    tmp_path: Path,
+):
+    settings = _prepare_video(tmp_path)
+    valid = save_confirmed_telop_script(
+        "video123", _segments(), _valid_document(), settings
+    )
+    before = valid.path.read_text(encoding="utf-8")
+    changed = _valid_document()
+    changed["hook_text"] = "変更したフック"
+    with (
+        patch.object(Path, "replace", side_effect=OSError("replace failed")),
+        pytest.raises(TelopError, match="保存できませんでした"),
+    ):
+        save_confirmed_telop_script("video123", _segments(), changed, settings)
+    assert valid.path.read_text(encoding="utf-8") == before
 
 
 def test_public_vtt_parser_keeps_end_and_milliseconds():

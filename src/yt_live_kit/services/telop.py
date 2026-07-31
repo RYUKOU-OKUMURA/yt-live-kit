@@ -91,6 +91,14 @@ class TelopScriptResult:
 
 
 @dataclass(frozen=True)
+class ConfirmedTelopScriptResult:
+    """人が修正・確定した正規化済みテロップ台本."""
+
+    path: Path
+    document: TelopScriptDocument
+
+
+@dataclass(frozen=True)
 class NormalizedSegmentBounds:
     """整数ミリ秒へ正規化した区間境界."""
 
@@ -452,9 +460,9 @@ def validate_telop_script(
 
 
 def _write_text_atomically(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
     temporary_path: Path | None = None
     try:
+        path.parent.mkdir(parents=True, exist_ok=True)
         with tempfile.NamedTemporaryFile(
             mode="w",
             encoding="utf-8",
@@ -467,8 +475,15 @@ def _write_text_atomically(path: Path, text: str) -> None:
             temporary_path = Path(temporary.name)
         temporary_path.replace(path)
     finally:
-        if temporary_path is not None and temporary_path.exists():
-            temporary_path.unlink()
+        if temporary_path is not None:
+            try:
+                temporary_path.unlink(missing_ok=True)
+            except OSError:
+                logger.warning(
+                    "一時テキストファイルを削除できませんでした: %s",
+                    temporary_path,
+                    exc_info=True,
+                )
 
 
 def _save_prompt(video_id: str, clip_id: str, prompt: str, settings: Settings) -> Path:
@@ -489,6 +504,35 @@ def _save_document(
     path = settings.data_dir / video_id / "shorts" / "telop" / f"telop_{clip_id}.json"
     _write_text_atomically(path, document.model_dump_json(indent=2))
     return path
+
+
+def save_confirmed_telop_script(
+    video_id: str,
+    segments: Sequence[HighlightSegment | tuple[float, float]],
+    document: dict | TelopScriptDocument,
+    settings: Settings | None = None,
+) -> ConfirmedTelopScriptResult:
+    """人が修正した台本を再検証し、正規化済み document だけを保存する."""
+    settings = settings or get_settings()
+    video_dir = settings.data_dir / video_id
+    if not video_dir.is_dir():
+        raise TelopError(f"動画ディレクトリが見つかりません: {video_dir}")
+    validation = validate_telop_script(document, segments=segments)
+    if not validation.ok or validation.document is None:
+        detail = "\n".join(f"- {error}" for error in validation.errors)
+        raise TelopValidationError(
+            f"テロップ台本の形式が正しくありません:\n{detail}",
+            validation.errors,
+        )
+    clip_id = make_clip_id(segments)
+    try:
+        path = _save_document(video_id, clip_id, validation.document, settings)
+    except OSError as exc:
+        raise TelopError(
+            "確定済みテロップ台本を保存できませんでした。"
+            "保存先の権限と空き容量を確認してください。"
+        ) from exc
+    return ConfirmedTelopScriptResult(path=path, document=validation.document)
 
 
 def generate_telop_script(

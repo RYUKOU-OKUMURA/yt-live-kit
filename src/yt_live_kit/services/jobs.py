@@ -27,7 +27,7 @@ from yt_live_kit.services.subtitle_burn import SubtitleBurnError
 from yt_live_kit.services.transcript import TranscriptError
 from yt_live_kit.services.ytdlp import YtdlpError
 
-JobKind = str  # "single" | "batch" | "regenerate" | "highlights" | "shorts"
+JobKind = str  # "single" | "batch" | "regenerate" | "highlights" | "shorts" | "shorts_queue"
 JobStatus = str  # "running" | "done" | "failed" | "interrupted"
 
 _UNEXPECTED_ERROR_MESSAGE = (
