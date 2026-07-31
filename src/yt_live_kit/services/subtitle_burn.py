@@ -41,6 +41,137 @@ class TimedCue:
     start_seconds: float
     end_seconds: float
     text: str
+    emphasis: bool = False
+
+
+@dataclass(frozen=True)
+class TelopPreset:
+    """ASS のテロップスタイル定義."""
+
+    font_size: float
+    primary_colour: str
+    secondary_colour: str
+    outline_colour: str
+    back_colour: str
+    bold: bool
+    italic: bool
+    underline: bool
+    strike_out: bool
+    scale_x: float
+    scale_y: float
+    spacing: float
+    angle: float
+    border_style: int
+    outline: float
+    shadow: float
+    alignment: int
+    margin_l: int
+    margin_r: int
+    margin_v: int
+    encoding: int
+    emphasis_colour: str
+
+
+TELOP_PRESETS: dict[str, TelopPreset] = {
+    "default": TelopPreset(
+        font_size=54,
+        primary_colour="&H00FFFFFF",
+        secondary_colour="&H000000FF",
+        outline_colour="&H00000000",
+        back_colour="&H80000000",
+        bold=False,
+        italic=False,
+        underline=False,
+        strike_out=False,
+        scale_x=100,
+        scale_y=100,
+        spacing=0,
+        angle=0,
+        border_style=1,
+        outline=3,
+        shadow=0,
+        alignment=2,
+        margin_l=10,
+        margin_r=10,
+        margin_v=180,
+        encoding=1,
+        emphasis_colour="&H0000FFFF",
+    ),
+    "bold_outline": TelopPreset(
+        font_size=60,
+        primary_colour="&H00FFFFFF",
+        secondary_colour="&H000000FF",
+        outline_colour="&H00000000",
+        back_colour="&H80000000",
+        bold=True,
+        italic=False,
+        underline=False,
+        strike_out=False,
+        scale_x=100,
+        scale_y=100,
+        spacing=0,
+        angle=0,
+        border_style=1,
+        outline=6,
+        shadow=0,
+        alignment=2,
+        margin_l=40,
+        margin_r=40,
+        margin_v=180,
+        encoding=1,
+        emphasis_colour="&H0000FFFF",
+    ),
+    "boxed": TelopPreset(
+        font_size=56,
+        primary_colour="&H00FFFFFF",
+        secondary_colour="&H000000FF",
+        outline_colour="&H00000000",
+        back_colour="&H60000000",
+        bold=True,
+        italic=False,
+        underline=False,
+        strike_out=False,
+        scale_x=100,
+        scale_y=100,
+        spacing=0,
+        angle=0,
+        border_style=3,
+        outline=3,
+        shadow=0,
+        alignment=2,
+        margin_l=60,
+        margin_r=60,
+        margin_v=180,
+        encoding=1,
+        emphasis_colour="&H0000FFFF",
+    ),
+    "hook": TelopPreset(
+        font_size=88,
+        primary_colour="&H00FFFFFF",
+        secondary_colour="&H000000FF",
+        outline_colour="&H00000000",
+        back_colour="&H60000000",
+        bold=True,
+        italic=False,
+        underline=False,
+        strike_out=False,
+        scale_x=100,
+        scale_y=100,
+        spacing=0,
+        angle=0,
+        border_style=3,
+        outline=4,
+        shadow=0,
+        alignment=8,
+        margin_l=70,
+        margin_r=70,
+        margin_v=220,
+        encoding=1,
+        emphasis_colour="&H0000FFFF",
+    ),
+}
+
+_ASS_STYLE_COLOUR_RE = re.compile(r"^&H[0-9A-Fa-f]{8}$")
 
 
 def _parse_timestamp(h: str | None, m: str, s: str, ms: str | None) -> float:
@@ -119,6 +250,7 @@ def _deduplicate_progressive_timed(cues: list[TimedCue]) -> list[TimedCue]:
                             start_seconds=cue.start_seconds,
                             end_seconds=cue.end_seconds,
                             text=delta,
+                            emphasis=cue.emphasis,
                         )
                     )
                 prev_text = text
@@ -132,6 +264,7 @@ def _deduplicate_progressive_timed(cues: list[TimedCue]) -> list[TimedCue]:
                             start_seconds=cue.start_seconds,
                             end_seconds=cue.end_seconds,
                             text=delta,
+                            emphasis=cue.emphasis,
                         )
                     )
                 prev_text = text
@@ -162,7 +295,12 @@ def filter_cues_for_segment(
             continue
 
         result.append(
-            TimedCue(start_seconds=new_start, end_seconds=new_end, text=cue.text)
+            TimedCue(
+                start_seconds=new_start,
+                end_seconds=new_end,
+                text=cue.text,
+                emphasis=cue.emphasis,
+            )
         )
 
     return result
@@ -181,20 +319,93 @@ def _seconds_to_ass_time(seconds: float) -> str:
     return f"{h}:{m:02d}:{s:02d}.{cs:02d}"
 
 
-def _escape_ass_text(text: str) -> str:
-    return text.replace("\\", "\\\\").replace("{", "\\{").replace("}", "\\}")
+def _sanitize_ass_text(text: str) -> str:
+    """ユーザー文字列から ASS の制御列と物理改行を除く."""
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+    normalized = normalized.replace("\\", "＼").replace("{", "｛").replace("}", "｝")
+    normalized = "".join(
+        " " if ord(character) < 32 and character != "\n" else character
+        for character in normalized
+    )
+    return normalized.replace("\n", r"\N")
 
 
-def write_ass(
-    cues: list[TimedCue],
+def _get_preset(name: str) -> TelopPreset:
+    try:
+        preset = TELOP_PRESETS[name]
+    except KeyError as exc:
+        available = "、".join(TELOP_PRESETS)
+        raise SubtitleBurnError(
+            f"テロッププリセット「{name}」は利用できません。利用可能: {available}"
+        ) from exc
+    _validate_preset_colours(name, preset)
+    return preset
+
+
+def _validate_preset_colours(name: str, preset: TelopPreset) -> None:
+    colour_fields = (
+        "primary_colour",
+        "secondary_colour",
+        "outline_colour",
+        "back_colour",
+        "emphasis_colour",
+    )
+    for field_name in colour_fields:
+        colour = getattr(preset, field_name)
+        if not _ASS_STYLE_COLOUR_RE.fullmatch(colour):
+            raise SubtitleBurnError(
+                f"テロッププリセット「{name}」の色 {field_name} が不正です。"
+                "&H と8桁の16進数で指定してください。"
+            )
+
+
+def _inline_colour(style_colour: str) -> str:
+    """アルファ付き ASS スタイル色をインライン色へ変換する."""
+    return f"&H{style_colour[4:]}&"
+
+
+def _ass_number(value: float) -> str:
+    return f"{value:g}"
+
+
+def _style_line(name: str, font_name: str, preset: TelopPreset) -> str:
+    values = (
+        name,
+        font_name,
+        _ass_number(preset.font_size),
+        preset.primary_colour,
+        preset.secondary_colour,
+        preset.outline_colour,
+        preset.back_colour,
+        "-1" if preset.bold else "0",
+        "-1" if preset.italic else "0",
+        "-1" if preset.underline else "0",
+        "-1" if preset.strike_out else "0",
+        _ass_number(preset.scale_x),
+        _ass_number(preset.scale_y),
+        _ass_number(preset.spacing),
+        _ass_number(preset.angle),
+        str(preset.border_style),
+        _ass_number(preset.outline),
+        _ass_number(preset.shadow),
+        str(preset.alignment),
+        str(preset.margin_l),
+        str(preset.margin_r),
+        str(preset.margin_v),
+        str(preset.encoding),
+    )
+    return "Style: " + ",".join(values)
+
+
+def _serialize_ass(
     output_path: Path,
     *,
     font_name: str,
-    play_res_x: int = _ASS_PLAY_RES_X,
-    play_res_y: int = _ASS_PLAY_RES_Y,
+    styles: list[tuple[str, TelopPreset]],
+    events: list[str],
+    play_res_x: int,
+    play_res_y: int,
 ) -> Path:
-    """ASS 字幕ファイルを書き出す（既定は縦型ショート 1080x1920 基準）."""
-    output_path.parent.mkdir(parents=True, exist_ok=True)
     lines = [
         "[Script Info]",
         "ScriptType: v4.00+",
@@ -209,23 +420,84 @@ def write_ass(
         "OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, "
         "ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, "
         "Alignment, MarginL, MarginR, MarginV, Encoding",
-        (
-            f"Style: Default,{font_name},54,&H00FFFFFF,&H000000FF,&H00000000,"
-            "&H80000000,0,0,0,0,100,100,0,0,1,3,0,2,10,10,180,1"
-        ),
+        *(_style_line(name, font_name, preset) for name, preset in styles),
         "",
         "[Events]",
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
+        *events,
     ]
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return output_path
 
+
+def write_ass(
+    cues: list[TimedCue],
+    output_path: Path,
+    *,
+    font_name: str,
+    preset: str = "default",
+    hook_text: str | None = None,
+    hook_preset: str = "hook",
+    play_res_x: int = _ASS_PLAY_RES_X,
+    play_res_y: int = _ASS_PLAY_RES_Y,
+) -> Path:
+    """ASS 字幕ファイルを書き出す（既定は縦型ショート 1080x1920 基準）."""
+    selected_preset = _get_preset(preset)
+    selected_hook_preset: TelopPreset | None = None
+    clean_hook: str | None = None
+    if hook_text is not None:
+        if not hook_text.strip():
+            raise SubtitleBurnError("フックタイトルを入力してください。")
+        selected_hook_preset = _get_preset(hook_preset)
+        clean_hook = _sanitize_ass_text(hook_text)
+
+    events: list[str] = []
     for cue in cues:
         start = _seconds_to_ass_time(cue.start_seconds)
         end = _seconds_to_ass_time(cue.end_seconds)
-        text = _escape_ass_text(cue.text)
-        lines.append(f"Dialogue: 0,{start},{end},Default,,0,0,0,,{text}")
+        text = _sanitize_ass_text(cue.text)
+        if cue.emphasis:
+            emphasis = _inline_colour(selected_preset.emphasis_colour)
+            primary = _inline_colour(selected_preset.primary_colour)
+            text = f"{{\\c{emphasis}}}{text}{{\\c{primary}}}"
+        events.append(f"Dialogue: 0,{start},{end},Default,,0,0,0,,{text}")
 
-    output_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    return output_path
+    styles = [("Default", selected_preset)]
+    if selected_hook_preset is not None and clean_hook is not None:
+        styles.append(("Hook", selected_hook_preset))
+        events.append(f"Dialogue: 1,0:00:00.00,0:00:02.00,Hook,,0,0,0,,{clean_hook}")
+
+    return _serialize_ass(
+        output_path,
+        font_name=font_name,
+        styles=styles,
+        events=events,
+        play_res_x=play_res_x,
+        play_res_y=play_res_y,
+    )
+
+
+def write_hook_ass(
+    hook_text: str,
+    output_path: Path,
+    *,
+    font_name: str,
+    preset: str = "hook",
+) -> Path:
+    """冒頭 2 秒に表示するフックタイトル ASS を書き出す."""
+    if not hook_text.strip():
+        raise SubtitleBurnError("フックタイトルを入力してください。")
+    selected_preset = _get_preset(preset)
+    clean_hook = _sanitize_ass_text(hook_text)
+    return _serialize_ass(
+        output_path,
+        font_name=font_name,
+        styles=[("Hook", selected_preset)],
+        events=[f"Dialogue: 1,0:00:00.00,0:00:02.00,Hook,,0,0,0,,{clean_hook}"],
+        play_res_x=_ASS_PLAY_RES_X,
+        play_res_y=_ASS_PLAY_RES_Y,
+    )
 
 
 def _segment_ass_name(start_sec: float, end_sec: float) -> str:

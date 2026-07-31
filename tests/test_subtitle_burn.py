@@ -1,5 +1,6 @@
 """subtitle_burn サービスのユニットテスト."""
 
+from dataclasses import fields, replace
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -7,12 +8,16 @@ import pytest
 
 from yt_live_kit.services import subtitle_burn
 from yt_live_kit.services.subtitle_burn import (
+    TELOP_PRESETS,
+    SubtitleBurnError,
+    TelopPreset,
     TimedCue,
     build_segment_subtitle,
     filter_cues_for_segment,
     is_japanese_font_available,
     resolve_font,
     write_ass,
+    write_hook_ass,
 )
 from yt_live_kit.services.vtt_parser import Cue, deduplicate_progressive
 
@@ -317,3 +322,189 @@ def test_font_dir_returns_english_family_name_not_japanese(tmp_path):
     with patch.object(subtitle_burn, "_MAC_FONT_DIRS", (tmp_path,)):
         with patch.object(subtitle_burn, "_font_available_via_fc_list", return_value=False):
             assert resolve_font(None) == "Hiragino Sans"
+
+
+# --- S2: テロップスタイルプリセット + フックタイトル ------------------------
+
+
+def test_timed_cue_three_argument_compatibility_and_emphasis_propagation():
+    cue = TimedCue(10.0, 15.0, "強調字幕")
+    assert cue.emphasis is False
+
+    emphasized = TimedCue(10.0, 15.0, "強調字幕", emphasis=True)
+    filtered = filter_cues_for_segment([emphasized], 12.0, 14.0)
+    assert filtered == [TimedCue(0.0, 2.0, "強調字幕", emphasis=True)]
+
+    progressive = [
+        TimedCue(0.0, 1.0, "前", emphasis=False),
+        TimedCue(1.0, 2.0, "前 続き", emphasis=True),
+    ]
+    deduplicated = subtitle_burn._deduplicate_progressive_timed(progressive)
+    assert deduplicated[1] == TimedCue(1.0, 2.0, "続き", emphasis=True)
+
+
+def test_telop_presets_have_complete_fields_valid_colours_and_expected_borders():
+    expected_fields = {field.name for field in fields(TelopPreset)}
+    assert set(TELOP_PRESETS) == {"default", "bold_outline", "boxed", "hook"}
+    assert TELOP_PRESETS["default"].border_style == 1
+    assert TELOP_PRESETS["bold_outline"].bold is True
+    assert TELOP_PRESETS["bold_outline"].outline > TELOP_PRESETS["default"].outline
+    assert TELOP_PRESETS["boxed"].border_style == 3
+    assert TELOP_PRESETS["hook"].font_size > 54
+
+    for preset in TELOP_PRESETS.values():
+        assert set(preset.__dataclass_fields__) == expected_fields
+        for field_name in (
+            "primary_colour",
+            "secondary_colour",
+            "outline_colour",
+            "back_colour",
+            "emphasis_colour",
+        ):
+            assert subtitle_burn._ASS_STYLE_COLOUR_RE.fullmatch(
+                getattr(preset, field_name)
+            )
+
+
+def test_default_style_and_hook_free_output_are_v2_compatible(tmp_path):
+    output = tmp_path / "default.ass"
+    write_ass([TimedCue(0, 1, "本文")], output, font_name="Hiragino Sans")
+    content = output.read_text(encoding="utf-8")
+
+    assert (
+        "Style: Default,Hiragino Sans,54,&H00FFFFFF,&H000000FF,&H00000000,"
+        "&H80000000,0,0,0,0,100,100,0,0,1,3,0,2,10,10,180,1"
+    ) in content
+    assert "Style: Hook" not in content
+    assert ",Hook,," not in content
+
+
+@pytest.mark.parametrize("preset_name", ["bold_outline", "boxed", "hook"])
+def test_additional_preset_style_differs_from_default(tmp_path, preset_name):
+    output = tmp_path / f"{preset_name}.ass"
+    write_ass([], output, font_name="Test Font", preset=preset_name)
+    content = output.read_text(encoding="utf-8")
+    default_style = subtitle_burn._style_line(
+        "Default", "Test Font", TELOP_PRESETS["default"]
+    )
+    selected_style = subtitle_burn._style_line(
+        "Default", "Test Font", TELOP_PRESETS[preset_name]
+    )
+    assert selected_style in content
+    assert selected_style != default_style
+
+
+def test_unknown_presets_are_japanese_errors_with_available_names(tmp_path):
+    with pytest.raises(SubtitleBurnError, match="利用可能: default、bold_outline、boxed、hook"):
+        write_ass([], tmp_path / "unknown.ass", font_name="Font", preset="missing")
+    with pytest.raises(SubtitleBurnError, match="利用可能: default、bold_outline、boxed、hook"):
+        write_ass(
+            [],
+            tmp_path / "unknown_hook.ass",
+            font_name="Font",
+            hook_text="フック",
+            hook_preset="missing",
+        )
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    [
+        "primary_colour",
+        "secondary_colour",
+        "outline_colour",
+        "back_colour",
+        "emphasis_colour",
+    ],
+)
+def test_invalid_preset_colour_is_japanese_error_and_does_not_create_file(
+    tmp_path, monkeypatch, field_name
+):
+    bad = replace(TELOP_PRESETS["default"], **{field_name: "&H123456"})
+    monkeypatch.setitem(TELOP_PRESETS, "invalid", bad)
+    output = tmp_path / "invalid.ass"
+
+    with pytest.raises(SubtitleBurnError, match="色.*が不正"):
+        write_ass([], output, font_name="Font", preset="invalid")
+    assert not output.exists()
+
+
+def test_emphasis_uses_selected_preset_colours_for_entire_sanitized_line(tmp_path):
+    output = tmp_path / "emphasis.ass"
+    cues = [
+        TimedCue(0, 1, "通常"),
+        TimedCue(1, 2, r"強調{\c&HFFFFFF&}", emphasis=True),
+    ]
+    write_ass(cues, output, font_name="Font", preset="boxed")
+    content = output.read_text(encoding="utf-8")
+
+    assert "Dialogue: 0,0:00:00.00,0:00:01.00,Default,,0,0,0,,通常" in content
+    assert "{\\c" not in content.split("Dialogue: 0,0:00:00.00", 1)[1].splitlines()[0]
+    emphasis_colour = subtitle_burn._inline_colour(
+        TELOP_PRESETS["boxed"].emphasis_colour
+    )
+    primary_colour = subtitle_burn._inline_colour(TELOP_PRESETS["boxed"].primary_colour)
+    assert (
+        f"{{\\c{emphasis_colour}}}強調｛＼c&HFFFFFF&｝"
+        f"{{\\c{primary_colour}}}"
+    ) in content
+
+
+@pytest.mark.parametrize("target", ["cue", "hook"])
+def test_user_ass_control_sequences_are_sanitized_without_physical_dialogue_injection(
+    tmp_path, target
+):
+    unsafe = "一行目\\N{\\bord20}\r\n二行目\x00\x1f終端"
+    output = tmp_path / f"safe_{target}.ass"
+    if target == "cue":
+        write_ass([TimedCue(0, 1, unsafe)], output, font_name="Font")
+    else:
+        write_hook_ass(unsafe, output, font_name="Font")
+    content = output.read_text(encoding="utf-8")
+    dialogue_lines = [line for line in content.splitlines() if line.startswith("Dialogue:")]
+
+    assert len(dialogue_lines) == 1
+    assert "＼N｛＼bord20｝\\N二行目  終端" in dialogue_lines[0]
+    assert "{\\bord20}" not in dialogue_lines[0]
+
+
+def test_write_hook_ass_has_fixed_timing_resolution_and_large_font(tmp_path):
+    output = tmp_path / "hook.ass"
+    write_hook_ass("冒頭フック", output, font_name="Font")
+    content = output.read_text(encoding="utf-8")
+
+    assert "PlayResX: 1080" in content
+    assert "PlayResY: 1920" in content
+    assert "Style: Hook,Font,88," in content
+    assert "Dialogue: 1,0:00:00.00,0:00:02.00,Hook,,0,0,0,,冒頭フック" in content
+
+
+@pytest.mark.parametrize("writer", ["hook_only", "combined"])
+def test_blank_hook_is_rejected_before_output_creation(tmp_path, writer):
+    output = tmp_path / f"{writer}.ass"
+    with pytest.raises(SubtitleBurnError, match="フックタイトルを入力"):
+        if writer == "hook_only":
+            write_hook_ass(" \t\r\n ", output, font_name="Font")
+        else:
+            write_ass([], output, font_name="Font", hook_text=" \t\r\n ")
+    assert not output.exists()
+
+
+def test_write_ass_combines_default_and_hook_styles_and_layers(tmp_path):
+    output = tmp_path / "combined.ass"
+    write_ass(
+        [TimedCue(2, 3, "本文")],
+        output,
+        font_name="Font",
+        preset="bold_outline",
+        hook_text="フック",
+        hook_preset="boxed",
+    )
+    content = output.read_text(encoding="utf-8")
+
+    assert subtitle_burn._style_line(
+        "Default", "Font", TELOP_PRESETS["bold_outline"]
+    ) in content
+    assert subtitle_burn._style_line("Hook", "Font", TELOP_PRESETS["boxed"]) in content
+    assert "Dialogue: 0,0:00:02.00,0:00:03.00,Default" in content
+    assert "Dialogue: 1,0:00:00.00,0:00:02.00,Hook" in content

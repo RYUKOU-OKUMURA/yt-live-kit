@@ -21,7 +21,7 @@
 | U4 | 設定ページ | [x] 完了 |
 | U5 | 正式 4 画面 IA + ストレージ管理移設 + 概要欄差分プレビュー + フェーズ U 受け入れ | [x] 完了 |
 | S1 | テロップ台本 + メタデータ生成 | [x] 完了 |
-| S2 | ASS テロップスタイルプリセット + フックタイトル | [ ] 未着手 |
+| S2 | ASS テロップスタイルプリセット + フックタイトル | [~] 進行中 |
 | S3 | ジャンプカット連結ショート生成（services 拡張） | [ ] 未着手 |
 | S4 | キュー量産 UI + 台本確認フロー | [ ] 未着手 |
 | S5 | フェーズ S 受け入れ（実配信 1 本からショート複数本を通しで作る） | [ ] 未着手 |
@@ -564,21 +564,21 @@ data/{video_id}/ ...
 
 **作業:**
 
-- [ ] S2-1. `TimedCue` の末尾に `emphasis: bool = False` を追加する。既存の 3 引数構築を壊さず、`TimedCue` を再生成する `filter_cues_for_segment()` 等ではフラグを引き継ぐ
-- [ ] S2-2. frozen dataclass の `TelopPreset` と `TELOP_PRESETS: dict[str, TelopPreset]` を定義する
+- [x] S2-1. `TimedCue` の末尾に `emphasis: bool = False` を追加する。既存の 3 引数構築を壊さず、`TimedCue` を再生成する `filter_cues_for_segment()` 等ではフラグを引き継ぐ
+- [x] S2-2. frozen dataclass の `TelopPreset` と `TELOP_PRESETS: dict[str, TelopPreset]` を定義する
   - `TelopPreset` は `font_size: float`、`primary_colour` / `secondary_colour` / `outline_colour` / `back_colour: str`、`bold` / `italic` / `underline` / `strike_out: bool`、`scale_x` / `scale_y` / `spacing` / `angle: float`、`border_style: int`、`outline` / `shadow: float`、`alignment: int`、`margin_l` / `margin_r` / `margin_v: int`、`encoding: int`、`emphasis_colour: str` を持つ。`font_name` は従来どおり呼び出し引数で渡す
   - ASS スタイル行の真偽値は `True=-1` / `False=0` で直列化する。スタイル色はアルファ込みの `&HAABBGGRR`、アルファを受けないインライン色は `&HBBGGRR&` とする。`BorderStyle` は通常縁取りを `1`、矩形の座布団を `3` とする
   - `primary_colour` / `secondary_colour` / `outline_colour` / `back_colour` / `emphasis_colour` は `&H` + 8 桁の 16 進数というスタイル色形式を必須とし、不正なプリセット定義を日本語の `SubtitleBurnError` にする。インライン色は、スタイル色の先頭 2 桁のアルファを除いて `&HBBGGRR&` に変換する
   - `"default"` は既存 v2 スタイル互換とし、`Style: Default,{font_name},54,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,0,0,0,0,100,100,0,0,1,3,0,2,10,10,180,1` と完全一致させる。`"bold_outline"` は太字 + 強い通常縁取り、`"boxed"` は `BorderStyle=3` の座布団、`"hook"` は `font_size > 54` のフック専用スタイルとする
-- [ ] S2-3. `write_ass(cues, output_path, *, font_name, preset="default", hook_text: str | None = None, hook_preset="hook", play_res_x=1080, play_res_y=1920) -> Path` へ後方互換で拡張する
+- [x] S2-3. `write_ass(cues, output_path, *, font_name, preset="default", hook_text: str | None = None, hook_preset="hook", play_res_x=1080, play_res_y=1920) -> Path` へ後方互換で拡張する
   - `hook_text is None` の場合は Hook スタイル / Hook イベントを一切追加せず、既定引数で既存のヘッダー・`Default` スタイル・イベント出力と完全互換にする
   - `hook_text` がある場合は、選択した通常字幕スタイルを `Default`、フック用スタイルを `Hook` として同一 ASS に出力する。通常字幕は `Layer=0`、フックは `Layer=1` とする
   - `TimedCue.emphasis=True` は語の一部ではなく、安全化済みの行全体を、選択した `TelopPreset.emphasis_colour` から導出したインライン色タグと、同じプリセットの `primary_colour` から導出した復帰色タグで囲む。本文を先に安全化し、その後でのみ管理下の色タグを付与する
   - 通常字幕とフックに共通する安全化は、CRLF / CR を LF へ正規化し、ユーザー由来の `\` / `{` / `}` を全角の `＼` / `｛` / `｝` へ置換し、LF 以外の C0 制御文字を空白へ置換してから、最後に実 LF だけを管理下の `\N` へ変換する。この順序により、ユーザー由来の ASS override tag / control sequence を残さず、物理的な `Dialogue` 行を増やさない
   - `hook_text is not None` かつ strip 後に空の場合は、`write_hook_ass()` と同じ日本語の `SubtitleBurnError` にする
   - 不明な `preset` / `hook_preset` は、利用可能な名前を含む日本語の `SubtitleBurnError` にする
-- [ ] S2-4. `write_hook_ass(hook_text, output_path, *, font_name, preset="hook") -> Path` を新規実装する。同じ ASS serializer へ委譲し、フックを `0:00:00.00` から `0:00:02.00` まで固定表示する。strip 後に空の `hook_text` は日本語の `SubtitleBurnError` にする。既存の `build_segment_subtitle()` は後方互換のため既定プリセットで動かし、v2 の呼び出し元を壊さない
-- [ ] S2-5. ユニットテスト
+- [x] S2-4. `write_hook_ass(hook_text, output_path, *, font_name, preset="hook") -> Path` を新規実装する。同じ ASS serializer へ委譲し、フックを `0:00:00.00` から `0:00:02.00` まで固定表示する。strip 後に空の `hook_text` は日本語の `SubtitleBurnError` にする。既存の `build_segment_subtitle()` は後方互換のため既定プリセットで動かし、v2 の呼び出し元を壊さない
+- [x] S2-5. ユニットテスト
   - `TimedCue` を従来の 3 引数で構築でき、`emphasis=False` になること。再生成処理でもフラグを引き継ぐこと
   - `default` のスタイル行が既存文字列と完全一致し、`preset` 省略かつフックなしの出力に Hook スタイル / イベントが無いこと。各追加プリセットの必須フィールド・`BorderStyle`・色形式とスタイル行の差分
   - 不明な `preset` / `hook_preset` が利用可能名を含む日本語エラーになること
@@ -590,8 +590,8 @@ data/{video_id}/ ...
 
 **Done 条件:**
 
-- [ ] `uv run pytest` が全件通る（既存の `test_subtitle_burn.py` を壊さない）
-- [ ] 追加の pip 依存が無い
+- [x] `uv run pytest` が全件通る（既存の `test_subtitle_burn.py` を壊さない）
+- [x] 追加の pip 依存が無い
 - [ ] タスク完了コミット済み
 
 **見積もり目安:** 1 日
