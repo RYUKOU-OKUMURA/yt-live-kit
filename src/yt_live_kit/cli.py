@@ -3,9 +3,12 @@
 import typer
 
 from yt_live_kit.commands.chapters import chapters_cmd
+from yt_live_kit.commands.channel import channel_cmd
 from yt_live_kit.commands.clips import clips_app
 from yt_live_kit.commands.fetch import fetch_cmd
+from yt_live_kit.commands.highlights import highlights_app
 from yt_live_kit.commands.run import run_cmd
+from yt_live_kit.commands.shorts import short_cmd
 from yt_live_kit.commands.transcript import transcript_cmd
 
 app = typer.Typer(
@@ -26,6 +29,9 @@ app.command("transcript")(transcript_cmd)
 app.command("chapters")(chapters_cmd)
 app.command("run")(run_cmd)
 app.add_typer(clips_app, name="clips")
+app.command("channel")(channel_cmd)
+app.add_typer(highlights_app, name="highlights")
+app.command("short")(short_cmd)
 
 
 @app.command()
