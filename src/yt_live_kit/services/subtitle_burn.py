@@ -51,7 +51,7 @@ def _parse_timestamp(h: str | None, m: str, s: str, ms: str | None) -> float:
     return hours * 3600 + minutes * 60 + seconds + millis / 1000.0
 
 
-def _parse_vtt_with_end(content: str) -> list[TimedCue]:
+def parse_vtt_with_end(content: str) -> list[TimedCue]:
     """WebVTT をパースし、終了時刻付きキューを返す."""
     cues: list[TimedCue] = []
     lines = content.replace("\r\n", "\n").replace("\r", "\n").split("\n")
@@ -86,6 +86,10 @@ def _parse_vtt_with_end(content: str) -> list[TimedCue]:
             cues.append(TimedCue(start_seconds=start, end_seconds=end, text=text))
 
     return _deduplicate_progressive_timed(cues)
+
+
+# v2 までの内部呼び出しと外部利用者の互換性を維持する。
+_parse_vtt_with_end = parse_vtt_with_end
 
 
 def _deduplicate_progressive_timed(cues: list[TimedCue]) -> list[TimedCue]:
@@ -244,7 +248,7 @@ def build_segment_subtitle(
         raise SubtitleBurnError(f"字幕ファイルが見つかりません: {vtt_path}")
 
     content = vtt_path.read_text(encoding="utf-8")
-    cues = _parse_vtt_with_end(content)
+    cues = parse_vtt_with_end(content)
     segment_cues = filter_cues_for_segment(cues, start_sec, end_sec)
 
     output_path = (

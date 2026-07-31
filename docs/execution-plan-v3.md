@@ -20,7 +20,7 @@
 | U3 | 取り込みページ | [x] 完了 |
 | U4 | 設定ページ | [x] 完了 |
 | U5 | 正式 4 画面 IA + ストレージ管理移設 + 概要欄差分プレビュー + フェーズ U 受け入れ | [x] 完了 |
-| S1 | テロップ台本 + メタデータ生成 | [ ] 未着手 |
+| S1 | テロップ台本 + メタデータ生成 | [~] 進行中 |
 | S2 | ASS テロップスタイルプリセット + フックタイトル | [ ] 未着手 |
 | S3 | ジャンプカット連結ショート生成（services 拡張） | [ ] 未着手 |
 | S4 | キュー量産 UI + 台本確認フロー | [ ] 未着手 |
@@ -519,12 +519,12 @@ data/{video_id}/ ...
 
 **作業:**
 
-- [ ] S1-1. `prompts/telop_script.md` を作成する
+- [x] S1-1. `prompts/telop_script.md` を作成する
   - 入力: 区間ごとの `[HH:MM:SS.mmm --> HH:MM:SS.mmm] テキスト` 形式のカット単位字幕（圧縮版ではなく原文に近い粒度）。開始・終了の両方とミリ秒を保持し、Codex が行の絶対秒を区間内へ配置できるようにする
   - 出力 JSON: 区間ごとのテロップ行（元動画基準の絶対秒 `start_sec` / `end_sec`、本文、強調フラグ）+ `hook_text`（1 本）+ `title_candidates`（複数）+ `description` + `tags`
   - 出力ルール: 半角 `<` `>` 禁止、各行は画面に収まる短さ（目安 13〜16 文字）に分割すること、誤字脱字・固有名詞の誤変換は補正してよいが**話していない内容を追加しない**こと
-- [ ] S1-2. `models/telop.py` に `TelopLine`（`text`, `start_sec`, `end_sec`, `emphasis: bool`）、`TelopSegmentScript`（元動画基準の絶対秒 `start_sec`, `end_sec` と区間ごとの `TelopLine` リスト）、`TelopScriptDocument`（`hook_text`, `title_candidates`, `description`, `tags`, `segments`）を pydantic で定義する
-- [ ] S1-3. `services/telop.py` に以下を実装する
+- [x] S1-2. `models/telop.py` に `TelopLine`（`text`, `start_sec`, `end_sec`, `emphasis: bool`）、`TelopSegmentScript`（元動画基準の絶対秒 `start_sec`, `end_sec` と区間ごとの `TelopLine` リスト）、`TelopScriptDocument`（`hook_text`, `title_candidates`, `description`, `tags`, `segments`）を pydantic で定義する
+- [x] S1-3. `services/telop.py` に以下を実装する
   - `generate_telop_script(video_id: str, segments: Sequence[HighlightSegment], settings=None, *, on_progress=None, prompt_only=False, codex_path="codex") -> TelopScriptResult`
   - `TelopScriptResult` は `video_id: str`, `clip_id: str`, `prompt_path: Path`, `script_path: Path | None`, `used_codex: bool`, `document: TelopScriptDocument | None` を持つ frozen dataclass とする。`prompt_only=True` はプロンプトを保存し、`script_path=None`, `used_codex=False`, `document=None` で正常終了する
   - `validate_telop_script(doc: dict | TelopScriptDocument, *, segments: Sequence[HighlightSegment]) -> TelopValidationResult`
@@ -536,7 +536,7 @@ data/{video_id}/ ...
   - Codex 出力 JSON の抽出は、コードフェンス付き・前後テキスト付き出力に対応する非公開ヘルパーを `services/telop.py` 内に局所実装する。`highlights.py` の非公開関数は import せず、S1 では共通化のために `highlights.py` / `ai_prompt.py` を変更しない
   - `services/subtitle_burn.py` の `_parse_vtt_with_end()` を `parse_vtt_with_end()` として公開し、既存呼び出し互換のため旧名 alias を残す。S1 では公開 parser と `filter_cues_for_segment()` を使い、区間内相対秒へ元区間開始秒を足して絶対秒へ戻す
   - Codex 未導入時は `services/highlights.py` の `CODEX_INSTALL_HINT` と同じ形式のヒントを出す
-- [ ] S1-4. ユニットテスト
+- [x] S1-4. ユニットテスト
   - `validate_telop_script` の違反パターン（入力との区間数不一致・境界不一致、行なし、区間外の行、行の逆転・重複、strip 後の空本文、`hook_text` 空、`title_candidates` なし・空文字、`description` 空、`tags` なし・空文字、全生成文字列の半角 `<>`）と、16 文字超が error ではなく warning になること、pydantic 詳細を漏らさない日本語スキーマエラー
   - `make_clip_id` が同じ境界の `HighlightSegment` / tuple で同じ ID、順序を変えると異なる ID になること。`ROUND_HALF_UP` の 0.5 ミリ秒境界と、空配列・非有限値・負値・`end <= start` の日本語エラー
   - Codex 出力 JSON の抽出（コードフェンス付き / 前後にテキストがある場合）
@@ -544,8 +544,8 @@ data/{video_id}/ ...
 
 **Done 条件:**
 
-- [ ] `uv run pytest` が全件通る
-- [ ] Codex CLI が失敗した場合は既存方針どおり例外を送出するが、既存の同一 `telop_{clip_id}.json` と他の成果物（チャプター・候補・ハイライト）を変更しない。S1 単体では AC-23 の UI 修正・焼き込み反映を完了扱いにせず、後続 S3 / S4 で閉じる
+- [x] `uv run pytest` が全件通る
+- [x] Codex CLI が失敗した場合は既存方針どおり例外を送出するが、既存の同一 `telop_{clip_id}.json` と他の成果物（チャプター・候補・ハイライト）を変更しない。S1 単体では AC-23 の UI 修正・焼き込み反映を完了扱いにせず、後続 S3 / S4 で閉じる
 - [ ] タスク完了コミット済み
 
 **見積もり目安:** 1.5 日
