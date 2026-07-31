@@ -779,9 +779,9 @@ data/{video_id}/ ...
 - [x] P0-1. P1 / P2 の Done 条件と全モックテストが完了し、実 API を自動テストが呼ばないことを確認する。実操作の承認待ちでも P1 / P2 の開発・レビュー・コミットを止めない
 - [x] P0-2. `channels.list(mine=true)` の実チャンネル ID / 名称、対象ファイル、絶対パス、サイズ、尺、タイトル、説明文、タグ、timezone 付き予約日時と UTC `Z`、`privacyStatus=private`、`notifySubscribers=false`、Made for Kids / synthetic media の選択、Community Guidelines 同意、当日 attempt 数をユーザーに提示する。**private lock が非該当なら、この probe 動画も指定時刻に public となり得る**ことを明記し、その外部公開まで含む P0 専用の明示承認を得るまで確定しない
 - [x] P0-3. 承認後も P2 の確認後再検証を通し、operation ID を発行した本番経路から 1 本だけ upload する。operation の `reserved → uploading → uploaded` または `needs_reconciliation` / `failed`、job ID、YouTube video ID、attempt 台帳を記録する
-- [ ] P0-4. `videos.list(part="status,processingDetails")` の bounded poll と YouTube Studio で processing 状態、指定時刻前の private、公開予約可否、private lock の有無を確認する。**private lock は probe 成功や予約投稿成功として扱わない**
-- [ ] P0-5. private lock がある場合、審査フォームの提出内容をユーザーに提示し、実 upload の承認とは別の**審査フォーム提出専用の明示承認**を得てから提出する。承認前は提出しない。審査待ちは P1 / P2 のブロッカーにしない
-- [ ] P0-6. 承認時刻、operation ID、YouTube video ID、upload / processing / schedule status、private lock、審査申請の有無と申請日を受け入れ証跡へ記録する。動画削除等の追加操作はこの承認に含めない
+- [x] P0-4. `videos.list(part="status,processingDetails")` の bounded poll と YouTube Studio で processing 状態、指定時刻前の private、公開予約可否、private lock の有無を確認する。**private lock は probe 成功や予約投稿成功として扱わない**
+- [x] P0-5. private lock がある場合、審査フォームの提出内容をユーザーに提示し、実 upload の承認とは別の**審査フォーム提出専用の明示承認**を得てから提出する。承認前は提出しない。審査待ちは P1 / P2 のブロッカーにしない
+- [x] P0-6. 承認時刻、operation ID、YouTube video ID、upload / processing / schedule status、private lock、審査申請の有無と申請日を受け入れ証跡へ記録する。動画削除等の追加操作はこの承認に含めない
 
 **P0 read-only 準備記録（2026-08-01 06:01 JST）:**
 
@@ -799,13 +799,16 @@ data/{video_id}/ ...
 - operation は `reserved → uploading → uploaded`、job は `done`。LA 当日 attempt は upload 前 0 / 100、upload 後 1 / 100 で、追加の `videos.insert` は実行していない
 - `videos.list(part="status,processingDetails")` の bounded poll は 2026-07-31 22:13:26 UTC、22:13:36 UTC、22:13:46 UTC の 3 回で、`processing → processing → processing_succeeded`。最終 `uploadStatus=processed`、`privacyStatus=private`、`publishAt=2026-08-01T00:00:00Z`
 - YouTube Studio でも Standard / HD processing 完了、公開設定「公開予約」、公開までは非公開、2026-08-01 09:00、GMT+0900 を確認した。Made for Kids は「いいえ」。保存・変更操作は行っていない
-- P0-4 の公開後 status、実視聴、private lock 判定は予約時刻後に確認する。現時点では lock の有無を確定せず、審査フォームも提出していない
+- 2026-08-01 07:30 JST、ユーザーから検証のため公開時刻を早める追加承認を取得した。10 分 lead を維持して 07:45 JST / 2026-07-31 22:45 UTC へ変更し、YouTube Studio の「すべての変更を保存しました」と API の `privacyStatus=private`、`processingStatus=succeeded`、`publishAt=2026-07-31T22:45:00Z` を照合した。operation の upload 時 snapshot は元の 09:00 を不変記録として保持し、公開 poll には実際の 07:45 を使う
+- 予約時刻後の 2026-07-31 22:46:19 UTC、production の bounded publication poll は初回で `uploadStatus=processed`、`processingStatus=succeeded`、`privacyStatus=public`、classification `published` を返した。operation の poll history は processing 3 件 + publication 1 件の計 4 件
+- YouTube Studio は公開設定「公開」、公開 URL `https://youtube.com/shorts/4WYXdB5p0K0` は動画プレーヤー、チャンネル `@ai.seitai`、タイトル「同じ条件でゲームを作らせた結果」を表示し、実視聴可能と確認した。operation の予約公開可否を `no_private_lock` として記録した
+- private lock は非該当のため審査フォームは不要で、提出・申請日は無し。動画削除その他の追加操作も行っていない
 
 **Done 条件:**
 
 - [x] P1 / P2 の安全契約を迂回する P0 専用 upload コードが無い
-- [ ] 実 upload と審査フォーム提出について、対象を示した別々の明示承認記録がある（審査不要ならその判定記録がある）
-- [ ] operation / attempt / poll の実結果と private lock 判定が記録されている
+- [x] 実 upload と審査フォーム提出について、対象を示した別々の明示承認記録がある（審査不要ならその判定記録がある）
+- [x] operation / attempt / poll の実結果と private lock 判定が記録されている
 - [x] 4xx / 結果不明が発生した場合に新しい `videos.insert` が自動実行されず、`needs_reconciliation` のまま手動照合へ止まる
 - [x] `uv run pytest` が全件通る（実 API を呼ぶテストは含めない）
 - [ ] タスク完了コミット済み
