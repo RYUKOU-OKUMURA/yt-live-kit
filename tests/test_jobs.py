@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import threading
 import time
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
@@ -26,6 +27,20 @@ from yt_live_kit.services.jobs import (
     update_job,
 )
 from yt_live_kit.services.pipeline import PipelineError
+
+
+@contextmanager
+def _patch_real_thread():
+    threads: list[threading.Thread] = []
+    real = threading.Thread
+
+    def factory(*args, **kwargs):
+        t = real(*args, **kwargs)
+        threads.append(t)
+        return t
+
+    with patch("yt_live_kit.services.jobs.threading.Thread", side_effect=factory) as mock_thread:
+        yield mock_thread, threads
 
 
 def test_create_update_read_roundtrip(tmp_path):
@@ -110,9 +125,9 @@ def test_start_job_updates_state_via_report(tmp_path):
         report(stage="fetch", message="取得中", current=1, total=2)
         done.set()
 
-    with patch("yt_live_kit.services.jobs.threading.Thread", wraps=threading.Thread) as mock_thread:
+    with _patch_real_thread() as (_mock_thread, threads):
         job_id = start_job("single", target_fn, settings=settings, total=2)
-        mock_thread.return_value.join(timeout=5)
+        threads[-1].join(timeout=5)
     assert done.wait(timeout=5)
     for _ in range(50):
         state = read_job(job_id, settings)
@@ -139,9 +154,9 @@ def test_start_job_marks_failed_on_exception(tmp_path):
         # PipelineError は _KNOWN_ERRORS に含まれるため、メッセージがそのまま使われる。
         raise PipelineError("処理に失敗しました")
 
-    with patch("yt_live_kit.services.jobs.threading.Thread", wraps=threading.Thread) as mock_thread:
+    with _patch_real_thread() as (_mock_thread, threads):
         job_id = start_job("single", target_fn, settings=settings)
-        mock_thread.return_value.join(timeout=5)
+        threads[-1].join(timeout=5)
     for _ in range(50):
         state = read_job(job_id, settings)
         if state is not None and state.status == "failed":
@@ -164,9 +179,9 @@ def test_start_job_writes_log_for_unexpected_exception(tmp_path):
     def target_fn(*, report, settings, **_kwargs):
         raise ValueError()
 
-    with patch("yt_live_kit.services.jobs.threading.Thread", wraps=threading.Thread) as mock_thread:
+    with _patch_real_thread() as (_mock_thread, threads):
         job_id = start_job("single", target_fn, settings=settings)
-        mock_thread.return_value.join(timeout=5)
+        threads[-1].join(timeout=5)
     for _ in range(50):
         state = read_job(job_id, settings)
         if state is not None and state.status == "failed":
@@ -191,7 +206,7 @@ def test_is_busy_and_job_busy_error(tmp_path):
         time.sleep(0.2)
 
     assert not is_busy(settings)
-    with patch("yt_live_kit.services.jobs.threading.Thread", wraps=threading.Thread) as mock_thread:
+    with _patch_real_thread() as (_mock_thread, threads):
         job_id = start_job("single", target_fn, settings=settings)
         assert started.wait(timeout=5)
         assert is_busy(settings)
@@ -205,7 +220,7 @@ def test_is_busy_and_job_busy_error(tmp_path):
             if not is_busy(settings):
                 break
             time.sleep(0.05)
-        mock_thread.return_value.join(timeout=5)
+        threads[-1].join(timeout=5)
     assert not is_busy(settings)
 
 
@@ -230,7 +245,7 @@ def test_start_job_concurrent_calls_only_start_one_job(tmp_path):
         with results_lock:
             results.append(outcome)
 
-    with patch("yt_live_kit.services.jobs.threading.Thread", wraps=threading.Thread) as mock_thread:
+    with _patch_real_thread() as (_mock_thread, threads):
         workers = [threading.Thread(target=worker) for _ in range(5)]
         for w in workers:
             w.start()
@@ -241,7 +256,7 @@ def test_start_job_concurrent_calls_only_start_one_job(tmp_path):
             if not is_busy(settings):
                 break
             time.sleep(0.05)
-        mock_thread.return_value.join(timeout=5)
+        threads[-1].join(timeout=5)
 
     assert len(results) == 5
     ok_results = [r for r in results if r[0] == "ok"]
@@ -422,8 +437,8 @@ def test_start_job_passes_job_id_to_target_fn(tmp_path):
         received["job_id"] = job_id
         done.set()
 
-    with patch("yt_live_kit.services.jobs.threading.Thread", wraps=threading.Thread) as mock_thread:
+    with _patch_real_thread() as (_mock_thread, threads):
         job_id = start_job("single", target_fn, settings=settings)
-        mock_thread.return_value.join(timeout=5)
+        threads[-1].join(timeout=5)
     assert done.wait(timeout=5)
     assert received["job_id"] == job_id
