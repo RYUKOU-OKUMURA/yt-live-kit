@@ -35,7 +35,12 @@ from yt_live_kit.services.youtube_api import (
     update_video_description,
 )
 from yt_live_kit.ui.components.clipboard import render_copy_button
-from yt_live_kit.ui.components.shorts_line import record_line_upload, render_shorts_line
+from yt_live_kit.ui.components.shorts_line import (
+    record_line_upload,
+    render_main_line_summary,
+    render_shorts_line,
+    validate_line_reservation,
+)
 from yt_live_kit.ui.components.upload import render_upload_section
 from yt_live_kit.ui.state import get_selected_video_id, set_active_job_id
 from yt_live_kit.ui.views._local_settings import (
@@ -817,6 +822,14 @@ def _render_publish_workspace(
             render_upload_section(
                 video.video_id,
                 settings,
+                before_preview=lambda clip_id, output_path: (
+                    validate_line_reservation(
+                        video.video_id,
+                        clip_id,
+                        output_path,
+                        settings,
+                    )
+                ),
                 on_operation_started=lambda clip_id, operation_id, output_path: (
                     record_line_upload(
                         video.video_id,
@@ -927,6 +940,7 @@ def render_video_detail_page(
         description_applied=video.video_id in load_description_applied_ids(settings),
     )
     _render_state_summary(summary)
+    render_main_line_summary(video.video_id, settings)
 
     default_workspace = choose_initial_workspace(
         video_id=video.video_id,
@@ -946,9 +960,6 @@ def render_video_detail_page(
     selected_workspace: Workspace = (
         workspace if workspace in _WORKSPACES else default_workspace
     )
-
-    # サイドバー折り畳み時にも、現在工程の要約がメインから消えない。
-    st.caption("作成中のショート: 工程状態はショート作成内で確認できます。")
 
     if selected_workspace == "materials":
         _render_materials_workspace(

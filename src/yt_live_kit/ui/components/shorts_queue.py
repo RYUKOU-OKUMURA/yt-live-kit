@@ -114,6 +114,7 @@ def install_line_snapshot(
     )
     _clear_snapshot(video_id)
     st.session_state[_state_key(video_id, "snapshot")] = {
+        "line_mode": True,
         "fingerprint": fingerprint,
         "source": source,
         "mode": "concat",
@@ -185,40 +186,44 @@ def _validate_overwrite_confirmation(
     snapshot = _snapshot(video_id)
     if snapshot is None or snapshot.get("fingerprint") != snapshot_fingerprint:
         return False, "選択内容が変わりました。台本確認からやり直してください。"
-    try:
-        source = str(snapshot["source"])
-        if source == "clips":
-            document = load_candidates_file(video_id, settings)
-        elif source == "highlights":
-            document = load_segments_file(video_id, settings)
-        else:
-            return False, "候補ソースが変わりました。選択し直してください。"
-        if document is None:
-            return False, "候補ファイルが見つかりません。選択し直してください。"
-        current_selected = select_queue_candidates_by_id(
-            document.candidates,
-            tuple(snapshot["selected_ids"]),
-        )
-        current_segments = normalize_queue_candidates(
-            current_selected,
-            source=source,
-        )
-        current_fingerprint = make_shorts_queue_fingerprint(
-            video_id=video_id,
-            source=source,
-            mode=str(snapshot["mode"]),
-            original_candidates=current_selected,
-            segments=current_segments,
-            layout=str(snapshot["layout"]),
-            preset=str(snapshot["preset"]),
-            hook_preset=str(snapshot["hook_preset"]),
-        )
-        current_targets = build_shorts_queue_targets(
-            current_segments,
-            mode=str(snapshot["mode"]),
-        )
-    except (ShortsQueueError, TelopError, OSError, ValueError) as exc:
-        return False, _safe_text(exc)
+    if snapshot.get("line_mode") is True:
+        current_fingerprint = str(snapshot.get("fingerprint") or "")
+        current_targets = tuple(snapshot.get("targets", ()))
+    else:
+        try:
+            source = str(snapshot["source"])
+            if source == "clips":
+                document = load_candidates_file(video_id, settings)
+            elif source == "highlights":
+                document = load_segments_file(video_id, settings)
+            else:
+                return False, "候補ソースが変わりました。選択し直してください。"
+            if document is None:
+                return False, "候補ファイルが見つかりません。選択し直してください。"
+            current_selected = select_queue_candidates_by_id(
+                document.candidates,
+                tuple(snapshot["selected_ids"]),
+            )
+            current_segments = normalize_queue_candidates(
+                current_selected,
+                source=source,
+            )
+            current_fingerprint = make_shorts_queue_fingerprint(
+                video_id=video_id,
+                source=source,
+                mode=str(snapshot["mode"]),
+                original_candidates=current_selected,
+                segments=current_segments,
+                layout=str(snapshot["layout"]),
+                preset=str(snapshot["preset"]),
+                hook_preset=str(snapshot["hook_preset"]),
+            )
+            current_targets = build_shorts_queue_targets(
+                current_segments,
+                mode=str(snapshot["mode"]),
+            )
+        except (ShortsQueueError, TelopError, OSError, ValueError) as exc:
+            return False, _safe_text(exc)
     target_ids = tuple(target.target_id for target in current_targets)
     snapshot_targets = tuple(snapshot.get("targets", ()))
     if target_ids != tuple(target.target_id for target in snapshot_targets):
@@ -655,6 +660,14 @@ def render_shorts_queue(
     """S4 の選択、明示台本生成、全確定、結果表示を描画する."""
     st.divider()
     st.markdown("### ショートをまとめて生成")
+    existing_snapshot = _snapshot(video_id)
+    if existing_snapshot is not None and existing_snapshot.get("line_mode") is True:
+        st.info(
+            "現在の 1 本はショート生産ラインで管理されています。"
+            "まとめて生成はライン完了後に利用してください。"
+        )
+        _render_current_result(video_id, settings)
+        return
     available_sources: list[str] = []
     if clip_candidates:
         available_sources.append("clips")

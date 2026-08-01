@@ -117,6 +117,14 @@ def choose_preview_mode(
     return "source_missing"
 
 
+def is_human_review_current(state: LineState, review_fingerprint: str) -> bool:
+    """人確認が現在の台本にだけ結び付いているか返す."""
+    return (
+        state.review_fingerprint == review_fingerprint
+        and state.review_confirmed_fingerprint == review_fingerprint
+    )
+
+
 def _context_key(video_id: str) -> str:
     return f"{_SESSION_PREFIX}_{video_id}"
 
@@ -199,8 +207,9 @@ def _start_line(
             queue_fingerprint,
             generated.document,
         )
-        state = set_review_fingerprint(state, review)
-        save_line_state(state, settings)
+        previous_state = state
+        state = set_review_fingerprint(previous_state, review)
+        save_line_state(state, settings, expected_state=previous_state)
         context["draft"] = generated.document
         _save_context(video_id, context)
     except (AiPromptError, LineStateError) as exc:
@@ -443,6 +452,16 @@ def render_sidebar_line_context(video_id: str | None, settings: Settings) -> Non
     render_compact_line_status(state, load_daily_line_summary(settings))
 
 
+def render_main_line_summary(video_id: str, settings: Settings) -> None:
+    """サイドバー折り畳み時にも残る表示専用の工程要約."""
+    try:
+        state = resolve_active_line(video_id, settings)
+    except LineStateError:
+        state = None
+    with st.container(border=True):
+        render_compact_line_status(state, load_daily_line_summary(settings))
+
+
 def record_line_upload(
     video_id: str,
     clip_id: str,
@@ -454,8 +473,38 @@ def record_line_upload(
     state = resolve_active_line(video_id, settings)
     if state is None or state.clip_id != clip_id:
         return
-    updated = record_upload_operation(state, operation_id, output_path)
-    save_line_state(updated, settings)
+    updated = record_upload_operation(
+        state,
+        operation_id,
+        output_path,
+        settings=settings,
+    )
+    if updated.current_stage != LineStage.RESERVED:
+        raise LineStateError(
+            "完成動画が最終確認時から変わりました。もう一度プレビューしてください。"
+        )
+
+
+def validate_line_reservation(
+    video_id: str,
+    clip_id: str,
+    output_path: Path,
+    settings: Settings,
+) -> None:
+    """投稿 preview を開く前に最終確認済み出力との一致を固定する."""
+    state = resolve_active_line(video_id, settings)
+    if state is None or state.clip_id != clip_id:
+        raise LineStateError("予約対象のショート生産ラインを確認できませんでした。")
+    checked = reconcile_output(state, output_path)
+    if checked != state:
+        save_line_state(checked, settings, expected_state=state)
+    if (
+        checked.output_fingerprint is None
+        or checked.preview_confirmed_fingerprint != checked.output_fingerprint
+    ):
+        raise LineStateError(
+            "完成動画が最終確認時から変わりました。もう一度プレビューしてください。"
+        )
 
 
 def render_shorts_line(
@@ -565,8 +614,9 @@ def render_shorts_line(
             edited,
         )
         if review_fingerprint != state.review_fingerprint:
-            state = set_review_fingerprint(state, review_fingerprint)
-            save_line_state(state, settings)
+            previous_state = state
+            state = set_review_fingerprint(previous_state, review_fingerprint)
+            save_line_state(state, settings, expected_state=previous_state)
     except LineStateError as exc:
         st.error(_safe(exc))
         return
@@ -593,18 +643,19 @@ def render_shorts_line(
     check_key = f"line_human_check_{video_id}_{target.target_id}_{state.updated_at.timestamp()}"
     human_checked = st.checkbox(
         "台本全体の誤字・固有名詞を確認した",
-        value=gate.human_confirmed and gate.fingerprint_current,
+        value=is_human_review_current(state, review_fingerprint),
         key=check_key,
         disabled=not gate.hard_valid,
     )
     if human_checked and not gate.can_generate:
         try:
+            previous_state = state
             state = confirm_review(
-                state,
+                previous_state,
                 review_fingerprint,
                 hard_errors=validation.errors,
             )
-            save_line_state(state, settings)
+            save_line_state(state, settings, expected_state=previous_state)
         except LineStateError as exc:
             st.error(_safe(exc))
         else:
@@ -644,12 +695,14 @@ def render_shorts_line(
         spec = manifest_spec
     if output_path is not None:
         try:
+            previous_state = state
             state = (
-                record_output(state, output_path)
-                if state.output_fingerprint is None
+                record_output(previous_state, output_path)
+                if previous_state.output_fingerprint is None
                 else reconcile_output(state, output_path)
             )
-            save_line_state(state, settings)
+            if state != previous_state:
+                save_line_state(state, settings, expected_state=previous_state)
         except LineStateError as exc:
             st.error(_safe(exc))
 
@@ -699,8 +752,9 @@ def render_shorts_line(
     if not preview_current:
         if st.button("完成動画を確認して予約へ", type="primary"):
             try:
-                state = confirm_preview(state, output_path)
-                save_line_state(state, settings)
+                previous_state = state
+                state = confirm_preview(previous_state, output_path)
+                save_line_state(state, settings, expected_state=previous_state)
             except LineStateError as exc:
                 st.error(_safe(exc))
             else:

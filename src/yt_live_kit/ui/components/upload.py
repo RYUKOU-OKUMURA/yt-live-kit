@@ -244,11 +244,18 @@ def _open_preview(
     settings: Settings,
     *,
     start_ms: int | None = None,
+    before_preview: Callable[[str, Path], None] | None = None,
     on_operation_started: Callable[[str, str, Path], None] | None = None,
 ) -> None:
     if item.output_path is None:
         st.error("投稿できるショート動画ファイルがありません。")
         return
+    if before_preview is not None:
+        try:
+            before_preview(item.target_id, item.output_path)
+        except LineStateError as exc:
+            st.error(_safe_text(exc))
+            return
     try:
         description = build_shorts_description(
             item.description,
@@ -286,6 +293,7 @@ def render_upload_section(
     video_id: str,
     settings: Settings,
     *,
+    before_preview: Callable[[str, Path], None] | None = None,
     on_operation_started: Callable[[str, str, Path], None] | None = None,
 ) -> None:
     """最新の検証済み shorts queue から成功 item の投稿入口を描画する."""
@@ -340,5 +348,6 @@ def render_upload_section(
                     item,
                     settings,
                     start_ms=_clip_start_ms(result, item.target_id),
+                    before_preview=before_preview,
                     on_operation_started=on_operation_started,
                 )

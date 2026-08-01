@@ -278,6 +278,8 @@ def test_render_detail_draws_only_selected_workspace(tmp_path: Path) -> None:
         stack.enter_context(patch("yt_live_kit.ui.views.video_detail.get_active_job", return_value=None))
         stack.enter_context(patch("yt_live_kit.ui.views.video_detail._load_material_candidates", return_value=([], [])))
         stack.enter_context(patch("yt_live_kit.ui.views.video_detail._render_state_summary"))
+        stack.enter_context(patch("yt_live_kit.ui.views.video_detail.render_main_line_summary"))
+        line = stack.enter_context(patch("yt_live_kit.ui.views.video_detail.render_shorts_line"))
         stack.enter_context(patch("yt_live_kit.ui.views.video_detail.st.segmented_control", return_value="shorts"))
         materials = stack.enter_context(patch("yt_live_kit.ui.views.video_detail._render_materials_workspace"))
         shorts = stack.enter_context(
@@ -297,7 +299,8 @@ def test_render_detail_draws_only_selected_workspace(tmp_path: Path) -> None:
         video_detail.render_video_detail_page()
 
     materials.assert_not_called()
-    shorts.assert_called_once_with(result, expanded=True)
+    line.assert_called_once()
+    shorts.assert_called_once_with(result, expanded=False)
     publish.assert_not_called()
 
 
