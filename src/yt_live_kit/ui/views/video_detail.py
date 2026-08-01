@@ -2,22 +2,32 @@
 
 from __future__ import annotations
 
-from collections.abc import Collection
+import hashlib
+import json
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 import streamlit as st
 
 from yt_live_kit.config import Settings, get_settings
+from yt_live_kit.models.clips import ClipCandidate
+from yt_live_kit.models.highlights import HighlightSegment
 from yt_live_kit.services.chapter_validator import validate_chapters
+from yt_live_kit.services.clips import load_candidates_file
+from yt_live_kit.services.highlights import load_segments_file
 from yt_live_kit.services.history import ProcessedVideo, list_processed_videos
-from yt_live_kit.services.jobs import JobBusyError, is_busy, start_job
+from yt_live_kit.services.jobs import JobBusyError, JobState, get_active_job, is_busy, start_job
 from yt_live_kit.services.pipeline import (
     PipelineResult,
     load_result_from_disk,
     regenerate_job_target,
 )
 from yt_live_kit.services.storage import StorageError, format_bytes, purge_source
+from yt_live_kit.services.shorts_queue import (
+    ShortsQueueError,
+    load_latest_shorts_queue_result,
+)
 from yt_live_kit.services.youtube_api import (
     fetch_video_snippet,
     is_configured,
@@ -25,6 +35,12 @@ from yt_live_kit.services.youtube_api import (
     update_video_description,
 )
 from yt_live_kit.ui.components.clipboard import render_copy_button
+from yt_live_kit.ui.components.shorts_line import (
+    render_main_line_summary,
+    render_shorts_line,
+    run_line_upload_transaction,
+    validate_line_reservation,
+)
 from yt_live_kit.ui.components.upload import render_upload_section
 from yt_live_kit.ui.state import get_selected_video_id, set_active_job_id
 from yt_live_kit.ui.views._local_settings import (
@@ -38,60 +54,83 @@ from yt_live_kit.ui.views.shorts import render_shorts_section
 if TYPE_CHECKING:
     from streamlit.navigation.page import StreamlitPage
 
-StepStatus = Literal["complete", "next", "pending"]
+Workspace = Literal["materials", "shorts", "publish"]
 
 _BUSY_MESSAGE = "他の処理が実行中です。完了までお待ちください。"
-_STEP_LABELS = ("字幕", "チャプター", "候補", "ショート", "概要欄")
-_STATUS_LABELS: dict[StepStatus, str] = {
-    "complete": "✓ 完了",
-    "next": "● 次にやる",
-    "pending": "○ 未着手",
+_WORKSPACES: tuple[Workspace, ...] = ("materials", "shorts", "publish")
+_WORKSPACE_LABELS: dict[Workspace, str] = {
+    "materials": "素材候補",
+    "shorts": "ショート作成",
+    "publish": "公開・投稿",
 }
 _DESCRIPTION_UPDATED_IDS_KEY = "detail_description_updated_ids"
 _DESCRIPTION_SUCCESS_KEY = "detail_description_success"
 
 
 @dataclass(frozen=True)
-class ProgressStep:
-    """動画詳細ステッパーの 1 段階."""
+class DetailSummary:
+    """動画詳細の読み取り専用サマリー."""
 
-    label: str
-    status: StepStatus
+    candidate_count: int
+    generated_short_count: int
+    reservable_short_count: int
+    description_applied: bool
 
 
-def calculate_progress_steps(
-    video: ProcessedVideo,
-    result: PipelineResult | None,
+def calculate_detail_summary(
     *,
-    shorts_count: int,
-    description_applied_ids: Collection[str],
-    has_highlights: bool = False,
-) -> tuple[ProgressStep, ...]:
-    """保存済み成果物から 5 段階の状態を計算する純粋関数."""
-    completion = (
-        video.has_transcript,
-        video.has_chapters or bool(result and result.chapters_text.strip()),
-        video.has_clips
-        or bool(result and result.clips_candidates)
-        or has_highlights,
-        shorts_count > 0,
-        video.video_id in description_applied_ids,
-    )
-    first_incomplete = next(
-        (index for index, complete in enumerate(completion) if not complete),
-        None,
+    clip_count: int,
+    highlight_count: int,
+    generated_short_count: int,
+    reservable_short_count: int,
+    description_applied: bool,
+) -> DetailSummary:
+    """UI 入力から状態カードの値を副作用なく計算する."""
+    return DetailSummary(
+        candidate_count=max(0, clip_count) + max(0, highlight_count),
+        generated_short_count=max(0, generated_short_count),
+        reservable_short_count=max(0, reservable_short_count),
+        description_applied=description_applied,
     )
 
-    steps: list[ProgressStep] = []
-    for index, (label, complete) in enumerate(zip(_STEP_LABELS, completion)):
-        if complete:
-            status: StepStatus = "complete"
-        elif index == first_incomplete:
-            status = "next"
-        else:
-            status = "pending"
-        steps.append(ProgressStep(label=label, status=status))
-    return tuple(steps)
+
+def choose_initial_workspace(
+    *,
+    video_id: str,
+    candidate_count: int,
+    reservable_short_count: int,
+    active_job: JobState | None = None,
+) -> Workspace:
+    """FR-17 v3.2 の優先順で初期ワークスペースを返す純粋関数."""
+    if (
+        active_job is not None
+        and active_job.status == "running"
+        and active_job.video_id == video_id
+    ):
+        if active_job.kind in {"upload"}:
+            return "publish"
+        if active_job.kind in {"shorts", "shorts_queue", "short_cut"}:
+            return "shorts"
+        if active_job.kind in {"highlights", "regenerate", "cut_clip"}:
+            return "materials"
+    if candidate_count <= 0:
+        return "materials"
+    if reservable_short_count <= 0:
+        return "shorts"
+    return "publish"
+
+
+def count_reservable_shorts(video_id: str, settings: Settings) -> int:
+    """最新の検証済み manifest にある実在成功出力だけを数える."""
+    result = load_latest_shorts_queue_result(video_id, settings)
+    if result is None:
+        return 0
+    return sum(
+        item.status == "succeeded"
+        and item.output_path is not None
+        and item.output_path.is_file()
+        for item in result.items
+    )
 
 
 def _start_regenerate(
@@ -163,27 +202,6 @@ def _confirm_source_purge_dialog(
                 f"元動画と中間ファイルを削除しました（{format_bytes(deleted)}）。"
             )
             st.rerun()
-
-
-def _render_stepper(steps: tuple[ProgressStep, ...]) -> str | None:
-    """ステッパーを表示し、押された次ステップ名を返す."""
-    st.subheader("次にやること")
-    with st.container(horizontal=True, horizontal_alignment="distribute"):
-        for step in steps:
-            st.badge(f"{step.label}  {_STATUS_LABELS[step.status]}")
-
-    next_step = next((step for step in steps if step.status == "next"), None)
-    if next_step is None:
-        st.success("すべてのステップが完了しています。")
-        return None
-    if st.button(
-        f"次にやる: {next_step.label}",
-        key="detail_next_step",
-        type="primary",
-        width="stretch",
-    ):
-        return next_step.label
-    return None
 
 
 def _description_updated_ids() -> set[str]:
@@ -408,29 +426,6 @@ def _render_description_control(
         _start_description_preview(video, chapters_text, settings)
 
 
-def _handle_next_action(
-    next_action: str | None,
-    video: ProcessedVideo,
-    settings: Settings,
-    *,
-    run_page: StreamlitPage | None,
-    chapters_text: str = "",
-) -> bool:
-    """次ステップ CTA を実行し、ショート UI を開くか返す."""
-    if next_action == "字幕":
-        if run_page is None:
-            st.info("実行ページで動画 URL を入力し、字幕を取得してください。")
-        else:
-            st.switch_page(run_page)
-    elif next_action == "チャプター":
-        _confirm_regenerate_dialog(video, "chapters", settings)
-    elif next_action == "候補":
-        _confirm_regenerate_dialog(video, "clips", settings)
-    elif next_action == "概要欄":
-        _start_description_preview(video, chapters_text, settings)
-    return next_action == "ショート"
-
-
 def _render_regenerate_control(
     video: ProcessedVideo,
     *,
@@ -457,11 +452,8 @@ def _render_regenerate_control(
             _confirm_regenerate_dialog(video, target, settings)
 
     if complete:
-        with st.expander(f"{target_label}を再実行", expanded=False):
-            st.caption("既存成果物を退避してから再生成します。")
-            render_button()
-    else:
-        render_button()
+        st.caption("既存成果物を退避してから再生成します。")
+    render_button()
 
 
 def _render_transcript(result: PipelineResult) -> None:
@@ -541,14 +533,430 @@ def _render_clips(
     )
 
 
+@dataclass(frozen=True)
+class CandidateTransfer:
+    """正式ライン開始前だけ session state に置く候補引き継ぎ."""
+
+    source: Literal["clips", "highlights"]
+    selected_ids: tuple[str, ...]
+    fingerprint: str
+
+
+CandidateKey = tuple[Literal["clips", "highlights"], str]
+
+
+def make_candidate_fingerprint(
+    source: Literal["clips", "highlights"],
+    candidates: list[ClipCandidate] | list[HighlightSegment],
+) -> str:
+    """候補ファイル全体と表示順を表す安定 fingerprint を返す."""
+    payload = {
+        "source": source,
+        "candidates": [candidate.model_dump(mode="json") for candidate in candidates],
+    }
+    canonical = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def validate_candidate_transfer(
+    transfer: CandidateTransfer | None,
+    *,
+    current_fingerprint: str,
+    candidate_ids: set[str],
+) -> CandidateTransfer | None:
+    """候補変更・ID 欠落を検出し、安全な引き継ぎだけを返す."""
+    if transfer is None:
+        return None
+    if transfer.fingerprint != current_fingerprint:
+        return None
+    if not transfer.selected_ids or not set(transfer.selected_ids) <= candidate_ids:
+        return None
+    return transfer
+
+
+def _transfer_key(video_id: str, source: str) -> str:
+    return f"shorts_line_transfer_{video_id}_{source}"
+
+
+def _transfer_order_key(video_id: str) -> str:
+    return f"shorts_line_transfer_order_{video_id}"
+
+
+def _load_transfer_order(video_id: str) -> tuple[CandidateKey, ...]:
+    raw = st.session_state.get(_transfer_order_key(video_id))
+    if not isinstance(raw, list):
+        return ()
+    values: list[CandidateKey] = []
+    for item in raw:
+        if (
+            isinstance(item, (list, tuple))
+            and len(item) == 2
+            and item[0] in {"clips", "highlights"}
+            and isinstance(item[1], str)
+        ):
+            key: CandidateKey = (item[0], item[1])
+            if key not in values:
+                values.append(key)
+    return tuple(values)
+
+
+def _load_transfer(video_id: str, source: str) -> CandidateTransfer | None:
+    raw = st.session_state.get(_transfer_key(video_id, source))
+    if not isinstance(raw, dict):
+        return None
+    try:
+        return CandidateTransfer(
+            source=source,  # type: ignore[arg-type]
+            selected_ids=tuple(str(value) for value in raw["selected_ids"]),
+            fingerprint=str(raw["fingerprint"]),
+        )
+    except (KeyError, TypeError):
+        return None
+
+
+def _save_transfer(video_id: str, transfer: CandidateTransfer) -> None:
+    st.session_state[_transfer_key(video_id, transfer.source)] = {
+        "source": transfer.source,
+        "selected_ids": transfer.selected_ids,
+        "fingerprint": transfer.fingerprint,
+    }
+    order = list(_load_transfer_order(video_id))
+    selected = {(transfer.source, candidate_id) for candidate_id in transfer.selected_ids}
+    order = [
+        key for key in order if key[0] != transfer.source or key in selected
+    ]
+    for candidate_id in transfer.selected_ids:
+        key: CandidateKey = (transfer.source, candidate_id)
+        if key not in order:
+            order.append(key)
+    st.session_state[_transfer_order_key(video_id)] = order
+
+
+def _valid_transfer_candidates(
+    video_id: str,
+    *,
+    clips: list[ClipCandidate],
+    highlights: list[HighlightSegment],
+) -> tuple[CandidateKey, ...]:
+    """全 workspace 描画前に引き継ぎを再検証し、stale 状態を破棄する."""
+    valid: list[CandidateKey] = []
+    invalidated = False
+    for source, candidates in (("clips", clips), ("highlights", highlights)):
+        transfer = _load_transfer(video_id, source)
+        if transfer is None:
+            continue
+        current = validate_candidate_transfer(
+            transfer,
+            current_fingerprint=make_candidate_fingerprint(source, candidates),
+            candidate_ids={candidate.id for candidate in candidates},
+        )
+        if current is None:
+            st.session_state.pop(_transfer_key(video_id, source), None)
+            invalidated = True
+        else:
+            valid.extend((source, candidate_id) for candidate_id in current.selected_ids)
+    valid_set = set(valid)
+    values = [key for key in _load_transfer_order(video_id) if key in valid_set]
+    values.extend(key for key in valid if key not in values)
+    st.session_state[_transfer_order_key(video_id)] = values
+    if invalidated:
+        st.warning("候補が更新されました。ショート作成対象を選び直してください。")
+    return tuple(values)
+
+
+def _set_workspace(video_id: str, workspace: Workspace) -> None:
+    st.session_state[f"detail_workspace_{video_id}"] = workspace
+
+
+def _render_state_summary(summary: DetailSummary) -> None:
+    columns = st.columns(3)
+    with columns[0].container(border=True, height="stretch"):
+        st.markdown("**素材候補**")
+        st.write(f"{summary.candidate_count} 件")
+    with columns[1].container(border=True, height="stretch"):
+        st.markdown("**ショート**")
+        st.write(
+            f"生成 {summary.generated_short_count} 本・"
+            f"予約可能 {summary.reservable_short_count} 本"
+        )
+    with columns[2].container(border=True, height="stretch"):
+        st.markdown("**概要欄**")
+        st.write("反映済み" if summary.description_applied else "未反映")
+
+
+def _existing_artifacts(video_id: str, settings: Settings) -> tuple[str, ...]:
+    video_dir = settings.data_dir / video_id
+    if not video_dir.is_dir():
+        return ()
+    labels: list[str] = []
+    for label, relative in (
+        ("動画メタデータ", Path("meta.json")),
+        ("字幕ファイル", Path("subtitles/ja.vtt")),
+        ("チャプター", Path("chapters.md")),
+        ("切り抜き候補", Path("clips/candidates.json")),
+        ("ハイライト候補", Path("highlights/segments.json")),
+    ):
+        if (video_dir / relative).is_file():
+            labels.append(label)
+    return tuple(labels)
+
+
+def _render_recovery_state(
+    video_id: str,
+    settings: Settings,
+    *,
+    run_page: StreamlitPage | None,
+) -> None:
+    st.warning("保存済みの字幕成果物を読み込めませんでした。")
+    st.write(
+        "字幕の保存結果が欠けているか壊れているため、安全のため通常の作業画面を"
+        "停止しています。取り込みからこの動画を再処理してください。"
+    )
+    if st.button(
+        "取り込みで再処理",
+        key=f"detail_recover_{video_id}",
+        type="primary",
+        disabled=run_page is None,
+    ) and run_page is not None:
+        st.switch_page(run_page)
+
+    details = st.expander(
+        "読み込み状況の詳細",
+        expanded=False,
+        key=f"detail_recovery_details_{video_id}",
+        on_change="rerun",
+    )
+    if details.open:
+        with details:
+            st.write(f"動画 ID: {_safe_user_text(video_id)}")
+            artifacts = _existing_artifacts(video_id, settings)
+            st.write(
+                "存在する成果物: " + ("、".join(artifacts) if artifacts else "なし")
+            )
+
+
+def _load_material_candidates(
+    result: PipelineResult,
+    settings: Settings,
+) -> tuple[list[ClipCandidate], list[HighlightSegment]]:
+    clip_doc = load_candidates_file(result.video_id, settings)
+    clips = (
+        list(clip_doc.candidates)
+        if clip_doc is not None
+        else list(result.clips_candidates)
+    )
+    highlight_doc = load_segments_file(result.video_id, settings)
+    highlights = list(highlight_doc.candidates) if highlight_doc is not None else []
+    return clips, highlights
+
+
+def _render_materials_workspace(
+    result: PipelineResult,
+    settings: Settings,
+    *,
+    clips: list[ClipCandidate],
+    highlights: list[HighlightSegment],
+) -> None:
+    st.subheader("素材候補")
+    st.caption("候補を確認し、作成するショートへ同じ順序で引き継ぎます。")
+    available: list[Literal["clips", "highlights"]] = []
+    if clips:
+        available.append("clips")
+    if highlights:
+        available.append("highlights")
+    if not available:
+        st.info("素材候補がありません。詳細・再生成から候補を生成してください。")
+        return
+
+    source: Literal["clips", "highlights"] = available[0]
+    if len(available) == 2:
+        selected = st.segmented_control(
+            "候補ソース",
+            available,
+            default=available[0],
+            required=True,
+            format_func=lambda value: (
+                "切り抜き候補" if value == "clips" else "ハイライト候補"
+            ),
+            key=f"materials_source_{result.video_id}",
+            width="stretch",
+        )
+        if selected in available:
+            source = selected
+
+    candidates: list[ClipCandidate] | list[HighlightSegment] = (
+        clips if source == "clips" else highlights
+    )
+    fingerprint = make_candidate_fingerprint(source, candidates)
+    transfer = _load_transfer(result.video_id, source)
+    valid_transfer = validate_candidate_transfer(
+        transfer,
+        current_fingerprint=fingerprint,
+        candidate_ids={candidate.id for candidate in candidates},
+    )
+    if transfer is not None and valid_transfer is None:
+        st.session_state.pop(_transfer_key(result.video_id, source), None)
+        st.warning("候補が更新されました。ショート作成対象を選び直してください。")
+    selected_ids = list(valid_transfer.selected_ids if valid_transfer else ())
+
+    for candidate in candidates:
+        with st.container(border=True):
+            st.markdown(f"**{_safe_user_text(candidate.title)}**")
+            st.caption(
+                f"{_safe_user_text(candidate.start)} → {_safe_user_text(candidate.end)}"
+                f"（{candidate.duration_sec} 秒）"
+            )
+            st.write(_safe_user_text(candidate.reason))
+            already_added = candidate.id in selected_ids
+            if st.button(
+                "追加済み" if already_added else "ショート作成対象へ追加",
+                key=f"materials_add_{result.video_id}_{source}_{candidate.id}",
+                disabled=already_added,
+            ):
+                selected_ids.append(candidate.id)
+                _save_transfer(
+                    result.video_id,
+                    CandidateTransfer(source, tuple(selected_ids), fingerprint),
+                )
+                st.rerun()
+
+    if selected_ids:
+        st.caption(f"ショート作成へ引き継ぐ候補: {len(selected_ids)} 件")
+        if st.button(
+            "選択した候補でショート作成へ",
+            key=f"materials_to_shorts_{result.video_id}_{source}",
+            type="primary",
+        ):
+            _set_workspace(result.video_id, "shorts")
+            st.rerun()
+
+    st.divider()
+    st.markdown("#### 補助操作")
+    render_highlights_section(result)
+
+
+def _render_publish_workspace(
+    video: ProcessedVideo,
+    result: PipelineResult,
+    settings: Settings,
+    *,
+    busy: bool,
+    summary: DetailSummary,
+) -> None:
+    st.subheader("公開・投稿")
+    validation = validate_chapters(result.chapters_text)
+    chapter_count = len(
+        [line for line in result.chapters_text.splitlines() if line.strip()]
+    )
+    with st.container(border=True):
+        st.markdown("**元動画の概要欄**")
+        if not result.chapters_text.strip():
+            st.info("チャプターは未生成です。")
+        elif validation.ok:
+            st.success(f"チャプター生成済み・{chapter_count} 件・形式 OK")
+        else:
+            st.error("チャプターの形式エラーがあります。詳細・再生成で確認してください。")
+        st.caption("反映済み" if summary.description_applied else "未反映")
+        _render_description_control(
+            video,
+            result.chapters_text,
+            settings,
+            busy=busy or not validation.ok,
+        )
+
+    with st.container(border=True):
+        st.markdown("**ショートの予約投稿**")
+        if summary.reservable_short_count == 0:
+            if summary.generated_short_count:
+                st.info(
+                    "生成済みですが予約対象に追加されていません。"
+                    "ショート生産ラインで最終確認まで進めてください。"
+                )
+            else:
+                st.info("先にショートを作成してください。")
+            if st.button(
+                "ショート生産ラインへ",
+                key=f"publish_to_shorts_{video.video_id}",
+            ):
+                _set_workspace(video.video_id, "shorts")
+                st.rerun()
+        else:
+            render_upload_section(
+                video.video_id,
+                settings,
+                before_preview=lambda clip_id, output_path: (
+                    validate_line_reservation(
+                        video.video_id,
+                        clip_id,
+                        output_path,
+                        settings,
+                    )
+                ),
+                reservation_transaction=lambda clip_id, output_path, start_upload: (
+                    run_line_upload_transaction(
+                        video.video_id,
+                        clip_id,
+                        output_path,
+                        settings,
+                        start_upload,
+                    )
+                ),
+            )
+
+
+def _render_details_and_regeneration(
+    video: ProcessedVideo,
+    result: PipelineResult,
+    *,
+    settings: Settings,
+    busy: bool,
+) -> None:
+    details = st.expander(
+        "詳細・再生成",
+        expanded=False,
+        key=f"detail_regeneration_{video.video_id}",
+        on_change="rerun",
+    )
+    if not details.open:
+        return
+    with details:
+        _render_transcript(result)
+        _render_chapters(video, result, busy=busy, settings=settings)
+        st.markdown("**候補の再生成**")
+        if result.clips_error:
+            st.warning(_safe_user_text(result.clips_error))
+        _render_regenerate_control(
+            video,
+            target="clips",
+            complete=video.has_clips or bool(result.clips_candidates),
+            busy=busy,
+            settings=settings,
+        )
+        st.markdown("**元動画と中間ファイルの管理**")
+        st.caption(
+            "削除してもチャプター・全文・切り抜き候補・切り出し済み動画は残ります。"
+        )
+        if st.button(
+            "元動画を削除",
+            key=f"detail_purge_{video.video_id}",
+            disabled=busy,
+        ):
+            _confirm_source_purge_dialog(video, settings)
+
+
 def render_video_detail_page(
     *,
     run_page: StreamlitPage | None = None,
 ) -> None:
     """選択中の動画について、保存済み成果物から詳細ページを再構築する."""
-    st.header("動画詳細")
     video_id = get_selected_video_id()
     if video_id is None:
+        st.header("動画詳細")
         st.info("ライブラリから動画を選択してください。")
         return
 
@@ -568,8 +976,8 @@ def render_video_detail_page(
         )
         return
 
-    st.markdown(f"**{video.title}**")
-    st.caption(video.video_id)
+    st.header(_safe_user_text(video.title))
+    st.caption(f"動画 ID: {_safe_user_text(video.video_id)}")
     description_success = st.session_state.pop(_DESCRIPTION_SUCCESS_KEY, None)
     if description_success:
         st.success(description_success)
@@ -577,73 +985,84 @@ def render_video_detail_page(
     if busy:
         st.info(_BUSY_MESSAGE)
 
-    has_highlights = (
-        settings.data_dir / video.video_id / "highlights" / "segments.json"
-    ).is_file()
     result = load_result_from_disk(video_id, settings)
-    steps = calculate_progress_steps(
-        video,
-        result,
-        shorts_count=count_shorts(video.video_id, settings),
-        description_applied_ids=load_description_applied_ids(settings),
-        has_highlights=has_highlights,
-    )
-    next_action = _render_stepper(steps)
-    shorts_expanded = _handle_next_action(
-        next_action,
-        video,
-        settings,
-        run_page=run_page,
-        chapters_text=result.chapters_text if result is not None else "",
-    )
-
-    st.divider()
-
     if result is None:
-        st.warning(
-            "保存済みの字幕成果物を読み込めませんでした。"
-            "実行ページから字幕の取得と整形をやり直してください。"
-        )
+        _render_recovery_state(video_id, settings, run_page=run_page)
         return
 
-    _render_transcript(result)
-    _render_chapters(video, result, busy=busy, settings=settings)
-    _render_clips(
+    clips, highlights = _load_material_candidates(result, settings)
+    preferred_transfer_candidates = _valid_transfer_candidates(
+        video.video_id,
+        clips=clips,
+        highlights=highlights,
+    )
+    try:
+        reservable_count = count_reservable_shorts(video.video_id, settings)
+    except ShortsQueueError as exc:
+        reservable_count = 0
+        st.warning(
+            "予約可能なショートを安全に確認できませんでした。"
+            f"詳細: {_safe_user_text(exc)}"
+        )
+    summary = calculate_detail_summary(
+        clip_count=len(clips),
+        highlight_count=len(highlights),
+        generated_short_count=count_shorts(video.video_id, settings),
+        reservable_short_count=reservable_count,
+        description_applied=video.video_id in load_description_applied_ids(settings),
+    )
+    _render_state_summary(summary)
+    render_main_line_summary(video.video_id, settings)
+
+    default_workspace = choose_initial_workspace(
+        video_id=video.video_id,
+        candidate_count=summary.candidate_count,
+        reservable_short_count=summary.reservable_short_count,
+        active_job=get_active_job(settings),
+    )
+    workspace = st.segmented_control(
+        "作業を選択",
+        _WORKSPACES,
+        default=default_workspace,
+        required=True,
+        format_func=lambda value: _WORKSPACE_LABELS[value],
+        key=f"detail_workspace_{video.video_id}",
+        width="stretch",
+    )
+    selected_workspace: Workspace = (
+        workspace if workspace in _WORKSPACES else default_workspace
+    )
+
+    if selected_workspace == "materials":
+        _render_materials_workspace(
+            result,
+            settings,
+            clips=clips,
+            highlights=highlights,
+        )
+    elif selected_workspace == "shorts":
+        st.subheader("ショート作成")
+        render_shorts_line(
+            video_id=video.video_id,
+            title=result.title,
+            clip_candidates=clips,
+            highlight_candidates=highlights,
+            settings=settings,
+            preferred_candidate_keys=preferred_transfer_candidates,
+        )
+        render_shorts_section(result, expanded=False)
+    else:
+        _render_publish_workspace(
+            video,
+            result,
+            settings,
+            busy=busy,
+            summary=summary,
+        )
+
+    _render_details_and_regeneration(
         video,
         result,
-        busy=busy,
         settings=settings,
-        has_highlights=has_highlights,
-    )
-
-    st.subheader("4. ハイライト候補")
-    if result.highlights_error:
-        st.warning(
-            "ハイライト候補の生成に失敗しましたが、他の成果物は利用できます。\n\n"
-            f"{result.highlights_error}"
-        )
-    render_highlights_section(result)
-
-    st.subheader("5. ショート作成")
-    render_shorts_section(result, expanded=shorts_expanded)
-
-    st.subheader("6. 概要欄反映")
-    _render_description_control(
-        video,
-        result.chapters_text,
-        settings,
         busy=busy,
     )
-
-    render_upload_section(video.video_id, settings)
-
-    with st.expander("元動画と中間ファイルの管理", expanded=False):
-        st.caption(
-            "削除してもチャプター・全文・切り抜き候補・切り出し済み動画は残ります。"
-        )
-        if st.button(
-            "元動画を削除",
-            key=f"detail_purge_{video.video_id}",
-            disabled=busy,
-        ):
-            _confirm_source_purge_dialog(video, settings)

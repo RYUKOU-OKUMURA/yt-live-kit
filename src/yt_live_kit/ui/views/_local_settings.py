@@ -5,13 +5,25 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 
 from yt_live_kit.config import Settings, get_settings
+from yt_live_kit.services.subtitle_burn import TELOP_PRESETS
 
 _ARCHIVED_VIDEOS_FILENAME = "archived_videos.json"
 _DESCRIPTION_APPLIED_VIDEOS_FILENAME = "description_applied_videos.json"
 _CHANNEL_HANDLE_FILENAME = "channel_handle.txt"
+_SHORTS_DEFAULTS_FILENAME = "shorts_defaults.json"
+
+
+@dataclass(frozen=True)
+class ShortsLineDefaults:
+    """ショート生産ラインで毎回選ばず適用する既定値."""
+
+    layout: str = "blur"
+    preset: str = "default"
+    hook_preset: str = "hook"
 
 
 def _archived_videos_path(settings: Settings) -> Path:
@@ -24,6 +36,33 @@ def _description_applied_videos_path(settings: Settings) -> Path:
 
 def _channel_handle_path(settings: Settings) -> Path:
     return settings.data_dir / "_config" / _CHANNEL_HANDLE_FILENAME
+
+
+def _shorts_defaults_path(settings: Settings) -> Path:
+    return settings.data_dir / "_config" / _SHORTS_DEFAULTS_FILENAME
+
+
+def load_shorts_line_defaults(
+    settings: Settings | None = None,
+) -> ShortsLineDefaults:
+    """保存済み既定値を読み、欠落・破損時は現行既定へ安全に戻す."""
+    settings = settings or get_settings()
+    try:
+        raw = json.loads(_shorts_defaults_path(settings).read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return ShortsLineDefaults()
+    if not isinstance(raw, dict):
+        return ShortsLineDefaults()
+    layout = raw.get("layout")
+    preset = raw.get("preset")
+    hook_preset = raw.get("hook_preset")
+    if layout not in {"blur", "crop"}:
+        return ShortsLineDefaults()
+    if not isinstance(preset, str) or preset not in TELOP_PRESETS:
+        return ShortsLineDefaults()
+    if not isinstance(hook_preset, str) or hook_preset not in TELOP_PRESETS:
+        return ShortsLineDefaults()
+    return ShortsLineDefaults(layout, preset, hook_preset)
 
 
 def _load_id_set(path: Path) -> set[str]:

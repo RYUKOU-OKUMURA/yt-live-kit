@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -111,6 +111,37 @@ def parse_cut_timestamp(text: str) -> tuple[float | None, str | None]:
         return None, _TIMESTAMP_FORMAT_ERROR
 
 
+def shift_cut_timestamp(text: str, delta_sec: int) -> tuple[str | None, str | None]:
+    """正規の HH:MM:SS 境界を整数秒だけ前後へ移動する."""
+    seconds, error = parse_cut_timestamp(text)
+    if error is not None or seconds is None:
+        return None, error
+    shifted = int(seconds) + delta_sec
+    if shifted < 0:
+        return None, "開始・終了時刻は 0 秒より前にできません。"
+    hours, remainder = divmod(shifted, 3600)
+    minutes, value = divmod(remainder, 60)
+    return f"{hours:02d}:{minutes:02d}:{value:02d}", None
+
+
+def _shift_cut_input(key: str, delta_sec: int) -> None:
+    value = str(st.session_state.get(key, ""))
+    shifted, error = shift_cut_timestamp(value, delta_sec)
+    if shifted is not None and error is None:
+        st.session_state[key] = shifted
+
+
+def _render_time_assist(key: str, label: str) -> None:
+    with st.container(horizontal=True, gap="small"):
+        st.caption(label)
+        for delta in (-5, -1, 1, 5):
+            sign = "+" if delta > 0 else ""
+            st.button(
+                f"{sign}{delta} 秒",
+                key=f"{key}_shift_{delta}",
+                on_click=_shift_cut_input,
+                args=(key, delta),
+            )
 def resolve_transcript_bounds(
     start_text: str,
     end_text: str,
@@ -437,6 +468,9 @@ def _render_plan(
     option: ParentOption,
     document: ShortCutDocument,
     settings: Settings,
+    on_segments_confirmed: (
+        Callable[[Sequence[HighlightSegment], ParentOption], None] | None
+    ) = None,
 ) -> None:
     st.markdown("**提案された区間**（採用するものにチェックし、必要なら時刻を調整）")
     cues, transcript_notice = load_transcript_cues(video_id, settings.data_dir)
@@ -444,6 +478,10 @@ def _render_plan(
         st.info(transcript_notice)
 
     for candidate in document.candidates:
+        candidate_start_key = start_key(video_id, candidate.id)
+        candidate_end_key = end_key(video_id, candidate.id)
+        st.session_state.setdefault(candidate_start_key, candidate.start)
+        st.session_state.setdefault(candidate_end_key, candidate.end)
         st.checkbox(
             f"{candidate.id}: {candidate.title}（{candidate.duration_sec} 秒）",
             value=True,
@@ -451,24 +489,24 @@ def _render_plan(
         )
         columns = st.columns(2)
         with columns[0]:
+            _render_time_assist(candidate_start_key, "開始を調整")
             st.text_input(
                 "開始",
-                value=candidate.start,
-                key=start_key(video_id, candidate.id),
+                key=candidate_start_key,
             )
         with columns[1]:
+            _render_time_assist(candidate_end_key, "終了を調整")
             st.text_input(
                 "終了",
-                value=candidate.end,
-                key=end_key(video_id, candidate.id),
+                key=candidate_end_key,
             )
         st.caption(candidate.reason)
 
         current_start = str(
-            st.session_state.get(start_key(video_id, candidate.id), candidate.start)
+            st.session_state.get(candidate_start_key, candidate.start)
         )
         current_end = str(
-            st.session_state.get(end_key(video_id, candidate.id), candidate.end)
+            st.session_state.get(candidate_end_key, candidate.end)
         )
         transcript_start, transcript_end, used_fallback = resolve_transcript_bounds(
             current_start,
@@ -496,6 +534,21 @@ def _render_plan(
         f"（{int(MIN_TOTAL_MS / 1000)}〜{int(MAX_TOTAL_MS / 1000)} 秒に収める必要があります）"
     )
 
+    disabled_message = build_disabled_message(validation, parse_errors)
+    if disabled_message:
+        st.warning(disabled_message)
+
+    busy = is_busy(settings)
+    if on_segments_confirmed is not None:
+        if st.button(
+            "区間列を確定してテロップ確認へ",
+            type="primary",
+            key=f"short_cut_confirm_segments_{video_id}",
+            disabled=busy or disabled_message is not None,
+        ):
+            on_segments_confirmed(tuple(segments), option)
+        return
+
     layout_label = st.radio(
         "レイアウト",
         LAYOUT_LABELS,
@@ -504,11 +557,6 @@ def _render_plan(
     )
     layout = layout_from_label(layout_label)
 
-    disabled_message = build_disabled_message(validation, parse_errors)
-    if disabled_message:
-        st.warning(disabled_message)
-
-    busy = is_busy(settings)
     output_path: Path | None = None
     if disabled_message is None:
         output_path = short_cut_output_path(video_id, segments, settings)
@@ -546,9 +594,14 @@ def render_short_cut_section(
     clip_candidates: Sequence[ClipCandidate],
     highlight_candidates: Sequence[HighlightSegment],
     settings: Settings,
+    embedded: bool = False,
+    preferred_candidate_ids: Sequence[str] = (),
+    on_segments_confirmed: (
+        Callable[[Sequence[HighlightSegment], ParentOption], None] | None
+    ) = None,
 ) -> None:
     """長い候補を刻んでショートにするセクションを描画する."""
-    with st.expander("長い候補を刻んでショートにする", expanded=False):
+    def render_contents() -> None:
         st.caption(_SECTION_NOTE)
 
         options = collect_parent_options(clip_candidates, highlight_candidates)
@@ -556,11 +609,23 @@ def render_short_cut_section(
             st.info(_NO_LONG_CANDIDATE_MESSAGE)
             return
 
+        selected_key = f"short_cut_parent_{video_id}"
+        if selected_key not in st.session_state:
+            preferred = next(
+                (
+                    index
+                    for index, option in enumerate(options)
+                    if option.id in preferred_candidate_ids
+                ),
+                0,
+            )
+            st.session_state[selected_key] = preferred
+
         selected_index = st.radio(
             "刻む候補",
             range(len(options)),
             format_func=lambda index: options[index].label,
-            key=f"short_cut_parent_{video_id}",
+            key=selected_key,
         )
         option = options[selected_index]
 
@@ -591,4 +656,19 @@ def render_short_cut_section(
             option=option,
             document=document,
             settings=settings,
+            on_segments_confirmed=on_segments_confirmed,
         )
+
+    if embedded:
+        render_contents()
+        return
+
+    expander = st.expander(
+        "長い候補を刻んでショートにする",
+        expanded=False,
+        key=f"short_cut_expander_{video_id}",
+        on_change="rerun",
+    )
+    if expander.open:
+        with expander:
+            render_contents()

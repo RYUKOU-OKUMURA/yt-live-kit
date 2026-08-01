@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
@@ -23,9 +24,11 @@ from yt_live_kit.models.upload import (
 )
 from yt_live_kit.services.schedule import SchedulePolicy
 from yt_live_kit.services.shorts_line import (
+    LineReservationStartedError,
     LineStage,
     LineState,
     LineStateError,
+    abandon_line_state,
     calculate_line_stage,
     confirm_preview,
     confirm_review,
@@ -40,9 +43,11 @@ from yt_live_kit.services.shorts_line import (
     record_upload_operation,
     recover_line_state,
     resolve_active_line,
+    run_line_reservation_transaction,
     save_active_line,
     save_line_state,
     set_review_fingerprint,
+    set_generation_spec,
     summarize_daily_lines,
 )
 
@@ -53,6 +58,29 @@ QUEUE_FP = "a" * 64
 
 def _settings(tmp_path: Path) -> Settings:
     return Settings(data_dir=tmp_path / "data")
+
+
+def test_abandon_line_archives_state_and_keeps_artifacts(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    state = create_line_state("video-1", "clip-1", QUEUE_FP, now=NOW)
+    save_line_state(state, settings)
+    save_active_line("video-1", "clip-1", settings, now=NOW + timedelta(seconds=1))
+    artifact = (
+        settings.data_dir
+        / "video-1"
+        / "shorts"
+        / "output"
+        / "short_clip-1.mp4"
+    )
+    artifact.parent.mkdir(parents=True)
+    artifact.write_bytes(b"keep")
+
+    archive = abandon_line_state(state, settings)
+
+    assert archive.is_file()
+    assert load_line_state("video-1", "clip-1", settings) is None
+    assert resolve_active_line("video-1", settings) is None
+    assert artifact.read_bytes() == b"keep"
 
 
 def _document(*, text: str = "確認する本文", emphasis: bool = False) -> TelopScriptDocument:
@@ -88,12 +116,28 @@ def _review_fingerprint(document: TelopScriptDocument | None = None) -> str:
     return make_review_fingerprint("video-1", "clip-1", QUEUE_FP, document or _document())
 
 
+def _generation_spec(*, layout: str = "blur", preset: str = "default") -> dict[str, object]:
+    return {
+        "target_id": "clip-1",
+        "layout": layout,
+        "preset": preset,
+        "hook_preset": "hook",
+        "telop_document": _document().model_dump(mode="json"),
+    }
+
+
 def _confirmed_state(tmp_path: Path) -> tuple[LineState, Path]:
     review = _review_fingerprint()
     state = create_line_state(
         "video-1", "clip-1", QUEUE_FP, review_fingerprint=review, now=NOW
     )
     state = confirm_review(state, review, now=NOW + timedelta(seconds=1))
+    state = set_generation_spec(
+        state,
+        review,
+        _generation_spec(),
+        now=NOW + timedelta(milliseconds=1500),
+    )
     output = _output(tmp_path)
     state = record_output(state, output, now=NOW + timedelta(seconds=2))
     state = confirm_preview(state, output, now=NOW + timedelta(seconds=3))
@@ -229,6 +273,12 @@ def test_review_edit_invalidation_does_not_auto_restore_after_revert(tmp_path: P
         "video-1", "clip-1", QUEUE_FP, review_fingerprint=original, now=NOW
     )
     state = confirm_review(state, original, now=NOW + timedelta(seconds=1))
+    state = set_generation_spec(
+        state,
+        original,
+        _generation_spec(),
+        now=NOW + timedelta(milliseconds=1500),
+    )
     state = record_output(state, _output(tmp_path), now=NOW + timedelta(seconds=2))
     state = set_review_fingerprint(state, changed, now=NOW + timedelta(seconds=3))
     assert state.review_confirmed_fingerprint is None
@@ -241,6 +291,47 @@ def test_review_edit_invalidation_does_not_auto_restore_after_revert(tmp_path: P
     assert reverted.review_confirmed_fingerprint is None
     with pytest.raises(LineStateError, match="ハード判定"):
         confirm_review(reverted, original, hard_errors=("形式エラー",))
+
+
+def test_generation_spec_proof_is_full_and_review_change_clears_it() -> None:
+    review = _review_fingerprint()
+    state = create_line_state(
+        "video-1", "clip-1", QUEUE_FP, review_fingerprint=review, now=NOW
+    )
+    state = confirm_review(state, review, now=NOW + timedelta(seconds=1))
+    state = set_generation_spec(
+        state,
+        review,
+        _generation_spec(layout="blur", preset="default"),
+        now=NOW + timedelta(seconds=2),
+    )
+    assert state.generation_spec_fingerprint is not None
+    payload = state.model_dump(mode="json")
+    payload["generation_spec_json"] = json.dumps(
+        _generation_spec(layout="crop", preset="default"),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    with pytest.raises(Exception, match="生成 spec"):
+        LineState.model_validate(payload)
+
+    changed = set_review_fingerprint(
+        state,
+        _review_fingerprint(_document(text="変更")),
+        now=NOW + timedelta(seconds=3),
+    )
+    assert changed.generation_spec_json is None
+    assert changed.generation_spec_fingerprint is None
+
+
+def test_old_output_state_without_generation_proof_fails_closed(tmp_path: Path) -> None:
+    state, _output_path = _confirmed_state(tmp_path)
+    payload = state.model_dump(mode="json")
+    payload["generation_spec_json"] = None
+    payload["generation_spec_fingerprint"] = None
+    with pytest.raises(Exception, match="生成 spec"):
+        LineState.model_validate(payload)
 
 
 def test_output_change_and_missing_only_invalidate_preview_confirmation(tmp_path: Path) -> None:
@@ -270,6 +361,12 @@ def test_preview_rechecks_output_and_upload_requires_preview(tmp_path: Path) -> 
         "video-1", "clip-1", QUEUE_FP, review_fingerprint=review, now=NOW
     )
     state = confirm_review(state, review, now=NOW + timedelta(seconds=1))
+    state = set_generation_spec(
+        state,
+        review,
+        _generation_spec(),
+        now=NOW + timedelta(milliseconds=1500),
+    )
     output = _output(tmp_path)
     state = record_output(state, output, now=NOW + timedelta(seconds=2))
     with pytest.raises(LineStateError, match="最終確認"):
@@ -303,6 +400,121 @@ def test_reservation_rechecks_output_after_preview_confirmation(tmp_path: Path) 
     assert invalidated.review_confirmed_fingerprint == state.review_confirmed_fingerprint
     assert invalidated.preview_confirmed_fingerprint is None
     assert invalidated.upload_operation_id is None
+
+
+def test_reservation_transaction_rejects_stale_state_and_serializes_tabs(
+    tmp_path: Path,
+) -> None:
+    settings = _settings(tmp_path)
+    state, output = _confirmed_state(tmp_path)
+    save_line_state(state, settings)
+    operation = _operation(
+        tmp_path,
+        operation_id="transaction-op",
+        source_video_id="video-1",
+        clip_id="clip-1",
+    ).model_copy(update={"video_path": output})
+
+    invalid = set_review_fingerprint(state, "c" * 64)
+    save_line_state(invalid, settings, expected_state=state)
+    called = False
+
+    def must_not_start() -> UploadOperation:
+        nonlocal called
+        called = True
+        return operation
+
+    with pytest.raises(LineStateError, match="最終確認|生成 spec"):
+        run_line_reservation_transaction(
+            "video-1", "clip-1", output, settings, must_not_start
+        )
+    assert called is False
+
+    second_dir = tmp_path / "second"
+    second_dir.mkdir()
+    second_settings = Settings(data_dir=tmp_path / "second-data")
+    state, output = _confirmed_state(second_dir)
+    save_line_state(state, second_settings)
+    operation = operation.model_copy(update={"video_path": output})
+    callback_entered = threading.Event()
+    release_callback = threading.Event()
+    invalidator_started = threading.Event()
+    invalidator_done = threading.Event()
+    errors: list[Exception] = []
+
+    def start_upload() -> UploadOperation:
+        callback_entered.set()
+        assert release_callback.wait(2)
+        return operation
+
+    def invalidate_from_second_tab() -> None:
+        try:
+            previous = load_line_state("video-1", "clip-1", second_settings)
+            assert previous is not None
+            changed = set_review_fingerprint(previous, "d" * 64)
+            invalidator_started.set()
+            save_line_state(changed, second_settings, expected_state=previous)
+        except Exception as exc:
+            errors.append(exc)
+        finally:
+            invalidator_done.set()
+
+    result: list[UploadOperation] = []
+    transaction = threading.Thread(
+        target=lambda: result.append(
+            run_line_reservation_transaction(
+                "video-1", "clip-1", output, second_settings, start_upload
+            )
+        )
+    )
+    transaction.start()
+    assert callback_entered.wait(2)
+    invalidator = threading.Thread(target=invalidate_from_second_tab)
+    invalidator.start()
+    assert invalidator_started.wait(2)
+    assert invalidator_done.wait(0.05) is False
+    release_callback.set()
+    transaction.join(2)
+    invalidator.join(2)
+
+    assert result == [operation]
+    assert any(isinstance(error, LineStateError) for error in errors)
+    persisted = load_line_state("video-1", "clip-1", second_settings)
+    assert persisted is not None and persisted.current_stage == LineStage.RESERVED
+
+
+def test_reservation_transaction_raises_started_error_if_output_changes_in_callback(
+    tmp_path: Path,
+) -> None:
+    settings = _settings(tmp_path)
+    state, output = _confirmed_state(tmp_path)
+    save_line_state(state, settings)
+    operation = _operation(
+        tmp_path,
+        operation_id="changed-during-start",
+        source_video_id="video-1",
+        clip_id="clip-1",
+    ).model_copy(update={"video_path": output})
+
+    def start_and_replace_output() -> UploadOperation:
+        output.write_bytes(b"changed-during-upload-start")
+        return operation
+
+    with pytest.raises(LineReservationStartedError) as raised:
+        run_line_reservation_transaction(
+            "video-1",
+            "clip-1",
+            output,
+            settings,
+            start_and_replace_output,
+        )
+
+    assert raised.value.operation == operation
+    persisted = load_line_state("video-1", "clip-1", settings)
+    assert persisted is not None
+    assert persisted.current_stage == LineStage.FINAL_REVIEW
+    assert persisted.preview_confirmed_fingerprint is None
+    assert persisted.upload_operation_id is None
 
 
 def test_state_cannot_advance_beyond_persisted_gate_evidence() -> None:
@@ -476,6 +688,7 @@ def test_recovery_keeps_machine_evidence_but_clears_both_human_confirmations(tmp
         state.clip_id,
         state.queue_fingerprint,
         review_fingerprint=state.review_fingerprint,
+        generation_spec=_generation_spec(),
         output_fingerprint=state.output_fingerprint,
         now=NOW + timedelta(minutes=1),
     )

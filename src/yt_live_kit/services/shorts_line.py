@@ -7,7 +7,7 @@ import json
 import os
 import threading
 import uuid
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from enum import Enum
@@ -39,6 +39,14 @@ _ATTENTION_UPLOAD_STATES = frozenset({"failed", "needs_reconciliation"})
 
 class LineStateError(Exception):
     """ライン状態を安全に検証、保存、復元できないエラー。"""
+
+
+class LineReservationStartedError(LineStateError):
+    """外部投稿開始後にライン記録だけが失敗した状態。"""
+
+    def __init__(self, message: str, operation: UploadOperation) -> None:
+        super().__init__(message)
+        self.operation = operation
 
 
 class LineStage(str, Enum):
@@ -90,6 +98,53 @@ def _validate_digest(value: str | None, label: str, *, optional: bool = False) -
     return value.lower()
 
 
+def _canonical_json(payload: object) -> str:
+    return json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
+def _canonical_digest(payload: object) -> str:
+    return hashlib.sha256(_canonical_json(payload).encode("utf-8")).hexdigest()
+
+
+def _material_context_digest(
+    video_id: str,
+    clip_id: str,
+    queue_fingerprint: str,
+    context: Mapping[str, object],
+) -> str:
+    return _canonical_digest(
+        {
+            "video_id": video_id,
+            "clip_id": clip_id,
+            "queue_fingerprint": queue_fingerprint,
+            "material_context": context,
+        }
+    )
+
+
+def _generation_spec_digest(
+    video_id: str,
+    clip_id: str,
+    queue_fingerprint: str,
+    review_fingerprint: str,
+    spec: Mapping[str, object],
+) -> str:
+    return _canonical_digest(
+        {
+            "video_id": video_id,
+            "clip_id": clip_id,
+            "queue_fingerprint": queue_fingerprint,
+            "review_fingerprint": review_fingerprint,
+            "generation_spec": spec,
+        }
+    )
+
+
 class LineState(_FrozenModel):
     """video と clip ごとの永続ライン状態。"""
 
@@ -104,6 +159,14 @@ class LineState(_FrozenModel):
         default=None, min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$"
     )
     review_confirmed_at: datetime | None = None
+    material_context_json: str | None = None
+    material_context_fingerprint: str | None = Field(
+        default=None, min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$"
+    )
+    generation_spec_json: str | None = None
+    generation_spec_fingerprint: str | None = Field(
+        default=None, min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$"
+    )
     output_fingerprint: str | None = Field(
         default=None, min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$"
     )
@@ -149,6 +212,54 @@ class LineState(_FrozenModel):
         ):
             raise ValueError("台本確認が現在の review fingerprint と一致しません。")
 
+        material_pair = (
+            self.material_context_json,
+            self.material_context_fingerprint,
+        )
+        if (material_pair[0] is None) != (material_pair[1] is None):
+            raise ValueError("素材 context と fingerprint は両方必要です。")
+        if material_pair[0] is not None:
+            try:
+                material = json.loads(material_pair[0])
+            except (TypeError, json.JSONDecodeError) as exc:
+                raise ValueError("素材 context を読み込めません。") from exc
+            if not isinstance(material, dict) or _canonical_json(material) != material_pair[0]:
+                raise ValueError("素材 context が canonical JSON ではありません。")
+            if material_pair[1] != _material_context_digest(
+                self.video_id,
+                self.clip_id,
+                self.queue_fingerprint,
+                material,
+            ):
+                raise ValueError("素材 context が queue fingerprint と一致しません。")
+
+        generation_pair = (
+            self.generation_spec_json,
+            self.generation_spec_fingerprint,
+        )
+        if (generation_pair[0] is None) != (generation_pair[1] is None):
+            raise ValueError("生成 spec と fingerprint は両方必要です。")
+        if generation_pair[0] is not None:
+            if self.review_fingerprint is None:
+                raise ValueError("生成 spec には review fingerprint が必要です。")
+            try:
+                generation_spec = json.loads(generation_pair[0])
+            except (TypeError, json.JSONDecodeError) as exc:
+                raise ValueError("生成 spec を読み込めません。") from exc
+            if (
+                not isinstance(generation_spec, dict)
+                or _canonical_json(generation_spec) != generation_pair[0]
+            ):
+                raise ValueError("生成 spec が canonical JSON ではありません。")
+            if generation_pair[1] != _generation_spec_digest(
+                self.video_id,
+                self.clip_id,
+                self.queue_fingerprint,
+                self.review_fingerprint,
+                generation_spec,
+            ):
+                raise ValueError("生成 spec が現在のライン証跡と一致しません。")
+
         preview_pair = (self.preview_confirmed_fingerprint, self.preview_confirmed_at)
         if (preview_pair[0] is None) != (preview_pair[1] is None):
             raise ValueError("最終確認 fingerprint と確認日時は両方必要です。")
@@ -161,6 +272,8 @@ class LineState(_FrozenModel):
             raise ValueError("出力が無い状態で最終確認済みにはできません。")
         if self.output_fingerprint is not None and self.review_fingerprint is None:
             raise ValueError("output fingerprint には生成時の review fingerprint が必要です。")
+        if self.output_fingerprint is not None and self.generation_spec_fingerprint is None:
+            raise ValueError("output fingerprint には生成 spec の証跡が必要です。")
         review_is_current = (
             self.review_fingerprint is not None
             and self.review_confirmed_fingerprint == self.review_fingerprint
@@ -230,16 +343,6 @@ class DailyLineSummary(_FrozenModel):
     target_count: int = 3
 
 
-def _canonical_digest(payload: object) -> str:
-    encoded = json.dumps(
-        payload,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
-
-
 def make_review_fingerprint(
     video_id: str,
     clip_id: str,
@@ -259,6 +362,44 @@ def make_review_fingerprint(
             "queue_fingerprint": queue_fingerprint,
             "telop_document": document.model_dump(mode="json"),
         }
+    )
+
+
+def make_material_context_fingerprint(
+    video_id: str,
+    clip_id: str,
+    queue_fingerprint: str,
+    context: Mapping[str, object],
+) -> str:
+    """素材・区間 evidence を exact queue snapshot へ結び付ける。"""
+    video_id = _safe_identifier(video_id, "動画 ID")
+    clip_id = _safe_identifier(clip_id, "clip ID")
+    queue = _validate_digest(queue_fingerprint, "queue fingerprint")
+    if not isinstance(context, Mapping):
+        raise LineStateError("素材 context が正しくありません。")
+    return _material_context_digest(video_id, clip_id, queue, dict(context))  # type: ignore[arg-type]
+
+
+def make_generation_spec_fingerprint(
+    video_id: str,
+    clip_id: str,
+    queue_fingerprint: str,
+    review_fingerprint: str,
+    spec: Mapping[str, object],
+) -> str:
+    """full generation spec を queue・review lineage へ結び付ける。"""
+    video_id = _safe_identifier(video_id, "動画 ID")
+    clip_id = _safe_identifier(clip_id, "clip ID")
+    queue = _validate_digest(queue_fingerprint, "queue fingerprint")
+    review = _validate_digest(review_fingerprint, "review fingerprint")
+    if not isinstance(spec, Mapping):
+        raise LineStateError("生成 spec が正しくありません。")
+    return _generation_spec_digest(
+        video_id,
+        clip_id,
+        queue,  # type: ignore[arg-type]
+        review,  # type: ignore[arg-type]
+        dict(spec),
     )
 
 
@@ -383,6 +524,7 @@ def create_line_state(
     queue_fingerprint: str,
     *,
     review_fingerprint: str | None = None,
+    material_context: Mapping[str, object] | None = None,
     now: datetime | None = None,
 ) -> LineState:
     """区間確定後の未確認ライン状態を作る。"""
@@ -392,12 +534,27 @@ def create_line_state(
     review_fingerprint = _validate_digest(
         review_fingerprint, "review fingerprint", optional=True
     )
+    material_json: str | None = None
+    material_fingerprint: str | None = None
+    if material_context is not None:
+        if not isinstance(material_context, Mapping):
+            raise LineStateError("素材 context が正しくありません。")
+        material = dict(material_context)
+        material_json = _canonical_json(material)
+        material_fingerprint = make_material_context_fingerprint(
+            video_id,
+            clip_id,
+            queue_fingerprint,  # type: ignore[arg-type]
+            material,
+        )
     try:
         return LineState(
             video_id=video_id,
             clip_id=clip_id,
             queue_fingerprint=queue_fingerprint,
             review_fingerprint=review_fingerprint,
+            material_context_json=material_json,
+            material_context_fingerprint=material_fingerprint,
             current_stage=LineStage.TELOP_REVIEW,
             updated_at=_timestamp(now, "更新日時"),
         )
@@ -426,11 +583,56 @@ def set_review_fingerprint(
         review_fingerprint=current,
         review_confirmed_fingerprint=None,
         review_confirmed_at=None,
+        generation_spec_json=None,
+        generation_spec_fingerprint=None,
         output_fingerprint=None,
         preview_confirmed_fingerprint=None,
         preview_confirmed_at=None,
         current_stage=LineStage.TELOP_REVIEW,
         updated_at=_state_timestamp(state, now, "更新日時"),
+    )
+
+
+def set_generation_spec(
+    state: LineState,
+    current_review_fingerprint: str,
+    spec: Mapping[str, object],
+    *,
+    now: datetime | None = None,
+) -> LineState:
+    """人確認済み review に full generation spec の証跡を固定する。"""
+    _ensure_not_reserved(state)
+    review = _validate_digest(current_review_fingerprint, "review fingerprint")
+    if (
+        state.review_fingerprint != review
+        or state.review_confirmed_fingerprint != review
+    ):
+        raise LineStateError("現在の台本が全文確認されていないため生成 spec を固定できません。")
+    if not isinstance(spec, Mapping):
+        raise LineStateError("生成 spec が正しくありません。")
+    payload = dict(spec)
+    canonical = _canonical_json(payload)
+    fingerprint = make_generation_spec_fingerprint(
+        state.video_id,
+        state.clip_id,
+        state.queue_fingerprint,
+        review,  # type: ignore[arg-type]
+        payload,
+    )
+    if (
+        state.generation_spec_json == canonical
+        and state.generation_spec_fingerprint == fingerprint
+    ):
+        return state
+    return _replace_state(
+        state,
+        generation_spec_json=canonical,
+        generation_spec_fingerprint=fingerprint,
+        output_fingerprint=None,
+        preview_confirmed_fingerprint=None,
+        preview_confirmed_at=None,
+        current_stage=LineStage.GENERATION,
+        updated_at=_state_timestamp(state, now, "生成 spec 更新日時"),
     )
 
 
@@ -472,6 +674,8 @@ def record_output(
         or state.review_confirmed_fingerprint != state.review_fingerprint
     ):
         raise LineStateError("現在の台本が全文確認されていないため出力を記録できません。")
+    if state.generation_spec_fingerprint is None:
+        raise LineStateError("生成 spec の証跡がないため出力を記録できません。")
     output = make_output_fingerprint(
         state.video_id,
         state.clip_id,
@@ -760,6 +964,96 @@ def _load_active_pointer(video_id: str, settings: Settings) -> ActiveLinePointer
         return None
 
 
+def abandon_line_state(state: LineState, settings: Settings) -> Path:
+    """CAS で未完了ラインだけを退避し、生成成果物には触れず選定へ戻す。"""
+    if not isinstance(state, LineState):
+        raise LineStateError("破棄するライン状態が正しくありません。")
+    _ensure_not_reserved(state)
+    path = line_state_path(state.video_id, state.clip_id, settings)
+    archive = path.with_name(
+        f"abandoned_{state.clip_id}_{uuid.uuid4().hex}.json"
+    )
+    with _line_lock(state.video_id, settings):
+        persisted = load_line_state(state.video_id, state.clip_id, settings)
+        if persisted != state:
+            raise LineStateError(
+                "ライン状態が別の操作で更新されました。最新状態を読み直してください。"
+            )
+        try:
+            os.replace(path, archive)
+            pointer = _load_active_pointer(state.video_id, settings)
+            if pointer is not None and pointer.clip_id == state.clip_id:
+                _active_line_path(state.video_id, settings).unlink(missing_ok=True)
+        except OSError as exc:
+            raise LineStateError(
+                "ショート生産ラインを安全に退避できませんでした。"
+            ) from exc
+    return archive
+
+
+def run_line_reservation_transaction(
+    video_id: str,
+    clip_id: str,
+    output_path: Path,
+    settings: Settings,
+    start_upload: Callable[[], UploadOperation],
+) -> UploadOperation:
+    """exact line の検証から外部投稿開始・operation 記録までを同一 lock で囲む。"""
+    video_id = _safe_identifier(video_id, "動画 ID")
+    clip_id = _safe_identifier(clip_id, "clip ID")
+    if not callable(start_upload):
+        raise LineStateError("投稿開始 callback が正しくありません。")
+    with _line_lock(video_id, settings):
+        state = load_line_state(video_id, clip_id, settings)
+        if state is None:
+            return start_upload()
+        if state.generation_spec_fingerprint is None:
+            raise LineStateError("生成 spec の証跡がないため予約投稿できません。")
+        checked = reconcile_output(state, output_path)
+        if checked != state:
+            _atomic_write(
+                line_state_path(video_id, clip_id, settings),
+                checked.model_dump(mode="json"),
+            )
+        if (
+            checked.output_fingerprint is None
+            or checked.preview_confirmed_fingerprint != checked.output_fingerprint
+        ):
+            raise LineStateError(
+                "完成動画が最終確認時から変わりました。もう一度プレビューしてください。"
+            )
+        operation = start_upload()
+        if not isinstance(operation, UploadOperation):
+            raise LineStateError("開始済み投稿 operation を確認できませんでした。")
+        try:
+            if (
+                operation.source_video_id != video_id
+                or operation.clip_id != clip_id
+                or operation.video_path.resolve() != Path(output_path).resolve()
+            ):
+                raise LineStateError("開始済み投稿 operation がライン対象と一致しません。")
+            completed = record_upload_operation(
+                checked,
+                operation.operation_id,
+                output_path,
+            )
+            _atomic_write(
+                line_state_path(video_id, clip_id, settings),
+                completed.model_dump(mode="json"),
+            )
+        except LineStateError as exc:
+            raise LineReservationStartedError(str(exc), operation) from exc
+        if (
+            completed.current_stage != LineStage.RESERVED
+            or completed.upload_operation_id != operation.operation_id
+        ):
+            raise LineReservationStartedError(
+                "投稿開始後に完成動画が変わったため、ラインへ予約完了を記録できませんでした。",
+                operation,
+            )
+        return operation
+
+
 def _valid_line_states(video_id: str, settings: Settings) -> tuple[LineState, ...]:
     directory = _active_line_path(video_id, settings).parent
     if not directory.exists():
@@ -805,6 +1099,8 @@ def recover_line_state(
     queue_fingerprint: str,
     *,
     review_fingerprint: str | None = None,
+    material_context: Mapping[str, object] | None = None,
+    generation_spec: Mapping[str, object] | None = None,
     output_fingerprint: str | None = None,
     upload_operation: UploadOperation | None = None,
     now: datetime | None = None,
@@ -815,9 +1111,26 @@ def recover_line_state(
         clip_id,
         queue_fingerprint,
         review_fingerprint=review_fingerprint,
+        material_context=material_context,
         now=now,
     )
     output = _validate_digest(output_fingerprint, "output fingerprint", optional=True)
+    generation_json: str | None = None
+    generation_fingerprint: str | None = None
+    if generation_spec is not None:
+        if review_fingerprint is None or not isinstance(generation_spec, Mapping):
+            raise LineStateError("生成 spec の復元 evidence が正しくありません。")
+        generation_payload = dict(generation_spec)
+        generation_json = _canonical_json(generation_payload)
+        generation_fingerprint = make_generation_spec_fingerprint(
+            video_id,
+            clip_id,
+            queue_fingerprint,
+            review_fingerprint,
+            generation_payload,
+        )
+    if output is not None and generation_fingerprint is None:
+        raise LineStateError("出力の復元には生成 spec の証跡が必要です。")
     operation_id: str | None = None
     if upload_operation is not None:
         if not isinstance(upload_operation, UploadOperation):
@@ -833,6 +1146,8 @@ def recover_line_state(
     stage = LineStage.RESERVED if operation_id is not None else LineStage.TELOP_REVIEW
     return _replace_state(
         state,
+        generation_spec_json=generation_json,
+        generation_spec_fingerprint=generation_fingerprint,
         output_fingerprint=output,
         review_confirmed_fingerprint=None,
         review_confirmed_at=None,

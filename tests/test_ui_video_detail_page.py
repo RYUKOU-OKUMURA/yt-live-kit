@@ -9,6 +9,8 @@ from pathlib import Path
 from unittest.mock import MagicMock, call, patch
 
 from yt_live_kit.config import Settings
+from yt_live_kit.models.clips import ClipCandidate
+from yt_live_kit.models.highlights import HighlightSegment
 from yt_live_kit.models.meta import VideoMeta
 from yt_live_kit.services.history import ProcessedVideo
 from yt_live_kit.services.pipeline import PipelineResult
@@ -59,66 +61,132 @@ def _result(tmp_path: Path, *, chapters: str = "", candidates: tuple = ()) -> Pi
     )
 
 
-def _statuses(steps: tuple[video_detail.ProgressStep, ...]) -> list[str]:
-    return [step.status for step in steps]
-
-
-def test_stepper_marks_transcript_as_first_next() -> None:
-    steps = video_detail.calculate_progress_steps(
-        _video(), None, shorts_count=0, description_applied_ids=set()
+def test_detail_summary_keeps_generated_and_reservable_counts_separate() -> None:
+    summary = video_detail.calculate_detail_summary(
+        clip_count=2,
+        highlight_count=3,
+        generated_short_count=4,
+        reservable_short_count=1,
+        description_applied=True,
     )
-    assert _statuses(steps) == ["next", "pending", "pending", "pending", "pending"]
+    assert summary == video_detail.DetailSummary(5, 4, 1, True)
 
 
-def test_stepper_marks_chapters_as_next_after_transcript(tmp_path: Path) -> None:
-    steps = video_detail.calculate_progress_steps(
-        _video(transcript=True),
-        _result(tmp_path),
-        shorts_count=0,
-        description_applied_ids=set(),
+def test_initial_workspace_prioritizes_running_job_for_current_video() -> None:
+    from yt_live_kit.services.jobs import JobState
+
+    active = JobState(
+        job_id="job-1",
+        kind="upload",
+        status="running",
+        video_id="vid1234567",
     )
-    assert _statuses(steps) == ["complete", "next", "pending", "pending", "pending"]
+    assert video_detail.choose_initial_workspace(
+        video_id="vid1234567",
+        candidate_count=0,
+        reservable_short_count=0,
+        active_job=active,
+    ) == "publish"
 
 
-def test_stepper_accepts_result_chapters_and_moves_to_candidates(tmp_path: Path) -> None:
-    steps = video_detail.calculate_progress_steps(
-        _video(transcript=True),
-        _result(tmp_path, chapters="0:00 はじめに"),
-        shorts_count=0,
-        description_applied_ids=set(),
+def test_initial_workspace_ignores_job_for_other_video() -> None:
+    from yt_live_kit.services.jobs import JobState
+
+    active = JobState(
+        job_id="job-1",
+        kind="upload",
+        status="running",
+        video_id="other-video",
     )
-    assert _statuses(steps) == ["complete", "complete", "next", "pending", "pending"]
+    assert video_detail.choose_initial_workspace(
+        video_id="vid1234567",
+        candidate_count=0,
+        reservable_short_count=0,
+        active_job=active,
+    ) == "materials"
 
 
-def test_stepper_accepts_highlight_artifact_as_candidate_completion(tmp_path: Path) -> None:
-    steps = video_detail.calculate_progress_steps(
-        _video(transcript=True, chapters=True),
-        _result(tmp_path, chapters="0:00 はじめに"),
-        shorts_count=0,
-        description_applied_ids=set(),
-        has_highlights=True,
+def test_initial_workspace_follows_candidate_and_reservable_priority() -> None:
+    assert video_detail.choose_initial_workspace(
+        video_id="v", candidate_count=0, reservable_short_count=2
+    ) == "materials"
+    assert video_detail.choose_initial_workspace(
+        video_id="v", candidate_count=2, reservable_short_count=0
+    ) == "shorts"
+    assert video_detail.choose_initial_workspace(
+        video_id="v", candidate_count=2, reservable_short_count=1
+    ) == "publish"
+
+
+def test_candidate_transfer_preserves_order_and_invalidates_on_change() -> None:
+    from yt_live_kit.models.clips import ClipCandidate
+
+    first = ClipCandidate(
+        id="clip-1",
+        title="1",
+        start="00:00:00",
+        end="00:01:00",
+        duration_sec=60,
+        reason="理由",
     )
-    assert _statuses(steps) == ["complete", "complete", "complete", "next", "pending"]
-
-
-def test_stepper_moves_to_description_after_short(tmp_path: Path) -> None:
-    steps = video_detail.calculate_progress_steps(
-        _video(transcript=True, chapters=True, clips=True),
-        _result(tmp_path, chapters="0:00 はじめに"),
-        shorts_count=2,
-        description_applied_ids=set(),
+    second = first.model_copy(update={"id": "clip-2", "title": "2"})
+    fingerprint = video_detail.make_candidate_fingerprint("clips", [first, second])
+    transfer = video_detail.CandidateTransfer(
+        "clips", ("clip-2", "clip-1"), fingerprint
     )
-    assert _statuses(steps) == ["complete", "complete", "complete", "complete", "next"]
+    assert video_detail.validate_candidate_transfer(
+        transfer,
+        current_fingerprint=fingerprint,
+        candidate_ids={"clip-1", "clip-2"},
+    ) == transfer
+    changed = video_detail.make_candidate_fingerprint("clips", [second, first])
+    assert video_detail.validate_candidate_transfer(
+        transfer,
+        current_fingerprint=changed,
+        candidate_ids={"clip-1", "clip-2"},
+    ) is None
 
 
-def test_stepper_marks_everything_complete(tmp_path: Path) -> None:
-    steps = video_detail.calculate_progress_steps(
-        _video(transcript=True, chapters=True, clips=True),
-        _result(tmp_path, chapters="0:00 はじめに"),
-        shorts_count=1,
-        description_applied_ids={"vid1234567"},
+def test_candidate_transfer_preserves_global_source_identity_and_order() -> None:
+    clip = ClipCandidate(
+        id="same",
+        title="切り抜き",
+        start="0:00:00",
+        end="0:00:20",
+        duration_sec=20,
+        reason="理由",
     )
-    assert _statuses(steps) == ["complete"] * 5
+    highlight = HighlightSegment(
+        id="same",
+        title="ハイライト",
+        start="0:01:00",
+        end="0:01:20",
+        duration_sec=20,
+        reason="理由",
+    )
+    session_state: dict[str, object] = {}
+    with patch.object(video_detail.st, "session_state", session_state):
+        video_detail._save_transfer(
+            "video-1",
+            video_detail.CandidateTransfer(
+                "highlights",
+                ("same",),
+                video_detail.make_candidate_fingerprint("highlights", [highlight]),
+            ),
+        )
+        video_detail._save_transfer(
+            "video-1",
+            video_detail.CandidateTransfer(
+                "clips",
+                ("same",),
+                video_detail.make_candidate_fingerprint("clips", [clip]),
+            ),
+        )
+        assert video_detail._valid_transfer_candidates(
+            "video-1",
+            clips=[clip],
+            highlights=[highlight],
+        ) == (("highlights", "same"), ("clips", "same"))
 
 
 def test_description_applied_ids_round_trip_and_mark(tmp_path: Path) -> None:
@@ -209,36 +277,6 @@ def test_regenerate_button_opens_dialog_without_starting_job() -> None:
     start.assert_not_called()
 
 
-def test_next_step_cta_is_stretched_primary_and_returns_clicked_step() -> None:
-    steps = (
-        video_detail.ProgressStep(label="字幕", status="complete"),
-        video_detail.ProgressStep(label="チャプター", status="next"),
-        video_detail.ProgressStep(label="候補", status="pending"),
-        video_detail.ProgressStep(label="ショート", status="pending"),
-        video_detail.ProgressStep(label="概要欄", status="pending"),
-    )
-
-    @contextmanager
-    def container(*_args: object, **_kwargs: object):
-        yield
-
-    with (
-        patch("yt_live_kit.ui.views.video_detail.st.container", side_effect=container),
-        patch("yt_live_kit.ui.views.video_detail.st.subheader"),
-        patch("yt_live_kit.ui.views.video_detail.st.badge"),
-        patch("yt_live_kit.ui.views.video_detail.st.button", return_value=True) as button,
-    ):
-        clicked = video_detail._render_stepper(steps)
-
-    assert clicked == "チャプター"
-    button.assert_called_once_with(
-        "次にやる: チャプター",
-        key="detail_next_step",
-        type="primary",
-        width="stretch",
-    )
-
-
 def test_render_detail_guides_when_selection_is_missing() -> None:
     with (
         patch("yt_live_kit.ui.views.video_detail.get_selected_video_id", return_value=None),
@@ -249,7 +287,7 @@ def test_render_detail_guides_when_selection_is_missing() -> None:
     info.assert_called_once_with("ライブラリから動画を選択してください。")
 
 
-def test_render_detail_without_saved_result_shows_stepper_and_opens_run_page(
+def test_render_detail_without_saved_result_shows_only_recovery_state(
     tmp_path: Path,
 ) -> None:
     settings = Settings(data_dir=tmp_path)
@@ -260,63 +298,22 @@ def test_render_detail_without_saved_result_shows_stepper_and_opens_run_page(
         patch("yt_live_kit.ui.views.video_detail.get_settings", return_value=settings),
         patch("yt_live_kit.ui.views.video_detail.list_processed_videos", return_value=[video]),
         patch("yt_live_kit.ui.views.video_detail.load_result_from_disk", return_value=None),
-        patch("yt_live_kit.ui.views.video_detail.count_shorts", return_value=0),
-        patch("yt_live_kit.ui.views.video_detail.load_description_applied_ids", return_value=set()),
         patch("yt_live_kit.ui.views.video_detail.is_busy", return_value=False),
-        patch("yt_live_kit.ui.views.video_detail._render_stepper", return_value="字幕") as stepper,
+        patch("yt_live_kit.ui.views.video_detail._render_recovery_state") as recovery,
+        patch("yt_live_kit.ui.views.video_detail._render_materials_workspace") as materials,
         patch("yt_live_kit.ui.views.video_detail.st.header"),
-        patch("yt_live_kit.ui.views.video_detail.st.markdown") as markdown,
         patch("yt_live_kit.ui.views.video_detail.st.caption"),
-        patch("yt_live_kit.ui.views.video_detail.st.divider"),
-        patch("yt_live_kit.ui.views.video_detail.st.warning") as warning,
-        patch("yt_live_kit.ui.views.video_detail.st.switch_page") as switch_page,
     ):
         video_detail.render_video_detail_page(run_page=run_page)
 
-    markdown.assert_called_once_with("**テスト動画**")
-    rendered_steps = stepper.call_args.args[0]
-    assert _statuses(rendered_steps) == [
-        "next",
-        "pending",
-        "pending",
-        "pending",
-        "pending",
-    ]
-    switch_page.assert_called_once_with(run_page)
-    assert "成果物" in warning.call_args.args[0]
+    recovery.assert_called_once_with(video.video_id, settings, run_page=run_page)
+    materials.assert_not_called()
 
 
-def test_chapters_next_cta_opens_generation_dialog(tmp_path: Path) -> None:
-    settings = Settings(data_dir=tmp_path)
-    video = _video(transcript=True)
-    with (
-        patch("yt_live_kit.ui.views.video_detail._confirm_regenerate_dialog") as dialog,
-    ):
-        expanded = video_detail._handle_next_action(
-            "チャプター", video, settings, run_page=None
-        )
-
-    dialog.assert_called_once_with(video, "chapters", settings)
-    assert expanded is False
-
-
-def test_shorts_next_cta_requests_expanded_creation_ui(tmp_path: Path) -> None:
-    assert video_detail._handle_next_action(
-        "ショート",
-        _video(transcript=True, chapters=True, clips=True),
-        Settings(data_dir=tmp_path),
-        run_page=None,
-    ) is True
-
-
-def test_render_detail_calls_pipeline_sections_from_saved_result(tmp_path: Path) -> None:
+def test_render_detail_draws_only_selected_workspace(tmp_path: Path) -> None:
     settings = Settings(data_dir=tmp_path)
     video = _video(transcript=True, chapters=True, clips=True)
     result = _result(tmp_path, chapters="0:00 はじめに")
-
-    @contextmanager
-    def expander(*_args: object, **_kwargs: object):
-        yield
 
     with ExitStack() as stack:
         stack.enter_context(
@@ -340,9 +337,8 @@ def test_render_detail_calls_pipeline_sections_from_saved_result(tmp_path: Path)
                 return_value=result,
             )
         )
-        stack.enter_context(
-            patch("yt_live_kit.ui.views.video_detail.count_shorts", return_value=1)
-        )
+        stack.enter_context(patch("yt_live_kit.ui.views.video_detail.count_shorts", return_value=1))
+        stack.enter_context(patch("yt_live_kit.ui.views.video_detail.count_reservable_shorts", return_value=0))
         stack.enter_context(
             patch(
                 "yt_live_kit.ui.views.video_detail.load_description_applied_ids",
@@ -352,38 +348,21 @@ def test_render_detail_calls_pipeline_sections_from_saved_result(tmp_path: Path)
         stack.enter_context(
             patch("yt_live_kit.ui.views.video_detail.is_busy", return_value=False)
         )
-        stepper = stack.enter_context(
-            patch("yt_live_kit.ui.views.video_detail._render_stepper")
-        )
-        transcript = stack.enter_context(
-            patch("yt_live_kit.ui.views.video_detail._render_transcript")
-        )
-        chapters = stack.enter_context(
-            patch("yt_live_kit.ui.views.video_detail._render_chapters")
-        )
-        clips = stack.enter_context(
-            patch("yt_live_kit.ui.views.video_detail._render_clips")
-        )
-        highlights = stack.enter_context(
-            patch("yt_live_kit.ui.views.video_detail.render_highlights_section")
-        )
+        stack.enter_context(patch("yt_live_kit.ui.views.video_detail.get_active_job", return_value=None))
+        stack.enter_context(patch("yt_live_kit.ui.views.video_detail._load_material_candidates", return_value=([], [])))
+        stack.enter_context(patch("yt_live_kit.ui.views.video_detail._render_state_summary"))
+        stack.enter_context(patch("yt_live_kit.ui.views.video_detail.render_main_line_summary"))
+        line = stack.enter_context(patch("yt_live_kit.ui.views.video_detail.render_shorts_line"))
+        stack.enter_context(patch("yt_live_kit.ui.views.video_detail.st.segmented_control", return_value="shorts"))
+        materials = stack.enter_context(patch("yt_live_kit.ui.views.video_detail._render_materials_workspace"))
         shorts = stack.enter_context(
             patch("yt_live_kit.ui.views.video_detail.render_shorts_section")
         )
-        upload_section = stack.enter_context(
-            patch("yt_live_kit.ui.views.video_detail.render_upload_section")
-        )
-        stack.enter_context(
-            patch("yt_live_kit.ui.views.video_detail.st.expander", side_effect=expander)
-        )
-        stack.enter_context(
-            patch("yt_live_kit.ui.views.video_detail.st.button", return_value=False)
-        )
+        publish = stack.enter_context(patch("yt_live_kit.ui.views.video_detail._render_publish_workspace"))
+        stack.enter_context(patch("yt_live_kit.ui.views.video_detail._render_details_and_regeneration"))
         for command in (
             "header",
-            "markdown",
             "caption",
-            "divider",
             "subheader",
             "info",
         ):
@@ -392,13 +371,10 @@ def test_render_detail_calls_pipeline_sections_from_saved_result(tmp_path: Path)
             )
         video_detail.render_video_detail_page()
 
-    stepper.assert_called_once()
-    transcript.assert_called_once_with(result)
-    chapters.assert_called_once()
-    clips.assert_called_once()
-    highlights.assert_called_once_with(result)
+    materials.assert_not_called()
+    line.assert_called_once()
     shorts.assert_called_once_with(result, expanded=False)
-    upload_section.assert_called_once_with(video.video_id, settings)
+    publish.assert_not_called()
 
 
 _VALID_CHAPTERS = "0:00 はじめに\n0:10 本題\n0:20 まとめ"
@@ -762,7 +738,7 @@ def test_restart_equal_preview_skips_update_and_saves_completion_only() -> None:
     mark.assert_called_once_with(video.video_id, settings)
 
 
-def test_busy_common_preview_blocks_normal_and_stepper_before_fetch() -> None:
+def test_busy_description_preview_blocks_before_fetch() -> None:
     video = _video(chapters=True)
     settings = MagicMock()
 
@@ -778,19 +754,9 @@ def test_busy_common_preview_blocks_normal_and_stepper_before_fetch() -> None:
         video_detail._render_description_control(
             video, _VALID_CHAPTERS, settings, busy=False
         )
-        video_detail._handle_next_action(
-            "概要欄",
-            video,
-            settings,
-            run_page=None,
-            chapters_text=_VALID_CHAPTERS,
-        )
 
-    assert info.call_count == 2
-    assert all(
-        video_detail._BUSY_MESSAGE in item.args[0]
-        for item in info.call_args_list
-    )
+    assert info.call_count == 1
+    assert video_detail._BUSY_MESSAGE in info.call_args.args[0]
     fetch.assert_not_called()
     dialog.assert_not_called()
 
@@ -1001,7 +967,7 @@ def test_preview_shows_japanese_errors_for_limit_and_snippet_failure() -> None:
     merge.assert_not_called()
 
 
-def test_stepper_cta_and_normal_button_use_same_preview_flow(tmp_path: Path) -> None:
+def test_description_button_uses_common_preview_flow(tmp_path: Path) -> None:
     video = _video(chapters=True)
     settings = Settings(data_dir=tmp_path)
 
@@ -1010,24 +976,14 @@ def test_stepper_cta_and_normal_button_use_same_preview_flow(tmp_path: Path) -> 
         patch("yt_live_kit.ui.views.video_detail.st.button", return_value=True),
         patch("yt_live_kit.ui.views.video_detail._start_description_preview") as start,
     ):
-        video_detail._handle_next_action(
-            "概要欄",
-            video,
-            settings,
-            run_page=None,
-            chapters_text=_VALID_CHAPTERS,
-        )
         video_detail._render_description_control(
             video, _VALID_CHAPTERS, settings, busy=False
         )
 
-    assert start.call_args_list == [
-        call(video, _VALID_CHAPTERS, settings),
-        call(video, _VALID_CHAPTERS, settings),
-    ]
+    start.assert_called_once_with(video, _VALID_CHAPTERS, settings)
 
 
-def test_successful_description_mark_completes_stepper(tmp_path: Path) -> None:
+def test_successful_description_mark_updates_summary_input(tmp_path: Path) -> None:
     settings = Settings(data_dir=tmp_path)
     video = _video(transcript=True, chapters=True, clips=True)
     session_state: dict[str, object] = {}
@@ -1049,10 +1005,11 @@ def test_successful_description_mark_completes_stepper(tmp_path: Path) -> None:
         )
 
     applied_ids = load_description_applied_ids(settings)
-    steps = video_detail.calculate_progress_steps(
-        video,
-        _result(tmp_path, chapters=_VALID_CHAPTERS),
-        shorts_count=1,
-        description_applied_ids=applied_ids,
+    summary = video_detail.calculate_detail_summary(
+        clip_count=1,
+        highlight_count=0,
+        generated_short_count=1,
+        reservable_short_count=1,
+        description_applied=video.video_id in applied_ids,
     )
-    assert steps[-1] == video_detail.ProgressStep("概要欄", "complete")
+    assert summary.description_applied is True

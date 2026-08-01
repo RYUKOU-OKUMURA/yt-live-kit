@@ -159,6 +159,112 @@ def test_dialog_confirm_passes_explicit_choices_and_stores_operation(tmp_path: P
     set_job.assert_called_once_with("job-1")
 
 
+def test_dialog_runs_confirm_inside_reservation_transaction(tmp_path: Path) -> None:
+    preview = _preview(tmp_path)
+    operation = _operation(tmp_path)
+    transaction = MagicMock(
+        side_effect=lambda _clip_id, _path, start_upload: start_upload()
+    )
+    with (
+        patch.object(upload.st, "container", side_effect=_container),
+        patch.object(upload.st, "warning"),
+        patch.object(upload.st, "markdown"),
+        patch.object(upload.st, "write"),
+        patch.object(upload.st, "code"),
+        patch.object(upload.st, "text_area"),
+        patch.object(upload.st, "caption"),
+        patch.object(upload.st, "segmented_control", side_effect=["はい", "いいえ"]),
+        patch.object(upload.st, "checkbox", return_value=True),
+        patch.object(upload.st, "button", return_value=True),
+        patch.object(upload.st, "success"),
+        patch.object(upload.st, "rerun"),
+        patch.object(upload, "confirm_and_start_upload", return_value=operation) as confirm,
+        patch.object(upload, "_store_operation_id"),
+        patch.object(upload, "set_active_job_id"),
+    ):
+        upload.upload_preview_dialog.__wrapped__(
+            preview,
+            Settings(data_dir=tmp_path),
+            "open-transaction",
+            reservation_transaction=transaction,
+        )
+
+    transaction.assert_called_once()
+    assert transaction.call_args.args[:2] == ("clip-1", preview.video_path)
+    confirm.assert_called_once()
+
+
+def test_dialog_revalidates_line_immediately_before_confirm(tmp_path: Path) -> None:
+    preview = _preview(tmp_path)
+    before_confirm = MagicMock(
+        side_effect=upload.LineStateError("完成動画が確認後に変わりました。")
+    )
+    with (
+        patch.object(upload.st, "container", side_effect=_container),
+        patch.object(upload.st, "warning"),
+        patch.object(upload.st, "markdown"),
+        patch.object(upload.st, "write"),
+        patch.object(upload.st, "code"),
+        patch.object(upload.st, "text_area"),
+        patch.object(upload.st, "caption"),
+        patch.object(upload.st, "segmented_control", side_effect=["はい", "いいえ"]),
+        patch.object(upload.st, "checkbox", return_value=True),
+        patch.object(upload.st, "button", return_value=True),
+        patch.object(upload.st, "error") as error,
+        patch.object(upload, "confirm_and_start_upload") as confirm,
+    ):
+        upload.upload_preview_dialog.__wrapped__(
+            preview,
+            Settings(data_dir=tmp_path),
+            "open-1",
+            before_confirm=before_confirm,
+        )
+
+    before_confirm.assert_called_once_with("clip-1", preview.video_path)
+    confirm.assert_not_called()
+    assert "完成動画が確認後に変わりました" in error.call_args.args[0]
+
+
+def test_started_upload_keeps_job_tracking_when_line_recording_fails(
+    tmp_path: Path,
+) -> None:
+    preview = _preview(tmp_path)
+    operation = _operation(tmp_path)
+    on_started = MagicMock(side_effect=upload.LineStateError("CAS conflict"))
+    with (
+        patch.object(upload.st, "container", side_effect=_container),
+        patch.object(upload.st, "warning"),
+        patch.object(upload.st, "markdown"),
+        patch.object(upload.st, "write"),
+        patch.object(upload.st, "code"),
+        patch.object(upload.st, "text_area"),
+        patch.object(upload.st, "caption"),
+        patch.object(upload.st, "segmented_control", side_effect=["はい", "いいえ"]),
+        patch.object(upload.st, "checkbox", return_value=True),
+        patch.object(upload.st, "button", return_value=True),
+        patch.object(upload.st, "error") as error,
+        patch.object(upload, "confirm_and_start_upload", return_value=operation),
+        patch.object(upload, "_store_operation_id") as store,
+        patch.object(upload, "_store_post_start_error") as store_error,
+        patch.object(upload, "set_active_job_id") as set_job,
+        patch.object(upload.st, "rerun") as rerun,
+    ):
+        upload.upload_preview_dialog.__wrapped__(
+            preview,
+            Settings(data_dir=tmp_path),
+            "open-1",
+            on_operation_started=on_started,
+        )
+
+    store.assert_called_once_with("source-1", "operation-1")
+    set_job.assert_called_once_with("job-1")
+    on_started.assert_called_once()
+    assert "予約投稿ジョブは開始済み" in error.call_args.args[0]
+    store_error.assert_called_once()
+    assert "予約投稿ジョブは開始済み" in store_error.call_args.args[1]
+    rerun.assert_called_once()
+
+
 def test_dialog_does_not_confirm_when_button_is_not_clicked(tmp_path: Path) -> None:
     preview = _preview(tmp_path)
     with (

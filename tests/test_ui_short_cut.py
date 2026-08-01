@@ -29,6 +29,7 @@ from yt_live_kit.ui.components.short_cut import (
     resolve_transcript_bounds,
     segments_to_pairs,
     short_cut_output_path,
+    shift_cut_timestamp,
     start_key,
     suggest_short_cut_job_target,
 )
@@ -124,6 +125,14 @@ def test_parse_cut_timestamp() -> None:
     seconds, error = parse_cut_timestamp("39:10")
     assert seconds is None
     assert error == "時刻は HH:MM:SS の形式で入力してください。"
+
+
+def test_shift_cut_timestamp_assists_without_changing_parse_boundary() -> None:
+    assert shift_cut_timestamp("00:39:10", -5) == ("00:39:05", None)
+    assert shift_cut_timestamp("00:39:10", 5) == ("00:39:15", None)
+    shifted, error = shift_cut_timestamp("00:00:02", -5)
+    assert shifted is None
+    assert error is not None and "0 秒より前" in error
 
 
 def test_extract_segment_text_matches_exact_boundaries() -> None:

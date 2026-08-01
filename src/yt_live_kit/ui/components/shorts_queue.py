@@ -89,6 +89,102 @@ def _candidate_label(candidate: ClipCandidate | HighlightSegment) -> str:
     )
 
 
+def install_line_snapshot(
+    *,
+    video_id: str,
+    source: str,
+    original_candidate: ClipCandidate | HighlightSegment,
+    segments: Sequence[HighlightSegment],
+    layout: str,
+    preset: str,
+    hook_preset: str,
+) -> tuple[ShortsQueueTarget, str]:
+    """区間確定済みの 1 本を既存 S4 snapshot 契約へ載せる."""
+    normalized = normalize_queue_candidates(segments, source="highlights")
+    targets = build_shorts_queue_targets(normalized, mode="concat")
+    fingerprint = make_shorts_queue_fingerprint(
+        video_id=video_id,
+        source=source,
+        mode="concat",
+        original_candidates=(original_candidate,),
+        segments=normalized,
+        layout=layout,
+        preset=preset,
+        hook_preset=hook_preset,
+    )
+    _clear_snapshot(video_id)
+    st.session_state[_state_key(video_id, "snapshot")] = {
+        "line_mode": True,
+        "fingerprint": fingerprint,
+        "source": source,
+        "mode": "concat",
+        "layout": layout,
+        "preset": preset,
+        "hook_preset": hook_preset,
+        "targets": targets,
+        "original_candidates": (original_candidate,),
+        "selected_ids": (original_candidate.id,),
+        "segments": normalized,
+    }
+    return targets[0], fingerprint
+
+
+def install_line_confirmed_spec(
+    video_id: str,
+    spec: ShortsQueueClipSpec,
+) -> None:
+    """工程 UI で確認した spec を既存 S4 の確認済み集合へ登録する."""
+    _dict_state(video_id, "confirmed")[spec.target_id] = spec
+
+
+def clear_line_confirmed_spec(video_id: str, target_id: str) -> None:
+    """台本 fingerprint 変更時に旧 S4 spec を生成候補から外す。"""
+    _dict_state(video_id, "confirmed").pop(target_id, None)
+
+
+def clear_line_snapshot(video_id: str) -> None:
+    """破棄を確認した正式ラインの session snapshot だけを消す。"""
+    _clear_snapshot(video_id)
+
+
+def restore_line_snapshot(
+    *,
+    video_id: str,
+    source: str,
+    original_candidate: ClipCandidate | HighlightSegment,
+    target: ShortsQueueTarget,
+    layout: str,
+    preset: str,
+    hook_preset: str,
+    expected_fingerprint: str,
+    confirmed_spec: ShortsQueueClipSpec | None = None,
+) -> None:
+    """永続 material evidence と一致する exact line-mode S4 state を復元する。"""
+    restored_target, fingerprint = install_line_snapshot(
+        video_id=video_id,
+        source=source,
+        original_candidate=original_candidate,
+        segments=target.highlight_segments(),
+        layout=layout,
+        preset=preset,
+        hook_preset=hook_preset,
+    )
+    if restored_target != target or fingerprint != expected_fingerprint:
+        _clear_snapshot(video_id)
+        raise ShortsQueueError(
+            "保存済みラインの生成 snapshot が queue fingerprint と一致しません。"
+        )
+    if confirmed_spec is not None:
+        if (
+            confirmed_spec.target_id != target.target_id
+            or confirmed_spec.segments != target.segments
+            or confirmed_spec.output_name != target.output_name
+        ):
+            _clear_snapshot(video_id)
+            raise ShortsQueueError("保存済み生成 spec がライン対象と一致しません。")
+        install_line_confirmed_spec(video_id, confirmed_spec)
+
+
 def _store_job_id(video_id: str, job_id: str) -> None:
     values = dict(_job_ids())
     values[video_id] = job_id
@@ -138,40 +234,44 @@ def _validate_overwrite_confirmation(
     snapshot = _snapshot(video_id)
     if snapshot is None or snapshot.get("fingerprint") != snapshot_fingerprint:
         return False, "選択内容が変わりました。台本確認からやり直してください。"
-    try:
-        source = str(snapshot["source"])
-        if source == "clips":
-            document = load_candidates_file(video_id, settings)
-        elif source == "highlights":
-            document = load_segments_file(video_id, settings)
-        else:
-            return False, "候補ソースが変わりました。選択し直してください。"
-        if document is None:
-            return False, "候補ファイルが見つかりません。選択し直してください。"
-        current_selected = select_queue_candidates_by_id(
-            document.candidates,
-            tuple(snapshot["selected_ids"]),
-        )
-        current_segments = normalize_queue_candidates(
-            current_selected,
-            source=source,
-        )
-        current_fingerprint = make_shorts_queue_fingerprint(
-            video_id=video_id,
-            source=source,
-            mode=str(snapshot["mode"]),
-            original_candidates=current_selected,
-            segments=current_segments,
-            layout=str(snapshot["layout"]),
-            preset=str(snapshot["preset"]),
-            hook_preset=str(snapshot["hook_preset"]),
-        )
-        current_targets = build_shorts_queue_targets(
-            current_segments,
-            mode=str(snapshot["mode"]),
-        )
-    except (ShortsQueueError, TelopError, OSError, ValueError) as exc:
-        return False, _safe_text(exc)
+    if snapshot.get("line_mode") is True:
+        current_fingerprint = str(snapshot.get("fingerprint") or "")
+        current_targets = tuple(snapshot.get("targets", ()))
+    else:
+        try:
+            source = str(snapshot["source"])
+            if source == "clips":
+                document = load_candidates_file(video_id, settings)
+            elif source == "highlights":
+                document = load_segments_file(video_id, settings)
+            else:
+                return False, "候補ソースが変わりました。選択し直してください。"
+            if document is None:
+                return False, "候補ファイルが見つかりません。選択し直してください。"
+            current_selected = select_queue_candidates_by_id(
+                document.candidates,
+                tuple(snapshot["selected_ids"]),
+            )
+            current_segments = normalize_queue_candidates(
+                current_selected,
+                source=source,
+            )
+            current_fingerprint = make_shorts_queue_fingerprint(
+                video_id=video_id,
+                source=source,
+                mode=str(snapshot["mode"]),
+                original_candidates=current_selected,
+                segments=current_segments,
+                layout=str(snapshot["layout"]),
+                preset=str(snapshot["preset"]),
+                hook_preset=str(snapshot["hook_preset"]),
+            )
+            current_targets = build_shorts_queue_targets(
+                current_segments,
+                mode=str(snapshot["mode"]),
+            )
+        except (ShortsQueueError, TelopError, OSError, ValueError) as exc:
+            return False, _safe_text(exc)
     target_ids = tuple(target.target_id for target in current_targets)
     snapshot_targets = tuple(snapshot.get("targets", ()))
     if target_ids != tuple(target.target_id for target in snapshot_targets):
@@ -242,6 +342,34 @@ def _confirm_queue_overwrite_dialog(
             specs=specs,
             settings=settings,
         )
+
+
+def start_or_confirm_line_generation(
+    *,
+    video_id: str,
+    title: str,
+    spec: ShortsQueueClipSpec,
+    snapshot_fingerprint: str,
+    settings: Settings,
+) -> None:
+    """工程 UI の 1 本を既存 S4 ジョブ・上書き確認境界へ接続する."""
+    output_path = settings.data_dir / video_id / "shorts" / "output" / spec.output_name
+    if output_path.is_file():
+        _confirm_queue_overwrite_dialog(
+            video_id=video_id,
+            title=title,
+            specs=(spec,),
+            snapshot_fingerprint=snapshot_fingerprint,
+            existing_names=(spec.output_name,),
+            settings=settings,
+        )
+        return
+    _start_queue_job(
+        video_id=video_id,
+        title=title,
+        specs=(spec,),
+        settings=settings,
+    )
 
 
 def _render_snapshot_form(
@@ -579,7 +707,15 @@ def render_shorts_queue(
 ) -> None:
     """S4 の選択、明示台本生成、全確定、結果表示を描画する."""
     st.divider()
-    st.markdown("### ショートをまとめて生成")
+    st.markdown("**ショートをまとめて生成**")
+    existing_snapshot = _snapshot(video_id)
+    if existing_snapshot is not None and existing_snapshot.get("line_mode") is True:
+        st.info(
+            "現在の 1 本はショート生産ラインで管理されています。"
+            "まとめて生成はライン完了後に利用してください。"
+        )
+        _render_current_result(video_id, settings)
+        return
     available_sources: list[str] = []
     if clip_candidates:
         available_sources.append("clips")

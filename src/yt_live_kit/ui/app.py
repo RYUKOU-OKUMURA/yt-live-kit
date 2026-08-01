@@ -7,8 +7,10 @@ from functools import partial
 import streamlit as st
 
 from yt_live_kit import __version__
+from yt_live_kit.config import get_settings
 from yt_live_kit.services.ytdlp import check_ytdlp_version_warning
 from yt_live_kit.ui.components.results import render_results
+from yt_live_kit.ui.components.shorts_line import render_sidebar_line_context
 from yt_live_kit.ui.components.status_bar import render_status_bar
 from yt_live_kit.ui.views.intake import render_intake_page
 from yt_live_kit.ui.views.library import render_library_page
@@ -19,6 +21,7 @@ from yt_live_kit.ui.state import (
     get_interrupted_notices,
     get_job_error,
     get_result,
+    get_selected_video_id,
     init_orphans_once,
     interrupted_notices_shown,
     mark_interrupted_notices_shown,
@@ -87,6 +90,8 @@ page = st.navigation(
         detail_page,
     ]
 )
+with st.sidebar:
+    render_sidebar_line_context(get_selected_video_id(), get_settings())
 page.run()
 
 result = get_result()
