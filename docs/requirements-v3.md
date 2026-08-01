@@ -377,6 +377,8 @@ Streamlit は、エントリスクリプト（[`src/yt_live_kit/ui/app.py`](../s
 | **出力** | 割り当て結果と、再起動後にも復元できる永続 upload operation |
 | **スコープ** | 予約枠の件数と upload attempt の日次上限を混同しない。upload attempt は公開日ではなく、**実際に API session を開始しようとした日の `America/Los_Angeles` 暦日**で数える。`YTLK_VIDEO_UPLOAD_DAILY_LIMIT` は 1〜100、既定 100 とし、失敗・結果不明も 1 試行に含める |
 
+**投稿ごとの日時変更（v3.2 追加）:** 公開・投稿ワークスペースでは、自動計算した次の空き枠を初期値として、投稿ごとに日付と時刻を変更できる。指定値は現在の `SchedulePolicy.timezone` の aware datetime として構築し、現在から最低 10 分先、既存の slot と非重複、DST の ambiguous / nonexistent ではないことを preview 前と確定時の両方で検証する。確認ダイアログには実際に送信するローカル予約日時と UTC RFC 3339 `Z` を固定表示する。編集・不正値・競合時は以前の確認を再利用せず、operation / job / upload attempt を作成しない。
+
 **複数枠拡張（v3.2 追記・P5）:** 運用目標「毎日 3 本」（§1.3.1）のため、ポリシーを `daily_time` 1 つから **`daily_times`（1〜N 個の厳密な `HH:MM` リスト、重複禁止、設定ページで編集可能）**へ拡張する。`assign_next_slot` は日内の複数枠を時刻順に埋めてから翌 `interval_days` 日へ進む。既存の単一 `daily_time` 設定は読み込み互換（要素 1 個のリスト）として扱い、FR-27 の安全契約・UTC 変換・attempt 台帳の扱いは変更しない。公開時刻の具体値は未定のため、既定値は定めず設定画面での編集を正とする。
 
 予約確定と upload attempt の競合制御を次のとおり固定する。
