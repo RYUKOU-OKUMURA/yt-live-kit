@@ -34,6 +34,7 @@ from yt_live_kit.services.upload_queue import UploadQueueError, load_operation
 from yt_live_kit.ui.state import set_active_job_id
 
 _OPERATION_IDS_KEY = "upload_operation_ids"
+_POST_START_ERRORS_KEY = "upload_post_start_errors"
 _STATE_LABELS = {
     "reserved": "予約済み",
     "uploading": "アップロード中",
@@ -77,6 +78,23 @@ def _store_operation_id(video_id: str, operation_id: str) -> None:
     values = dict(_operation_ids())
     values[video_id] = operation_id
     st.session_state[_OPERATION_IDS_KEY] = values
+
+
+def _store_post_start_error(video_id: str, message: str) -> None:
+    raw = st.session_state.get(_POST_START_ERRORS_KEY)
+    values = dict(raw) if isinstance(raw, dict) else {}
+    values[video_id] = message
+    st.session_state[_POST_START_ERRORS_KEY] = values
+
+
+def _pop_post_start_error(video_id: str) -> str | None:
+    raw = st.session_state.get(_POST_START_ERRORS_KEY)
+    if not isinstance(raw, dict):
+        return None
+    values = dict(raw)
+    message = values.pop(video_id, None)
+    st.session_state[_POST_START_ERRORS_KEY] = values
+    return str(message) if message else None
 
 
 def _resolve_operation(
@@ -139,6 +157,7 @@ def upload_preview_dialog(
     preview: UploadPreview,
     settings: Settings,
     dialog_nonce: str,
+    before_confirm: Callable[[str, Path], None] | None = None,
     on_operation_started: Callable[[str, str, Path], None] | None = None,
 ) -> None:
     """全 snapshot を表示し、明示選択と同意後だけ service confirm を呼ぶ."""
@@ -202,6 +221,12 @@ def upload_preview_dialog(
         disabled=not ready,
         key=f"upload_confirm_{dialog_nonce}",
     ):
+        if before_confirm is not None:
+            try:
+                before_confirm(preview.clip_id, preview.video_path)
+            except LineStateError as exc:
+                st.error(_safe_text(exc))
+                return
         try:
             operation = confirm_and_start_upload(
                 preview,
@@ -215,6 +240,8 @@ def upload_preview_dialog(
             st.error(_safe_text(exc))
             return
         _store_operation_id(preview.source_video_id, operation.operation_id)
+        # operation 作成後は、ライン記録が失敗してもジョブ追跡を失わない。
+        set_active_job_id(operation.job_id)
         if on_operation_started is not None:
             try:
                 on_operation_started(
@@ -223,9 +250,16 @@ def upload_preview_dialog(
                     preview.video_path,
                 )
             except LineStateError as exc:
-                st.error(_safe_text(exc))
+                message = (
+                    "予約投稿ジョブは開始済みですが、ライン状態へ記録できませんでした。"
+                    f" operation {_safe_text(operation.operation_id)} を確認してください。"
+                    f" 詳細: {_safe_text(exc)}"
+                )
+                _store_post_start_error(preview.source_video_id, message)
+                st.error(message)
+                # fragment 内の再確定による重複 operation を防ぎ、一覧で追跡させる。
+                st.rerun()
                 return
-        set_active_job_id(operation.job_id)
         st.success("予約投稿ジョブを開始しました。")
         st.rerun()
 
@@ -245,6 +279,7 @@ def _open_preview(
     *,
     start_ms: int | None = None,
     before_preview: Callable[[str, Path], None] | None = None,
+    before_confirm: Callable[[str, Path], None] | None = None,
     on_operation_started: Callable[[str, str, Path], None] | None = None,
 ) -> None:
     if item.output_path is None:
@@ -285,6 +320,7 @@ def _open_preview(
         preview,
         settings,
         uuid.uuid4().hex,
+        before_confirm,
         on_operation_started,
     )
 
@@ -294,9 +330,13 @@ def render_upload_section(
     settings: Settings,
     *,
     before_preview: Callable[[str, Path], None] | None = None,
+    before_confirm: Callable[[str, Path], None] | None = None,
     on_operation_started: Callable[[str, str, Path], None] | None = None,
 ) -> None:
     """最新の検証済み shorts queue から成功 item の投稿入口を描画する."""
+    post_start_error = _pop_post_start_error(video_id)
+    if post_start_error:
+        st.error(post_start_error)
     st.caption(
         "生成済みショートを private 固定・通知なしでアップロードし、"
         "次の空き枠へ予約します。"
@@ -348,5 +388,6 @@ def render_upload_section(
                     settings,
                     start_ms=_clip_start_ms(result, item.target_id),
                     before_preview=before_preview,
+                    before_confirm=before_confirm,
                     on_operation_started=on_operation_started,
                 )

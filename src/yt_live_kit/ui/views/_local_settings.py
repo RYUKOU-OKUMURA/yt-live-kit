@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from yt_live_kit.config import Settings, get_settings
+from yt_live_kit.services.subtitle_burn import TELOP_PRESETS
 
 _ARCHIVED_VIDEOS_FILENAME = "archived_videos.json"
 _DESCRIPTION_APPLIED_VIDEOS_FILENAME = "description_applied_videos.json"
@@ -57,9 +58,9 @@ def load_shorts_line_defaults(
     hook_preset = raw.get("hook_preset")
     if layout not in {"blur", "crop"}:
         return ShortsLineDefaults()
-    if not isinstance(preset, str) or not preset:
+    if not isinstance(preset, str) or preset not in TELOP_PRESETS:
         return ShortsLineDefaults()
-    if not isinstance(hook_preset, str) or not hook_preset:
+    if not isinstance(hook_preset, str) or hook_preset not in TELOP_PRESETS:
         return ShortsLineDefaults()
     return ShortsLineDefaults(layout, preset, hook_preset)
 

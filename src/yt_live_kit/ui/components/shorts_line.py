@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
@@ -21,6 +21,7 @@ from yt_live_kit.services.shorts_line import (
     LineStage,
     LineState,
     LineStateError,
+    abandon_line_state,
     confirm_preview,
     confirm_review,
     create_line_state,
@@ -28,6 +29,7 @@ from yt_live_kit.services.shorts_line import (
     record_output,
     record_upload_operation,
     reconcile_output,
+    load_line_state,
     resolve_active_line,
     save_active_line,
     save_line_state,
@@ -54,6 +56,8 @@ from yt_live_kit.services.telop import (
 from yt_live_kit.services.upload_queue import UploadQueueError, list_operations
 from yt_live_kit.ui.components.short_cut import ParentOption, render_short_cut_section
 from yt_live_kit.ui.components.shorts_queue import (
+    clear_line_confirmed_spec,
+    clear_line_snapshot,
     install_line_confirmed_spec,
     install_line_snapshot,
     start_or_confirm_line_generation,
@@ -111,10 +115,10 @@ def choose_preview_mode(
     source_available: bool,
 ) -> PreviewMode:
     """左プレビューの 4 状態を副作用なく選ぶ."""
-    if output_available:
-        return "output"
     if generation_running:
         return "generating"
+    if output_available:
+        return "output"
     if source_available:
         return "source"
     return "source_missing"
@@ -125,6 +129,26 @@ def is_human_review_current(state: LineState, review_fingerprint: str) -> bool:
     return (
         state.review_fingerprint == review_fingerprint
         and state.review_confirmed_fingerprint == review_fingerprint
+    )
+
+
+def ordered_candidate_ids(
+    candidates: Sequence[ClipCandidate | HighlightSegment],
+    preferred_candidate_ids: Sequence[str],
+) -> tuple[str, ...]:
+    """引き継ぎ順を先頭に保ち、残りを元表示順で並べる。"""
+    available = {candidate.id for candidate in candidates}
+    values: list[str] = []
+    for candidate_id in preferred_candidate_ids:
+        if candidate_id in available and candidate_id not in values:
+            values.append(candidate_id)
+    values.extend(candidate.id for candidate in candidates if candidate.id not in values)
+    return tuple(values)
+
+
+def _candidate_handoff_label(candidate: ClipCandidate | HighlightSegment) -> str:
+    return _safe(
+        f"{candidate.id}: {candidate.title}（{candidate.start} → {candidate.end}）"
     )
 
 
@@ -139,6 +163,40 @@ def _context(video_id: str) -> dict[str, object] | None:
 
 def _save_context(video_id: str, value: dict[str, object]) -> None:
     st.session_state[_context_key(video_id)] = value
+
+
+def _spec_matches_lineage(spec: ShortsQueueClipSpec, state: LineState) -> bool:
+    """manifest spec が exact line の queue・target・review に属するか判定する。"""
+    if spec.target_id != state.clip_id or state.review_fingerprint is None:
+        return False
+    try:
+        return (
+            make_review_fingerprint(
+                state.video_id,
+                state.clip_id,
+                state.queue_fingerprint,
+                spec.telop_document,
+            )
+            == state.review_fingerprint
+        )
+    except (LineStateError, ShortsQueueError):
+        return False
+
+
+def _current_context_spec(
+    video_id: str,
+    context: dict[str, object],
+    state: LineState,
+) -> ShortsQueueClipSpec | None:
+    """旧 review の session spec を採用せず、S4 confirmed 集合からも外す。"""
+    spec = context.get("confirmed_spec")
+    if isinstance(spec, ShortsQueueClipSpec) and _spec_matches_lineage(spec, state):
+        return spec
+    if spec is not None:
+        context.pop("confirmed_spec", None)
+        clear_line_confirmed_spec(video_id, state.clip_id)
+        _save_context(video_id, context)
+    return None
 
 
 def _source_for(option: ParentOption) -> str:
@@ -156,6 +214,96 @@ def _as_highlight(candidate: ClipCandidate | HighlightSegment) -> HighlightSegme
         duration_sec=candidate.duration_sec,
         reason=candidate.reason,
     )
+
+
+def _generate_line_telop(
+    *,
+    video_id: str,
+    target: ShortsQueueTarget,
+    state: LineState,
+    context: dict[str, object],
+    settings: Settings,
+) -> None:
+    """明示操作時だけ台本を生成し、旧 spec/output lineage を失効させる。"""
+    try:
+        generated = generate_telop_script(
+            video_id,
+            target.highlight_segments(),
+            settings,
+        )
+        if generated.document is None:
+            raise TelopError("テロップ台本を生成できませんでした。")
+        review = make_review_fingerprint(
+            video_id,
+            target.target_id,
+            state.queue_fingerprint,
+            generated.document,
+        )
+        previous_state = state
+        updated = set_review_fingerprint(previous_state, review)
+        if updated != previous_state:
+            save_line_state(updated, settings, expected_state=previous_state)
+        context["draft"] = generated.document
+        context.pop("telop_error", None)
+        context.pop("confirmed_spec", None)
+        clear_line_confirmed_spec(video_id, target.target_id)
+        _save_context(video_id, context)
+    except (AiPromptError, LineStateError, TelopError) as exc:
+        context["telop_error"] = str(exc)
+        _save_context(video_id, context)
+
+
+@st.dialog("ショート生産ラインを素材選定へ戻す")
+def _confirm_abandon_line_dialog(state: LineState, settings: Settings) -> None:
+    """ライン状態だけを退避し、動画・台本・出力成果物は削除しない。"""
+    st.warning("現在の工程と人確認状態を終了し、素材選定へ戻ります。")
+    st.write(
+        "生成済み動画・テロップ台本・マニフェストは削除しません。"
+        "このライン状態は退避され、操作後は自動では再開されません。"
+    )
+    confirmed = st.checkbox(
+        "ライン状態を退避して素材選定へ戻ることを確認した",
+        value=False,
+        key=f"line_abandon_confirm_{state.video_id}_{state.clip_id}",
+    )
+    if st.button(
+        "ラインを終了して素材選定へ戻る",
+        type="primary",
+        disabled=not confirmed,
+        key=f"line_abandon_execute_{state.video_id}_{state.clip_id}",
+    ):
+        try:
+            abandon_line_state(state, settings)
+        except LineStateError as exc:
+            st.error(_safe(exc))
+            return
+        st.session_state.pop(_context_key(state.video_id), None)
+        clear_line_confirmed_spec(state.video_id, state.clip_id)
+        clear_line_snapshot(state.video_id)
+        st.success("ライン状態を退避しました。素材を選び直せます。")
+        st.rerun()
+
+
+def _render_line_recovery_actions(
+    state: LineState,
+    settings: Settings,
+    *,
+    retry: Callable[[], None] | None = None,
+    retry_label: str = "テロップ台本を再生成",
+) -> None:
+    """失敗・復元不能時の retry と確認付き終了を必ず提示する。"""
+    with st.container(horizontal=True):
+        if retry is not None and st.button(
+            retry_label,
+            key=f"line_telop_retry_{state.video_id}_{state.clip_id}",
+        ):
+            retry()
+            st.rerun()
+        if st.button(
+            "ラインを終了して素材選定へ戻る",
+            key=f"line_abandon_open_{state.video_id}_{state.clip_id}",
+        ):
+            _confirm_abandon_line_dialog(state, settings)
 
 
 def _start_line(
@@ -196,28 +344,13 @@ def _start_line(
     _save_context(video_id, context)
 
     # Codex 呼び出しは、この明示確定ボタンの操作時だけ行う。
-    try:
-        generated = generate_telop_script(
-            video_id,
-            target.highlight_segments(),
-            settings,
-        )
-        if generated.document is None:
-            raise TelopError("テロップ台本を生成できませんでした。")
-        review = make_review_fingerprint(
-            video_id,
-            target.target_id,
-            queue_fingerprint,
-            generated.document,
-        )
-        previous_state = state
-        state = set_review_fingerprint(previous_state, review)
-        save_line_state(state, settings, expected_state=previous_state)
-        context["draft"] = generated.document
-        _save_context(video_id, context)
-    except (AiPromptError, LineStateError) as exc:
-        context["telop_error"] = str(exc)
-        _save_context(video_id, context)
+    _generate_line_telop(
+        video_id=video_id,
+        target=target,
+        state=state,
+        context=context,
+        settings=settings,
+    )
     st.rerun()
 
 
@@ -236,7 +369,7 @@ def _restore_context(
     else:
         result_specs = result.clip_specs
     spec = next(
-        (value for value in result_specs if value.target_id == state.clip_id),
+        (value for value in result_specs if _spec_matches_lineage(value, state)),
         None,
     )
     if spec is not None:
@@ -269,6 +402,20 @@ def _restore_context(
         except (OSError, UnicodeError, ValueError, TelopError, ShortsQueueError):
             return None
         if target.target_id != state.clip_id:
+            return None
+        try:
+            if (
+                state.review_fingerprint is None
+                or make_review_fingerprint(
+                    video_id,
+                    state.clip_id,
+                    state.queue_fingerprint,
+                    document,
+                )
+                != state.review_fingerprint
+            ):
+                return None
+        except LineStateError:
             return None
         defaults = load_shorts_line_defaults(settings)
     context: dict[str, object] = {
@@ -367,22 +514,27 @@ def _editor_document(
 
 
 def _find_output(
-    video_id: str,
-    clip_id: str,
+    state: LineState,
     settings: Settings,
 ) -> tuple[Path | None, ShortsQueueClipSpec | None]:
+    """exact review lineage の最新 manifest 出力だけを返す。"""
     try:
-        result = load_latest_shorts_queue_result(video_id, settings)
+        result = load_latest_shorts_queue_result(state.video_id, settings)
     except ShortsQueueError:
         return None, None
     if result is None:
         return None, None
-    spec = next((value for value in result.clip_specs if value.target_id == clip_id), None)
+    spec = next(
+        (value for value in result.clip_specs if _spec_matches_lineage(value, state)),
+        None,
+    )
+    if spec is None:
+        return None, None
     item = next(
         (
             value
             for value in result.items
-            if value.target_id == clip_id and value.status == "succeeded"
+            if value.target_id == spec.target_id and value.status == "succeeded"
         ),
         None,
     )
@@ -448,7 +600,10 @@ def render_sidebar_line_context(video_id: str | None, settings: Settings) -> Non
         except LineStateError:
             st.warning("ライン状態を安全に復元できませんでした。")
     if video_id and state is not None:
-        output_path, _spec = _find_output(video_id, state.clip_id, settings)
+        context = _context(video_id)
+        if context is None:
+            context = _restore_context(video_id, state, settings)
+        output_path, _spec = _find_output(state, settings)
         source_files = sorted(
             (settings.data_dir / video_id / "clips" / "source").glob("*.mp4")
         ) + sorted(
@@ -471,7 +626,6 @@ def render_sidebar_line_context(video_id: str | None, settings: Settings) -> Non
         elif mode == "generating":
             st.info("ショートを生成中です。進捗は画面上部で確認できます。")
         elif mode == "source" and source_files:
-            context = _context(video_id)
             target = context.get("target") if context else None
             if isinstance(target, ShortsQueueTarget):
                 st.video(
@@ -505,8 +659,8 @@ def record_line_upload(
     settings: Settings,
 ) -> None:
     """P2 確定後の operation を現在出力の再検証付きで記録する."""
-    state = resolve_active_line(video_id, settings)
-    if state is None or state.clip_id != clip_id:
+    state = load_line_state(video_id, clip_id, settings)
+    if state is None:
         return
     updated = record_upload_operation(
         state,
@@ -527,9 +681,10 @@ def validate_line_reservation(
     settings: Settings,
 ) -> None:
     """投稿 preview を開く前に最終確認済み出力との一致を固定する."""
-    state = resolve_active_line(video_id, settings)
-    if state is None or state.clip_id != clip_id:
-        raise LineStateError("予約対象のショート生産ラインを確認できませんでした。")
+    state = load_line_state(video_id, clip_id, settings)
+    # S4 単体生成は従来 P2 導線を維持し、exact line がある item だけを gate する。
+    if state is None:
+        return
     checked = reconcile_output(state, output_path)
     if checked != state:
         save_line_state(checked, settings, expected_state=state)
@@ -564,20 +719,67 @@ def render_shorts_line(
     if state is None:
         render_stage_bar(LineStage.MATERIAL_SELECTION)
         st.subheader("素材を選び、区間を決める")
-        long_candidates = [
-            value
-            for value in (*clip_candidates, *highlight_candidates)
-            if value.duration_sec > 180
-        ]
-        if long_candidates:
+        candidates = [*clip_candidates, *highlight_candidates]
+        if not candidates:
+            st.info("素材候補がありません。素材候補ワークスペースで生成してください。")
+            return
+        candidate_by_id = {candidate.id: candidate for candidate in candidates}
+        ordered_ids = ordered_candidate_ids(candidates, preferred_candidate_ids)
+        preferred = tuple(
+            candidate_id
+            for candidate_id in preferred_candidate_ids
+            if candidate_id in candidate_by_id
+        )
+        default_ids = list(preferred or ordered_ids[:1])
+        selection_key = f"line_material_selection_{video_id}"
+        transfer_marker_key = f"line_material_transfer_marker_{video_id}"
+        stored_selection = st.session_state.get(selection_key)
+        transfer_marker = tuple(preferred)
+        if (
+            st.session_state.get(transfer_marker_key) != transfer_marker
+            or not isinstance(stored_selection, list)
+            or any(value not in candidate_by_id for value in stored_selection)
+        ):
+            st.session_state.pop(selection_key, None)
+            st.session_state[transfer_marker_key] = transfer_marker
+        selected_ids = st.multiselect(
+            "ショート作成対象（選択順）",
+            ordered_ids,
+            default=default_ids,
+            format_func=lambda value: _candidate_handoff_label(candidate_by_id[value]),
+            key=selection_key,
+        )
+        if not selected_ids:
+            st.info("ショート作成対象を 1 件以上選択してください。")
+            return
+        st.caption(
+            "選択順: "
+            + " → ".join(
+                f"{index}. {_candidate_handoff_label(candidate_by_id[candidate_id])}"
+                for index, candidate_id in enumerate(selected_ids, start=1)
+            )
+        )
+        target_key = f"line_material_target_{video_id}"
+        if st.session_state.get(target_key) not in selected_ids:
+            st.session_state[target_key] = selected_ids[0]
+        selected_id = st.radio(
+            "今回作る候補（1 本ずつ進めます）",
+            selected_ids,
+            format_func=lambda value: _candidate_handoff_label(candidate_by_id[value]),
+            key=target_key,
+        )
+        selected = candidate_by_id[selected_id]
+        if selected.duration_sec > 180:
             render_short_cut_section(
                 video_id=video_id,
                 title=title,
-                clip_candidates=clip_candidates,
-                highlight_candidates=highlight_candidates,
+                clip_candidates=(selected,) if isinstance(selected, ClipCandidate) else (),
+                highlight_candidates=(
+                    (selected,) if isinstance(selected, HighlightSegment) else ()
+                ),
                 settings=settings,
                 embedded=True,
-                preferred_candidate_ids=preferred_candidate_ids,
+                preferred_candidate_ids=(selected.id,),
                 on_segments_confirmed=lambda segments, option: _start_line(
                     video_id=video_id,
                     title=title,
@@ -587,14 +789,6 @@ def render_shorts_line(
                 ),
             )
             return
-        candidates = [*clip_candidates, *highlight_candidates]
-        if not candidates:
-            st.info("素材候補がありません。素材候補ワークスペースで生成してください。")
-            return
-        selected = next(
-            (value for value in candidates if value.id in preferred_candidate_ids),
-            candidates[0],
-        )
         st.write(f"{_safe(selected.title)}（{selected.start} → {selected.end}）")
         if st.button("この区間を確定してテロップ確認へ", type="primary"):
             option = ParentOption(
@@ -617,6 +811,12 @@ def render_shorts_line(
             "区間 snapshot を安全に復元できませんでした。"
             "候補を選び直し、ラインを再開してください。"
         )
+        _render_line_recovery_actions(
+            state,
+            settings,
+            retry=lambda: _restore_context(video_id, state, settings),
+            retry_label="保存状態を再読み込み",
+        )
         return
     target = context.get("target")
     defaults = context.get("defaults")
@@ -625,6 +825,12 @@ def render_shorts_line(
         defaults, ShortsLineDefaults
     ):
         st.error("ラインの対象を安全に読み込めませんでした。")
+        _render_line_recovery_actions(
+            state,
+            settings,
+            retry=lambda: _restore_context(video_id, state, settings),
+            retry_label="保存状態を再読み込み",
+        )
         return
     st.caption(
         f"適用中: {'ぼかし背景' if defaults.layout == 'blur' else '中央クロップ'}"
@@ -633,7 +839,18 @@ def render_shorts_line(
     if context.get("telop_error"):
         st.error(_safe(context["telop_error"]))
     if not isinstance(draft, TelopScriptDocument):
-        st.info("テロップ台本がありません。区間を選び直して生成してください。")
+        st.info("テロップ台本がありません。再生成するか、素材選定へ戻れます。")
+        _render_line_recovery_actions(
+            state,
+            settings,
+            retry=lambda: _generate_line_telop(
+                video_id=video_id,
+                target=target,
+                state=state,
+                context=context,
+                settings=settings,
+            ),
+        )
         return
 
     edited = _editor_document(draft, video_id=video_id, clip_id=target.target_id)
@@ -652,6 +869,9 @@ def render_shorts_line(
             previous_state = state
             state = set_review_fingerprint(previous_state, review_fingerprint)
             save_line_state(state, settings, expected_state=previous_state)
+            context.pop("confirmed_spec", None)
+            clear_line_confirmed_spec(video_id, target.target_id)
+            _save_context(video_id, context)
     except LineStateError as exc:
         st.error(_safe(exc))
         return
@@ -702,7 +922,7 @@ def render_shorts_line(
         review_fingerprint,
         state.review_confirmed_fingerprint,
     )
-    spec = context.get("confirmed_spec")
+    spec = _current_context_spec(video_id, context, state)
     if gate.can_generate and not isinstance(spec, ShortsQueueClipSpec):
         try:
             saved = save_confirmed_telop_script(
@@ -725,7 +945,7 @@ def render_shorts_line(
         except (TelopError, ShortsQueueError) as exc:
             st.error(_safe(exc))
 
-    output_path, manifest_spec = _find_output(video_id, target.target_id, settings)
+    output_path, manifest_spec = _find_output(state, settings)
     if isinstance(manifest_spec, ShortsQueueClipSpec):
         spec = manifest_spec
     if output_path is not None:

@@ -26,6 +26,7 @@ from yt_live_kit.services.shorts_line import (
     LineStage,
     LineState,
     LineStateError,
+    abandon_line_state,
     calculate_line_stage,
     confirm_preview,
     confirm_review,
@@ -53,6 +54,29 @@ QUEUE_FP = "a" * 64
 
 def _settings(tmp_path: Path) -> Settings:
     return Settings(data_dir=tmp_path / "data")
+
+
+def test_abandon_line_archives_state_and_keeps_artifacts(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    state = create_line_state("video-1", "clip-1", QUEUE_FP, now=NOW)
+    save_line_state(state, settings)
+    save_active_line("video-1", "clip-1", settings, now=NOW + timedelta(seconds=1))
+    artifact = (
+        settings.data_dir
+        / "video-1"
+        / "shorts"
+        / "output"
+        / "short_clip-1.mp4"
+    )
+    artifact.parent.mkdir(parents=True)
+    artifact.write_bytes(b"keep")
+
+    archive = abandon_line_state(state, settings)
+
+    assert archive.is_file()
+    assert load_line_state("video-1", "clip-1", settings) is None
+    assert resolve_active_line("video-1", settings) is None
+    assert artifact.read_bytes() == b"keep"
 
 
 def _document(*, text: str = "確認する本文", emphasis: bool = False) -> TelopScriptDocument:

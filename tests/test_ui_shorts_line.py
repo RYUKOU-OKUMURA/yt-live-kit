@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
-from pathlib import Path
 import json
-from unittest.mock import patch
+from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from yt_live_kit.config import Settings
+from yt_live_kit.models.clips import ClipCandidate
+from yt_live_kit.models.telop import TelopScriptDocument
 from yt_live_kit.services.shorts_line import (
     DailyLineSummary,
     LineStage,
@@ -18,10 +20,17 @@ from yt_live_kit.services.shorts_line import (
     confirm_review,
     create_line_state,
     load_line_state,
+    make_review_fingerprint,
     record_output,
     save_active_line,
     save_line_state,
     set_review_fingerprint,
+)
+from yt_live_kit.services.shorts_queue import (
+    ShortsQueueItemResult,
+    build_shorts_queue_targets,
+    make_shorts_queue_clip_spec,
+    normalize_queue_candidates,
 )
 from yt_live_kit.ui.components import shorts_line
 from yt_live_kit.ui.views._local_settings import (
@@ -41,12 +50,59 @@ def _reviewed_output_state(output_path: Path, settings: Settings):
     return state
 
 
+def _lineage_fixture() -> tuple[object, TelopScriptDocument, object]:
+    candidate = ClipCandidate(
+        id="clip-source",
+        title="短い候補",
+        start="0:00:00",
+        end="0:00:20",
+        duration_sec=20,
+        reason="理由",
+    )
+    target = build_shorts_queue_targets(
+        normalize_queue_candidates((candidate,), source="clips"),
+        mode="concat",
+    )[0]
+    segment = target.segments[0]
+    document = TelopScriptDocument.model_validate(
+        {
+            "hook_text": "重要ポイント",
+            "title_candidates": ["タイトル"],
+            "description": "説明",
+            "tags": ["タグ"],
+            "segments": [
+                {
+                    "start_sec": segment.start_ms / 1000,
+                    "end_sec": segment.end_ms / 1000,
+                    "lines": [
+                        {
+                            "text": "本文",
+                            "start_sec": segment.start_ms / 1000,
+                            "end_sec": segment.end_ms / 1000,
+                            "emphasis": False,
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+    spec = make_shorts_queue_clip_spec(
+        target,
+        document,
+        layout="blur",
+        preset="default",
+        hook_preset="hook",
+    )
+    return target, document, spec
+
+
 @pytest.mark.parametrize(
     ("output", "running", "source", "expected"),
     [
         (False, False, True, "source"),
         (False, True, True, "generating"),
-        (True, True, False, "output"),
+        (True, False, False, "output"),
+        (True, True, False, "generating"),
         (False, False, False, "source_missing"),
     ],
 )
@@ -94,6 +150,174 @@ def test_human_confirmation_does_not_return_after_edit_and_revert() -> None:
     assert shorts_line.is_human_review_current(state, original) is False
 
 
+def test_manifest_output_is_rejected_when_review_lineage_changed(tmp_path: Path) -> None:
+    target, document_a, spec_a = _lineage_fixture()
+    output = tmp_path / target.output_name
+    output.write_bytes(b"old-output")
+    queue_fingerprint = "a" * 64
+    review_a = make_review_fingerprint(
+        "video-1", target.target_id, queue_fingerprint, document_a
+    )
+    state = create_line_state(
+        "video-1", target.target_id, queue_fingerprint, review_fingerprint=review_a
+    )
+    item = ShortsQueueItemResult(
+        target_id=target.target_id,
+        status="succeeded",
+        output_path=output,
+        log_path=None,
+        font_warning=None,
+        title_candidates=("タイトル",),
+        description="説明",
+        tags=("タグ",),
+        error=None,
+    )
+    result = MagicMock(clip_specs=(spec_a,), items=(item,))
+
+    with patch.object(shorts_line, "load_latest_shorts_queue_result", return_value=result):
+        assert shorts_line._find_output(state, Settings(data_dir=tmp_path)) == (
+            output,
+            spec_a,
+        )
+        edited = document_a.model_copy(update={"hook_text": "変更後"})
+        state_b = set_review_fingerprint(
+            state,
+            make_review_fingerprint(
+                "video-1", target.target_id, queue_fingerprint, edited
+            ),
+        )
+        assert shorts_line._find_output(state_b, Settings(data_dir=tmp_path)) == (
+            None,
+            None,
+        )
+        spec_b = make_shorts_queue_clip_spec(
+            target,
+            edited,
+            layout="blur",
+            preset="default",
+            hook_preset="hook",
+        )
+        assert shorts_line._spec_matches_lineage(spec_a, state_b) is False
+        assert shorts_line._spec_matches_lineage(spec_b, state_b) is True
+
+
+def test_stale_context_spec_is_cleared_after_review_change() -> None:
+    target, document, spec = _lineage_fixture()
+    queue_fingerprint = "a" * 64
+    review = make_review_fingerprint(
+        "video-1", target.target_id, queue_fingerprint, document
+    )
+    state = create_line_state(
+        "video-1", target.target_id, queue_fingerprint, review_fingerprint=review
+    )
+    changed = set_review_fingerprint(state, "b" * 64)
+    context: dict[str, object] = {"confirmed_spec": spec}
+    with (
+        patch.object(shorts_line, "clear_line_confirmed_spec") as clear,
+        patch.object(shorts_line, "_save_context") as save_context,
+    ):
+        assert shorts_line._current_context_spec("video-1", context, changed) is None
+    assert "confirmed_spec" not in context
+    clear.assert_called_once_with("video-1", target.target_id)
+    save_context.assert_called_once_with("video-1", context)
+
+
+def test_ordered_candidate_ids_preserve_handoff_order_for_mixed_candidates() -> None:
+    short = ClipCandidate(
+        id="short",
+        title="短い",
+        start="0:00:00",
+        end="0:00:20",
+        duration_sec=20,
+        reason="理由",
+    )
+    long = ClipCandidate(
+        id="long",
+        title="長い",
+        start="0:01:00",
+        end="0:05:00",
+        duration_sec=240,
+        reason="理由",
+    )
+    assert shorts_line.ordered_candidate_ids(
+        (long, short), ("short", "long")
+    ) == ("short", "long")
+
+
+def test_mixed_handoff_preselects_order_and_does_not_force_long_cut(
+    tmp_path: Path,
+) -> None:
+    long = ClipCandidate(
+        id="long",
+        title="長い",
+        start="0:01:00",
+        end="0:05:00",
+        duration_sec=240,
+        reason="理由",
+    )
+    short = ClipCandidate(
+        id="short",
+        title="短い",
+        start="0:00:00",
+        end="0:00:20",
+        duration_sec=20,
+        reason="理由",
+    )
+    session_state: dict[str, object] = {}
+    with (
+        patch.object(shorts_line, "resolve_active_line", return_value=None),
+        patch.object(shorts_line, "render_stage_bar"),
+        patch.object(shorts_line, "render_short_cut_section") as cut,
+        patch.object(shorts_line.st, "session_state", session_state),
+        patch.object(shorts_line.st, "subheader"),
+        patch.object(
+            shorts_line.st,
+            "multiselect",
+            return_value=["short", "long"],
+        ) as multiselect,
+        patch.object(shorts_line.st, "radio", return_value="short"),
+        patch.object(shorts_line.st, "caption"),
+        patch.object(shorts_line.st, "write"),
+        patch.object(shorts_line.st, "button", return_value=False),
+    ):
+        shorts_line.render_shorts_line(
+            video_id="video-1",
+            title="動画",
+            clip_candidates=(long, short),
+            highlight_candidates=(),
+            settings=Settings(data_dir=tmp_path),
+            preferred_candidate_ids=("short", "long"),
+        )
+
+    assert multiselect.call_args.args[1] == ("short", "long")
+    assert multiselect.call_args.kwargs["default"] == ["short", "long"]
+    cut.assert_not_called()
+
+
+def test_recovery_actions_offer_retry_and_confirmed_abandon(tmp_path: Path) -> None:
+    state = create_line_state("video-1", "clip-1", "a" * 64)
+
+    @contextmanager
+    def horizontal(*_args: object, **_kwargs: object):
+        yield
+
+    with (
+        patch.object(shorts_line.st, "container", side_effect=horizontal),
+        patch.object(shorts_line.st, "button", side_effect=[False, False]) as button,
+    ):
+        shorts_line._render_line_recovery_actions(
+            state,
+            Settings(data_dir=tmp_path),
+            retry=lambda: None,
+            retry_label="保存状態を再読み込み",
+        )
+
+    assert [call.args[0] for call in button.call_args_list] == [
+        "保存状態を再読み込み",
+        "ラインを終了して素材選定へ戻る",
+    ]
+
+
 def test_validate_line_reservation_invalidates_changed_output(tmp_path: Path) -> None:
     settings = Settings(data_dir=tmp_path)
     output_path = tmp_path / "video-1" / "shorts" / "output" / "short_clip-1.mp4"
@@ -131,6 +355,34 @@ def test_upload_callback_invalidates_if_output_changes_after_preview(tmp_path: P
     assert persisted.upload_operation_id is None
 
 
+def test_publish_callbacks_bypass_non_line_item_and_do_not_require_active_line(
+    tmp_path: Path,
+) -> None:
+    settings = Settings(data_dir=tmp_path)
+    non_line = tmp_path / "non-line.mp4"
+    non_line.write_bytes(b"normal-s4")
+    shorts_line.validate_line_reservation("video-1", "normal-s4", non_line, settings)
+    shorts_line.record_line_upload(
+        "video-1", "normal-s4", "operation-normal", non_line, settings
+    )
+
+    line_output = tmp_path / "line.mp4"
+    line_output.write_bytes(b"line")
+    line_state = _reviewed_output_state(line_output, settings)
+    other = create_line_state("video-1", "other", "c" * 64)
+    save_line_state(other, settings)
+    save_active_line("video-1", "other", settings)
+    shorts_line.validate_line_reservation(
+        "video-1", line_state.clip_id, line_output, settings
+    )
+    shorts_line.record_line_upload(
+        "video-1", line_state.clip_id, "operation-line", line_output, settings
+    )
+    persisted = load_line_state("video-1", line_state.clip_id, settings)
+    assert persisted is not None
+    assert persisted.upload_operation_id == "operation-line"
+
+
 def test_sidebar_is_display_only_and_shows_daily_progress(tmp_path: Path) -> None:
     settings = Settings(data_dir=tmp_path)
     daily = DailyLineSummary(completed_count=1, needs_attention_count=2)
@@ -151,6 +403,39 @@ def test_sidebar_is_display_only_and_shows_daily_progress(tmp_path: Path) -> Non
     button.assert_not_called()
 
 
+def test_sidebar_restores_persisted_segment_preview_after_restart(tmp_path: Path) -> None:
+    target, document, spec = _lineage_fixture()
+    queue_fingerprint = "a" * 64
+    review = make_review_fingerprint(
+        "video-1", target.target_id, queue_fingerprint, document
+    )
+    state = create_line_state(
+        "video-1", target.target_id, queue_fingerprint, review_fingerprint=review
+    )
+    source = tmp_path / "video-1" / "clips" / "source" / "source.mp4"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"source")
+    result = MagicMock(clip_specs=(spec,), items=())
+    session_state: dict[str, object] = {}
+    with (
+        patch.object(shorts_line, "resolve_active_line", return_value=state),
+        patch.object(shorts_line, "load_latest_shorts_queue_result", return_value=result),
+        patch.object(shorts_line, "get_active_job", return_value=None),
+        patch.object(shorts_line, "render_compact_line_status"),
+        patch.object(shorts_line, "load_daily_line_summary", return_value=None),
+        patch.object(shorts_line.st, "session_state", session_state),
+        patch.object(shorts_line.st, "divider"),
+        patch.object(shorts_line.st, "video") as video,
+    ):
+        shorts_line.render_sidebar_line_context(
+            "video-1", Settings(data_dir=tmp_path)
+        )
+
+    assert video.call_args.args[0] == source
+    assert video.call_args.kwargs["start_time"] == 0
+    assert video.call_args.kwargs["end_time"] == 20
+
+
 def test_line_defaults_are_read_only_with_safe_fallback(tmp_path: Path) -> None:
     settings = Settings(data_dir=tmp_path)
     assert load_shorts_line_defaults(settings) == ShortsLineDefaults()
@@ -166,3 +451,19 @@ def test_line_defaults_are_read_only_with_safe_fallback(tmp_path: Path) -> None:
     assert load_shorts_line_defaults(settings) == ShortsLineDefaults(
         "crop", "boxed", "hook"
     )
+
+    path.write_text(
+        json.dumps(
+            {"layout": "crop", "preset": "unknown", "hook_preset": "hook"}
+        ),
+        encoding="utf-8",
+    )
+    assert load_shorts_line_defaults(settings) == ShortsLineDefaults()
+
+    path.write_text(
+        json.dumps(
+            {"layout": "crop", "preset": "boxed", "hook_preset": "unknown"}
+        ),
+        encoding="utf-8",
+    )
+    assert load_shorts_line_defaults(settings) == ShortsLineDefaults()

@@ -31,6 +31,7 @@ from yt_live_kit.ui.components.shorts_queue import (
     _state_key,
     _start_queue_job,
     _validate_overwrite_confirmation,
+    start_or_confirm_line_generation,
 )
 
 
@@ -187,6 +188,34 @@ def test_overwrite_dialog_only_starts_after_confirmation():
         specs=kwargs["specs"],
         settings=kwargs["settings"],
     )
+
+
+def test_line_generation_keeps_overwrite_dialog_for_existing_old_output(
+    tmp_path: Path,
+) -> None:
+    settings = Settings(data_dir=tmp_path)
+    spec = _confirmed_spec()
+    output = tmp_path / "video-a" / "shorts" / "output" / spec.output_name
+    output.parent.mkdir(parents=True)
+    output.write_bytes(b"old-review-output")
+    with (
+        patch(
+            "yt_live_kit.ui.components.shorts_queue._confirm_queue_overwrite_dialog"
+        ) as dialog,
+        patch("yt_live_kit.ui.components.shorts_queue._start_queue_job") as start,
+    ):
+        start_or_confirm_line_generation(
+            video_id="video-a",
+            title="動画",
+            spec=spec,
+            snapshot_fingerprint="a" * 64,
+            settings=settings,
+        )
+
+    dialog.assert_called_once()
+    assert dialog.call_args.kwargs["specs"] == (spec,)
+    assert dialog.call_args.kwargs["existing_names"] == (spec.output_name,)
+    start.assert_not_called()
 
 
 def test_overwrite_confirmation_revalidates_current_snapshot_specs_and_outputs(

@@ -858,6 +858,14 @@ def _render_publish_workspace(
                         settings,
                     )
                 ),
+                before_confirm=lambda clip_id, output_path: (
+                    validate_line_reservation(
+                        video.video_id,
+                        clip_id,
+                        output_path,
+                        settings,
+                    )
+                ),
                 on_operation_started=lambda clip_id, operation_id, output_path: (
                     record_line_upload(
                         video.video_id,

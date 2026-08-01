@@ -137,6 +137,16 @@ def install_line_confirmed_spec(
     _dict_state(video_id, "confirmed")[spec.target_id] = spec
 
 
+def clear_line_confirmed_spec(video_id: str, target_id: str) -> None:
+    """台本 fingerprint 変更時に旧 S4 spec を生成候補から外す。"""
+    _dict_state(video_id, "confirmed").pop(target_id, None)
+
+
+def clear_line_snapshot(video_id: str) -> None:
+    """破棄を確認した正式ラインの session snapshot だけを消す。"""
+    _clear_snapshot(video_id)
+
+
 def _store_job_id(video_id: str, job_id: str) -> None:
     values = dict(_job_ids())
     values[video_id] = job_id

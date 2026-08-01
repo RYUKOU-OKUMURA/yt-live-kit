@@ -760,6 +760,33 @@ def _load_active_pointer(video_id: str, settings: Settings) -> ActiveLinePointer
         return None
 
 
+def abandon_line_state(state: LineState, settings: Settings) -> Path:
+    """CAS で未完了ラインだけを退避し、生成成果物には触れず選定へ戻す。"""
+    if not isinstance(state, LineState):
+        raise LineStateError("破棄するライン状態が正しくありません。")
+    _ensure_not_reserved(state)
+    path = line_state_path(state.video_id, state.clip_id, settings)
+    archive = path.with_name(
+        f"abandoned_{state.clip_id}_{uuid.uuid4().hex}.json"
+    )
+    with _line_lock(state.video_id, settings):
+        persisted = load_line_state(state.video_id, state.clip_id, settings)
+        if persisted != state:
+            raise LineStateError(
+                "ライン状態が別の操作で更新されました。最新状態を読み直してください。"
+            )
+        try:
+            os.replace(path, archive)
+            pointer = _load_active_pointer(state.video_id, settings)
+            if pointer is not None and pointer.clip_id == state.clip_id:
+                _active_line_path(state.video_id, settings).unlink(missing_ok=True)
+        except OSError as exc:
+            raise LineStateError(
+                "ショート生産ラインを安全に退避できませんでした。"
+            ) from exc
+    return archive
+
+
 def _valid_line_states(video_id: str, settings: Settings) -> tuple[LineState, ...]:
     directory = _active_line_path(video_id, settings).parent
     if not directory.exists():
