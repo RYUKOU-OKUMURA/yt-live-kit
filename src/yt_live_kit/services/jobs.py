@@ -20,6 +20,7 @@ from yt_live_kit.services.channel import ChannelError
 from yt_live_kit.services.clips import ClipsError
 from yt_live_kit.services.description import DescriptionError
 from yt_live_kit.services.ffmpeg import FfmpegError
+from yt_live_kit.services.highlights import HighlightsError
 from yt_live_kit.services.pipeline import PipelineError
 from yt_live_kit.services.shorts import ShortsError
 from yt_live_kit.services.storage import StorageError
@@ -47,6 +48,7 @@ _KNOWN_ERRORS = (
     PipelineError,
     YtdlpError,
     ClipsError,
+    HighlightsError,
     TranscriptError,
     DescriptionError,
     ChannelError,

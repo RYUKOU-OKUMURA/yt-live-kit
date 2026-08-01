@@ -65,3 +65,27 @@ def is_video_processed(video_id: str, settings: Settings | None = None) -> bool:
     settings = settings or get_settings()
     chapters_path = settings.data_dir / video_id / "chapters" / "chapters.md"
     return chapters_path.is_file()
+
+
+def is_video_targets_complete(
+    video_id: str,
+    settings: Settings | None = None,
+    *,
+    do_chapters: bool = True,
+    do_clips: bool = True,
+) -> bool:
+    """今回要求されている成果物がすべて揃っていれば True."""
+    settings = settings or get_settings()
+    video_dir = settings.data_dir / video_id
+
+    if do_chapters:
+        chapters_path = video_dir / "chapters" / "chapters.md"
+        if not chapters_path.is_file():
+            return False
+
+    if do_clips:
+        clips_path = video_dir / "clips" / "candidates.json"
+        if not clips_path.is_file():
+            return False
+
+    return True

@@ -152,10 +152,10 @@ def test_run_batch_continues_on_failure(mock_run, tmp_path):
     assert results[1].error is not None
 
 
-@patch("yt_live_kit.services.batch.is_video_processed")
-def test_run_batch_skip_existing(mock_is_processed, tmp_path):
+@patch("yt_live_kit.services.batch.is_video_targets_complete")
+def test_run_batch_skip_existing(mock_is_complete, tmp_path):
     settings = Settings(data_dir=tmp_path)
-    mock_is_processed.return_value = True
+    mock_is_complete.return_value = True
 
     results = run_batch(
         ["https://www.youtube.com/watch?v=existing123"],
@@ -166,6 +166,83 @@ def test_run_batch_skip_existing(mock_is_processed, tmp_path):
 
     assert len(results) == 1
     assert results[0].status == "skipped"
+    mock_is_complete.assert_called_once_with(
+        "existing123",
+        settings,
+        do_chapters=True,
+        do_clips=True,
+    )
+
+
+def _write_chapters_only(settings: Settings, video_id: str) -> None:
+    video_dir = settings.data_dir / video_id
+    video_dir.mkdir(parents=True)
+    (video_dir / "chapters").mkdir()
+    (video_dir / "chapters" / "chapters.md").write_text("0:00 x\n", encoding="utf-8")
+
+
+def _write_chapters_and_clips(settings: Settings, video_id: str) -> None:
+    _write_chapters_only(settings, video_id)
+    (settings.data_dir / video_id / "clips").mkdir()
+    (settings.data_dir / video_id / "clips" / "candidates.json").write_text(
+        "[]", encoding="utf-8"
+    )
+
+
+@patch("yt_live_kit.services.batch.run")
+def test_run_batch_skip_existing_clips_only_with_chapters_present(mock_run, tmp_path):
+    settings = Settings(data_dir=tmp_path)
+    video_id = "existing123"
+    _write_chapters_only(settings, video_id)
+    mock_run.return_value = MagicMock(video_id=video_id, title="title")
+
+    results = run_batch(
+        [f"https://www.youtube.com/watch?v={video_id}"],
+        settings,
+        skip_existing=True,
+        do_chapters=False,
+        do_clips=True,
+        sleep_sec=0,
+    )
+
+    assert results[0].status == "success"
+    mock_run.assert_called_once()
+
+
+@patch("yt_live_kit.services.batch.run")
+def test_run_batch_skip_existing_both_complete(mock_run, tmp_path):
+    settings = Settings(data_dir=tmp_path)
+    video_id = "existing123"
+    _write_chapters_and_clips(settings, video_id)
+
+    results = run_batch(
+        [f"https://www.youtube.com/watch?v={video_id}"],
+        settings,
+        skip_existing=True,
+        sleep_sec=0,
+    )
+
+    assert results[0].status == "skipped"
+    mock_run.assert_not_called()
+
+
+@patch("yt_live_kit.services.batch.run")
+def test_run_batch_skip_existing_chapters_only(mock_run, tmp_path):
+    settings = Settings(data_dir=tmp_path)
+    video_id = "existing123"
+    _write_chapters_only(settings, video_id)
+
+    results = run_batch(
+        [f"https://www.youtube.com/watch?v={video_id}"],
+        settings,
+        skip_existing=True,
+        do_chapters=True,
+        do_clips=False,
+        sleep_sec=0,
+    )
+
+    assert results[0].status == "skipped"
+    mock_run.assert_not_called()
 
 
 def test_batch_status_persistence(tmp_path):

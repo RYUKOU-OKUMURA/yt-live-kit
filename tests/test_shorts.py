@@ -634,6 +634,26 @@ def test_build_short_duration_validation_in_build(
     mock_run.assert_not_called()
 
 
+@patch("yt_live_kit.services.shorts.ensure_source_video")
+def test_build_short_rejects_unsafe_output_name_before_source(
+    mock_ensure, tmp_path
+):
+    video_id = "testvid1234"
+    _setup_video_dir(tmp_path, video_id)
+    settings = Settings(data_dir=tmp_path)
+
+    with pytest.raises(ShortsError, match="出力ファイル名にパス"):
+        build_short(
+            video_id,
+            10.0,
+            25.0,
+            settings,
+            output_name="../evil.mp4",
+        )
+
+    mock_ensure.assert_not_called()
+
+
 @patch("yt_live_kit.services.shorts.subprocess.run")
 @patch("yt_live_kit.services.shorts.find_ffmpeg")
 @patch("yt_live_kit.services.shorts.encode_segment")

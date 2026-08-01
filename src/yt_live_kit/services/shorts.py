@@ -19,6 +19,7 @@ from yt_live_kit.services.ffmpeg import (
     encode_segment,
     ensure_source_video,
     find_ffmpeg,
+    resolve_output_filename,
     save_command_log,
 )
 from yt_live_kit.services.subtitle_burn import (
@@ -74,10 +75,20 @@ class ShortResult:
 ShortsProgressCallback = Callable[[int, int, str], None] | None
 
 
+def _resolve_short_output_name(
+    output_name: str | None,
+    default_name: str,
+) -> str:
+    try:
+        return resolve_output_filename(
+            output_name, default_name, required_suffix=".mp4"
+        )
+    except ValueError as exc:
+        raise ShortsError(str(exc)) from exc
+
+
 def _segment_output_name(start: float, end: float, output_name: str | None) -> str:
-    if output_name is not None:
-        return output_name
-    return f"short_{start:g}_{end:g}.mp4"
+    return _resolve_short_output_name(output_name, f"short_{start:g}_{end:g}.mp4")
 
 
 def _intermediate_segment_name(start: float, end: float) -> str:
@@ -215,25 +226,6 @@ def _build_short_layout_command(
     return cmd
 
 
-def _validate_segments_output_name(output_name: str | None, clip_id: str) -> str:
-    if output_name is None:
-        return f"short_{clip_id}.mp4"
-    if not isinstance(output_name, str):
-        raise ShortsError("出力ファイル名は文字列で指定してください。")
-    if not output_name.strip():
-        raise ShortsError("出力ファイル名を入力してください。")
-    if any(ord(character) < 32 for character in output_name):
-        raise ShortsError("出力ファイル名に制御文字は使えません。")
-    if output_name in {".", ".."}:
-        raise ShortsError("出力ファイル名にドットだけの名前は使えません。")
-    path = Path(output_name)
-    if path.is_absolute() or "/" in output_name or "\\" in output_name:
-        raise ShortsError("出力ファイル名にパスは指定できません。")
-    if path.suffix != ".mp4":
-        raise ShortsError("出力ファイル名は .mp4 で終わる名前にしてください。")
-    return output_name
-
-
 def _validate_explicit_hook(hook_text: str | None) -> str | None:
     if hook_text is None:
         return None
@@ -284,7 +276,7 @@ def build_short_from_segments(
         )
 
     build_layout_filter(layout)
-    formal_name = _validate_segments_output_name(output_name, clip_id)
+    formal_name = _resolve_short_output_name(output_name, f"short_{clip_id}.mp4")
     explicit_hook = _validate_explicit_hook(hook_text)
     try:
         get_telop_preset(preset)
@@ -493,6 +485,7 @@ def build_short(
     """縦型ショート動画を生成する（2パス: 精密シークで切り出してから字幕・レイアウトを焼き込む）."""
     settings = settings or get_settings()
     duration_sec = validate_short_duration(start, end)
+    resolved_output_name = _segment_output_name(start, end, output_name)
 
     video_dir = settings.data_dir / video_id
     if not video_dir.is_dir():
@@ -550,7 +543,7 @@ def build_short(
 
         output_dir = video_dir / "shorts" / "output"
         output_dir.mkdir(parents=True, exist_ok=True)
-        output_path = output_dir / _segment_output_name(start, end, output_name)
+        output_path = output_dir / resolved_output_name
 
         if on_progress:
             if burn_subtitles:

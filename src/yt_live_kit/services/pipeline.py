@@ -137,6 +137,31 @@ def _load_clips_from_disk(video_dir: Path) -> tuple[tuple[ClipCandidate, ...], P
     return tuple(doc.candidates), candidates_path
 
 
+def _clips_error_path(video_dir: Path) -> Path:
+    return video_dir / "clips" / "last_error.txt"
+
+
+def _highlights_error_path(video_dir: Path) -> Path:
+    return video_dir / "highlights" / "last_error.txt"
+
+
+def _persist_softfail_error(path: Path, message: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(message, encoding="utf-8")
+
+
+def _clear_softfail_error(path: Path) -> None:
+    if path.is_file():
+        path.unlink()
+
+
+def _load_softfail_error(path: Path) -> str | None:
+    if not path.is_file():
+        return None
+    text = path.read_text(encoding="utf-8").strip()
+    return text or None
+
+
 def _ensure_transcript_prerequisites(video_dir: Path) -> None:
     if not _fetch_artifacts_exist(video_dir) or not _transcript_artifacts_exist(video_dir):
         raise PipelineError("先に字幕の取得と整形を実行してください")
@@ -166,6 +191,11 @@ def _assemble_result(
 
     if clips_candidates is None:
         clips_candidates, clips_candidates_path = _load_clips_from_disk(video_dir)
+
+    if clips_error is None:
+        clips_error = _load_softfail_error(_clips_error_path(video_dir))
+    if highlights_error is None:
+        highlights_error = _load_softfail_error(_highlights_error_path(video_dir))
 
     return PipelineResult(
         video_id=video_id,
@@ -267,13 +297,16 @@ def run(
     clips_error: str | None = None
 
     if do_clips:
+        clips_error_path = _clips_error_path(video_dir)
         try:
             _notify(on_progress, STAGE_CLIPS_SUGGEST)
             clips_result = suggest_clips(video_id, settings)
             clips_candidates = clips_result.candidates
             clips_candidates_path = clips_result.candidates_path
+            _clear_softfail_error(clips_error_path)
         except (CodexNotFoundError, ClipValidationError, ClipsError, AiPromptError) as exc:
             clips_error = str(exc)
+            _persist_softfail_error(clips_error_path, clips_error)
     else:
         clips_candidates, clips_candidates_path = _load_clips_from_disk(video_dir)
 
@@ -333,18 +366,23 @@ def regenerate(
                 "チャプターの生成に失敗しました。Codex CLI の設定を確認してください。"
             )
     elif target == "clips":
+        clips_error_path = _clips_error_path(video_dir)
         try:
             _notify(on_progress, STAGE_CLIPS_SUGGEST)
             _backup_file(video_dir / "clips" / "candidates.json")
             clips_result = suggest_clips(video_id, settings)
             clips_candidates = clips_result.candidates
             clips_candidates_path = clips_result.candidates_path
+            _clear_softfail_error(clips_error_path)
         except (CodexNotFoundError, ClipValidationError, ClipsError, AiPromptError) as exc:
             clips_error = str(exc)
+            _persist_softfail_error(clips_error_path, clips_error)
     elif target == "highlights":
+        highlights_error_path = _highlights_error_path(video_dir)
         try:
             _backup_file(video_dir / "highlights" / "segments.json")
             suggest_highlights(video_id, settings, on_progress=on_progress)
+            _clear_softfail_error(highlights_error_path)
         except (
             CodexNotFoundError,
             HighlightValidationError,
@@ -352,6 +390,7 @@ def regenerate(
             AiPromptError,
         ) as exc:
             highlights_error = str(exc)
+            _persist_softfail_error(highlights_error_path, highlights_error)
 
     return _assemble_result(
         video_id,

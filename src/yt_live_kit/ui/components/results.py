@@ -10,15 +10,14 @@ from yt_live_kit.services.description import (
     build_description,
     get_template_path,
 )
-from yt_live_kit.services.ffmpeg import CutResult, FfmpegError, cut_clip
+from yt_live_kit.services.clips import cut_clip_job_target
+from yt_live_kit.services.ffmpeg import CutResult
+from yt_live_kit.services.jobs import JobBusyError, is_busy, start_job
 from yt_live_kit.services.pipeline import PipelineResult
 from yt_live_kit.services.storage import dir_size, format_bytes
 from yt_live_kit.ui.components.clipboard import render_copy_button
-from yt_live_kit.ui.state import get_cut_result, set_cut_result
+from yt_live_kit.ui.state import get_cut_result, set_active_job_id
 
-_UNEXPECTED_ERROR_MSG = (
-    "予期しないエラーが発生しました。しばらくしてから再度お試しください。"
-)
 _TEMPLATE_NOT_SET_MESSAGE = (
     "定型文が未設定です。data/_config/description_template.txt に "
     "{{timeline}} を含むテンプレートを置くと、まとめてコピーできます。"
@@ -30,6 +29,7 @@ _CLIPS_EMPTY_NOT_REQUESTED_MESSAGE = "この実行では切り抜き候補を生
 _CLIPS_EMPTY_REQUESTED_MESSAGE = (
     "切り抜き候補がありません。Codex CLI の設定を確認してください。"
 )
+_BUSY_MESSAGE = "他の処理が実行中です。完了までお待ちください。"
 
 
 def clips_empty_message(clips_requested: bool) -> str:
@@ -37,6 +37,35 @@ def clips_empty_message(clips_requested: bool) -> str:
     if clips_requested:
         return _CLIPS_EMPTY_REQUESTED_MESSAGE
     return _CLIPS_EMPTY_NOT_REQUESTED_MESSAGE
+
+
+def cut_clip_button_disabled(*, busy: bool) -> bool:
+    """切り出しボタンを無効化するかどうか."""
+    return busy
+
+
+def _start_cut_clip(
+    result: PipelineResult,
+    selected,
+    settings: Settings,
+) -> None:
+    """切り出しジョブを開始する."""
+    try:
+        job_id = start_job(
+            "cut_clip",
+            cut_clip_job_target,
+            video_id=result.video_id,
+            title=result.title,
+            settings=settings,
+            start=selected.start,
+            end=selected.end,
+            candidate_id=selected.id,
+        )
+    except JobBusyError:
+        st.error(_BUSY_MESSAGE)
+        return
+    set_active_job_id(job_id)
+    st.rerun()
 
 
 def source_cache_note(video_id: str, settings: Settings) -> str | None:
@@ -144,31 +173,17 @@ def render_results(result: PipelineResult) -> None:
         selected = result.clips_candidates[selected_idx]
         st.markdown(f"**理由:** {selected.reason}")
 
-        cut_clicked = st.button("切り出し", type="secondary", key="cut_clip")
+        settings = get_settings()
+        busy = is_busy(settings)
+        cut_clicked = st.button(
+            "切り出し",
+            type="secondary",
+            key="cut_clip",
+            disabled=cut_clip_button_disabled(busy=busy),
+        )
 
         if cut_clicked:
-            settings = get_settings()
-            with st.status("切り出し中…", expanded=True) as cut_status:
-                try:
-                    cut_result = cut_clip(
-                        result.video_id,
-                        selected.start,
-                        selected.end,
-                        settings,
-                        output_name=f"{selected.id}.mp4",
-                        ffmpeg_path=settings.ffmpeg_path,
-                    )
-                    cut_status.update(label="切り出し完了", state="complete", expanded=False)
-                except FfmpegError as exc:
-                    cut_status.update(label="切り出しエラー", state="error", expanded=True)
-                    st.error(str(exc))
-                    st.stop()
-                except Exception:
-                    cut_status.update(label="切り出しエラー", state="error", expanded=True)
-                    st.error(_UNEXPECTED_ERROR_MSG)
-                    st.stop()
-
-            set_cut_result(cut_result)
+            _start_cut_clip(result, selected, settings)
 
         cut_result: CutResult | None = get_cut_result()
         if cut_result is not None and cut_result.video_id == result.video_id:

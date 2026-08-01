@@ -252,3 +252,51 @@ def test_concat_segments_command(mock_which, mock_run, tmp_path):
     assert "copy" in cmd
     assert result == output
     assert not list_path.exists()
+
+
+@pytest.mark.parametrize(
+    "output_name",
+    ["../evil.mp4", "/tmp/evil.mp4", "subdir/evil.mp4", "evil.mov", ""],
+)
+def test_cut_clip_rejects_unsafe_output_name(tmp_path, output_name):
+    video_id = "testvid1234"
+    _setup_video_dir(tmp_path, video_id)
+    settings = Settings(data_dir=tmp_path)
+
+    with pytest.raises(FfmpegError, match="出力ファイル名"):
+        cut_clip(
+            video_id,
+            "03:42",
+            "16:30",
+            settings,
+            output_name=output_name,
+        )
+
+
+@patch("yt_live_kit.services.ffmpeg.subprocess.run")
+@patch("yt_live_kit.services.ffmpeg.shutil.which")
+def test_cut_clip_accepts_valid_custom_output_name(mock_which, mock_run, tmp_path):
+    mock_which.return_value = "/usr/bin/ffmpeg"
+
+    def fake_run(cmd, **kwargs):
+        output_path = Path(cmd[-1])
+        output_path.write_bytes(b"clip data")
+        return MagicMock(returncode=0, stdout="", stderr="")
+
+    mock_run.side_effect = fake_run
+
+    video_id = "testvid1234"
+    video_dir = _setup_video_dir(tmp_path, video_id)
+    settings = Settings(data_dir=tmp_path)
+
+    result = cut_clip(
+        video_id,
+        "03:42",
+        "16:30",
+        settings,
+        output_name="my_clip.mp4",
+        ffmpeg_path="/usr/bin/ffmpeg",
+    )
+
+    assert result.output_path == video_dir / "clips" / "output" / "my_clip.mp4"
+    assert result.output_path.is_file()

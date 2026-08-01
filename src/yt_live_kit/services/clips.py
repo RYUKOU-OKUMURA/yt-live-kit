@@ -17,6 +17,7 @@ from yt_live_kit.services.ai_prompt import (
     is_codex_available,
 )
 from yt_live_kit.services.chapter_validator import parse_timestamp_to_seconds
+from yt_live_kit.services.ffmpeg import CutResult, cut_clip
 
 logger = logging.getLogger(__name__)
 
@@ -363,3 +364,73 @@ def save_candidates_from_file(
         raise ClipsError(f"ファイルが見つかりません: {source_path}")
     text = source_path.read_text(encoding="utf-8")
     return save_candidates_file(video_id, text, settings)
+
+
+def cut_result_to_ref(result: CutResult) -> str:
+    """CutResult を job result_ref 用 JSON 文字列にシリアライズする."""
+    payload = {
+        "video_id": result.video_id,
+        "output_path": str(result.output_path),
+        "command_log_path": str(result.command_log_path),
+        "start": result.start,
+        "end": result.end,
+        "duration_sec": result.duration_sec,
+    }
+    return json.dumps(payload, ensure_ascii=False)
+
+
+def cut_result_from_ref(ref: str) -> CutResult | None:
+    """job result_ref から CutResult を復元する."""
+    try:
+        data = json.loads(ref)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    try:
+        return CutResult(
+            video_id=str(data["video_id"]),
+            output_path=Path(data["output_path"]),
+            command_log_path=Path(data["command_log_path"]),
+            start=str(data["start"]),
+            end=str(data["end"]),
+            duration_sec=int(data["duration_sec"]),
+        )
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def cut_clip_job_target(
+    *,
+    report,
+    settings: Settings,
+    video_id: str,
+    start: str,
+    end: str,
+    candidate_id: str,
+    job_id: str | None = None,
+) -> None:
+    """切り出し用: cut_clip を実行し、結果を job result_ref に保存する."""
+    from yt_live_kit.services.jobs import get_active_job, update_job
+
+    report(message="切り出しを開始しています…")
+    result = cut_clip(
+        video_id,
+        start,
+        end,
+        settings,
+        output_name=f"{candidate_id}.mp4",
+        ffmpeg_path=settings.ffmpeg_path,
+    )
+    report(message="切り出しが完了しました")
+
+    if job_id is None:
+        active = get_active_job(settings)
+        job_id = active.job_id if active is not None else None
+    if job_id is not None:
+        update_job(
+            job_id,
+            settings=settings,
+            video_id=video_id,
+            result_ref=cut_result_to_ref(result),
+        )

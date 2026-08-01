@@ -354,6 +354,41 @@ def concat_segments(
     return output_path
 
 
+def validate_output_filename(
+    output_name: str,
+    *,
+    required_suffix: str | None = None,
+) -> str:
+    """出力ファイル名のパストラバーサル等を検証する."""
+    if not isinstance(output_name, str):
+        raise ValueError("出力ファイル名は文字列で指定してください。")
+    if not output_name.strip():
+        raise ValueError("出力ファイル名を入力してください。")
+    if any(ord(character) < 32 for character in output_name):
+        raise ValueError("出力ファイル名に制御文字は使えません。")
+    if output_name in {".", ".."}:
+        raise ValueError("出力ファイル名にドットだけの名前は使えません。")
+    path = Path(output_name)
+    if path.is_absolute() or "/" in output_name or "\\" in output_name:
+        raise ValueError("出力ファイル名にパスは指定できません。")
+    if required_suffix is not None and path.suffix != required_suffix:
+        raise ValueError(
+            f"出力ファイル名は {required_suffix} で終わる名前にしてください。"
+        )
+    return output_name
+
+
+def resolve_output_filename(
+    output_name: str | None,
+    default_name: str,
+    *,
+    required_suffix: str | None = None,
+) -> str:
+    """出力ファイル名を解決し、指定時は検証する."""
+    name = default_name if output_name is None else output_name
+    return validate_output_filename(name, required_suffix=required_suffix)
+
+
 def cut_clip(
     video_id: str,
     start: str,
@@ -389,6 +424,13 @@ def cut_clip(
         safe_start = start.replace(":", "")
         safe_end = end.replace(":", "")
         output_name = f"clip_{safe_start}_{safe_end}.mp4"
+    else:
+        try:
+            output_name = validate_output_filename(
+                output_name, required_suffix=".mp4"
+            )
+        except ValueError as exc:
+            raise FfmpegError(str(exc)) from exc
     output_path = output_dir / output_name
 
     cmd = build_ffmpeg_command(
@@ -499,6 +541,11 @@ def cut_and_concat(
     """複数区間を再エンコードして連結し、ハイライト動画を出力する."""
     if not segments:
         raise FfmpegError("連結するハイライト区間が指定されていません。")
+
+    try:
+        output_name = validate_output_filename(output_name, required_suffix=".mp4")
+    except ValueError as exc:
+        raise FfmpegError(str(exc)) from exc
 
     settings = settings or get_settings()
     video_dir = settings.data_dir / video_id

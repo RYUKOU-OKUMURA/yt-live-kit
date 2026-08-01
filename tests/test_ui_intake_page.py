@@ -18,7 +18,9 @@ from yt_live_kit.ui.components.results import (
     _CLIPS_EMPTY_NOT_REQUESTED_MESSAGE,
     _CLIPS_EMPTY_REQUESTED_MESSAGE,
     _TEMPLATE_NOT_SET_MESSAGE,
+    _start_cut_clip,
     clips_empty_message,
+    cut_clip_button_disabled,
     source_cache_note,
 )
 from yt_live_kit.ui.views import intake
@@ -223,3 +225,51 @@ def test_source_cache_note_preserves_existing_behavior(tmp_path) -> None:
     assert format_bytes(2048) in note
 
     assert source_cache_note("missing", settings) is None
+
+
+def test_cut_clip_button_disabled_when_busy() -> None:
+    assert cut_clip_button_disabled(busy=True) is True
+    assert cut_clip_button_disabled(busy=False) is False
+
+
+def test_start_cut_clip_starts_job() -> None:
+    result = MagicMock(video_id="vid123", title="テスト動画")
+    selected = MagicMock(id="clip_001", start="00:03:42", end="00:16:30")
+    settings = MagicMock()
+    with (
+        patch("yt_live_kit.ui.components.results.start_job", return_value="job-cut-1") as start,
+        patch("yt_live_kit.ui.components.results.set_active_job_id") as set_active,
+        patch("yt_live_kit.ui.components.results.st.rerun") as rerun,
+    ):
+        _start_cut_clip(result, selected, settings)
+
+    start.assert_called_once()
+    assert start.call_args.args[0] == "cut_clip"
+    assert start.call_args.kwargs["video_id"] == "vid123"
+    assert start.call_args.kwargs["candidate_id"] == "clip_001"
+    set_active.assert_called_once_with("job-cut-1")
+    rerun.assert_called_once()
+
+
+def test_start_cut_clip_shows_busy_message_without_starting_job() -> None:
+    from yt_live_kit.services.jobs import JobBusyError
+
+    result = MagicMock(video_id="vid123", title="テスト動画")
+    selected = MagicMock(id="clip_001", start="00:03:42", end="00:16:30")
+    settings = MagicMock()
+    with (
+        patch(
+            "yt_live_kit.ui.components.results.start_job",
+            side_effect=JobBusyError(),
+        ) as start,
+        patch("yt_live_kit.ui.components.results.st.error") as show_error,
+        patch("yt_live_kit.ui.components.results.set_active_job_id") as set_active,
+        patch("yt_live_kit.ui.components.results.st.rerun") as rerun,
+    ):
+        _start_cut_clip(result, selected, settings)
+
+    start.assert_called_once()
+    show_error.assert_called_once()
+    assert "実行中" in show_error.call_args.args[0]
+    set_active.assert_not_called()
+    rerun.assert_not_called()

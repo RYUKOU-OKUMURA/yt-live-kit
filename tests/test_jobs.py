@@ -26,6 +26,7 @@ from yt_live_kit.services.jobs import (
     start_job,
     update_job,
 )
+from yt_live_kit.services.highlights import HighlightsError
 from yt_live_kit.services.pipeline import PipelineError
 from yt_live_kit.services.shorts import ShortsError
 from yt_live_kit.services.youtube_api import YouTubeAPIError
@@ -598,6 +599,39 @@ def test_start_job_does_not_pass_video_id_when_target_lacks_it(tmp_path):
     assert state is not None
     assert state.status == "done"
     assert state.error is None
+
+
+def test_error_message_for_highlights_error_passes_message_through():
+    exc = HighlightsError("ハイライト区間の生成に失敗しました。")
+    message, needs_log = _error_message_for(exc)
+    assert message == "ハイライト区間の生成に失敗しました。"
+    assert needs_log is False
+
+
+def test_start_job_reports_highlights_error_message(tmp_path):
+    """HighlightsError は _KNOWN_ERRORS に含まれ、日本語メッセージがそのまま error に入る."""
+    settings = Settings(data_dir=tmp_path)
+    done = threading.Event()
+
+    def target_fn(*, report, settings, **_kwargs):
+        raise HighlightsError("Codex CLI が見つかりません。")
+
+    with _patch_real_thread() as (_mock_thread, threads):
+        job_id = start_job("highlights", target_fn, settings=settings)
+        threads[-1].join(timeout=5)
+
+    for _ in range(50):
+        state = read_job(job_id, settings)
+        if state is not None and state.status == "failed":
+            done.set()
+            break
+        time.sleep(0.05)
+    assert done.wait(timeout=5)
+
+    state = read_job(job_id, settings)
+    assert state is not None
+    assert state.status == "failed"
+    assert state.error == "Codex CLI が見つかりません。"
 
 
 def test_start_job_reports_shorts_error_message(tmp_path):

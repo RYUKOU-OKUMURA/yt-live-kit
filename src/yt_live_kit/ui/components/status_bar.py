@@ -21,6 +21,7 @@ from yt_live_kit.ui.state import (
     mark_job_handled,
     set_active_job_id,
     set_batch_summary,
+    set_cut_result,
     set_job_error,
     set_last_job_id,
     set_result,
@@ -34,10 +35,11 @@ _KIND_LABELS: dict[str, str] = {
     "shorts": "ショート動画",
     "shorts_queue": "ショート量産",
     "upload": "予約投稿",
+    "cut_clip": "切り出し",
 }
 
 _PIPELINE_KINDS = frozenset({"single", "regenerate", "highlights", "shorts"})
-_KNOWN_NON_PIPELINE_KINDS = frozenset({"batch", "shorts_queue", "upload"})
+_KNOWN_NON_PIPELINE_KINDS = frozenset({"batch", "shorts_queue", "upload", "cut_clip"})
 
 _RESULT_LOAD_ERROR = (
     "成果物を読み込めませんでした。ライブラリから開き直してください。"
@@ -173,6 +175,17 @@ def _handle_finished_job(job: JobState) -> None:
                     set_job_error(f"予約投稿の状態を読み込めませんでした。{exc}")
         elif job.kind == "shorts_queue" and not job.result_ref:
             set_job_error("完了したショート量産ジョブに成果物の参照先がありません。")
+        elif job.kind == "cut_clip":
+            if not job.result_ref:
+                set_job_error("完了した切り出しジョブに成果物の参照先がありません。")
+            else:
+                from yt_live_kit.services.clips import cut_result_from_ref
+
+                cut_result = cut_result_from_ref(job.result_ref)
+                if cut_result is not None:
+                    set_cut_result(cut_result)
+                else:
+                    set_job_error("切り出し結果を読み込めませんでした。")
         elif job.kind not in _KNOWN_NON_PIPELINE_KINDS:
             set_job_error(
                 f"未対応のジョブ種別「{job.kind}」です。成果物を自動で読み込みませんでした。"

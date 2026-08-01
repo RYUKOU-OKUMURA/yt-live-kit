@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Literal
 
 from yt_live_kit.config import Settings, get_settings
-from yt_live_kit.services.history import is_video_processed
+from yt_live_kit.services.history import is_video_targets_complete
 from yt_live_kit.services.jobs import get_active_job, update_job
 from yt_live_kit.services.pipeline import PipelineError, PipelineResult, run
 from yt_live_kit.services.ytdlp import YtdlpError, extract_video_id
@@ -160,7 +160,16 @@ def run_batch(
         except YtdlpError:
             pass
 
-        if skip_existing and video_id and is_video_processed(video_id, settings):
+        if (
+            skip_existing
+            and video_id
+            and is_video_targets_complete(
+                video_id,
+                settings,
+                do_chapters=do_chapters,
+                do_clips=do_clips,
+            )
+        ):
             item = BatchItemResult(
                 url=url,
                 video_id=video_id,

@@ -4,10 +4,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from yt_live_kit.config import Settings
 from yt_live_kit.models.highlights import HighlightSegment
 from yt_live_kit.models.meta import VideoMeta
-from yt_live_kit.services.ffmpeg import cut_and_concat
+from yt_live_kit.services.ffmpeg import FfmpegError, cut_and_concat
 
 
 def _setup_video_dir(tmp_path: Path, video_id: str = "testvid1234") -> Path:
@@ -326,3 +328,21 @@ def test_cut_and_concat_command_log_path_ignores_stale_logs(
 
     assert result.command_log_path == output_dir / "highlight.ffmpeg.log"
     assert result.command_log_path.read_text(encoding="utf-8") == "real concat log"
+
+
+@pytest.mark.parametrize(
+    "output_name",
+    ["../evil.mp4", "/tmp/evil.mp4", "subdir/evil.mp4", "evil.mov", ""],
+)
+def test_cut_and_concat_rejects_unsafe_output_name(tmp_path, output_name):
+    video_id = "testvid1234"
+    _setup_video_dir(tmp_path, video_id)
+    settings = Settings(data_dir=tmp_path)
+
+    with pytest.raises(FfmpegError, match="出力ファイル名"):
+        cut_and_concat(
+            video_id,
+            _sample_segments(1),
+            settings,
+            output_name=output_name,
+        )

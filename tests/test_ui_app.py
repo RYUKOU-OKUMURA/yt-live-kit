@@ -288,6 +288,43 @@ def test_handle_finished_job_loads_result_on_done() -> None:
     rerun.assert_called_once_with(scope="app")
 
 
+def test_handle_finished_cut_clip_job_sets_cut_result(tmp_path) -> None:
+    from yt_live_kit.services.clips import cut_result_to_ref
+    from yt_live_kit.services.ffmpeg import CutResult
+    from yt_live_kit.ui.components import status_bar
+
+    cut_result = CutResult(
+        video_id="vid123",
+        output_path=tmp_path / "vid123" / "clips" / "output" / "clip_001.mp4",
+        command_log_path=tmp_path / "vid123" / "clips" / "output" / "clip_001.ffmpeg.log",
+        start="00:03:42",
+        end="00:16:30",
+        duration_sec=768,
+    )
+    job = JobState(
+        job_id="cut-done",
+        kind="cut_clip",
+        status="done",
+        result_ref=cut_result_to_ref(cut_result),
+    )
+
+    with (
+        patch("yt_live_kit.ui.components.status_bar.is_job_handled", return_value=False),
+        patch("yt_live_kit.ui.components.status_bar.mark_job_handled") as mark_handled,
+        patch("yt_live_kit.ui.components.status_bar.set_cut_result") as set_cut,
+        patch("yt_live_kit.ui.components.status_bar.load_result_from_disk") as load_result,
+        patch("yt_live_kit.ui.components.status_bar.clear_active_job_id") as clear_active,
+        patch("yt_live_kit.ui.components.status_bar.st.rerun") as rerun,
+    ):
+        status_bar._handle_finished_job(job)
+
+    load_result.assert_not_called()
+    set_cut.assert_called_once_with(cut_result)
+    clear_active.assert_called_once()
+    mark_handled.assert_called_once_with("cut-done")
+    rerun.assert_called_once_with(scope="app")
+
+
 @pytest.mark.parametrize("kind", ["batch", "shorts_queue", "upload"])
 def test_non_pipeline_finished_jobs_never_use_pipeline_loader(kind: str) -> None:
     from yt_live_kit.ui.components import status_bar
