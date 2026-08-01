@@ -10,7 +10,7 @@ YouTube 公開ライブアーカイブから字幕を取得し、AI でチャプ
 | **Python 3.11+** | 実行環境 | pyenv 等で管理 |
 | **[uv](https://github.com/astral-sh/uv)** | 依存管理・実行 | `curl -LsSf https://astral.sh/uv/install.sh \| sh` |
 | **yt-dlp** | 字幕・動画取得 | **最新版推奨**（2025.02.19 以前では字幕取得失敗の実績あり） |
-| **ffmpeg** | 動画切り出し・字幕焼き込み | 字幕付きショートは `subtitles` フィルタ対応版が必要 |
+| **ffmpeg / ffmpeg-full** | 動画切り出し・字幕焼き込み | macOS のショート生産ラインは `subtitles` フィルタを含む **ffmpeg-full が必須** |
 | **Codex CLI** | チャプター・候補の自動生成 | 未導入時は画面に日本語で手順が表示されます |
 
 ## セットアップ（初回のみ）
@@ -114,6 +114,8 @@ uv run streamlit run src/yt_live_kit/ui/app.py --server.address 127.0.0.1
 6. **予約** — 対象と確認状態を保ったまま「公開・投稿」へ進み、予約内容を確認して YouTube へ予約します
 
 ライン状態は動画ごとに保存されるため、アプリを再起動しても安全に復元されます。証明できない人確認は復元せず、再確認が必要な工程で止まります。複数本の一括生成と時刻を直接入力する単体作成は、ショート作成内の **「補助：単体手動作成・まとめて生成」** から利用できます。
+
+**macOS の事前設定:** ショート生産ラインは確認済みテロップを必ず焼き込むため、通常版 `ffmpeg` ではなく `subtitles` フィルタ対応の `ffmpeg-full` が必要です。非対応の場合は生成ジョブを作らず工程 4 で停止し、字幕なし生成へ自動で切り替えません。初回生成前に [ffmpeg のセットアップ](#ffmpeg)を行い、`.env` 設定後に yt-live-kit を再起動してください。
 
 ### 長い候補を刻んでショートにする
 
@@ -370,7 +372,8 @@ brew install ffmpeg-full
 "$(brew --prefix ffmpeg-full)/bin/ffmpeg" -version
 
 # subtitles フィルタ確認
-"$(brew --prefix ffmpeg-full)/bin/ffmpeg" -hide_banner -filters | grep subtitles
+"$(brew --prefix ffmpeg-full)/bin/ffmpeg" -hide_banner -filters 2>&1 \
+  | awk '$2 == "subtitles" { print; found=1 } END { exit(found ? 0 : 1) }'
 ```
 
 `ffmpeg-full` は keg-only のため、グローバルに強制 link せず、プロジェクト直下の `.env` で実体を明示します。Apple Silicon Mac の例は次のとおりです。Intel Mac の一般的なパスは `/usr/local/opt/ffmpeg-full/bin/ffmpeg` です。
@@ -379,7 +382,9 @@ brew install ffmpeg-full
 YTLK_FFMPEG_PATH=/opt/homebrew/opt/ffmpeg-full/bin/ffmpeg
 ```
 
-`brew install libass` を単独で実行したり、通常版 `ffmpeg` をアップグレードしたりしても、既存の FFmpeg バイナリに `subtitles` フィルタが後から追加されるわけではありません。設定画面で解決済みパス、バージョン、`subtitles` 利用可否を確認できます。
+設定後は、起動中の yt-live-kit をいったん終了して再起動してください。設定画面で解決済みパスが `ffmpeg-full` の実体になっていることと、`subtitles` が「利用可能」であることを確認できます。
+
+`brew install libass` を単独で実行したり、通常版 `ffmpeg` をアップグレードしたりしても、既存の FFmpeg バイナリに `subtitles` フィルタが後から追加されるわけではありません。ショート生産ラインはこの検査に通るまで生成ジョブを開始しないため、失敗ジョブや空の生成結果は増えません。
 
 ---
 

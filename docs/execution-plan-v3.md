@@ -1225,6 +1225,7 @@ data/{video_id}/ ...
 - [x] U6-8. テスト更新: 状態 round-trip / active pointer / 複数 line の決定的 fallback / atomic / fail closed、全 fingerprint と各確認の失効、4 種の品質判定、日次 timezone と最新 operation 集計、6 工程遷移、左パネル 4 状態、3 ワークスペース、回復用空状態、既存確認ダイアログの非回帰を固定する
 - [ ] U6-9. `uv run pytest` 全件通過、実ブラウザで確定リファレンスとの比較、左パネル 4 状態、折り畳み、3 ワークスペース、編集後の未確認化、生成・最終確認・予約まで 1 周を目視する。README・進捗チェックを更新して大タスクコミットする
 - [x] U6-10. ショート生成失敗契約のホットフィックス: テロップ生成前に既存 FFmpeg capability 検査を実行し、非対応時は job / queue snapshot を作らず生成工程と人確認を維持する。`shorts_queue` の全件失敗・部分失敗を成功表示せず、出力のない item を最終確認へ進めない。`short_cut` を既知の非 pipeline ジョブとして扱い、正常完了時は保存済み cutplan を画面側で再読込し、失敗時は元エラーを表示する。再現テスト、全件テスト、欠陥優先レビューを通して大タスクコミットする
+- [x] U6-11. macOS の生産ライン実行環境を固定する: Homebrew の keg-only `ffmpeg-full` 実体に `subtitles` フィルタと同梱 `ffprobe` があることを確認し、ローカル `.env` の `YTLK_FFMPEG_PATH` に明示設定する。README へショート生産ラインでは必須であり字幕なしへ自動フォールバックしないこと、capability 確認、設定、アプリ再起動の手順を主導線付近にも明記し、全件テスト・レビュー・コミットを行う
 
 **Done 条件:**
 

@@ -311,7 +311,7 @@ def ensure_subtitles_filter(
     if not capabilities.subtitles_available:
         raise FfmpegError(
             "指定された FFmpeg で subtitles フィルタを利用できません。"
-            "macOS では ffmpeg-full を導入し、YTLK_FFMPEG_PATH に"
+            "macOS では ffmpeg-full を導入し、YTLK_FFMPEG_PATH に "
             "ffmpeg-full の ffmpeg 実体パスを設定してください。"
             f"（検査対象: {capabilities.resolved_path}）"
         )

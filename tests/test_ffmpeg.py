@@ -216,6 +216,7 @@ def test_ensure_subtitles_filter_rejects_similar_but_missing_filter(
         ensure_subtitles_filter("configured-ffmpeg")
 
     assert "YTLK_FFMPEG_PATH" in str(error.value)
+    assert "YTLK_FFMPEG_PATH に ffmpeg-full" in str(error.value)
 
 
 @patch("yt_live_kit.services.ffmpeg.subprocess.run")
