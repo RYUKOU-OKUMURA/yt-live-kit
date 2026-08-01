@@ -301,7 +301,8 @@ def _render_output_video(video_id: str, settings: Settings) -> None:
         return
 
     st.success("ハイライト動画が作成されました。")
-    st.video(str(output_path))
+    with st.container(width=720):
+        st.video(str(output_path))
     st.markdown(f"**保存先:** `{output_path}`")
     st.markdown(f"**コマンドログ:** `{log_path}`")
     st.caption(_INTERMEDIATE_DELETED_NOTE)

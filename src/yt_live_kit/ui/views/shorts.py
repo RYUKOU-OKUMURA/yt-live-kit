@@ -293,7 +293,8 @@ def _render_existing_output(
         return
 
     st.success("ショート動画が生成されています。")
-    st.video(str(output_path))
+    with st.container(width=360):
+        st.video(str(output_path))
 
     meta = load_short_meta(output_path)
     command_log = (

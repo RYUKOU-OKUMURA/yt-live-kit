@@ -11,6 +11,7 @@ from yt_live_kit.models.clips import ClipCandidate
 from yt_live_kit.models.highlights import HighlightSegment
 from yt_live_kit.models.short_cut import ShortCutDocument
 from yt_live_kit.services.short_cut import validate_short_cut_selection
+from yt_live_kit.services.subtitle_burn import TimedCue, parse_vtt_with_end
 from yt_live_kit.ui.components.short_cut import (
     LAYOUT_BLUR_LABEL,
     LAYOUT_CROP_LABEL,
@@ -20,9 +21,12 @@ from yt_live_kit.ui.components.short_cut import (
     collect_edited_segments,
     collect_parent_options,
     end_key,
+    extract_segment_text,
     format_total_ms,
     layout_from_label,
+    load_transcript_cues,
     parse_cut_timestamp,
+    resolve_transcript_bounds,
     segments_to_pairs,
     short_cut_output_path,
     start_key,
@@ -120,6 +124,106 @@ def test_parse_cut_timestamp() -> None:
     seconds, error = parse_cut_timestamp("39:10")
     assert seconds is None
     assert error == "時刻は HH:MM:SS の形式で入力してください。"
+
+
+def test_extract_segment_text_matches_exact_boundaries() -> None:
+    cues = [
+        TimedCue(0.0, 1.0, "前"),
+        TimedCue(1.0, 2.0, "対象"),
+        TimedCue(2.0, 3.0, "後"),
+    ]
+
+    assert extract_segment_text(cues, 1.0, 2.0) == "対象"
+
+
+def test_extract_segment_text_includes_partially_overlapping_cues() -> None:
+    cues = [
+        TimedCue(0.0, 1.0, "前半"),
+        TimedCue(1.0, 2.0, "後半"),
+    ]
+
+    assert extract_segment_text(cues, 0.5, 1.5) == "前半\n後半"
+
+
+def test_extract_segment_text_returns_empty_for_empty_segment() -> None:
+    cues = [TimedCue(0.0, 1.0, "対象外")]
+
+    assert extract_segment_text(cues, 2.0, 3.0) == ""
+    assert extract_segment_text(cues, 1.0, 1.0) == ""
+
+
+def test_extract_segment_text_merges_only_consecutive_exact_duplicates() -> None:
+    cues = [
+        TimedCue(0.0, 1.0, "同じ文"),
+        TimedCue(1.0, 2.0, "同じ文"),
+        TimedCue(2.0, 3.0, "別の文"),
+        TimedCue(3.0, 4.0, "同じ文"),
+    ]
+
+    assert extract_segment_text(cues, 0.0, 4.0) == "同じ文\n別の文\n同じ文"
+
+
+def test_extract_segment_text_follows_changed_boundaries() -> None:
+    cues = [
+        TimedCue(0.0, 1.0, "最初"),
+        TimedCue(1.0, 2.0, "中央"),
+        TimedCue(2.0, 3.0, "最後"),
+    ]
+
+    original = extract_segment_text(cues, 0.0, 2.0)
+    changed = extract_segment_text(cues, 1.0, 3.0)
+
+    assert original == "最初\n中央"
+    assert changed == "中央\n最後"
+    assert changed != original
+
+
+def test_resolve_transcript_bounds_falls_back_for_invalid_input() -> None:
+    assert resolve_transcript_bounds(
+        "入力中", "00:00:20", "00:00:10", "00:00:30"
+    ) == (10.0, 30.0, True)
+    assert resolve_transcript_bounds(
+        "00:00:25", "00:00:20", "00:00:10", "00:00:30"
+    ) == (10.0, 30.0, True)
+    assert resolve_transcript_bounds(
+        "00:00:12", "00:00:22", "00:00:10", "00:00:30"
+    ) == (12.0, 22.0, False)
+
+
+def test_load_transcript_cues_missing_vtt_returns_japanese_notice(
+    tmp_path: Path,
+) -> None:
+    load_transcript_cues.clear()
+
+    cues, notice = load_transcript_cues("missing-video", tmp_path)
+
+    assert cues == ()
+    assert notice is not None
+    assert "文字起こしファイルが見つからない" in notice
+
+
+def test_load_transcript_cues_parses_once_per_video_across_reruns(
+    tmp_path: Path,
+) -> None:
+    vtt_path = tmp_path / "video-a" / "subtitles" / "ja.vtt"
+    vtt_path.parent.mkdir(parents=True)
+    vtt_path.write_text(
+        "WEBVTT\n\n00:00:00.000 --> 00:00:01.000\n本文\n",
+        encoding="utf-8",
+    )
+    load_transcript_cues.clear()
+    with patch(
+        "yt_live_kit.ui.components.short_cut.parse_vtt_with_end",
+        wraps=parse_vtt_with_end,
+    ) as parse:
+        first = load_transcript_cues("video-a", tmp_path)
+        second = load_transcript_cues("video-a", tmp_path)
+
+    assert first == second
+    assert first[0] == (TimedCue(0.0, 1.0, "本文"),)
+    assert first[1] is None
+    parse.assert_called_once()
+    load_transcript_cues.clear()
 
 
 def test_format_total_ms() -> None:

@@ -31,6 +31,11 @@ from yt_live_kit.services.short_cut import (
     validate_short_cut_selection,
 )
 from yt_live_kit.services.shorts import build_short_from_segments
+from yt_live_kit.services.subtitle_burn import (
+    TimedCue,
+    filter_cues_for_segment,
+    parse_vtt_with_end,
+)
 from yt_live_kit.services.telop import make_clip_id
 from yt_live_kit.ui.state import set_active_job_id
 
@@ -43,6 +48,10 @@ _SECTION_NOTE = (
 _NO_LONG_CANDIDATE_MESSAGE = (
     "180 秒を超える候補がありません。"
     "そのままショートにできる候補は上の「ショートを作成」から生成してください。"
+)
+_NO_TRANSCRIPT_MESSAGE = "この区間に表示できる文字起こしはありません。"
+_INVALID_TRANSCRIPT_BOUNDS_MESSAGE = (
+    "入力中の時刻が不正なため、提案時の区間を表示しています。"
 )
 _HH_MM_SS_RE = re.compile(r"^\d{1,2}:\d{2}:\d{2}$")
 
@@ -100,6 +109,76 @@ def parse_cut_timestamp(text: str) -> tuple[float | None, str | None]:
         return float(parse_timestamp_to_seconds(stripped)), None
     except ValueError:
         return None, _TIMESTAMP_FORMAT_ERROR
+
+
+def resolve_transcript_bounds(
+    start_text: str,
+    end_text: str,
+    fallback_start: str,
+    fallback_end: str,
+) -> tuple[float | None, float | None, bool]:
+    """文字起こし表示用の境界を解決し、不正入力時は提案値へ戻す."""
+    start_sec, start_error = parse_cut_timestamp(start_text)
+    end_sec, end_error = parse_cut_timestamp(end_text)
+    if (
+        start_error is None
+        and end_error is None
+        and start_sec is not None
+        and end_sec is not None
+        and start_sec < end_sec
+    ):
+        return start_sec, end_sec, False
+
+    fallback_start_sec, fallback_start_error = parse_cut_timestamp(fallback_start)
+    fallback_end_sec, fallback_end_error = parse_cut_timestamp(fallback_end)
+    if (
+        fallback_start_error is None
+        and fallback_end_error is None
+        and fallback_start_sec is not None
+        and fallback_end_sec is not None
+        and fallback_start_sec < fallback_end_sec
+    ):
+        return fallback_start_sec, fallback_end_sec, True
+    return None, None, True
+
+
+def extract_segment_text(
+    cues: Sequence[TimedCue],
+    start_sec: float,
+    end_sec: float,
+) -> str:
+    """区間と重なる字幕を、連続する完全同一行をまとめて本文にする."""
+    if end_sec <= start_sec:
+        return ""
+
+    lines: list[str] = []
+    for cue in filter_cues_for_segment(list(cues), start_sec, end_sec):
+        text = cue.text.strip()
+        if text and (not lines or lines[-1] != text):
+            lines.append(text)
+    return "\n".join(lines)
+
+
+@st.cache_data(show_spinner=False)
+def load_transcript_cues(
+    video_id: str,
+    data_dir: Path,
+) -> tuple[tuple[TimedCue, ...], str | None]:
+    """動画の VTT を読み込み、rerun 間で video_id と data_dir ごとにキャッシュする."""
+    vtt_path = data_dir / video_id / "subtitles" / "ja.vtt"
+    if not vtt_path.is_file():
+        return (), "文字起こしファイルが見つからないため、区間内容を表示できません。"
+    try:
+        content = vtt_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        return (), "文字起こしファイルを読み込めないため、区間内容を表示できません。"
+    try:
+        cues = parse_vtt_with_end(content)
+    except Exception:
+        return (), "文字起こしファイルを解析できないため、区間内容を表示できません。"
+    if not cues:
+        return (), "文字起こしに表示できる内容がありません。"
+    return tuple(cues), None
 
 
 def format_total_ms(total_ms: int) -> str:
@@ -360,6 +439,9 @@ def _render_plan(
     settings: Settings,
 ) -> None:
     st.markdown("**提案された区間**（採用するものにチェックし、必要なら時刻を調整）")
+    cues, transcript_notice = load_transcript_cues(video_id, settings.data_dir)
+    if transcript_notice:
+        st.info(transcript_notice)
 
     for candidate in document.candidates:
         st.checkbox(
@@ -381,6 +463,27 @@ def _render_plan(
                 key=end_key(video_id, candidate.id),
             )
         st.caption(candidate.reason)
+
+        current_start = str(
+            st.session_state.get(start_key(video_id, candidate.id), candidate.start)
+        )
+        current_end = str(
+            st.session_state.get(end_key(video_id, candidate.id), candidate.end)
+        )
+        transcript_start, transcript_end, used_fallback = resolve_transcript_bounds(
+            current_start,
+            current_end,
+            candidate.start,
+            candidate.end,
+        )
+        if used_fallback:
+            st.caption(_INVALID_TRANSCRIPT_BOUNDS_MESSAGE)
+        transcript = ""
+        if transcript_start is not None and transcript_end is not None:
+            transcript = extract_segment_text(cues, transcript_start, transcript_end)
+        st.markdown("**この区間の文字起こし**")
+        with st.container(height=160, border=True):
+            st.write(transcript or _NO_TRANSCRIPT_MESSAGE)
 
     segments, parse_errors = collect_edited_segments(
         document, video_id, st.session_state
@@ -431,7 +534,8 @@ def _render_plan(
 
     if output_path is not None and output_path.is_file():
         st.success("ショート動画が生成されています。")
-        st.video(str(output_path))
+        with st.container(width=360):
+            st.video(str(output_path))
         st.markdown(f"**保存先:** `{output_path}`")
 
 

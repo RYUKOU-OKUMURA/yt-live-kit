@@ -514,7 +514,8 @@ def _render_result(result: ShortsQueueResult) -> None:
             if not output_ready:
                 st.warning(output_warning)
             else:
-                st.video(output_path)
+                with st.container(width=360):
+                    st.video(output_path)
                 st.download_button(
                     "mp4 を保存",
                     data=lambda path=output_path: _open_video(path),
