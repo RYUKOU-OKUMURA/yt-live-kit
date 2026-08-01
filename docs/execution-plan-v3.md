@@ -29,6 +29,7 @@
 | P1 | 安全なアップロードサービス | [x] 完了 |
 | P2 | スケジュールポリシー + 原子的な予約確定 + 投稿確認 UI | [x] 完了 |
 | P3 | フェーズ P 受け入れ（予約投稿が実際に公開される） | [x] 完了 |
+| P4 | ショート概要欄の定型リンク差し込み（v3 追加要件） | [x] 完了 |
 
 **状態の書き方:** `[ ] 未着手` / `[~] 進行中` / `[x] 完了`
 
@@ -174,8 +175,9 @@ data/{video_id}/ ...
 | **P1** | 安全なアップロードサービス | private 固定、resumable upload、永続 operation、試行台帳、reconciliation | FR-27, NFR-12, AC-27 |
 | **P2** | スケジュールポリシー + 原子的な予約確定 + 投稿確認 UI | 予約枠の自動割り当て、確認後再検証、ジョブ / UI 復元 | FR-28, AC-27 |
 | **P3** | フェーズ P 受け入れ | 実際の予約公開確認、README・版数更新 | AC-27, AC-28 |
+| **P4** | ショート概要欄の定型リンク差し込み | ショート専用テンプレート、開始秒付き元配信 URL、preview 前合成 | FR-29, AC-29 |
 
-各タスクは「実装 → 単体確認 → Done 条件チェック → **タスク完了コミット**」で閉じる。フェーズ末（U5 / S5 / P3）は「フェーズ受け入れ」も兼ねる。
+各タスクは「実装 → 単体確認 → Done 条件チェック → **タスク完了コミット**」で閉じる。フェーズ末（U5 / S5 / P3）は「フェーズ受け入れ」も兼ねる。P4 は v3 受け入れ（P3）完了後に追加された要件であり、P3 の証跡・版数には手を入れない。
 
 ---
 
@@ -980,6 +982,42 @@ data/{video_id}/ ...
 
 ---
 
+### P4: ショート概要欄の定型リンク差し込み（v3 追加要件）
+
+**目的:** 投稿するショートの概要欄に、チャンネル URL と元になったライブ配信のリンクを定型で入れられるようにする（FR-29 / AC-29）。
+**フェーズ状態:** [x] 完了
+**前提:** P3 完了（0.3.0）。本タスクは v3 受け入れ後の追加要件であり、P3 の証跡・版数・受け入れ記録は変更しない。
+
+**変更ファイル範囲:**
+- `src/yt_live_kit/services/description.py`（ショート用テンプレートの読み書きと合成関数を追加。既存の長尺用関数は変更しない）
+- `src/yt_live_kit/ui/components/upload.py`（preview 生成前に合成、先頭区間の開始秒を受け渡し、テンプレート未設定の案内）
+- `tests/test_description.py` / `tests/test_ui_upload.py`（合成境界と UI 受け渡しのテスト追加）
+- `README.md`（テンプレートの置き場とプレースホルダーの説明）
+- `docs/requirements-v3.md` / `docs/execution-plan-v3.md`（FR-29 / AC-29 / 本タスクの進捗）
+
+**作業:**
+
+- [x] P4-1. `services/description.py` に `get_shorts_template_path()` / `save_shorts_template()` / `build_shorts_description()` を追加する。テンプレートは `data/_config/shorts_description_template.txt`、置換対象は `{{description}}` / `{{source_title}}` / `{{source_url}}`。未設定時は入力の説明文をそのまま返す
+- [x] P4-2. `{{source_url}}` に切り抜き先頭区間の開始秒を `t` クエリとして付与する。既存の `t` は置き換え、同じ入力から常に同じ URL を返す
+- [x] P4-3. 半角山カッコ、UTF-8 5000 bytes 超過、`meta.json` 欠損・破損を、テンプレートが原因と分かる日本語 `DescriptionError` で拒否する（空文字フォールバック禁止）
+- [x] P4-4. `ui/components/upload.py` で、`build_upload_preview()` を呼ぶ前に合成する。開始秒は最新 manifest の `clip_specs` から `target_id` 一致で先頭区間を引く。`DescriptionError` は日本語で表示し preview を開かない。テンプレート未設定時は設置場所を案内する
+- [x] P4-5. テストを追加する（テンプレート有無、開始秒付与、連結モードの先頭区間基準、山カッコ・5000 bytes・`meta.json` 欠損の拒否、UI が合成後の本文を `build_upload_preview` に渡すこと、長尺用 `build_description()` の非回帰）
+- [x] P4-6. README にテンプレートの置き場・プレースホルダー・チャンネル URL は直接記載する運用を追記する
+- [x] P4-7. `uv run pytest` を全件通し、進捗チェックと AC-29 を更新してコミットする
+
+**Done 条件:**
+
+- [x] AC-29 の全項目が満たされている
+- [x] 確認ダイアログに出た説明文と `videos.insert` へ送られる説明文が一致している（合成が preview 前に完結している）
+- [x] テンプレート未設定時の挙動が従来と同一で、既存の投稿導線・長尺概要欄反映に回帰が無い
+- [x] エラーはすべて日本語で、半角山カッコを含まない
+- [x] `uv run pytest` が全件通過し、従量課金 API・新規 pip 依存の追加が無い
+- [x] タスク完了コミット済み
+
+**見積もり目安:** 0.5 日
+
+---
+
 ## 7. 出力ディレクトリ・ソースコード構成（v3 追加分）
 
 ### 7.1 ソースコード構成
@@ -1188,12 +1226,17 @@ PLAN0 要件・計画の確定
 3. P1 / P2 のレビュー・コミット後、実 upload の明示承認が得られた時だけ P0 を行う。承認・審査待ち中も開発完了状態を維持する
 4. private lock 解消後、P0 とは別の明示承認を得て P3 の予約公開受け入れを行う
 
+**P1〜P3 完了後（0.3.0 リリース済み）の次アクション:**
+
+1. **P4 に着手する。** ショート概要欄へのチャンネル URL・元配信リンクの定型差し込み（FR-29 / AC-29）を実装する
+
 ---
 
 ## 変更履歴
 
 | 日付 | 内容 |
 |------|------|
+| 2026-08-01 | v3 受け入れ完了後の追加要件として P4（ショート概要欄の定型リンク差し込み、FR-29 / AC-29）を定義。長尺用テンプレートと分離し、preview 生成前の合成と日本語 fail closed を計画上固定 |
 | 2026-08-01 | P 安全監査の独立レビューを反映。P0 の公開可能性を承認範囲へ追加し、slot + full operation を単一 queue record へ統合、job ID 先行予約とクラッシュ recovery / fault injection、poll 回数・間隔・terminal・private lock 判定表、P1 → P2 → P0 → P3 の必須順序を固定 |
 | 2026-08-01 | P0〜P3 着手前安全監査を反映。P1 / P2 の本番安全契約を実機 probe より先に変更し、private 固定、aware `publishAt`、Made for Kids / synthetic media 必須選択、Community Guidelines 同意、metadata 制約、resumable / reconciliation、LA attempt 台帳、永続 operation、confirm race、jobs / status bar、polling、実操作別承認を固定。一般 uploader ではなく scheduled-only feature として即時 public / unlisted を対象外のまま維持 |
 | 2026-08-01 | S4 着手前監査・計画レビューを反映。form 外 source と表示順、明示 Codex submit、pure service、deep immutable spec、完全 fingerprint、正規化台本返却、manifest 単独 writer、job ID / latest 表示境界、決定的出力名とテスト境界を固定 |

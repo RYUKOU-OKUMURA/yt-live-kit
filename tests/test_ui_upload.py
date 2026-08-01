@@ -216,6 +216,104 @@ def test_each_dialog_open_uses_new_widget_keys_and_unselected_defaults(tmp_path:
     assert "nonce-2" in checkbox.call_args.kwargs["key"]
 
 
+def test_open_preview_sends_composed_description_to_preview(tmp_path: Path) -> None:
+    preview = _preview(tmp_path)
+    item = MagicMock(
+        output_path=preview.video_path,
+        target_id="clip-1",
+        title_candidates=(preview.title,),
+        description="台本の説明文",
+        tags=preview.tags,
+    )
+    with (
+        patch.object(upload, "build_shorts_description", return_value="合成後の本文") as compose,
+        patch.object(upload, "build_upload_preview", return_value=preview) as build,
+        patch.object(upload, "upload_preview_dialog"),
+    ):
+        upload._open_preview("source-1", item, Settings(data_dir=tmp_path), start_ms=90_000)
+
+    assert compose.call_args.args[0] == "台本の説明文"
+    assert compose.call_args.kwargs["video_id"] == "source-1"
+    assert compose.call_args.kwargs["start_ms"] == 90_000
+    assert build.call_args.kwargs["description"] == "合成後の本文"
+
+
+def test_open_preview_shows_japanese_error_and_opens_no_dialog_on_template_error(
+    tmp_path: Path,
+) -> None:
+    preview = _preview(tmp_path)
+    item = MagicMock(
+        output_path=preview.video_path,
+        target_id="clip-1",
+        title_candidates=(preview.title,),
+        description="台本の説明文",
+        tags=preview.tags,
+    )
+    with (
+        patch.object(
+            upload,
+            "build_shorts_description",
+            side_effect=upload.DescriptionError("定型文が長すぎます。"),
+        ),
+        patch.object(upload, "build_upload_preview") as build,
+        patch.object(upload, "upload_preview_dialog") as dialog,
+        patch.object(upload.st, "error") as error,
+    ):
+        upload._open_preview("source-1", item, Settings(data_dir=tmp_path))
+
+    assert "定型文が長すぎます。" in error.call_args.args[0]
+    build.assert_not_called()
+    dialog.assert_not_called()
+
+
+def test_clip_start_ms_uses_first_segment_of_matching_spec() -> None:
+    result = MagicMock(
+        clip_specs=(
+            MagicMock(target_id="clip-0", segments=(MagicMock(start_ms=1_000),)),
+            MagicMock(
+                target_id="clip-1",
+                segments=(MagicMock(start_ms=90_000), MagicMock(start_ms=150_000)),
+            ),
+        )
+    )
+    assert upload._clip_start_ms(result, "clip-1") == 90_000
+    assert upload._clip_start_ms(result, "clip-unknown") is None
+
+
+def test_upload_section_passes_first_segment_start_to_preview(tmp_path: Path) -> None:
+    item = MagicMock(
+        status="succeeded",
+        title_candidates=("予約タイトル",),
+        target_id="clip-1",
+    )
+    result = MagicMock(
+        items=(item,),
+        job_id="shorts-job",
+        clip_specs=(
+            MagicMock(
+                target_id="clip-1",
+                segments=(MagicMock(start_ms=90_000), MagicMock(start_ms=150_000)),
+            ),
+        ),
+    )
+    settings = Settings(data_dir=tmp_path)
+    with (
+        patch.object(upload, "load_latest_shorts_queue_result", return_value=result),
+        patch.object(upload, "_resolve_operation", return_value=None),
+        patch.object(upload, "_open_preview") as open_preview,
+        patch.object(upload.st, "container", side_effect=_container),
+        patch.object(upload.st, "subheader"),
+        patch.object(upload.st, "caption"),
+        patch.object(upload.st, "markdown"),
+        patch.object(upload.st, "info") as info,
+        patch.object(upload.st, "button", return_value=True),
+    ):
+        upload.render_upload_section("source-1", settings)
+
+    assert open_preview.call_args.kwargs["start_ms"] == 90_000
+    assert "shorts_description_template.txt" in info.call_args.args[0]
+
+
 def test_needs_reconciliation_shows_manual_guidance_without_retry_button(tmp_path: Path) -> None:
     operation = _operation(tmp_path, state="needs_reconciliation")
     with (
@@ -341,6 +439,7 @@ def test_queue_corruption_shows_japanese_error_and_hides_post_action(tmp_path: P
         patch.object(upload.st, "subheader"),
         patch.object(upload.st, "caption"),
         patch.object(upload.st, "markdown"),
+        patch.object(upload.st, "info"),
         patch.object(upload.st, "error") as error,
         patch.object(upload.st, "button") as button,
     ):

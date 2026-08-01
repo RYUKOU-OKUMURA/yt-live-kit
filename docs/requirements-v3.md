@@ -279,6 +279,22 @@ Streamlit は、エントリスクリプト（[`src/yt_live_kit/ui/app.py`](../s
 
 **P0（テストアップロード検証）について:** P0 を危険な最小経路にはしない。FR-27 / FR-28 の安全契約、永続 operation、冪等性、試行上限、resumable upload、reconciliation、polling を P1 / P2 でモック実装・自動テストした後に、その同じ本番経路で実 upload を 1 本だけ行う。ロックされる場合は Google のコンプライアンス審査を別承認で申請し、**P1 / P2 の開発とテストは実操作の承認・審査待ちで止めない**。この検証は [`docs/execution-plan-v3.md`](./execution-plan-v3.md) の P0 タスクとして扱う。
 
+### FR-29: ショート概要欄の定型リンク差し込み（v3 追加要件）
+
+| 項目 | 内容 |
+|------|------|
+| **入力** | FR-23 で生成したショートの説明文、元動画 ID、切り抜き先頭区間の開始ミリ秒、ユーザーが編集する定型文テンプレート `data/_config/shorts_description_template.txt` |
+| **処理** | テンプレートの `{{description}}` / `{{source_title}}` / `{{source_url}}` を置換して、投稿用の説明文を合成する。`{{source_title}}` と `{{source_url}}` は `data/{video_id}/meta.json`（FR-01 の `VideoMeta`）を正本とし、`{{source_url}}` には切り抜き先頭区間の開始秒を `t` クエリとして付与する。チャンネル URL は専用プレースホルダーを設けず、テンプレート本文へユーザーが直接記載する |
+| **出力** | 合成済みの説明文。確認ダイアログ（FR-27）の「説明文全文」に合成後の本文が表示され、その本文がそのまま `videos.insert` の `snippet.description` になる |
+| **スコープ** | 長尺用の `description_template.txt`（FR-21 のタイムライン合成）とはファイル・関数ともに分離する。テンプレート未設定時は合成せず、FR-23 の説明文をそのまま使う（後方互換）。UI 上のテンプレート編集画面は持たず、ファイル直接編集とする |
+
+合成の安全契約を次のとおり固定する。
+
+- 合成は `build_upload_preview()` を呼ぶ**前**に完了させる。preview の fingerprint、確定後の再検証、content snapshot、`videos.insert` body はすべて合成後の本文だけを見る。確認ダイアログに出た本文と実際に送信される本文が一致しない状態を作らない
+- 合成結果に半角の山カッコを含む場合、および UTF-8 で 5000 bytes を超える場合は、テンプレートが原因であると分かる日本語エラーで拒否する。preview を作らず、投稿を開始しない
+- テンプレートが `{{source_title}}` / `{{source_url}}` を含むのに `meta.json` が無い・壊れている場合は、空文字へ暗黙にフォールバックせず日本語エラーで拒否する
+- 連結モード（FR-25）で複数区間を含むショートは、**先頭区間の開始秒**を `t` に使う。同じ入力からは常に同じ URL になること
+
 ---
 
 ## 7. 非機能要件（v3 追加分）
@@ -429,6 +445,15 @@ Streamlit は、エントリスクリプト（[`src/yt_live_kit/ui/app.py`](../s
 - [x] 実配信 1 本から、チャプター生成 → ショート複数本の生成 → 予約投稿までを通しで実行できる
 - [x] 実 upload、審査フォーム提出、P3 の実予約公開について、各操作ごとの対象と内容を提示した別々の明示承認記録がある
 
+### AC-29: ショート概要欄の定型リンク差し込み
+
+- [x] `data/_config/shorts_description_template.txt` の `{{description}}` / `{{source_title}}` / `{{source_url}}` が置換され、テンプレートに直接書いたチャンネル URL がそのまま説明文へ入る
+- [x] `{{source_url}}` に切り抜き先頭区間の開始秒が `t` クエリとして付き、同じ入力から常に同じ URL になる（連結モードでも先頭区間基準）
+- [x] テンプレート未設定時は FR-23 の説明文がそのまま使われ、既存の投稿導線に回帰が無い
+- [x] 確認ダイアログの「説明文全文」が合成後の本文を表示し、その本文が preview fingerprint・content snapshot・`videos.insert` body と一致する
+- [x] 半角山カッコ・5000 bytes 超過・`meta.json` 欠損の各ケースが、テンプレートが原因と分かる日本語エラーで拒否され、preview が作られない
+- [x] 長尺用 `description_template.txt` の合成（FR-21）に影響が無い
+
 ---
 
 ## 用語集（v3 追加分）
@@ -448,6 +473,7 @@ Streamlit は、エントリスクリプト（[`src/yt_live_kit/ui/app.py`](../s
 
 | 日付 | 内容 |
 |------|------|
+| 2026-08-01 | v3 完了後の追加要件として FR-29 / AC-29（ショート概要欄への元配信リンク・チャンネル URL 差し込み）を追加。長尺用テンプレートと分離し、preview 生成前の合成・開始秒付き URL・日本語エラーでの fail closed を固定 |
 | 2026-08-01 | P 安全監査の独立レビューを反映。P0 probe の公開可能性、単一 queue record、job ID 先行予約と crash recovery、poll 上限・terminal・private lock 判定表、P1 → P2 → P0 → P3 の依存順を明確化 |
 | 2026-08-01 | S4 計画レビューを反映。候補ソースの form 外切替、表示順、明示 Codex submit、deep immutable spec、完全 fingerprint、manifest 単独所有、job ID 表示境界、決定的出力名を FR-26 / AC-26 に固定 |
 | 2026-08-01 | P0〜P3 着手前安全監査を反映。private 固定、aware `publishAt`、metadata 制約、実チャンネル確認、Made for Kids / synthetic media 必須選択、Community Guidelines 同意、resumable / reconciliation、America/Los_Angeles 基準の試行上限、永続 operation、確認後再検証、polling、実操作ごとの個別承認を FR-27 / FR-28 / NFR-12 / NFR-13 / AC-27 / AC-28 に固定。一般 uploader ではなく scheduled-only feature として即時 public / unlisted を引き続き対象外とした |

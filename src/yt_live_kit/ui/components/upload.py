@@ -9,6 +9,11 @@ import streamlit as st
 
 from yt_live_kit.config import Settings
 from yt_live_kit.models.upload import UploadOperation
+from yt_live_kit.services.description import (
+    DescriptionError,
+    build_shorts_description,
+    get_shorts_template_path,
+)
 from yt_live_kit.services.schedule import (
     ScheduleError,
     UploadPreview,
@@ -19,6 +24,7 @@ from yt_live_kit.services.schedule import (
 from yt_live_kit.services.shorts_queue import (
     ShortsQueueError,
     ShortsQueueItemResult,
+    ShortsQueueResult,
     load_latest_shorts_queue_result,
 )
 from yt_live_kit.services.upload_queue import UploadQueueError, load_operation
@@ -210,13 +216,33 @@ def upload_preview_dialog(
         st.rerun()
 
 
+def _clip_start_ms(result: ShortsQueueResult, target_id: str) -> int | None:
+    """該当生成対象の先頭区間の開始ミリ秒を返す."""
+    for spec in result.clip_specs:
+        if spec.target_id == target_id:
+            return spec.segments[0].start_ms
+    return None
+
+
 def _open_preview(
     video_id: str,
     item: ShortsQueueItemResult,
     settings: Settings,
+    *,
+    start_ms: int | None = None,
 ) -> None:
     if item.output_path is None:
         st.error("投稿できるショート動画ファイルがありません。")
+        return
+    try:
+        description = build_shorts_description(
+            item.description,
+            video_id=video_id,
+            start_ms=start_ms,
+            settings=settings,
+        )
+    except DescriptionError as exc:
+        st.error(_safe_text(exc))
         return
     try:
         preview = build_upload_preview(
@@ -225,7 +251,7 @@ def _open_preview(
             clip_id=item.target_id,
             video_path=item.output_path,
             title=item.title_candidates[0],
-            description=item.description,
+            description=description,
             tags=item.tags,
             settings=settings,
             now=datetime.now(timezone.utc),
@@ -255,6 +281,15 @@ def render_upload_section(video_id: str, settings: Settings) -> None:
     if not succeeded:
         st.info("予約投稿できる生成済みショートがありません。")
         return
+    template_path = get_shorts_template_path(settings)
+    if not template_path.is_file():
+        st.info(
+            "ショート用の定型文が未設定です。"
+            f"{template_path} に定型文を置くと、"
+            "チャンネル URL や元配信リンクを概要欄へ差し込めます。"
+            "使えるプレースホルダーは "
+            "{{description}} / {{source_title}} / {{source_url}} です。"
+        )
     for item in succeeded:
         with st.container(border=True):
             st.markdown(f"**{_safe_text(item.title_candidates[0])}**")
@@ -275,4 +310,9 @@ def render_upload_section(video_id: str, settings: Settings) -> None:
                 type="primary",
                 disabled=operation is not None and operation.state != "failed",
             ):
-                _open_preview(video_id, item, settings)
+                _open_preview(
+                    video_id,
+                    item,
+                    settings,
+                    start_ms=_clip_start_ms(result, item.target_id),
+                )

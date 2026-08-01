@@ -152,6 +152,35 @@ uv run streamlit run src/yt_live_kit/ui/app.py --server.address 127.0.0.1
 
 ---
 
+## ショート概要欄の定型文テンプレート
+
+`data/_config/shorts_description_template.txt` を置くと、予約投稿するショートの概要欄へ、チャンネル URL と元になったライブ配信のリンクを自動で差し込めます。上の長尺用テンプレート（`description_template.txt`）とは別ファイルで、互いに影響しません。
+
+```text
+{{description}}
+
+▼ 元のライブ配信
+{{source_title}}
+{{source_url}}
+
+▼ チャンネル
+https://www.youtube.com/@your-handle
+```
+
+| プレースホルダー | 置き換わる内容 |
+|------------------|----------------|
+| `{{description}}` | テロップ台本と一緒に生成された、そのショートの説明文 |
+| `{{source_title}}` | 元になったライブ配信のタイトル（`data/{video_id}/meta.json`） |
+| `{{source_url}}` | 元になったライブ配信の URL。切り抜きの先頭区間の開始秒が `t` クエリとして付きます（例: `...&t=90s`）。複数区間を連結したショートでは先頭区間が基準です |
+
+チャンネル URL 専用のプレースホルダーはありません。上の例のように、テンプレート本文へ直接書いてください。
+
+- テンプレートを置いていない場合は、これまでどおり生成された説明文がそのまま使われます
+- 合成後の本文は、予約投稿の確認ダイアログの「説明文全文」にそのまま表示されます。ダイアログで見た本文がそのまま YouTube へ送信されます
+- 合成結果が半角の山カッコを含む、UTF-8 で 5000 bytes を超える、`meta.json` が無いといった場合は、日本語のエラーを表示して確認ダイアログを開きません
+
+---
+
 ## 概要欄への反映（YouTube Data API）
 
 処理済み一覧の **「概要欄に反映」** ボタンから、生成したチャプターを YouTube の概要欄に直接書き込めます。ネットワーク経由で YouTube Data API を呼び出すため、事前に以下のセットアップが必要です。
@@ -386,6 +415,7 @@ data/
     {handle}.json         # チャンネル一覧のキャッシュ
   _config/
     description_template.txt   # 概要欄の定型文（ユーザー編集）
+    shorts_description_template.txt  # ショート概要欄の定型文（ユーザー編集）
     client_secret.json         # YouTube Data API の OAuth クライアントシークレット（ユーザー配置）
     youtube_token.json         # OAuth 認証トークン（初回認証後に自動生成）
   {video_id}/
