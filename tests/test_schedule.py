@@ -24,6 +24,7 @@ from yt_live_kit.services.schedule import (
     load_schedule_policy,
     make_content_fingerprint,
     make_requested_publish_at,
+    make_schedule_policy,
     save_schedule_policy,
     to_utc_rfc3339_z,
 )
@@ -99,7 +100,54 @@ def _content_from_preview(preview) -> UploadContentSnapshot:
 
 @pytest.mark.parametrize("daily_time", ["00:00", "23:59"])
 def test_schedule_policy_accepts_ascii_hhmm_boundaries(daily_time: str) -> None:
-    assert SchedulePolicy(daily_time=daily_time, interval_days=1).daily_time == daily_time
+    policy = SchedulePolicy(daily_time=daily_time, interval_days=1)
+    assert policy.daily_time == daily_time
+    assert policy.daily_times == (daily_time,)
+
+
+def test_schedule_policy_accepts_and_sorts_multiple_daily_times() -> None:
+    policy = SchedulePolicy(daily_times=["23:59", "00:00", "12:30"])
+    assert policy.daily_times == ("00:00", "12:30", "23:59")
+    # 移行期間の単一値 accessor は、正規化後の先頭枠を返す。
+    assert policy.daily_time == "00:00"
+
+
+@pytest.mark.parametrize(
+    ("daily_times", "reason"),
+    [
+        ([], "1件以上"),
+        (["09:00", "09:00"], "重複"),
+        (["09:00", "9:30"], "HH:MM"),
+        (["09:00", "１２:００"], "HH:MM"),
+    ],
+)
+def test_schedule_policy_rejects_invalid_multiple_daily_times(
+    daily_times: list[str], reason: str
+) -> None:
+    with pytest.raises(ValidationError, match=reason):
+        SchedulePolicy(daily_times=daily_times)
+
+
+def test_schedule_policy_rejects_singular_and_plural_time_together() -> None:
+    with pytest.raises(ValidationError, match="同時に指定できません"):
+        SchedulePolicy(daily_time="09:00", daily_times=["12:00"])
+
+
+def test_make_schedule_policy_accepts_plural_and_rejects_ambiguous_input() -> None:
+    policy = make_schedule_policy(
+        daily_times=["18:00", "09:00"],
+        interval_days=2,
+        timezone_name="Asia/Tokyo",
+    )
+    assert policy.daily_times == ("09:00", "18:00")
+
+    with pytest.raises(ScheduleError, match="同時に指定できません"):
+        make_schedule_policy(
+            daily_time="09:00",
+            daily_times=["18:00"],
+            interval_days=2,
+            timezone_name="Asia/Tokyo",
+        )
 
 
 @pytest.mark.parametrize(
@@ -125,13 +173,46 @@ def test_schedule_policy_interval_and_timezone_boundaries() -> None:
 
 def test_schedule_policy_atomic_round_trip_and_corrupt_fail_closed(tmp_path: Path) -> None:
     settings = _settings(tmp_path)
-    policy = SchedulePolicy(daily_time="18:30", interval_days=3, timezone="Asia/Tokyo")
+    policy = SchedulePolicy(
+        daily_times=["21:30", "09:00", "18:30"],
+        interval_days=3,
+        timezone="Asia/Tokyo",
+    )
     path = save_schedule_policy(policy, settings)
     assert load_schedule_policy(settings) == policy
+    saved = json.loads(path.read_text(encoding="utf-8"))
+    assert saved["daily_times"] == ["09:00", "18:30", "21:30"]
+    assert "daily_time" not in saved
     assert not tuple(path.parent.glob("*.tmp"))
     path.write_text("{broken", encoding="utf-8")
     with pytest.raises(ScheduleError, match="壊れて"):
         load_schedule_policy(settings)
+
+
+def test_schedule_policy_loads_legacy_daily_time_and_saves_plural_format(
+    tmp_path: Path,
+) -> None:
+    settings = _settings(tmp_path)
+    path = settings.data_dir / "_config" / "schedule_policy.json"
+    path.parent.mkdir(parents=True)
+    path.write_text(
+        json.dumps(
+            {"daily_time": "18:30", "interval_days": 2, "timezone": "Asia/Tokyo"}
+        ),
+        encoding="utf-8",
+    )
+
+    policy = load_schedule_policy(settings)
+
+    assert policy.daily_times == ("18:30",)
+    assert policy.daily_time == "18:30"
+    save_schedule_policy(policy, settings)
+    saved = json.loads(path.read_text(encoding="utf-8"))
+    assert saved == {
+        "daily_times": ["18:30"],
+        "interval_days": 2,
+        "timezone": "Asia/Tokyo",
+    }
 
     path.write_text(
         json.dumps(
@@ -161,7 +242,7 @@ def test_assign_next_slot_honors_lead_collision_and_interval() -> None:
     assert slot == datetime(2026, 8, 5, 9, 5, tzinfo=slot_zone)
 
 
-def test_assign_next_slot_continues_after_latest_reservation_without_backfill() -> None:
+def test_assign_next_slot_uses_earlier_open_slot_despite_later_reservations() -> None:
     zone = ZoneInfo("Asia/Tokyo")
     policy = SchedulePolicy(daily_time="12:00", interval_days=3)
     latest = datetime(2026, 8, 10, 12, 0, tzinfo=zone)
@@ -170,7 +251,73 @@ def test_assign_next_slot_continues_after_latest_reservation_without_backfill() 
         [datetime(2026, 8, 4, 12, 0, tzinfo=zone), latest],
         now=NOW,
     )
-    assert slot == datetime(2026, 8, 13, 12, 0, tzinfo=zone)
+    # 将来の予約を起点にせず、現在日以降で最初の未使用枠を選ぶ。
+    assert slot == datetime(2026, 8, 1, 12, 0, tzinfo=zone)
+
+
+def test_assign_next_slot_fills_same_day_in_time_order_then_advances_interval() -> None:
+    zone = ZoneInfo("Asia/Tokyo")
+    policy = SchedulePolicy(
+        daily_times=["18:00", "09:10", "12:00"],
+        interval_days=2,
+    )
+    first = datetime(2026, 8, 1, 9, 10, tzinfo=zone)
+    second = datetime(2026, 8, 1, 12, 0, tzinfo=zone)
+    third = datetime(2026, 8, 1, 18, 0, tzinfo=zone)
+
+    # 09:10 は現在 + 10 分ちょうどなので割り当て可能。
+    assert assign_next_slot(policy, [], now=NOW) == first
+    assert assign_next_slot(policy, [first.astimezone(timezone.utc)], now=NOW) == second
+    assert assign_next_slot(policy, [first, second], now=NOW) == third
+    assert assign_next_slot(policy, [first, second, third], now=NOW) == datetime(
+        2026, 8, 3, 9, 10, tzinfo=zone
+    )
+
+
+def test_assign_next_slot_aligns_current_day_to_existing_cadence() -> None:
+    zone = ZoneInfo("Asia/Tokyo")
+    policy = SchedulePolicy(daily_times=["12:00", "18:00"], interval_days=2)
+    occupied = [
+        datetime(2026, 8, 1, 12, 0, tzinfo=zone),
+        datetime(2026, 8, 1, 18, 0, tzinfo=zone),
+    ]
+    now = datetime(2026, 8, 2, 0, 0, tzinfo=zone)
+
+    assert assign_next_slot(policy, occupied, now=now) == datetime(
+        2026, 8, 3, 12, 0, tzinfo=zone
+    )
+
+
+def test_assign_next_slot_backtracks_future_anchor_to_today_on_same_cadence() -> None:
+    zone = ZoneInfo("Asia/Tokyo")
+    policy = SchedulePolicy(daily_times=["12:00", "18:00"], interval_days=3)
+    future = datetime(2026, 8, 10, 12, 0, tzinfo=zone)
+    now = datetime(2026, 8, 1, 0, 0, tzinfo=zone)
+
+    assert assign_next_slot(policy, [future], now=now) == datetime(
+        2026, 8, 1, 12, 0, tzinfo=zone
+    )
+
+
+def test_assign_next_slot_backtracks_future_anchor_to_next_aligned_day() -> None:
+    zone = ZoneInfo("Asia/Tokyo")
+    policy = SchedulePolicy(daily_times=["12:00", "18:00"], interval_days=3)
+    future = datetime(2026, 8, 10, 12, 0, tzinfo=zone)
+    now = datetime(2026, 8, 2, 0, 0, tzinfo=zone)
+
+    assert assign_next_slot(policy, [future], now=now) == datetime(
+        2026, 8, 4, 12, 0, tzinfo=zone
+    )
+
+
+def test_assign_next_slot_does_not_skip_open_same_day_slot_for_later_booking() -> None:
+    zone = ZoneInfo("Asia/Tokyo")
+    policy = SchedulePolicy(daily_times=["09:10", "12:00", "18:00"])
+    later = datetime(2026, 8, 2, 9, 10, tzinfo=zone)
+
+    assert assign_next_slot(policy, [later], now=NOW) == datetime(
+        2026, 8, 1, 9, 10, tzinfo=zone
+    )
 
 
 @pytest.mark.parametrize(
@@ -276,6 +423,18 @@ def test_get_next_upload_slot_returns_policy_and_current_available_slot(
     policy, slot = get_next_upload_slot(settings, now=NOW)
     assert policy == SchedulePolicy()
     assert slot == datetime(2026, 8, 2, 9, 0, tzinfo=ZoneInfo("Asia/Tokyo"))
+
+
+def test_assign_next_slot_fails_closed_when_one_of_multiple_slots_is_dst_invalid() -> None:
+    policy = SchedulePolicy(
+        daily_times=["01:00", "02:30", "04:00"],
+        interval_days=1,
+        timezone="America/New_York",
+    )
+    now = datetime(2026, 3, 8, 5, 0, tzinfo=timezone.utc)
+
+    with pytest.raises(ScheduleError, match="DST"):
+        assign_next_slot(policy, [], now=now)
 
 
 def test_preview_contains_all_read_only_fields_and_no_queue_side_effect(tmp_path: Path) -> None:

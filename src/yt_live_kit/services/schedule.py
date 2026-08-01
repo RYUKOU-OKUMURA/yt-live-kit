@@ -12,7 +12,14 @@ from pathlib import Path
 from typing import Any, Callable, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 from yt_live_kit.config import Settings
 from yt_live_kit.models.upload import UploadChannel, UploadContentSnapshot, UploadOperation
@@ -42,20 +49,53 @@ class ScheduleError(Exception):
 
 
 class SchedulePolicy(BaseModel):
-    """IANA timezone 上の投稿時刻と日間隔."""
+    """IANA timezone 上の複数投稿時刻と日間隔."""
 
     model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
 
-    daily_time: str = "09:00"
+    daily_times: tuple[str, ...] = ("09:00",)
     interval_days: int = Field(default=1, ge=1)
     timezone: str = "Asia/Tokyo"
 
-    @field_validator("daily_time")
+    @model_validator(mode="before")
     @classmethod
-    def _valid_daily_time(cls, value: str) -> str:
-        if not isinstance(value, str) or _DAILY_TIME_RE.fullmatch(value) is None:
-            raise ValueError("投稿時刻は半角数字の HH:MM 形式で指定してください。")
-        return value
+    def _migrate_legacy_daily_time(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        has_legacy = "daily_time" in value
+        has_plural = "daily_times" in value
+        if has_legacy and has_plural:
+            raise ValueError(
+                "投稿時刻の daily_time と daily_times は同時に指定できません。"
+            )
+        if not has_legacy:
+            return value
+        migrated = dict(value)
+        migrated["daily_times"] = (migrated.pop("daily_time"),)
+        return migrated
+
+    @field_validator("daily_times", mode="before")
+    @classmethod
+    def _valid_daily_times(cls, value: Any) -> tuple[str, ...]:
+        if not isinstance(value, (list, tuple)):
+            raise ValueError("投稿時刻一覧は1件以上の配列で指定してください。")
+        if not value:
+            raise ValueError("投稿時刻一覧は1件以上指定してください。")
+        normalized: list[str] = []
+        for item in value:
+            if not isinstance(item, str) or _DAILY_TIME_RE.fullmatch(item) is None:
+                raise ValueError(
+                    "各投稿時刻は半角数字の HH:MM 形式で指定してください。"
+                )
+            normalized.append(item)
+        if len(set(normalized)) != len(normalized):
+            raise ValueError("投稿時刻一覧に重複した時刻は指定できません。")
+        return tuple(sorted(normalized))
+
+    @property
+    def daily_time(self) -> str:
+        """移行期間向けに、正規化済みの先頭投稿枠を返す."""
+        return self.daily_times[0]
 
     @field_validator("timezone")
     @classmethod
@@ -154,19 +194,32 @@ def save_schedule_policy(policy: SchedulePolicy, settings: Settings) -> Path:
 
 
 def make_schedule_policy(
-    *, daily_time: str, interval_days: int, timezone_name: str
+    *,
+    daily_time: str | None = None,
+    daily_times: tuple[str, ...] | list[str] | None = None,
+    interval_days: int,
+    timezone_name: str,
 ) -> SchedulePolicy:
     """UI 入力を検証し、Pydantic の内部詳細を日本語エラーへ正規化する."""
-    try:
-        return SchedulePolicy(
-            daily_time=daily_time,
-            interval_days=interval_days,
-            timezone=timezone_name,
+    if daily_time is not None and daily_times is not None:
+        raise ScheduleError(
+            "投稿時刻の daily_time と daily_times は同時に指定できません。"
         )
+    values: dict[str, Any] = {
+        "interval_days": interval_days,
+        "timezone": timezone_name,
+    }
+    if daily_time is not None:
+        values["daily_time"] = daily_time
+    if daily_times is not None:
+        values["daily_times"] = daily_times
+    try:
+        return SchedulePolicy.model_validate(values)
     except ValidationError as exc:
         raise ScheduleError(
             "投稿スケジュールの入力が正しくありません。"
-            "時刻は半角 HH:MM、間隔は 1 以上の整数、timezone は IANA 名で指定してください。"
+            "時刻一覧は1件以上、重複なしの半角 HH:MM、"
+            "間隔は 1 以上の整数、timezone は IANA 名で指定してください。"
         ) from exc
 
 
@@ -283,13 +336,12 @@ def assign_next_slot(
     *,
     now: datetime,
 ) -> datetime:
-    """現在から 10 分以上先の非重複 slot を policy 間隔で返す pure 関数."""
+    """日内の時刻順に、現在から 10 分以上先の非重複 slot を返す."""
     if now.tzinfo is None or now.utcoffset() is None:
         raise ScheduleError("現在日時はタイムゾーン付きで指定してください。")
     zone = ZoneInfo(policy.timezone)
     local_now = now.astimezone(zone)
     threshold = now.astimezone(timezone.utc) + _MIN_LEAD
-    hour, minute = (int(value) for value in policy.daily_time.split(":"))
     occupied: set[datetime] = set()
     occupied_local_days = []
     for reservation in existing_reservations:
@@ -298,15 +350,29 @@ def assign_next_slot(
         occupied.add(reservation.astimezone(timezone.utc))
         occupied_local_days.append(reservation.astimezone(zone).date())
 
-    day = (
-        max(occupied_local_days) + timedelta(days=policy.interval_days)
-        if occupied_local_days
-        else local_now.date()
+    daily_clock_times = tuple(
+        tuple(int(part) for part in daily_time.split(":"))
+        for daily_time in policy.daily_times
     )
+    day = local_now.date()
+    if occupied_local_days:
+        # 最新の予約日を cadence の位相に使い、現在日以上で最初の同位相日へ
+        # 前後どちらからでも整列する。未来の予約だけでも今日が同位相なら戻れる。
+        anchor = max(occupied_local_days)
+        delta_days = (day - anchor).days
+        cadence_steps = -(-delta_days // policy.interval_days)
+        day = anchor + timedelta(days=cadence_steps * policy.interval_days)
     for _ in range(36600):
-        candidate = _validated_local_datetime(day, hour, minute, zone)
-        if candidate.astimezone(timezone.utc) >= threshold and candidate.astimezone(timezone.utc) not in occupied:
-            return candidate
+        # その日の全枠を先に検証する。一部の枠だけを暗黙に飛ばすと、
+        # 設定どおりの投稿頻度を証明できないため、DST 不正は日単位で fail closed にする。
+        candidates = tuple(
+            _validated_local_datetime(day, hour, minute, zone)
+            for hour, minute in daily_clock_times
+        )
+        for candidate in candidates:
+            candidate_utc = candidate.astimezone(timezone.utc)
+            if candidate_utc >= threshold and candidate_utc not in occupied:
+                return candidate
         day += timedelta(days=policy.interval_days)
     raise ScheduleError("次の空き予約枠を計算できませんでした。")
 
