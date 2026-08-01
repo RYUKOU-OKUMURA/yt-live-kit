@@ -27,6 +27,7 @@ from yt_live_kit.ui.components.short_cut import (
     load_transcript_cues,
     parse_cut_timestamp,
     resolve_transcript_bounds,
+    render_short_cut_section,
     segments_to_pairs,
     short_cut_output_path,
     shift_cut_timestamp,
@@ -368,3 +369,40 @@ def test_build_job_target_calls_concat_builder_and_writes_meta(tmp_path: Path) -
     meta = json.loads((tmp_path / "short_abc.meta.json").read_text(encoding="utf-8"))
     assert meta["duration_sec"] == 110.0
     assert meta["output_path"] == str(output_path)
+
+
+def test_render_section_reloads_saved_cutplan_after_job_rerun(tmp_path: Path) -> None:
+    settings = Settings(data_dir=tmp_path)
+    option = MagicMock()
+    option.id = "clip_002"
+    option.label = "切り抜き候補"
+    option.candidate = _clip()
+    document = _document()
+    session_state: dict[str, object] = {}
+    with (
+        patch(
+            "yt_live_kit.ui.components.short_cut.collect_parent_options",
+            return_value=[option],
+        ),
+        patch(
+            "yt_live_kit.ui.components.short_cut.load_cut_plan",
+            return_value=document,
+        ) as load,
+        patch("yt_live_kit.ui.components.short_cut._render_plan") as render_plan,
+        patch("yt_live_kit.ui.components.short_cut.is_busy", return_value=False),
+        patch("yt_live_kit.ui.components.short_cut.st.session_state", session_state),
+        patch("yt_live_kit.ui.components.short_cut.st.caption"),
+        patch("yt_live_kit.ui.components.short_cut.st.radio", return_value=0),
+        patch("yt_live_kit.ui.components.short_cut.st.button", return_value=False),
+    ):
+        render_short_cut_section(
+            video_id="video-1",
+            title="動画",
+            clip_candidates=(_clip(),),
+            highlight_candidates=(),
+            settings=settings,
+            embedded=True,
+        )
+
+    load.assert_called_once_with("video-1", "clip_002", settings)
+    render_plan.assert_called_once()

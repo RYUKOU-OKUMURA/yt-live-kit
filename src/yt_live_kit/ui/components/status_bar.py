@@ -10,6 +10,11 @@ from yt_live_kit.config import get_settings
 from yt_live_kit.services.batch import read_batch_summary
 from yt_live_kit.services.jobs import JobState, get_active_job, read_current_job, read_job
 from yt_live_kit.services.pipeline import load_result_from_disk
+from yt_live_kit.services.shorts_queue import (
+    ShortsQueueError,
+    ShortsQueueResult,
+    load_shorts_queue_result,
+)
 from yt_live_kit.services.upload_queue import UploadQueueError, load_operation
 from yt_live_kit.ui.state import (
     clear_active_job_id,
@@ -34,12 +39,15 @@ _KIND_LABELS: dict[str, str] = {
     "highlights": "ハイライト動画",
     "shorts": "ショート動画",
     "shorts_queue": "ショート量産",
+    "short_cut": "ショート区間提案",
     "upload": "予約投稿",
     "cut_clip": "切り出し",
 }
 
 _PIPELINE_KINDS = frozenset({"single", "regenerate", "highlights", "shorts"})
-_KNOWN_NON_PIPELINE_KINDS = frozenset({"batch", "shorts_queue", "upload", "cut_clip"})
+_KNOWN_NON_PIPELINE_KINDS = frozenset(
+    {"batch", "shorts_queue", "short_cut", "upload", "cut_clip"}
+)
 
 _RESULT_LOAD_ERROR = (
     "成果物を読み込めませんでした。ライブラリから開き直してください。"
@@ -49,6 +57,23 @@ _RESULT_LOAD_ERROR = (
 # read_current_job() 経由（＝ブラウザを開き直した直後などの新規セッション）で
 # 数日前に終わったジョブまで復元してしまわないよう制限する。
 _RESTORE_WINDOW_MINUTES = 10
+
+
+def _safe_summary_text(value: object) -> str:
+    """status bar 用に半角山カッコと改行を安全な1行へ整える。"""
+    safe = str(value).replace("<", "〈").replace(">", "〉")
+    return " ".join(safe.split())
+
+
+def _shorts_queue_failure_details(result: ShortsQueueResult) -> str:
+    """typed manifest の失敗 item を入力順の日本語表示へ整える。"""
+    details = [
+        f"{_safe_summary_text(item.target_id)}: "
+        f"{_safe_summary_text(item.error or '生成に失敗しました。')}"
+        for item in result.items
+        if item.status == "failed"
+    ]
+    return " / ".join(details)
 
 
 def kind_label(kind: str) -> str:
@@ -173,8 +198,51 @@ def _handle_finished_job(job: JobState) -> None:
                     load_operation(job.result_ref, settings)
                 except UploadQueueError as exc:
                     set_job_error(f"予約投稿の状態を読み込めませんでした。{exc}")
-        elif job.kind == "shorts_queue" and not job.result_ref:
-            set_job_error("完了したショート量産ジョブに成果物の参照先がありません。")
+        elif job.kind == "shorts_queue":
+            video_id = job.video_id or job.result_ref
+            if not video_id:
+                set_job_error(
+                    "完了したショート量産ジョブに成果物の参照先がありません。"
+                )
+            else:
+                try:
+                    queue_result = load_shorts_queue_result(
+                        video_id,
+                        job.job_id,
+                        settings,
+                    )
+                except ShortsQueueError as exc:
+                    set_job_error(
+                        f"ショート生成結果を読み込めませんでした。{exc}"
+                    )
+                else:
+                    if queue_result is None:
+                        set_job_error(
+                            "完了したショート量産ジョブの生成結果が見つかりません。"
+                        )
+                    elif (
+                        queue_result.failure_count > 0
+                        and queue_result.success_count == 0
+                    ):
+                        failure_details = _shorts_queue_failure_details(queue_result)
+                        set_job_error(
+                            "ショート生成はすべて失敗しました"
+                            f"（失敗 {queue_result.failure_count} 件）。"
+                            f"個別理由: {failure_details}。"
+                            "生成工程で個別の理由を確認して再試行してください。"
+                        )
+                    elif queue_result.failure_count > 0:
+                        failure_details = _shorts_queue_failure_details(queue_result)
+                        set_job_error(
+                            "ショート生成の一部が失敗しました"
+                            f"（成功 {queue_result.success_count} 件 / "
+                            f"失敗 {queue_result.failure_count} 件）。"
+                            f"個別理由: {failure_details}。"
+                            "生成工程で個別の理由を確認してください。"
+                        )
+        elif job.kind == "short_cut":
+            # 保存済み cutplan は画面 rerun 後に short_cut 部品が再読込する。
+            pass
         elif job.kind == "cut_clip":
             if not job.result_ref:
                 set_job_error("完了した切り出しジョブに成果物の参照先がありません。")

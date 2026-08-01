@@ -15,6 +15,7 @@ from yt_live_kit.models.highlights import HighlightSegment
 from yt_live_kit.models.telop import TelopScriptDocument
 from yt_live_kit.services.ai_prompt import AiPromptError
 from yt_live_kit.services.clips import load_candidates_file
+from yt_live_kit.services.ffmpeg import FfmpegError, ensure_subtitles_filter
 from yt_live_kit.services.highlights import load_segments_file
 from yt_live_kit.services.jobs import JobBusyError, is_busy, start_job
 from yt_live_kit.services.shorts_queue import (
@@ -201,6 +202,11 @@ def _start_queue_job(
     """単一ジョブを開始し、返却 ID を現在動画へ紐付ける."""
     if is_busy(settings):
         st.error(_BUSY_MESSAGE)
+        return
+    try:
+        ensure_subtitles_filter(settings.ffmpeg_path)
+    except FfmpegError as exc:
+        st.error(_safe_text(exc))
         return
     try:
         job_id = start_job(
@@ -625,6 +631,19 @@ def _render_result(result: ShortsQueueResult) -> None:
         f"成功 {result.success_count} 件 / 失敗 {result.failure_count} 件 / "
         f"ジョブ {_safe_text(result.job_id)}"
     )
+    if result.failure_count and result.success_count == 0:
+        st.error(
+            f"すべてのショート生成に失敗しました（失敗 {result.failure_count} 件）。"
+            "下の生成対象ごとに理由を確認して、生成工程から再試行してください。"
+        )
+    elif result.failure_count:
+        st.warning(
+            f"一部のショート生成に失敗しました"
+            f"（成功 {result.success_count} 件 / 失敗 {result.failure_count} 件）。"
+            "失敗した対象は理由を確認して再試行してください。"
+        )
+    elif result.success_count:
+        st.success(f"ショート生成に成功しました（成功 {result.success_count} 件）。")
     for item in result.items:
         with st.container(border=True):
             if item.status == "failed":

@@ -13,6 +13,7 @@ import pytest
 from yt_live_kit.config import Settings
 from yt_live_kit.models.clips import ClipCandidate
 from yt_live_kit.models.telop import TelopScriptDocument
+from yt_live_kit.services.ffmpeg import FfmpegError
 from yt_live_kit.services.shorts_queue import (
     ShortsQueueItemResult,
     ShortsQueueResult,
@@ -119,6 +120,39 @@ def _result(tmp_path: Path, *, exists: bool = True) -> ShortsQueueResult:
     )
 
 
+def _failed_item(target_id: str = "failed-target") -> ShortsQueueItemResult:
+    return ShortsQueueItemResult(
+        target_id=target_id,
+        status="failed",
+        output_path=None,
+        log_path=None,
+        font_warning=None,
+        title_candidates=("失敗したタイトル",),
+        description="説明文",
+        tags=("タグ",),
+        error="subtitles フィルタを利用できません。",
+    )
+
+
+def _queue_result(
+    tmp_path: Path,
+    items: tuple[ShortsQueueItemResult, ...],
+) -> ShortsQueueResult:
+    now = datetime.now(timezone.utc)
+    return ShortsQueueResult(
+        video_id="video-a",
+        job_id="job-a",
+        status="done",
+        created_at=now,
+        updated_at=now,
+        clip_specs=(),
+        items=items,
+        success_count=sum(item.status == "succeeded" for item in items),
+        failure_count=sum(item.status == "failed" for item in items),
+        manifest_path=tmp_path / "manifest.json",
+    )
+
+
 def test_start_queue_stores_job_id_by_video_and_updates_global_status():
     state: dict[str, object] = {}
     settings = MagicMock()
@@ -127,6 +161,10 @@ def test_start_queue_stores_job_id_by_video_and_updates_global_status():
     with (
         patch("yt_live_kit.ui.components.shorts_queue.st.session_state", state),
         patch("yt_live_kit.ui.components.shorts_queue.is_busy", return_value=False),
+        patch(
+            "yt_live_kit.ui.components.shorts_queue.ensure_subtitles_filter",
+            return_value="/opt/homebrew/opt/ffmpeg-full/bin/ffmpeg",
+        ),
         patch("yt_live_kit.ui.components.shorts_queue.start_job", return_value="job-1") as start,
         patch("yt_live_kit.ui.components.shorts_queue.set_active_job_id") as active,
         patch("yt_live_kit.ui.components.shorts_queue.st.rerun"),
@@ -157,6 +195,50 @@ def test_start_queue_busy_does_not_call_start_job():
             video_id="video-a", title="動画", specs=(MagicMock(),), settings=MagicMock()
         )
     start.assert_not_called()
+
+
+def test_start_queue_rejects_missing_subtitles_capability_before_job_or_manifest(
+    tmp_path: Path,
+) -> None:
+    settings = Settings(
+        data_dir=tmp_path,
+        ffmpeg_path="/opt/homebrew/bin/ffmpeg",
+    )
+    with (
+        patch("yt_live_kit.ui.components.shorts_queue.is_busy", return_value=False),
+        patch(
+            "yt_live_kit.ui.components.shorts_queue.ensure_subtitles_filter",
+            side_effect=FfmpegError(
+                "指定された FFmpeg で subtitles フィルタを利用できません。"
+                "macOS では ffmpeg-full を導入し、YTLK_FFMPEG_PATH に"
+                "ffmpeg-full の ffmpeg 実体パスを設定してください。"
+                "（検査対象: /opt/homebrew/bin/ffmpeg）"
+            ),
+        ) as preflight,
+        patch("yt_live_kit.ui.components.shorts_queue.start_job") as start,
+        patch("yt_live_kit.ui.components.shorts_queue.st.error") as error,
+    ):
+        _start_queue_job(
+            video_id="video-a",
+            title="動画",
+            specs=(_confirmed_spec(),),
+            settings=settings,
+        )
+        _start_queue_job(
+            video_id="video-a",
+            title="動画",
+            specs=(_confirmed_spec(),),
+            settings=settings,
+        )
+
+    start.assert_not_called()
+    assert preflight.call_count == 2
+    assert not (tmp_path / "video-a" / "shorts" / "queue").exists()
+    assert not (tmp_path / "_jobs").exists()
+    message = error.call_args.args[0]
+    assert "/opt/homebrew/bin/ffmpeg" in message
+    assert "ffmpeg-full" in message
+    assert "YTLK_FFMPEG_PATH" in message
 
 
 def test_overwrite_dialog_only_starts_after_confirmation():
@@ -449,6 +531,53 @@ def test_result_uses_path_video_callable_download_and_unique_copy_keys(tmp_path:
         "job-a_target_tags",
     ]
     assert copy.call_args_list[-1].args[0] == "タグ1,タグ2"
+
+
+def test_all_failed_result_is_not_rendered_as_success(tmp_path: Path) -> None:
+    result = _queue_result(tmp_path, (_failed_item(),))
+    with (
+        patch("yt_live_kit.ui.components.shorts_queue.st.container", return_value=nullcontext()),
+        patch("yt_live_kit.ui.components.shorts_queue.st.markdown"),
+        patch("yt_live_kit.ui.components.shorts_queue.st.caption"),
+        patch("yt_live_kit.ui.components.shorts_queue.st.error") as error,
+        patch("yt_live_kit.ui.components.shorts_queue.st.warning") as warning,
+        patch("yt_live_kit.ui.components.shorts_queue.st.success") as success,
+    ):
+        _render_result(result)
+
+    success.assert_not_called()
+    warning.assert_not_called()
+    messages = [call.args[0] for call in error.call_args_list]
+    assert any("すべてのショート生成に失敗" in message for message in messages)
+    assert any("subtitles フィルタを利用できません" in message for message in messages)
+
+
+def test_partial_result_shows_counts_and_individual_failure_reason(
+    tmp_path: Path,
+) -> None:
+    succeeded = _result(tmp_path).items[0]
+    result = _queue_result(tmp_path, (succeeded, _failed_item()))
+    with (
+        patch("yt_live_kit.ui.components.shorts_queue.st.container", return_value=nullcontext()),
+        patch("yt_live_kit.ui.components.shorts_queue.st.markdown"),
+        patch("yt_live_kit.ui.components.shorts_queue.st.caption") as caption,
+        patch("yt_live_kit.ui.components.shorts_queue.st.write"),
+        patch("yt_live_kit.ui.components.shorts_queue.st.error") as error,
+        patch("yt_live_kit.ui.components.shorts_queue.st.warning") as warning,
+        patch("yt_live_kit.ui.components.shorts_queue.st.success") as success,
+        patch("yt_live_kit.ui.components.shorts_queue.st.video"),
+        patch("yt_live_kit.ui.components.shorts_queue.st.download_button"),
+        patch("yt_live_kit.ui.components.shorts_queue.render_copy_button"),
+    ):
+        _render_result(result)
+
+    success.assert_not_called()
+    assert "成功 1 件 / 失敗 1 件" in caption.call_args.args[0]
+    assert any(
+        "一部のショート生成に失敗" in call.args[0]
+        for call in warning.call_args_list
+    )
+    assert "subtitles フィルタを利用できません" in error.call_args.args[0]
 
 
 def test_download_callable_reports_japanese_error_if_file_deleted_after_render(

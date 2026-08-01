@@ -13,6 +13,7 @@ from yt_live_kit.config import Settings
 from yt_live_kit.models.clips import ClipCandidate
 from yt_live_kit.models.highlights import HighlightSegment
 from yt_live_kit.models.telop import TelopScriptDocument
+from yt_live_kit.services.ffmpeg import FfmpegError
 from yt_live_kit.services.shorts_line import (
     DailyLineSummary,
     LineStage,
@@ -215,6 +216,42 @@ def test_manifest_output_is_rejected_when_review_lineage_changed(tmp_path: Path)
         )
         assert shorts_line._spec_matches_lineage(spec_a, state_b) is False
         assert shorts_line._spec_matches_lineage(spec_b, state_b) is True
+
+
+def test_failed_manifest_without_output_never_advances_to_final_review(
+    tmp_path: Path,
+) -> None:
+    target, document, spec = _lineage_fixture()
+    queue_fingerprint = "a" * 64
+    review = make_review_fingerprint(
+        "video-1", target.target_id, queue_fingerprint, document
+    )
+    state = create_line_state(
+        "video-1", target.target_id, queue_fingerprint, review_fingerprint=review
+    )
+    state = confirm_review(state, review)
+    state = set_generation_spec(state, review, spec.to_dict())
+    failed = ShortsQueueItemResult(
+        target_id=target.target_id,
+        status="failed",
+        output_path=None,
+        log_path=None,
+        font_warning=None,
+        title_candidates=("タイトル",),
+        description="説明",
+        tags=("タグ",),
+        error="生成に失敗しました。",
+    )
+    result = MagicMock(clip_specs=(spec,), items=(failed,))
+
+    with patch.object(shorts_line, "load_latest_shorts_queue_result", return_value=result):
+        assert shorts_line._find_output(state, Settings(data_dir=tmp_path)) == (
+            None,
+            spec,
+        )
+    assert state.current_stage == LineStage.GENERATION
+    assert state.output_fingerprint is None
+    assert state.preview_confirmed_fingerprint is None
 
 
 def test_manifest_output_is_rejected_after_layout_queue_change(tmp_path: Path) -> None:
@@ -688,6 +725,54 @@ def test_restart_restores_s4_snapshot_and_can_confirm_overwrite(tmp_path: Path) 
             )
 
     start.assert_called_once()
+
+
+def test_generation_preflight_failure_preserves_generation_stage_and_human_review(
+    tmp_path: Path,
+) -> None:
+    target, document, spec = _lineage_fixture()
+    queue_fingerprint = "a" * 64
+    review = make_review_fingerprint(
+        "video-1", target.target_id, queue_fingerprint, document
+    )
+    state = create_line_state(
+        "video-1", target.target_id, queue_fingerprint, review_fingerprint=review
+    )
+    state = confirm_review(state, review)
+    state = set_generation_spec(state, review, spec.to_dict())
+    settings = Settings(
+        data_dir=tmp_path,
+        ffmpeg_path="/opt/homebrew/bin/ffmpeg",
+    )
+    save_line_state(state, settings)
+
+    with (
+        patch.object(shorts_queue_ui, "is_busy", return_value=False),
+        patch.object(
+            shorts_queue_ui,
+            "ensure_subtitles_filter",
+            side_effect=FfmpegError(
+                "指定された FFmpeg で subtitles フィルタを利用できません。"
+            ),
+        ),
+        patch.object(shorts_queue_ui, "start_job") as start,
+        patch.object(shorts_queue_ui.st, "error"),
+    ):
+        shorts_queue_ui.start_or_confirm_line_generation(
+            video_id="video-1",
+            title="動画",
+            spec=spec,
+            snapshot_fingerprint=queue_fingerprint,
+            settings=settings,
+        )
+
+    start.assert_not_called()
+    persisted = load_line_state("video-1", target.target_id, settings)
+    assert persisted is not None
+    assert persisted.current_stage == LineStage.GENERATION
+    assert persisted.review_confirmed_fingerprint == review
+    assert persisted.output_fingerprint is None
+    assert not (tmp_path / "video-1" / "shorts" / "queue").exists()
 
 
 def test_line_defaults_are_read_only_with_safe_fallback(tmp_path: Path) -> None:

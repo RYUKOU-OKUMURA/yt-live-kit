@@ -217,6 +217,7 @@ def test_mark_failed_stage_marks_running_as_error() -> None:
 def test_kind_label_returns_japanese_name() -> None:
     assert kind_label("single") == "単本処理"
     assert kind_label("batch") == "一括処理"
+    assert kind_label("short_cut") == "ショート区間提案"
     assert kind_label("unknown") == "unknown"
 
 
@@ -325,7 +326,7 @@ def test_handle_finished_cut_clip_job_sets_cut_result(tmp_path) -> None:
     rerun.assert_called_once_with(scope="app")
 
 
-@pytest.mark.parametrize("kind", ["batch", "shorts_queue", "upload"])
+@pytest.mark.parametrize("kind", ["batch", "shorts_queue", "upload", "short_cut"])
 def test_non_pipeline_finished_jobs_never_use_pipeline_loader(kind: str) -> None:
     from yt_live_kit.ui.components import status_bar
 
@@ -344,6 +345,139 @@ def test_non_pipeline_finished_jobs_never_use_pipeline_loader(kind: str) -> None
     ):
         status_bar._handle_finished_job(job)
     pipeline_loader.assert_not_called()
+
+
+def test_finished_short_cut_is_known_and_reloads_screen_without_error() -> None:
+    from yt_live_kit.ui.components import status_bar
+
+    job = JobState(
+        job_id="done-short-cut",
+        kind="short_cut",
+        status="done",
+        video_id="video-1",
+        result_ref="video-1",
+    )
+    with (
+        patch("yt_live_kit.ui.components.status_bar.is_job_handled", return_value=False),
+        patch("yt_live_kit.ui.components.status_bar.mark_job_handled"),
+        patch("yt_live_kit.ui.components.status_bar.load_result_from_disk") as loader,
+        patch("yt_live_kit.ui.components.status_bar.set_job_error") as set_error,
+        patch("yt_live_kit.ui.components.status_bar.clear_active_job_id"),
+        patch("yt_live_kit.ui.components.status_bar.st.rerun") as rerun,
+    ):
+        status_bar._handle_finished_job(job)
+
+    loader.assert_not_called()
+    set_error.assert_not_called()
+    rerun.assert_called_once_with(scope="app")
+
+
+def test_failed_short_cut_keeps_original_japanese_error() -> None:
+    from yt_live_kit.ui.components import status_bar
+
+    job = JobState(
+        job_id="failed-short-cut",
+        kind="short_cut",
+        status="failed",
+        error="サブ区間の提案に失敗しました。字幕を確認してください。",
+    )
+    with (
+        patch("yt_live_kit.ui.components.status_bar.is_job_handled", return_value=False),
+        patch("yt_live_kit.ui.components.status_bar.mark_job_handled"),
+        patch("yt_live_kit.ui.components.status_bar.set_job_error") as set_error,
+        patch("yt_live_kit.ui.components.status_bar.clear_active_job_id"),
+        patch("yt_live_kit.ui.components.status_bar.st.rerun"),
+    ):
+        status_bar._handle_finished_job(job)
+
+    set_error.assert_called_once_with(
+        "サブ区間の提案に失敗しました。字幕を確認してください。"
+    )
+
+
+def test_finished_all_failed_shorts_queue_reads_manifest_and_reports_failure() -> None:
+    from yt_live_kit.ui.components import status_bar
+
+    job = JobState(
+        job_id="done-queue",
+        kind="shorts_queue",
+        status="done",
+        video_id="video-1",
+        result_ref="video-1",
+    )
+    failed_item = MagicMock(
+        status="failed",
+        target_id="clip<1>",
+        error="subtitles <filter> がありません。",
+    )
+    result = MagicMock(success_count=0, failure_count=1, items=(failed_item,))
+    with (
+        patch("yt_live_kit.ui.components.status_bar.is_job_handled", return_value=False),
+        patch("yt_live_kit.ui.components.status_bar.mark_job_handled"),
+        patch(
+            "yt_live_kit.ui.components.status_bar.load_shorts_queue_result",
+            return_value=result,
+        ) as load_result,
+        patch("yt_live_kit.ui.components.status_bar.set_job_error") as set_error,
+        patch("yt_live_kit.ui.components.status_bar.clear_active_job_id"),
+        patch("yt_live_kit.ui.components.status_bar.st.rerun"),
+    ):
+        status_bar._handle_finished_job(job)
+
+    load_result.assert_called_once_with("video-1", "done-queue", status_bar.get_settings())
+    set_error.assert_called_once()
+    message = set_error.call_args.args[0]
+    assert "すべて失敗" in message
+    assert "clip〈1〉: subtitles 〈filter〉 がありません。" in message
+    assert "<" not in message and ">" not in message
+
+
+def test_finished_partially_failed_shorts_queue_reports_each_safe_reason() -> None:
+    from yt_live_kit.ui.components import status_bar
+
+    job = JobState(
+        job_id="partial-queue",
+        kind="shorts_queue",
+        status="done",
+        video_id="video-1",
+        result_ref="video-1",
+    )
+    succeeded = MagicMock(status="succeeded")
+    first_failed = MagicMock(
+        status="failed",
+        target_id="clip<1>",
+        error="字幕<filter>がありません。",
+    )
+    second_failed = MagicMock(
+        status="failed",
+        target_id="clip-2",
+        error="動画を生成できませんでした。",
+    )
+    result = MagicMock(
+        success_count=1,
+        failure_count=2,
+        items=(succeeded, first_failed, second_failed),
+    )
+    with (
+        patch("yt_live_kit.ui.components.status_bar.is_job_handled", return_value=False),
+        patch("yt_live_kit.ui.components.status_bar.mark_job_handled"),
+        patch(
+            "yt_live_kit.ui.components.status_bar.load_shorts_queue_result",
+            return_value=result,
+        ),
+        patch("yt_live_kit.ui.components.status_bar.set_job_error") as set_error,
+        patch("yt_live_kit.ui.components.status_bar.clear_active_job_id"),
+        patch("yt_live_kit.ui.components.status_bar.st.rerun"),
+    ):
+        status_bar._handle_finished_job(job)
+
+    set_error.assert_called_once()
+    message = set_error.call_args.args[0]
+    assert "成功 1 件 / 失敗 2 件" in message
+    assert "clip〈1〉: 字幕〈filter〉がありません。" in message
+    assert "clip-2: 動画を生成できませんでした。" in message
+    assert message.index("clip〈1〉") < message.index("clip-2")
+    assert "<" not in message and ">" not in message
 
 
 def test_unknown_finished_job_reports_japanese_error_without_pipeline_load() -> None:
