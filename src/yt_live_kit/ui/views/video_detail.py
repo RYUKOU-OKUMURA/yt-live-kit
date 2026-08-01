@@ -35,6 +35,7 @@ from yt_live_kit.services.youtube_api import (
     update_video_description,
 )
 from yt_live_kit.ui.components.clipboard import render_copy_button
+from yt_live_kit.ui.components.shorts_line import record_line_upload, render_shorts_line
 from yt_live_kit.ui.components.upload import render_upload_section
 from yt_live_kit.ui.state import get_selected_video_id, set_active_job_id
 from yt_live_kit.ui.views._local_settings import (
@@ -813,7 +814,19 @@ def _render_publish_workspace(
                 _set_workspace(video.video_id, "shorts")
                 st.rerun()
         else:
-            render_upload_section(video.video_id, settings)
+            render_upload_section(
+                video.video_id,
+                settings,
+                on_operation_started=lambda clip_id, operation_id, output_path: (
+                    record_line_upload(
+                        video.video_id,
+                        clip_id,
+                        operation_id,
+                        output_path,
+                        settings,
+                    )
+                ),
+            )
 
 
 def _render_details_and_regeneration(
@@ -946,7 +959,20 @@ def render_video_detail_page(
         )
     elif selected_workspace == "shorts":
         st.subheader("ショート作成")
-        render_shorts_section(result, expanded=True)
+        preferred_ids: list[str] = []
+        for source in ("clips", "highlights"):
+            transfer = _load_transfer(video.video_id, source)
+            if transfer is not None:
+                preferred_ids.extend(transfer.selected_ids)
+        render_shorts_line(
+            video_id=video.video_id,
+            title=result.title,
+            clip_candidates=clips,
+            highlight_candidates=highlights,
+            settings=settings,
+            preferred_candidate_ids=preferred_ids,
+        )
+        render_shorts_section(result, expanded=False)
     else:
         _render_publish_workspace(
             video,

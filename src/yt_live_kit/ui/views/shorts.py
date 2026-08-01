@@ -322,7 +322,15 @@ def render_shorts_section(
     video_id = result.video_id
     key_prefix = f"shorts_{video_id}"
 
-    with st.expander("縦型ショート動画", expanded=expanded):
+    expander = st.expander(
+        "補助: 単体手動作成・まとめて生成",
+        expanded=expanded,
+        key=f"shorts_auxiliary_{video_id}",
+        on_change="rerun",
+    )
+    if not expander.open:
+        return
+    with expander:
         st.caption(_DURATION_NOTE)
 
         clip_doc = load_candidates_file(video_id, settings)

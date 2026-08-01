@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Callable
 from datetime import datetime, timezone
+from pathlib import Path
 
 import streamlit as st
 
@@ -27,6 +29,7 @@ from yt_live_kit.services.shorts_queue import (
     ShortsQueueResult,
     load_latest_shorts_queue_result,
 )
+from yt_live_kit.services.shorts_line import LineStateError
 from yt_live_kit.services.upload_queue import UploadQueueError, load_operation
 from yt_live_kit.ui.state import set_active_job_id
 
@@ -136,6 +139,7 @@ def upload_preview_dialog(
     preview: UploadPreview,
     settings: Settings,
     dialog_nonce: str,
+    on_operation_started: Callable[[str, str, Path], None] | None = None,
 ) -> None:
     """全 snapshot を表示し、明示選択と同意後だけ service confirm を呼ぶ."""
     st.warning(
@@ -211,6 +215,16 @@ def upload_preview_dialog(
             st.error(_safe_text(exc))
             return
         _store_operation_id(preview.source_video_id, operation.operation_id)
+        if on_operation_started is not None:
+            try:
+                on_operation_started(
+                    preview.clip_id,
+                    operation.operation_id,
+                    preview.video_path,
+                )
+            except LineStateError as exc:
+                st.error(_safe_text(exc))
+                return
         set_active_job_id(operation.job_id)
         st.success("予約投稿ジョブを開始しました。")
         st.rerun()
@@ -230,6 +244,7 @@ def _open_preview(
     settings: Settings,
     *,
     start_ms: int | None = None,
+    on_operation_started: Callable[[str, str, Path], None] | None = None,
 ) -> None:
     if item.output_path is None:
         st.error("投稿できるショート動画ファイルがありません。")
@@ -259,10 +274,20 @@ def _open_preview(
     except ScheduleError as exc:
         st.error(_safe_text(exc))
         return
-    upload_preview_dialog(preview, settings, uuid.uuid4().hex)
+    upload_preview_dialog(
+        preview,
+        settings,
+        uuid.uuid4().hex,
+        on_operation_started,
+    )
 
 
-def render_upload_section(video_id: str, settings: Settings) -> None:
+def render_upload_section(
+    video_id: str,
+    settings: Settings,
+    *,
+    on_operation_started: Callable[[str, str, Path], None] | None = None,
+) -> None:
     """最新の検証済み shorts queue から成功 item の投稿入口を描画する."""
     st.subheader("7. YouTube 予約投稿")
     st.caption(
@@ -315,4 +340,5 @@ def render_upload_section(video_id: str, settings: Settings) -> None:
                     item,
                     settings,
                     start_ms=_clip_start_ms(result, item.target_id),
+                    on_operation_started=on_operation_started,
                 )
