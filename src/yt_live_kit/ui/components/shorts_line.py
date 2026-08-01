@@ -733,7 +733,7 @@ def render_compact_line_status(
     if state is None:
         st.caption("作成中のラインはありません。")
     else:
-        st.caption(_safe(title or state.clip_id))
+        st.caption(f"対象ショート: {_safe(title or state.clip_id)}")
         st.write(
             f"工程 {stage_number(state.current_stage)}／6 "
             f"{_STAGE_LABELS[state.current_stage]}"
@@ -759,6 +759,7 @@ def render_sidebar_line_context(video_id: str | None, settings: Settings) -> Non
     """グローバルナビ下に表示専用の現在ラインを置く."""
     st.divider()
     state: LineState | None = None
+    target_title: str | None = None
     if video_id:
         try:
             state = resolve_active_line(video_id, settings)
@@ -768,6 +769,9 @@ def render_sidebar_line_context(video_id: str | None, settings: Settings) -> Non
         context = _context(video_id)
         if context is None:
             context = _restore_context(video_id, state, settings)
+        target = context.get("target") if context else None
+        if isinstance(target, ShortsQueueTarget):
+            target_title = " + ".join(segment.title for segment in target.segments)
         output_path, _spec = _find_output(state, settings)
         source_files = sorted(
             (settings.data_dir / video_id / "clips" / "source").glob("*.mp4")
@@ -789,9 +793,8 @@ def render_sidebar_line_context(video_id: str | None, settings: Settings) -> Non
         if mode == "output" and output_path is not None:
             st.video(output_path, width=240)
         elif mode == "generating":
-            st.info("ショートを生成中です。進捗は画面上部で確認できます。")
+            st.info("ショートを生成中です。")
         elif mode == "source" and source_files:
-            target = context.get("target") if context else None
             if isinstance(target, ShortsQueueTarget):
                 st.video(
                     source_files[0],
@@ -803,7 +806,11 @@ def render_sidebar_line_context(video_id: str | None, settings: Settings) -> Non
                 st.video(source_files[0], width=240)
         else:
             st.warning("元素材がありません。取り込みで元動画を再取得してください。")
-    render_compact_line_status(state, load_daily_line_summary(settings))
+    render_compact_line_status(
+        state,
+        load_daily_line_summary(settings),
+        title=target_title,
+    )
 
 
 def render_main_line_summary(video_id: str, settings: Settings) -> None:
@@ -812,8 +819,22 @@ def render_main_line_summary(video_id: str, settings: Settings) -> None:
         state = resolve_active_line(video_id, settings)
     except LineStateError:
         state = None
-    with st.container(border=True):
-        render_compact_line_status(state, load_daily_line_summary(settings))
+    if state is None:
+        return
+    active_job = get_active_job(settings)
+    generating = bool(
+        active_job
+        and active_job.status == "running"
+        and active_job.video_id == video_id
+        and active_job.kind in {"shorts", "shorts_queue"}
+    )
+    prefix = "生成中・" if generating else ""
+    st.caption(f"{prefix}工程 {stage_number(state.current_stage)}／6")
+
+
+def _switch_to_publish_workspace(video_id: str) -> None:
+    """widget callback 内で次 rerun の作業選択を更新する."""
+    st.session_state[f"detail_workspace_{video_id}"] = "publish"
 
 
 def record_line_upload(
@@ -998,7 +1019,6 @@ def render_shorts_line(
         return
 
     render_stage_bar(state.current_stage)
-    render_compact_line_status(state, load_daily_line_summary(settings), title=title)
     if context is None:
         st.error(
             "区間 snapshot を安全に復元できませんでした。"
@@ -1217,6 +1237,9 @@ def render_shorts_line(
                 st.rerun()
         return
     st.success("完成動画の最終確認済み")
-    if st.button("公開・投稿で予約する", type="primary"):
-        st.session_state[f"detail_workspace_{video_id}"] = "publish"
-        st.rerun()
+    st.button(
+        "公開・投稿で予約する",
+        type="primary",
+        on_click=_switch_to_publish_workspace,
+        args=(video_id,),
+    )

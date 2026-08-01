@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+import inspect
 import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -477,6 +478,27 @@ def test_upload_callback_invalidates_if_output_changes_after_preview(tmp_path: P
     assert persisted.upload_operation_id is None
 
 
+def test_publish_workspace_callback_preserves_confirmed_line_without_operation(
+    tmp_path: Path,
+) -> None:
+    settings = Settings(data_dir=tmp_path)
+    output_path = tmp_path / "video-1" / "shorts" / "output" / "short_clip-1.mp4"
+    output_path.parent.mkdir(parents=True)
+    output_path.write_bytes(b"confirmed")
+    before = _reviewed_output_state(output_path, settings)
+    session_state: dict[str, object] = {}
+
+    with patch.object(shorts_line.st, "session_state", session_state):
+        shorts_line._switch_to_publish_workspace("video-1")
+
+    assert session_state == {"detail_workspace_video-1": "publish"}
+    assert load_line_state("video-1", "clip-1", settings) == before
+    assert not (tmp_path / "_schedule" / "queue.json").exists()
+    render_source = inspect.getsource(shorts_line.render_shorts_line)
+    assert "on_click=_switch_to_publish_workspace" in render_source
+    assert "detail_workspace_" not in render_source
+
+
 def test_publish_callbacks_bypass_non_line_item_and_do_not_require_active_line(
     tmp_path: Path,
 ) -> None:
@@ -523,6 +545,90 @@ def test_sidebar_is_display_only_and_shows_daily_progress(tmp_path: Path) -> Non
     assert any("作成中のラインはありません" in call.args[0] for call in caption.call_args_list)
     assert any("本日のライン完了 1／3" in call.args[0] for call in write.call_args_list)
     button.assert_not_called()
+
+
+def test_sidebar_labels_target_stage_next_and_attention() -> None:
+    state = create_line_state("video-1", "clip-1", "a" * 64)
+    daily = DailyLineSummary(completed_count=1, needs_attention_count=2)
+    with (
+        patch.object(shorts_line.st, "markdown"),
+        patch.object(shorts_line.st, "caption") as caption,
+        patch.object(shorts_line.st, "write") as write,
+    ):
+        shorts_line.render_compact_line_status(
+            state,
+            daily,
+            title="重要ポイント",
+        )
+
+    captions = [call.args[0] for call in caption.call_args_list]
+    writes = [call.args[0] for call in write.call_args_list]
+    assert "対象ショート: 重要ポイント" in captions
+    assert any(value.startswith("次: ") for value in captions)
+    assert "要対応 2 件" in captions
+    assert any(
+        value.startswith(
+            f"工程 {shorts_line.stage_number(state.current_stage)}／6"
+        )
+        for value in writes
+    )
+    assert "本日のライン完了 1／3" in writes
+
+
+def test_sidebar_generation_preview_has_no_duplicate_location_guidance(
+    tmp_path: Path,
+) -> None:
+    state = create_line_state("video-1", "clip-1", "a" * 64).model_copy(
+        update={"current_stage": LineStage.GENERATION}
+    )
+    active_job = MagicMock(
+        status="running",
+        video_id="video-1",
+        kind="shorts_queue",
+    )
+    with (
+        patch.object(shorts_line, "resolve_active_line", return_value=state),
+        patch.object(shorts_line, "_context", return_value={}),
+        patch.object(shorts_line, "_find_output", return_value=(None, None)),
+        patch.object(shorts_line, "get_active_job", return_value=active_job),
+        patch.object(shorts_line, "render_compact_line_status"),
+        patch.object(shorts_line, "load_daily_line_summary", return_value=None),
+        patch.object(shorts_line.st, "divider"),
+        patch.object(shorts_line.st, "info") as info,
+    ):
+        shorts_line.render_sidebar_line_context(
+            "video-1",
+            Settings(data_dir=tmp_path),
+        )
+
+    info.assert_called_once_with("ショートを生成中です。")
+    assert "進捗は画面上部で確認できます" not in info.call_args.args[0]
+
+
+def test_main_line_summary_is_only_collapsed_stage_status(tmp_path: Path) -> None:
+    state = create_line_state("video-1", "clip-1", "a" * 64).model_copy(
+        update={"current_stage": LineStage.GENERATION}
+    )
+    active_job = MagicMock(
+        status="running",
+        video_id="video-1",
+        kind="shorts_queue",
+    )
+    with (
+        patch.object(shorts_line, "resolve_active_line", return_value=state),
+        patch.object(shorts_line, "get_active_job", return_value=active_job),
+        patch.object(shorts_line, "render_compact_line_status") as compact,
+        patch.object(shorts_line, "load_daily_line_summary") as daily,
+        patch.object(shorts_line.st, "caption") as caption,
+    ):
+        shorts_line.render_main_line_summary(
+            "video-1",
+            Settings(data_dir=tmp_path),
+        )
+
+    caption.assert_called_once_with("生成中・工程 4／6")
+    compact.assert_not_called()
+    daily.assert_not_called()
 
 
 def test_sidebar_restores_persisted_segment_preview_after_restart(tmp_path: Path) -> None:

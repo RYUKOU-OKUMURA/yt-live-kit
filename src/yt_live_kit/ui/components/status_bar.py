@@ -164,6 +164,7 @@ def _load_batch_summary_for_job(job: JobState, settings) -> None:
 
 
 def _render_running_job(job: JobState) -> None:
+    st.markdown("**実行中の処理**")
     message = format_status_message(job)
     if job.total > 0:
         ratio = min(max(job.current / job.total, 0.0), 1.0)

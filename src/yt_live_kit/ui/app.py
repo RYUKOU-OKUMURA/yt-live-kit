@@ -41,8 +41,6 @@ if not interrupted_notices_shown():
             )
         mark_interrupted_notices_shown()
 
-render_status_bar()
-
 job_error = get_job_error()
 if job_error:
     st.error(job_error)
@@ -91,6 +89,7 @@ page = st.navigation(
     ]
 )
 with st.sidebar:
+    render_status_bar()
     render_sidebar_line_context(get_selected_video_id(), get_settings())
 page.run()
 

@@ -183,6 +183,36 @@ def test_settings_page_is_included_in_navigation_list() -> None:
     assert "settings_page" in navigation_names
 
 
+def test_running_status_is_rendered_inside_sidebar() -> None:
+    app_path = Path(__file__).parents[1] / "src/yt_live_kit/ui/app.py"
+    tree = ast.parse(app_path.read_text(encoding="utf-8"))
+    sidebar = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.With)
+        and isinstance(node.items[0].context_expr, ast.Attribute)
+        and isinstance(node.items[0].context_expr.value, ast.Name)
+        and node.items[0].context_expr.value.id == "st"
+        and node.items[0].context_expr.attr == "sidebar"
+    )
+    calls = [
+        node.value.func.id
+        for node in sidebar.body
+        if isinstance(node, ast.Expr)
+        and isinstance(node.value, ast.Call)
+        and isinstance(node.value.func, ast.Name)
+    ]
+
+    assert calls == ["render_status_bar", "render_sidebar_line_context"]
+    assert not any(
+        isinstance(node, ast.Expr)
+        and isinstance(node.value, ast.Call)
+        and isinstance(node.value.func, ast.Name)
+        and node.value.func.id == "render_status_bar"
+        for node in tree.body
+    )
+
+
 def test_render_progress_shows_error_state() -> None:
     progress_state = {
         STAGE_FETCH: "complete",
@@ -240,6 +270,33 @@ def test_format_status_message_includes_elapsed_and_counts() -> None:
     assert "処理中" in message
     assert "45 秒" in message
     assert "2/5" in message
+
+
+def test_running_short_cut_shows_known_name_progress_and_elapsed() -> None:
+    from yt_live_kit.ui.components import status_bar
+
+    started = datetime.now(timezone.utc) - timedelta(seconds=12)
+    job = JobState(
+        job_id="short-cut-running",
+        kind="short_cut",
+        status="running",
+        message="候補を解析中",
+        current=1,
+        total=3,
+        started_at=started,
+    )
+    with (
+        patch.object(status_bar.st, "markdown") as markdown,
+        patch.object(status_bar.st, "progress") as progress,
+    ):
+        status_bar._render_running_job(job)
+
+    markdown.assert_called_once_with("**実行中の処理**")
+    message = progress.call_args.kwargs["text"]
+    assert "ショート区間提案" in message
+    assert "候補を解析中" in message
+    assert "1/3" in message
+    assert "経過" in message
 
 
 def test_should_show_running_bar_only_for_running_jobs() -> None:

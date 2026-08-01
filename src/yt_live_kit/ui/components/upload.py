@@ -305,6 +305,9 @@ def _open_preview(
     settings: Settings,
     *,
     start_ms: int | None = None,
+    title: str | None = None,
+    description: str | None = None,
+    tags: tuple[str, ...] | list[str] | None = None,
     before_preview: Callable[[str, Path], None] | None = None,
     before_confirm: Callable[[str, Path], None] | None = None,
     on_operation_started: Callable[[str, str, Path], None] | None = None,
@@ -312,6 +315,7 @@ def _open_preview(
         Callable[[str, Path, Callable[[], UploadOperation]], UploadOperation] | None
     ) = None,
 ) -> None:
+    """現在の編集値だけから、新しい不変 preview を作って確認を開く."""
     if item.output_path is None:
         st.error("投稿できるショート動画ファイルがありません。")
         return
@@ -321,25 +325,29 @@ def _open_preview(
         except LineStateError as exc:
             st.error(_safe_text(exc))
             return
-    try:
-        description = build_shorts_description(
-            item.description,
-            video_id=video_id,
-            start_ms=start_ms,
-            settings=settings,
-        )
-    except DescriptionError as exc:
-        st.error(_safe_text(exc))
-        return
+    upload_title = item.title_candidates[0] if title is None else title
+    upload_tags = tuple(item.tags) if tags is None else tuple(tags)
+    upload_description = description
+    if upload_description is None:
+        try:
+            upload_description = build_shorts_description(
+                item.description,
+                video_id=video_id,
+                start_ms=start_ms,
+                settings=settings,
+            )
+        except DescriptionError as exc:
+            st.error(_safe_text(exc))
+            return
     try:
         preview = build_upload_preview(
             source_video_id=video_id,
             source_kind="shorts_queue",
             clip_id=item.target_id,
             video_path=item.output_path,
-            title=item.title_candidates[0],
-            description=description,
-            tags=item.tags,
+            title=upload_title,
+            description=upload_description,
+            tags=upload_tags,
             settings=settings,
             now=datetime.now(timezone.utc),
         )
@@ -354,6 +362,50 @@ def _open_preview(
         on_operation_started,
         reservation_transaction,
     )
+
+
+def _render_upload_metadata_editor(
+    item: ShortsQueueItemResult,
+    *,
+    job_id: str,
+    initial_description: str,
+) -> tuple[str, str, tuple[str, ...]]:
+    """候補を起点に、実送信 metadata の編集値だけを返す."""
+    candidates = tuple(dict.fromkeys(item.title_candidates))
+    selected_title = st.selectbox(
+        "タイトル候補",
+        candidates,
+        format_func=_safe_text,
+        key=f"upload_title_candidate_{job_id}_{item.target_id}",
+    )
+    if selected_title not in candidates:
+        selected_title = candidates[0]
+    candidate_index = candidates.index(selected_title)
+    title = st.text_input(
+        "タイトル",
+        value=selected_title,
+        max_chars=100,
+        key=f"upload_title_{job_id}_{item.target_id}_{candidate_index}",
+        help="候補を選んだ後、この欄で自由に編集できます。",
+    )
+    description = st.text_area(
+        "説明文",
+        value=initial_description,
+        height=240,
+        key=f"upload_description_edit_{job_id}_{item.target_id}",
+        help="ここに表示される全文が投稿内容の確認対象になります。",
+    )
+    tags = st.multiselect(
+        "タグ",
+        options=list(item.tags),
+        default=list(item.tags),
+        accept_new_options=True,
+        placeholder="タグを選択または追加",
+        key=f"upload_tags_{job_id}_{item.target_id}",
+        help="選択を外すと削除でき、新しいタグも入力できます。",
+    )
+    st.caption("編集後は、予約日時と投稿内容をあらためて確認してください。")
+    return title, description, tuple(tags)
 
 
 def render_upload_section(
@@ -410,8 +462,26 @@ def render_upload_section(
                 continue
             if operation is not None:
                 render_upload_operation(operation)
+            start_ms = _clip_start_ms(result, item.target_id)
+            try:
+                initial_description = build_shorts_description(
+                    item.description,
+                    video_id=video_id,
+                    start_ms=start_ms,
+                    settings=settings,
+                )
+            except DescriptionError as exc:
+                st.error(_safe_text(exc))
+                continue
+            title, description, tags = _render_upload_metadata_editor(
+                item,
+                job_id=result.job_id,
+                initial_description=initial_description,
+            )
+            # preview は session state に保持しない。編集 rerun 後にこのボタンを
+            # 押した時点の値からだけ再構築し、過去の確認内容を再利用しない。
             if st.button(
-                "投稿内容を確認",
+                "予約日時と投稿内容を確認",
                 key=f"upload_open_{result.job_id}_{item.target_id}",
                 type="primary",
                 disabled=operation is not None and operation.state != "failed",
@@ -420,7 +490,10 @@ def render_upload_section(
                     video_id,
                     item,
                     settings,
-                    start_ms=_clip_start_ms(result, item.target_id),
+                    start_ms=start_ms,
+                    title=title,
+                    description=description,
+                    tags=tags,
                     before_preview=before_preview,
                     before_confirm=before_confirm,
                     on_operation_started=on_operation_started,

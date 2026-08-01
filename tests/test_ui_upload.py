@@ -344,6 +344,174 @@ def test_open_preview_sends_composed_description_to_preview(tmp_path: Path) -> N
     assert build.call_args.kwargs["description"] == "合成後の本文"
 
 
+def test_metadata_editor_supports_title_candidates_free_edit_and_native_tags() -> None:
+    item = MagicMock(
+        target_id="clip-1",
+        title_candidates=("候補 1", "候補 2", "候補 2"),
+        tags=("既存 1", "既存 2"),
+    )
+    with (
+        patch.object(upload.st, "selectbox", return_value="候補 2") as selectbox,
+        patch.object(upload.st, "text_input", return_value="自由編集タイトル") as text_input,
+        patch.object(upload.st, "text_area", return_value="編集後の説明文") as text_area,
+        patch.object(upload.st, "multiselect", return_value=["既存 2", "追加タグ"]) as multiselect,
+        patch.object(upload.st, "caption"),
+    ):
+        edited = upload._render_upload_metadata_editor(
+            item,
+            job_id="job-1",
+            initial_description="合成済みの説明文",
+        )
+
+    assert edited == ("自由編集タイトル", "編集後の説明文", ("既存 2", "追加タグ"))
+    assert selectbox.call_args.args[1] == ("候補 1", "候補 2")
+    assert text_input.call_args.kwargs["value"] == "候補 2"
+    assert text_input.call_args.kwargs["max_chars"] == 100
+    assert text_area.call_args.kwargs["value"] == "合成済みの説明文"
+    assert multiselect.call_args.kwargs["default"] == ["既存 1", "既存 2"]
+    assert multiselect.call_args.kwargs["accept_new_options"] is True
+
+
+def test_edited_metadata_builds_new_fixed_preview_snapshot(tmp_path: Path) -> None:
+    base = _preview(tmp_path)
+    item = MagicMock(
+        output_path=base.video_path,
+        target_id="clip-1",
+        title_candidates=(base.title,),
+        description=base.description,
+        tags=base.tags,
+    )
+    mutable_tags = ["編集タグ", "追加タグ"]
+
+    def build_from_edits(**kwargs) -> UploadPreview:
+        return base.model_copy(
+            update={
+                "title": kwargs["title"],
+                "description": kwargs["description"],
+                "tags": tuple(kwargs["tags"]),
+                "fingerprint": "b" * 64,
+            }
+        )
+
+    with (
+        patch.object(upload, "build_shorts_description") as compose,
+        patch.object(upload, "build_upload_preview", side_effect=build_from_edits) as build,
+        patch.object(upload, "upload_preview_dialog") as dialog,
+    ):
+        upload._open_preview(
+            "source-1",
+            item,
+            Settings(data_dir=tmp_path),
+            title="編集タイトル",
+            description="編集後の説明文",
+            tags=mutable_tags,
+        )
+
+    compose.assert_not_called()
+    assert build.call_args.kwargs["title"] == "編集タイトル"
+    assert build.call_args.kwargs["description"] == "編集後の説明文"
+    assert build.call_args.kwargs["tags"] == ("編集タグ", "追加タグ")
+    fixed_preview = dialog.call_args.args[0]
+    mutable_tags.append("ダイアログ後の変更")
+    assert fixed_preview.title == "編集タイトル"
+    assert fixed_preview.description == "編集後の説明文"
+    assert fixed_preview.tags == ("編集タグ", "追加タグ")
+
+
+def test_edit_after_preview_requires_a_new_snapshot_without_mutating_old_one(
+    tmp_path: Path,
+) -> None:
+    base = _preview(tmp_path)
+    item = MagicMock(
+        output_path=base.video_path,
+        target_id="clip-1",
+        title_candidates=(base.title,),
+        description=base.description,
+        tags=base.tags,
+    )
+
+    def build_from_edits(**kwargs) -> UploadPreview:
+        fingerprint_char = "b" if kwargs["title"] == "最初のタイトル" else "c"
+        return base.model_copy(
+            update={
+                "title": kwargs["title"],
+                "description": kwargs["description"],
+                "tags": tuple(kwargs["tags"]),
+                "fingerprint": fingerprint_char * 64,
+            }
+        )
+
+    with (
+        patch.object(upload, "build_upload_preview", side_effect=build_from_edits),
+        patch.object(upload, "upload_preview_dialog") as dialog,
+    ):
+        upload._open_preview(
+            "source-1",
+            item,
+            Settings(data_dir=tmp_path),
+            title="最初のタイトル",
+            description="最初の説明文",
+            tags=("最初",),
+        )
+        upload._open_preview(
+            "source-1",
+            item,
+            Settings(data_dir=tmp_path),
+            title="編集後のタイトル",
+            description="編集後の説明文",
+            tags=("編集後",),
+        )
+
+    first_preview = dialog.call_args_list[0].args[0]
+    latest_preview = dialog.call_args_list[1].args[0]
+    assert first_preview.title == "最初のタイトル"
+    assert first_preview.description == "最初の説明文"
+    assert first_preview.tags == ("最初",)
+    assert latest_preview.title == "編集後のタイトル"
+    assert latest_preview.description == "編集後の説明文"
+    assert latest_preview.tags == ("編集後",)
+    assert first_preview.fingerprint != latest_preview.fingerprint
+
+
+def test_invalid_edited_metadata_creates_no_dialog_operation_or_job(tmp_path: Path) -> None:
+    preview = _preview(tmp_path)
+    item = MagicMock(
+        output_path=preview.video_path,
+        target_id="clip-1",
+        title_candidates=(preview.title,),
+        description=preview.description,
+        tags=preview.tags,
+    )
+    before_preview = MagicMock()
+    reservation_transaction = MagicMock()
+    with (
+        patch.object(
+            upload,
+            "build_upload_preview",
+            side_effect=upload.ScheduleError("タイトルを入力してください。"),
+        ),
+        patch.object(upload, "upload_preview_dialog") as dialog,
+        patch.object(upload, "confirm_and_start_upload") as confirm,
+        patch.object(upload.st, "error") as error,
+    ):
+        upload._open_preview(
+            "source-1",
+            item,
+            Settings(data_dir=tmp_path),
+            title="",
+            description="編集後の説明文",
+            tags=("タグ",),
+            before_preview=before_preview,
+            reservation_transaction=reservation_transaction,
+        )
+
+    before_preview.assert_called_once_with("clip-1", preview.video_path)
+    assert "タイトルを入力してください" in error.call_args.args[0]
+    dialog.assert_not_called()
+    confirm.assert_not_called()
+    reservation_transaction.assert_not_called()
+
+
 def test_open_preview_shows_japanese_error_and_opens_no_dialog_on_template_error(
     tmp_path: Path,
 ) -> None:
@@ -406,6 +574,12 @@ def test_upload_section_passes_first_segment_start_to_preview(tmp_path: Path) ->
     with (
         patch.object(upload, "load_latest_shorts_queue_result", return_value=result),
         patch.object(upload, "_resolve_operation", return_value=None),
+        patch.object(upload, "build_shorts_description", return_value="合成済み説明文"),
+        patch.object(
+            upload,
+            "_render_upload_metadata_editor",
+            return_value=("自由編集タイトル", "編集後の説明文", ("編集タグ",)),
+        ),
         patch.object(upload, "_open_preview") as open_preview,
         patch.object(upload.st, "container", side_effect=_container),
         patch.object(upload.st, "subheader"),
@@ -417,6 +591,9 @@ def test_upload_section_passes_first_segment_start_to_preview(tmp_path: Path) ->
         upload.render_upload_section("source-1", settings)
 
     assert open_preview.call_args.kwargs["start_ms"] == 90_000
+    assert open_preview.call_args.kwargs["title"] == "自由編集タイトル"
+    assert open_preview.call_args.kwargs["description"] == "編集後の説明文"
+    assert open_preview.call_args.kwargs["tags"] == ("編集タグ",)
     assert "shorts_description_template.txt" in info.call_args.args[0]
 
 
