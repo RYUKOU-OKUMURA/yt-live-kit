@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, call, patch
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -372,6 +373,80 @@ def test_metadata_editor_supports_title_candidates_free_edit_and_native_tags() -
     assert multiselect.call_args.kwargs["accept_new_options"] is True
 
 
+def test_schedule_editor_uses_native_date_time_and_job_item_unique_keys() -> None:
+    policy = SchedulePolicy(timezone="America/New_York")
+    initial = datetime(2026, 8, 5, 14, 30, tzinfo=ZoneInfo(policy.timezone))
+    date_input = MagicMock(return_value=date(2026, 8, 6))
+    time_input = MagicMock(return_value=time(16, 45))
+    with (
+        patch.object(upload.st, "date_input", date_input),
+        patch.object(upload.st, "time_input", time_input),
+        patch.object(upload.st, "caption") as caption,
+    ):
+        first = upload._render_upload_schedule_editor(
+            job_id="job-1",
+            item_id="clip-1",
+            policy=policy,
+            initial_publish_at=initial,
+            disabled=False,
+        )
+        upload._render_upload_schedule_editor(
+            job_id="job-1",
+            item_id="clip-2",
+            policy=policy,
+            initial_publish_at=initial,
+            disabled=False,
+        )
+
+    assert first == datetime(2026, 8, 6, 16, 45, tzinfo=ZoneInfo(policy.timezone))
+    assert "America/New_York" in caption.call_args_list[0].args[0]
+    assert [item.kwargs["key"] for item in date_input.call_args_list] == [
+        "upload_publish_date_job-1_clip-1",
+        "upload_publish_date_job-1_clip-2",
+    ]
+    assert [item.kwargs["key"] for item in time_input.call_args_list] == [
+        "upload_publish_time_job-1_clip-1",
+        "upload_publish_time_job-1_clip-2",
+    ]
+    assert all(item.kwargs["step"] == 60 for item in time_input.call_args_list)
+
+
+@pytest.mark.parametrize(
+    ("publish_date", "publish_time"),
+    [
+        (date(2026, 3, 8), time(2, 30)),
+        (date(2026, 11, 1), time(1, 30)),
+    ],
+)
+def test_schedule_editor_rejects_dst_before_preview(
+    publish_date: date,
+    publish_time: time,
+) -> None:
+    policy = SchedulePolicy(timezone="America/New_York")
+    with (
+        patch.object(upload.st, "date_input", return_value=publish_date),
+        patch.object(upload.st, "time_input", return_value=publish_time),
+        patch.object(upload.st, "caption"),
+        patch.object(upload.st, "error") as error,
+    ):
+        requested = upload._render_upload_schedule_editor(
+            job_id="job-1",
+            item_id="clip-1",
+            policy=policy,
+            initial_publish_at=datetime(
+                2026,
+                3,
+                9,
+                9,
+                tzinfo=ZoneInfo(policy.timezone),
+            ),
+            disabled=False,
+        )
+
+    assert requested is None
+    assert "DST" in error.call_args.args[0]
+
+
 def test_edited_metadata_builds_new_fixed_preview_snapshot(tmp_path: Path) -> None:
     base = _preview(tmp_path)
     item = MagicMock(
@@ -416,6 +491,41 @@ def test_edited_metadata_builds_new_fixed_preview_snapshot(tmp_path: Path) -> No
     assert fixed_preview.title == "編集タイトル"
     assert fixed_preview.description == "編集後の説明文"
     assert fixed_preview.tags == ("編集タグ", "追加タグ")
+
+
+def test_open_preview_passes_edited_publish_at_into_new_preview(tmp_path: Path) -> None:
+    preview = _preview(tmp_path)
+    item = MagicMock(
+        output_path=preview.video_path,
+        target_id="clip-1",
+        title_candidates=(preview.title,),
+        description=preview.description,
+        tags=preview.tags,
+    )
+    requested = datetime(2026, 8, 5, 15, 45, tzinfo=ZoneInfo("Asia/Tokyo"))
+    with (
+        patch.object(upload, "build_upload_preview", return_value=preview) as build,
+        patch.object(upload, "upload_preview_dialog") as dialog,
+    ):
+        upload._open_preview(
+            "source-1",
+            item,
+            Settings(data_dir=tmp_path),
+            title="編集タイトル",
+            description="編集後の説明文",
+            tags=("編集タグ",),
+            requested_publish_at=requested,
+        )
+
+    assert build.call_args.kwargs["requested_publish_at"] is requested
+    dialog.assert_called_once_with(
+        preview,
+        build.call_args.kwargs["settings"],
+        dialog.call_args.args[2],
+        None,
+        None,
+        None,
+    )
 
 
 def test_edit_after_preview_requires_a_new_snapshot_without_mutating_old_one(
@@ -571,14 +681,22 @@ def test_upload_section_passes_first_segment_start_to_preview(tmp_path: Path) ->
         ),
     )
     settings = Settings(data_dir=tmp_path)
+    policy = SchedulePolicy()
+    requested = datetime(2026, 8, 5, 15, 45, tzinfo=ZoneInfo(policy.timezone))
     with (
         patch.object(upload, "load_latest_shorts_queue_result", return_value=result),
+        patch.object(upload, "get_next_upload_slot", return_value=(policy, requested)),
         patch.object(upload, "_resolve_operation", return_value=None),
         patch.object(upload, "build_shorts_description", return_value="合成済み説明文"),
         patch.object(
             upload,
             "_render_upload_metadata_editor",
             return_value=("自由編集タイトル", "編集後の説明文", ("編集タグ",)),
+        ),
+        patch.object(
+            upload,
+            "_render_upload_schedule_editor",
+            return_value=requested,
         ),
         patch.object(upload, "_open_preview") as open_preview,
         patch.object(upload.st, "container", side_effect=_container),
@@ -594,7 +712,56 @@ def test_upload_section_passes_first_segment_start_to_preview(tmp_path: Path) ->
     assert open_preview.call_args.kwargs["title"] == "自由編集タイトル"
     assert open_preview.call_args.kwargs["description"] == "編集後の説明文"
     assert open_preview.call_args.kwargs["tags"] == ("編集タグ",)
+    assert open_preview.call_args.kwargs["requested_publish_at"] == requested
     assert "shorts_description_template.txt" in info.call_args.args[0]
+
+
+def test_invalid_schedule_or_unclicked_button_creates_no_preview_operation_or_job(
+    tmp_path: Path,
+) -> None:
+    item = MagicMock(
+        status="succeeded",
+        title_candidates=("予約タイトル",),
+        target_id="clip-1",
+        description="説明文",
+        tags=("タグ",),
+    )
+    result = MagicMock(items=(item,), job_id="shorts-job", clip_specs=())
+    settings = Settings(data_dir=tmp_path)
+    policy = SchedulePolicy()
+    initial = datetime(2026, 8, 5, 9, 0, tzinfo=ZoneInfo(policy.timezone))
+    reservation_transaction = MagicMock()
+
+    with (
+        patch.object(upload, "load_latest_shorts_queue_result", return_value=result),
+        patch.object(upload, "get_next_upload_slot", return_value=(policy, initial)),
+        patch.object(upload, "_resolve_operation", return_value=None),
+        patch.object(upload, "build_shorts_description", return_value="説明文"),
+        patch.object(
+            upload,
+            "_render_upload_metadata_editor",
+            return_value=("予約タイトル", "説明文", ("タグ",)),
+        ),
+        patch.object(upload, "_render_upload_schedule_editor", return_value=None),
+        patch.object(upload, "_open_preview") as open_preview,
+        patch.object(upload, "confirm_and_start_upload") as confirm,
+        patch.object(upload.st, "container", side_effect=_container),
+        patch.object(upload.st, "caption"),
+        patch.object(upload.st, "markdown"),
+        patch.object(upload.st, "info"),
+        # disabled widget が誤って True を返す test double でも明示 guard する。
+        patch.object(upload.st, "button", return_value=True) as button,
+    ):
+        upload.render_upload_section(
+            "source-1",
+            settings,
+            reservation_transaction=reservation_transaction,
+        )
+
+    assert button.call_args.kwargs["disabled"] is True
+    open_preview.assert_not_called()
+    confirm.assert_not_called()
+    reservation_transaction.assert_not_called()
 
 
 def test_needs_reconciliation_shows_manual_guidance_without_retry_button(tmp_path: Path) -> None:

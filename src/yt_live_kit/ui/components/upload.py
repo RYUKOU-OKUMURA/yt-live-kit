@@ -18,10 +18,13 @@ from yt_live_kit.services.description import (
 )
 from yt_live_kit.services.schedule import (
     ScheduleError,
+    SchedulePolicy,
     UploadPreview,
     build_upload_preview,
     confirm_and_start_upload,
+    get_next_upload_slot,
     latest_operation_for_source,
+    make_requested_publish_at,
 )
 from yt_live_kit.services.shorts_queue import (
     ShortsQueueError,
@@ -308,6 +311,7 @@ def _open_preview(
     title: str | None = None,
     description: str | None = None,
     tags: tuple[str, ...] | list[str] | None = None,
+    requested_publish_at: datetime | None = None,
     before_preview: Callable[[str, Path], None] | None = None,
     before_confirm: Callable[[str, Path], None] | None = None,
     on_operation_started: Callable[[str, str, Path], None] | None = None,
@@ -350,6 +354,7 @@ def _open_preview(
             tags=upload_tags,
             settings=settings,
             now=datetime.now(timezone.utc),
+            requested_publish_at=requested_publish_at,
         )
     except ScheduleError as exc:
         st.error(_safe_text(exc))
@@ -408,6 +413,38 @@ def _render_upload_metadata_editor(
     return title, description, tuple(tags)
 
 
+def _render_upload_schedule_editor(
+    *,
+    job_id: str,
+    item_id: str,
+    policy: SchedulePolicy,
+    initial_publish_at: datetime,
+    disabled: bool,
+) -> datetime | None:
+    """native widget の日付・時刻を policy timezone の aware datetime にする."""
+    local_initial = initial_publish_at.astimezone(initial_publish_at.tzinfo)
+    st.caption(f"予約日時の timezone: {_safe_text(policy.timezone)}")
+    publish_date = st.date_input(
+        "予約日",
+        value=local_initial.date(),
+        key=f"upload_publish_date_{job_id}_{item_id}",
+        format="YYYY/MM/DD",
+        disabled=disabled,
+    )
+    publish_time = st.time_input(
+        "予約時刻",
+        value=local_initial.timetz().replace(tzinfo=None),
+        key=f"upload_publish_time_{job_id}_{item_id}",
+        step=60,
+        disabled=disabled,
+    )
+    try:
+        return make_requested_publish_at(policy, publish_date, publish_time)
+    except ScheduleError as exc:
+        st.error(_safe_text(exc))
+        return None
+
+
 def render_upload_section(
     video_id: str,
     settings: Settings,
@@ -438,6 +475,14 @@ def render_upload_section(
     succeeded = tuple(item for item in result.items if item.status == "succeeded")
     if not succeeded:
         st.info("予約投稿できる生成済みショートがありません。")
+        return
+    try:
+        policy, initial_publish_at = get_next_upload_slot(
+            settings,
+            now=datetime.now(timezone.utc),
+        )
+    except ScheduleError as exc:
+        st.error(_safe_text(exc))
         return
     template_path = get_shorts_template_path(settings)
     if not template_path.is_file():
@@ -478,14 +523,23 @@ def render_upload_section(
                 job_id=result.job_id,
                 initial_description=initial_description,
             )
+            active_operation = operation is not None and operation.state != "failed"
+            requested_publish_at = _render_upload_schedule_editor(
+                job_id=result.job_id,
+                item_id=item.target_id,
+                policy=policy,
+                initial_publish_at=initial_publish_at,
+                disabled=active_operation,
+            )
             # preview は session state に保持しない。編集 rerun 後にこのボタンを
             # 押した時点の値からだけ再構築し、過去の確認内容を再利用しない。
-            if st.button(
+            preview_requested = st.button(
                 "予約日時と投稿内容を確認",
                 key=f"upload_open_{result.job_id}_{item.target_id}",
                 type="primary",
-                disabled=operation is not None and operation.state != "failed",
-            ):
+                disabled=active_operation or requested_publish_at is None,
+            )
+            if preview_requested and requested_publish_at is not None and not active_operation:
                 _open_preview(
                     video_id,
                     item,
@@ -494,6 +548,7 @@ def render_upload_section(
                     title=title,
                     description=description,
                     tags=tags,
+                    requested_publish_at=requested_publish_at,
                     before_preview=before_preview,
                     before_confirm=before_confirm,
                     on_operation_started=on_operation_started,

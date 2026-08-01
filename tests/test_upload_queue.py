@@ -60,7 +60,13 @@ def _snapshot(tmp_path: Path, *, publish_at: datetime | None = None) -> UploadCo
     )
 
 
-def _reserved(tmp_path: Path, *, operation_id: str = "op1", job_id: str = "job1"):
+def _reserved(
+    tmp_path: Path,
+    *,
+    operation_id: str = "op1",
+    job_id: str = "job1",
+    publish_at: datetime | None = None,
+):
     settings = Settings(data_dir=tmp_path)
     operation = create_reserved_operation(
         operation_id=operation_id,
@@ -68,7 +74,7 @@ def _reserved(tmp_path: Path, *, operation_id: str = "op1", job_id: str = "job1"
         source_video_id="source1",
         source_kind="shorts_queue",
         clip_id="clip1",
-        content=_snapshot(tmp_path),
+        content=_snapshot(tmp_path, publish_at=publish_at),
         now=datetime(2026, 7, 31, tzinfo=timezone.utc),
         settings=settings,
     )
@@ -410,7 +416,10 @@ def test_job_target_preflight_failure_never_records_attempt_or_uploads(tmp_path:
 
 
 def test_persisted_metadata_tamper_is_rejected_before_attempt(tmp_path: Path) -> None:
-    settings, operation = _reserved(tmp_path)
+    settings, operation = _reserved(
+        tmp_path,
+        publish_at=datetime(2099, 8, 2, tzinfo=timezone.utc),
+    )
     queue_path = tmp_path / "_schedule" / "queue.json"
     payload = json.loads(queue_path.read_text(encoding="utf-8"))
     payload["operations"][0]["content"]["title"] = "  改変タイトル  "

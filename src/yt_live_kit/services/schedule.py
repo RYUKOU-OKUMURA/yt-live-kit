@@ -7,7 +7,7 @@ import json
 import os
 import re
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -170,8 +170,24 @@ def make_schedule_policy(
         ) from exc
 
 
-def _validated_local_datetime(day, hour: int, minute: int, zone: ZoneInfo) -> datetime:
-    naive = datetime(day.year, day.month, day.day, hour, minute)
+def _validated_local_datetime(
+    day: date,
+    hour: int,
+    minute: int,
+    zone: ZoneInfo,
+    *,
+    second: int = 0,
+    microsecond: int = 0,
+) -> datetime:
+    naive = datetime(
+        day.year,
+        day.month,
+        day.day,
+        hour,
+        minute,
+        second,
+        microsecond,
+    )
     candidates: list[datetime] = []
     for fold in (0, 1):
         candidate = naive.replace(tzinfo=zone, fold=fold)
@@ -188,6 +204,77 @@ def _validated_local_datetime(day, hour: int, minute: int, zone: ZoneInfo) -> da
             "投稿時刻が DST により重複します。曖昧でない時刻へ設定してください。"
         )
     return candidates[0]
+
+
+def make_requested_publish_at(
+    policy: SchedulePolicy,
+    publish_date: date,
+    publish_time: time,
+) -> datetime:
+    """UI のローカル日付・時刻を policy timezone の aware datetime にする."""
+    if not isinstance(publish_date, date) or isinstance(publish_date, datetime):
+        raise ScheduleError("予約日を正しく指定してください。")
+    if not isinstance(publish_time, time):
+        raise ScheduleError("予約時刻を正しく指定してください。")
+    if publish_time.tzinfo is not None and publish_time.utcoffset() is not None:
+        raise ScheduleError(
+            "予約時刻は日付と現在の timezone を使って指定してください。"
+        )
+    zone = ZoneInfo(policy.timezone)
+    return _validated_local_datetime(
+        publish_date,
+        publish_time.hour,
+        publish_time.minute,
+        zone,
+        second=publish_time.second,
+        microsecond=publish_time.microsecond,
+    )
+
+
+def _validate_requested_slot(
+    policy: SchedulePolicy,
+    requested_publish_at: datetime,
+    existing_reservations: tuple[datetime, ...] | list[datetime],
+    *,
+    now: datetime,
+) -> datetime:
+    """手動指定 slot を policy timezone・lead・重複の境界で検証する."""
+    if now.tzinfo is None or now.utcoffset() is None:
+        raise ScheduleError("現在日時はタイムゾーン付きで指定してください。")
+    if not isinstance(requested_publish_at, datetime):
+        raise ScheduleError("予約日時を正しく指定してください。")
+    if (
+        requested_publish_at.tzinfo is None
+        or requested_publish_at.utcoffset() is None
+    ):
+        raise ScheduleError("予約日時はタイムゾーン付きで指定してください。")
+    zone = ZoneInfo(policy.timezone)
+    local = requested_publish_at.astimezone(zone)
+    canonical = _validated_local_datetime(
+        local.date(),
+        local.hour,
+        local.minute,
+        zone,
+        second=local.second,
+        microsecond=local.microsecond,
+    )
+    if canonical.astimezone(timezone.utc) != requested_publish_at.astimezone(timezone.utc):
+        raise ScheduleError(
+            "予約日時を timezone 上で一意に確定できません。別の時刻を指定してください。"
+        )
+    if canonical.astimezone(timezone.utc) < now.astimezone(timezone.utc) + _MIN_LEAD:
+        raise ScheduleError("予約日時は現在から 10 分以上先を指定してください。")
+
+    occupied: set[datetime] = set()
+    for reservation in existing_reservations:
+        if reservation.tzinfo is None or reservation.utcoffset() is None:
+            raise ScheduleError("既存の予約日時にタイムゾーンがありません。")
+        occupied.add(reservation.astimezone(timezone.utc))
+    if canonical.astimezone(timezone.utc) in occupied:
+        raise ScheduleError(
+            "指定した予約日時は既に使われています。別の日時を指定してください。"
+        )
+    return canonical
 
 
 def assign_next_slot(
@@ -222,6 +309,30 @@ def assign_next_slot(
             return candidate
         day += timedelta(days=policy.interval_days)
     raise ScheduleError("次の空き予約枠を計算できませんでした。")
+
+
+def get_next_upload_slot(
+    settings: Settings,
+    *,
+    now: datetime | None = None,
+) -> tuple[SchedulePolicy, datetime]:
+    """UI 初期値用に policy と現在の次の空き枠を同じ lock snapshot で返す."""
+    reference = now or datetime.now(timezone.utc)
+    if reference.tzinfo is None or reference.utcoffset() is None:
+        raise ScheduleError("現在日時はタイムゾーン付きで指定してください。")
+    try:
+        with schedule_lock(settings):
+            policy = load_schedule_policy(settings)
+            operations = list_operations(settings)
+            slot_holders = _slot_holding_operations(operations)
+            slot = assign_next_slot(
+                policy,
+                [item.content.publish_at for item in slot_holders],
+                now=reference,
+            )
+    except UploadQueueError as exc:
+        raise ScheduleError(str(exc)) from exc
+    return policy, slot
 
 
 def to_utc_rfc3339_z(value: datetime) -> str:
@@ -284,8 +395,9 @@ def build_upload_preview(
     tags: tuple[str, ...] | list[str],
     settings: Settings,
     now: datetime | None = None,
+    requested_publish_at: datetime | None = None,
 ) -> UploadPreview:
-    """read-only API とローカル検証だけで immutable preview を作る."""
+    """自動または手動 slot で read-only な immutable preview を作る."""
     reference = now or datetime.now(timezone.utc)
     if reference.tzinfo is None or reference.utcoffset() is None:
         raise ScheduleError("現在日時はタイムゾーン付きで指定してください。")
@@ -293,10 +405,16 @@ def build_upload_preview(
         policy = load_schedule_policy(settings)
         operations = list_operations(settings)
         slot_holders = _slot_holding_operations(operations)
-        slot = assign_next_slot(
-            policy,
-            [item.content.publish_at for item in slot_holders],
-            now=reference,
+        existing_reservations = [item.content.publish_at for item in slot_holders]
+        slot = (
+            assign_next_slot(policy, existing_reservations, now=reference)
+            if requested_publish_at is None
+            else _validate_requested_slot(
+                policy,
+                requested_publish_at,
+                existing_reservations,
+                now=reference,
+            )
         )
         channel = fetch_mine_channel(settings)
         # audience / synthetic は preview では決めない。ここでは共通部分だけを
@@ -340,7 +458,11 @@ def build_upload_preview(
     }
     try:
         return UploadPreview.model_validate(
-            {**values, "fingerprint": _canonical_fingerprint(values)}
+            {
+                **values,
+                "publish_at": slot,
+                "fingerprint": _canonical_fingerprint(values),
+            }
         )
     except ValidationError as exc:
         raise ScheduleError("投稿プレビューの内容が正しくありません。入力を確認してください。") from exc
@@ -421,6 +543,7 @@ def confirm_and_start_upload(
             tags=preview.tags,
             settings=settings,
             now=reference,
+            requested_publish_at=preview.publish_at,
         )
         if not _same_preview(preview, current):
             raise ScheduleError("確認後に投稿内容・予約枠・試行枠が変わりました。新しく確認してください。")

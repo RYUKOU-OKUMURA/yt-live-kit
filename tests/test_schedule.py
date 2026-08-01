@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import threading
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
@@ -13,15 +13,17 @@ import pytest
 from pydantic import ValidationError
 
 from yt_live_kit.config import Settings
-from yt_live_kit.models.upload import UploadChannel
+from yt_live_kit.models.upload import UploadChannel, UploadContentSnapshot
 from yt_live_kit.services.schedule import (
     ScheduleError,
     SchedulePolicy,
     assign_next_slot,
     build_upload_preview,
     confirm_and_start_upload,
+    get_next_upload_slot,
     load_schedule_policy,
     make_content_fingerprint,
+    make_requested_publish_at,
     save_schedule_policy,
     to_utc_rfc3339_z,
 )
@@ -73,6 +75,26 @@ def _preview(tmp_path: Path, settings: Settings, **overrides):
         patch("yt_live_kit.services.youtube_api.probe_duration", return_value=30.0),
     ):
         return build_upload_preview(**values)
+
+
+def _content_from_preview(preview) -> UploadContentSnapshot:
+    return UploadContentSnapshot(
+        channel=preview.channel,
+        video_path=preview.video_path,
+        file_size=preview.file_size,
+        file_mtime_ns=preview.file_mtime_ns,
+        duration_sec=preview.duration_sec,
+        title=preview.title,
+        description=preview.description,
+        tags=preview.tags,
+        publish_at=preview.publish_at,
+        privacy_status="private",
+        notify_subscribers=False,
+        self_declared_made_for_kids=False,
+        contains_synthetic_media=False,
+        community_guidelines_confirmed=True,
+        community_guidelines_confirmed_at=NOW,
+    )
 
 
 @pytest.mark.parametrize("daily_time", ["00:00", "23:59"])
@@ -170,6 +192,92 @@ def test_assign_next_slot_rejects_dst_nonexistent_and_ambiguous(
         assign_next_slot(policy, [], now=now)
 
 
+@pytest.mark.parametrize(
+    ("publish_date", "publish_time"),
+    [
+        (date(2026, 3, 8), time(2, 30)),
+        (date(2026, 11, 1), time(1, 30)),
+    ],
+)
+def test_make_requested_publish_at_rejects_dst_nonexistent_and_ambiguous(
+    publish_date: date,
+    publish_time: time,
+) -> None:
+    policy = SchedulePolicy(timezone="America/New_York")
+    with pytest.raises(ScheduleError, match="DST"):
+        make_requested_publish_at(policy, publish_date, publish_time)
+
+
+def test_requested_publish_at_is_policy_aware_and_exactly_preserved_in_preview(
+    tmp_path: Path,
+) -> None:
+    settings = _settings(tmp_path)
+    policy = SchedulePolicy()
+    requested = make_requested_publish_at(policy, date(2026, 8, 4), time(15, 45))
+
+    preview = _preview(tmp_path, settings, requested_publish_at=requested)
+
+    assert getattr(requested.tzinfo, "key", None) == policy.timezone
+    assert getattr(preview.publish_at.tzinfo, "key", None) == policy.timezone
+    assert preview.publish_at.astimezone(timezone.utc) == requested.astimezone(timezone.utc)
+    assert preview.publish_at_utc_z == "2026-08-04T06:45:00Z"
+    assert preview.publish_at.hour == 15
+    assert preview.publish_at.minute == 45
+    assert list_operations(settings) == ()
+    assert count_upload_attempts(settings, now=NOW) == 0
+
+
+@pytest.mark.parametrize("minute", [0, 9])
+def test_requested_publish_at_rejects_lead_shortage_without_side_effects(
+    tmp_path: Path,
+    minute: int,
+) -> None:
+    settings = _settings(tmp_path)
+    requested = make_requested_publish_at(
+        SchedulePolicy(),
+        date(2026, 8, 1),
+        time(9, minute),
+    )
+    with pytest.raises(ScheduleError, match="10 分以上"):
+        _preview(tmp_path, settings, requested_publish_at=requested)
+    assert list_operations(settings) == ()
+    assert count_upload_attempts(settings, now=NOW) == 0
+
+
+def test_requested_publish_at_accepts_exact_ten_minute_lead_and_rejects_naive(
+    tmp_path: Path,
+) -> None:
+    settings = _settings(tmp_path)
+    exact_boundary = make_requested_publish_at(
+        SchedulePolicy(),
+        date(2026, 8, 1),
+        time(9, 10),
+    )
+    assert _preview(
+        tmp_path,
+        settings,
+        requested_publish_at=exact_boundary,
+    ).publish_at == exact_boundary
+
+    with pytest.raises(ScheduleError, match="タイムゾーン付き"):
+        _preview(
+            tmp_path,
+            settings,
+            requested_publish_at=datetime(2026, 8, 2, 9, 0),
+        )
+    assert list_operations(settings) == ()
+    assert count_upload_attempts(settings, now=NOW) == 0
+
+
+def test_get_next_upload_slot_returns_policy_and_current_available_slot(
+    tmp_path: Path,
+) -> None:
+    settings = _settings(tmp_path)
+    policy, slot = get_next_upload_slot(settings, now=NOW)
+    assert policy == SchedulePolicy()
+    assert slot == datetime(2026, 8, 2, 9, 0, tzinfo=ZoneInfo("Asia/Tokyo"))
+
+
 def test_preview_contains_all_read_only_fields_and_no_queue_side_effect(tmp_path: Path) -> None:
     settings = _settings(tmp_path)
     preview = _preview(tmp_path, settings)
@@ -247,6 +355,131 @@ def test_confirm_saves_single_record_then_starts_same_ids(tmp_path: Path) -> Non
     )
     assert calls[0][1]["requested_job_id"] == "job-1"
     assert calls[0][1]["operation_id"] == "operation-1"
+    assert count_upload_attempts(settings, now=NOW) == 0
+
+
+def test_confirm_preserves_manual_publish_at_through_operation_and_job_start(
+    tmp_path: Path,
+) -> None:
+    settings = _settings(tmp_path)
+    requested = make_requested_publish_at(
+        SchedulePolicy(),
+        date(2026, 8, 4),
+        time(15, 45),
+    )
+    preview = _preview(tmp_path, settings, requested_publish_at=requested)
+    started: list[dict[str, object]] = []
+
+    def fake_start(*args, **kwargs):
+        started.append(kwargs)
+        return "manual-job"
+
+    with (
+        patch("yt_live_kit.services.schedule.fetch_mine_channel", return_value=CHANNEL),
+        patch("yt_live_kit.services.youtube_api.probe_duration", return_value=30.0),
+    ):
+        operation = confirm_and_start_upload(
+            preview,
+            self_declared_made_for_kids=False,
+            contains_synthetic_media=True,
+            community_guidelines_confirmed=True,
+            settings=settings,
+            now=NOW,
+            operation_id_factory=lambda: "manual-operation",
+            job_id_factory=lambda: "manual-job",
+            start_job_fn=fake_start,
+        )
+
+    assert operation.content.publish_at.astimezone(timezone.utc) == requested.astimezone(
+        timezone.utc
+    )
+    assert list_operations(settings)[0].content.publish_at == operation.content.publish_at
+    assert started[0]["operation_id"] == "manual-operation"
+    assert started[0]["requested_job_id"] == "manual-job"
+    assert count_upload_attempts(settings, now=NOW) == 0
+
+
+def test_requested_publish_at_rejects_existing_slot_before_read_only_api(
+    tmp_path: Path,
+) -> None:
+    settings = _settings(tmp_path)
+    requested = make_requested_publish_at(
+        SchedulePolicy(),
+        date(2026, 8, 4),
+        time(15, 45),
+    )
+    preview = _preview(tmp_path, settings, requested_publish_at=requested)
+    create_reserved_operation(
+        operation_id="slot-holder",
+        job_id="slot-holder-job",
+        source_video_id="other-source",
+        source_kind="shorts_queue",
+        clip_id="other-clip",
+        content=_content_from_preview(preview),
+        now=NOW,
+        settings=settings,
+    )
+
+    with (
+        patch("yt_live_kit.services.schedule.fetch_mine_channel") as fetch,
+        pytest.raises(ScheduleError, match="既に使われています"),
+    ):
+        build_upload_preview(
+            source_video_id="source-1",
+            source_kind="shorts_queue",
+            clip_id="clip-1",
+            video_path=preview.video_path,
+            title=preview.title,
+            description=preview.description,
+            tags=preview.tags,
+            requested_publish_at=requested,
+            settings=settings,
+            now=NOW,
+        )
+    fetch.assert_not_called()
+    assert len(list_operations(settings)) == 1
+    assert count_upload_attempts(settings, now=NOW) == 0
+
+
+def test_manual_slot_confirm_race_creates_no_new_operation_job_or_attempt(
+    tmp_path: Path,
+) -> None:
+    settings = _settings(tmp_path)
+    requested = make_requested_publish_at(
+        SchedulePolicy(),
+        date(2026, 8, 4),
+        time(15, 45),
+    )
+    preview = _preview(tmp_path, settings, requested_publish_at=requested)
+    create_reserved_operation(
+        operation_id="race-winner",
+        job_id="race-winner-job",
+        source_video_id="other-source",
+        source_kind="shorts_queue",
+        clip_id="other-clip",
+        content=_content_from_preview(preview),
+        now=NOW,
+        settings=settings,
+    )
+    started: list[bool] = []
+
+    with (
+        patch("yt_live_kit.services.schedule.fetch_mine_channel", return_value=CHANNEL),
+        patch("yt_live_kit.services.youtube_api.probe_duration", return_value=30.0),
+        pytest.raises(ScheduleError, match="既に使われています"),
+    ):
+        confirm_and_start_upload(
+            preview,
+            self_declared_made_for_kids=False,
+            contains_synthetic_media=False,
+            community_guidelines_confirmed=True,
+            settings=settings,
+            now=NOW,
+            start_job_fn=lambda *args, **kwargs: started.append(True),
+        )
+
+    assert started == []
+    assert [item.operation_id for item in list_operations(settings)] == ["race-winner"]
     assert count_upload_attempts(settings, now=NOW) == 0
 
 
