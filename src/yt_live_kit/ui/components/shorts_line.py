@@ -38,13 +38,16 @@ from yt_live_kit.services.shorts_line import (
 from yt_live_kit.services.shorts_queue import (
     ShortsQueueClipSpec,
     ShortsQueueError,
+    ShortsQueueSegmentSpec,
     ShortsQueueTarget,
+    build_shorts_queue_targets,
     load_latest_shorts_queue_result,
     make_shorts_queue_clip_spec,
 )
 from yt_live_kit.services.telop import (
     TelopError,
     generate_telop_script,
+    normalize_seconds_to_milliseconds,
     save_confirmed_telop_script,
     validate_telop_script,
 )
@@ -229,22 +232,54 @@ def _restore_context(
     except ShortsQueueError:
         return None
     if result is None:
-        return None
+        result_specs: tuple[ShortsQueueClipSpec, ...] = ()
+    else:
+        result_specs = result.clip_specs
     spec = next(
-        (value for value in result.clip_specs if value.target_id == state.clip_id),
+        (value for value in result_specs if value.target_id == state.clip_id),
         None,
     )
-    if spec is None:
-        return None
-    target = ShortsQueueTarget(spec.target_id, spec.segments, spec.output_name)
+    if spec is not None:
+        target = ShortsQueueTarget(spec.target_id, spec.segments, spec.output_name)
+        defaults = ShortsLineDefaults(spec.layout, spec.preset, spec.hook_preset)
+        document = spec.telop_document
+    else:
+        script_path = (
+            settings.data_dir
+            / video_id
+            / "shorts"
+            / "telop"
+            / f"telop_{state.clip_id}.json"
+        )
+        try:
+            document = TelopScriptDocument.model_validate_json(
+                script_path.read_text(encoding="utf-8")
+            )
+            segment_specs = tuple(
+                ShortsQueueSegmentSpec(
+                    id=f"segment_{index:03d}",
+                    title=f"区間 {index}",
+                    start_ms=normalize_seconds_to_milliseconds(segment.start_sec),
+                    end_ms=normalize_seconds_to_milliseconds(segment.end_sec),
+                    reason="保存済みテロップ台本から復元",
+                )
+                for index, segment in enumerate(document.segments, start=1)
+            )
+            target = build_shorts_queue_targets(segment_specs, mode="concat")[0]
+        except (OSError, UnicodeError, ValueError, TelopError, ShortsQueueError):
+            return None
+        if target.target_id != state.clip_id:
+            return None
+        defaults = load_shorts_line_defaults(settings)
     context: dict[str, object] = {
         "title": video_id,
         "target": target,
         "queue_fingerprint": state.queue_fingerprint,
-        "defaults": ShortsLineDefaults(spec.layout, spec.preset, spec.hook_preset),
-        "draft": spec.telop_document,
-        "confirmed_spec": spec,
+        "defaults": defaults,
+        "draft": document,
     }
+    if spec is not None:
+        context["confirmed_spec"] = spec
     _save_context(video_id, context)
     return context
 
@@ -645,7 +680,7 @@ def render_shorts_line(
         "台本全体の誤字・固有名詞を確認した",
         value=is_human_review_current(state, review_fingerprint),
         key=check_key,
-        disabled=not gate.hard_valid,
+        disabled=not gate.hard_valid or gate.can_generate,
     )
     if human_checked and not gate.can_generate:
         try:

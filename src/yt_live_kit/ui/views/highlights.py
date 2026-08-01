@@ -313,7 +313,15 @@ def render_highlights_section(result: PipelineResult) -> None:
     settings = get_settings()
     busy = is_busy()
 
-    with st.expander("ハイライトまとめ動画", expanded=False):
+    expander = st.expander(
+        "補助: ハイライトまとめ動画",
+        expanded=False,
+        key=f"highlights_auxiliary_{result.video_id}",
+        on_change="rerun",
+    )
+    if not expander.open:
+        return
+    with expander:
         if busy:
             st.info(_BUSY_MESSAGE)
 

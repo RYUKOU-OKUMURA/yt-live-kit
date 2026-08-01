@@ -297,7 +297,6 @@ def render_upload_section(
     on_operation_started: Callable[[str, str, Path], None] | None = None,
 ) -> None:
     """最新の検証済み shorts queue から成功 item の投稿入口を描画する."""
-    st.subheader("7. YouTube 予約投稿")
     st.caption(
         "生成済みショートを private 固定・通知なしでアップロードし、"
         "次の空き枠へ予約します。"

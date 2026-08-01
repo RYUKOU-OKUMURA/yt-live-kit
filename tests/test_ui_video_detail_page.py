@@ -116,6 +116,35 @@ def test_initial_workspace_follows_candidate_and_reservable_priority() -> None:
     ) == "publish"
 
 
+def test_candidate_transfer_preserves_order_and_invalidates_on_change() -> None:
+    from yt_live_kit.models.clips import ClipCandidate
+
+    first = ClipCandidate(
+        id="clip-1",
+        title="1",
+        start="00:00:00",
+        end="00:01:00",
+        duration_sec=60,
+        reason="理由",
+    )
+    second = first.model_copy(update={"id": "clip-2", "title": "2"})
+    fingerprint = video_detail.make_candidate_fingerprint("clips", [first, second])
+    transfer = video_detail.CandidateTransfer(
+        "clips", ("clip-2", "clip-1"), fingerprint
+    )
+    assert video_detail.validate_candidate_transfer(
+        transfer,
+        current_fingerprint=fingerprint,
+        candidate_ids={"clip-1", "clip-2"},
+    ) == transfer
+    changed = video_detail.make_candidate_fingerprint("clips", [second, first])
+    assert video_detail.validate_candidate_transfer(
+        transfer,
+        current_fingerprint=changed,
+        candidate_ids={"clip-1", "clip-2"},
+    ) is None
+
+
 def test_description_applied_ids_round_trip_and_mark(tmp_path: Path) -> None:
     settings = Settings(data_dir=tmp_path)
 

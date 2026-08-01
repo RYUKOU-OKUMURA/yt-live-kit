@@ -659,7 +659,7 @@ def render_shorts_queue(
 ) -> None:
     """S4 の選択、明示台本生成、全確定、結果表示を描画する."""
     st.divider()
-    st.markdown("### ショートをまとめて生成")
+    st.markdown("**ショートをまとめて生成**")
     existing_snapshot = _snapshot(video_id)
     if existing_snapshot is not None and existing_snapshot.get("line_mode") is True:
         st.info(

@@ -495,6 +495,7 @@ def render_shorts_section(
             clip_candidates=clip_candidates,
             highlight_candidates=highlight_candidates,
             settings=settings,
+            embedded=True,
         )
 
         render_shorts_queue(

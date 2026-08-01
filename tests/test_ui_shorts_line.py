@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from pathlib import Path
+import json
 from unittest.mock import patch
 
 import pytest
@@ -23,6 +24,10 @@ from yt_live_kit.services.shorts_line import (
     set_review_fingerprint,
 )
 from yt_live_kit.ui.components import shorts_line
+from yt_live_kit.ui.views._local_settings import (
+    ShortsLineDefaults,
+    load_shorts_line_defaults,
+)
 
 
 def _reviewed_output_state(output_path: Path, settings: Settings):
@@ -144,3 +149,20 @@ def test_sidebar_is_display_only_and_shows_daily_progress(tmp_path: Path) -> Non
     assert any("作成中のラインはありません" in call.args[0] for call in caption.call_args_list)
     assert any("本日のライン完了 1／3" in call.args[0] for call in write.call_args_list)
     button.assert_not_called()
+
+
+def test_line_defaults_are_read_only_with_safe_fallback(tmp_path: Path) -> None:
+    settings = Settings(data_dir=tmp_path)
+    assert load_shorts_line_defaults(settings) == ShortsLineDefaults()
+
+    path = tmp_path / "_config" / "shorts_defaults.json"
+    path.parent.mkdir(parents=True)
+    path.write_text(
+        json.dumps(
+            {"layout": "crop", "preset": "boxed", "hook_preset": "hook"}
+        ),
+        encoding="utf-8",
+    )
+    assert load_shorts_line_defaults(settings) == ShortsLineDefaults(
+        "crop", "boxed", "hook"
+    )

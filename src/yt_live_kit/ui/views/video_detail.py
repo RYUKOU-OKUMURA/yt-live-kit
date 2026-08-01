@@ -602,6 +602,34 @@ def _save_transfer(video_id: str, transfer: CandidateTransfer) -> None:
     }
 
 
+def _valid_transfer_ids(
+    video_id: str,
+    *,
+    clips: list[ClipCandidate],
+    highlights: list[HighlightSegment],
+) -> tuple[str, ...]:
+    """全 workspace 描画前に引き継ぎを再検証し、stale 状態を破棄する."""
+    values: list[str] = []
+    invalidated = False
+    for source, candidates in (("clips", clips), ("highlights", highlights)):
+        transfer = _load_transfer(video_id, source)
+        if transfer is None:
+            continue
+        current = validate_candidate_transfer(
+            transfer,
+            current_fingerprint=make_candidate_fingerprint(source, candidates),
+            candidate_ids={candidate.id for candidate in candidates},
+        )
+        if current is None:
+            st.session_state.pop(_transfer_key(video_id, source), None)
+            invalidated = True
+        else:
+            values.extend(current.selected_ids)
+    if invalidated:
+        st.warning("候補が更新されました。ショート作成対象を選び直してください。")
+    return tuple(values)
+
+
 def _set_workspace(video_id: str, workspace: Workspace) -> None:
     st.session_state[f"detail_workspace_{video_id}"] = workspace
 
@@ -924,6 +952,11 @@ def render_video_detail_page(
         return
 
     clips, highlights = _load_material_candidates(result, settings)
+    preferred_transfer_ids = _valid_transfer_ids(
+        video.video_id,
+        clips=clips,
+        highlights=highlights,
+    )
     try:
         reservable_count = count_reservable_shorts(video.video_id, settings)
     except ShortsQueueError as exc:
@@ -970,18 +1003,13 @@ def render_video_detail_page(
         )
     elif selected_workspace == "shorts":
         st.subheader("ショート作成")
-        preferred_ids: list[str] = []
-        for source in ("clips", "highlights"):
-            transfer = _load_transfer(video.video_id, source)
-            if transfer is not None:
-                preferred_ids.extend(transfer.selected_ids)
         render_shorts_line(
             video_id=video.video_id,
             title=result.title,
             clip_candidates=clips,
             highlight_candidates=highlights,
             settings=settings,
-            preferred_candidate_ids=preferred_ids,
+            preferred_candidate_ids=preferred_transfer_ids,
         )
         render_shorts_section(result, expanded=False)
     else:
