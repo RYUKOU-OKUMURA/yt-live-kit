@@ -52,9 +52,10 @@ v2 は Cursor 上で Grok 4.5（オーケストレーター）+ Composer 2.5（�
 - 新規依存パッケージを追加しない（yt-dlp / ffmpeg / Streamlit / pydantic / typer /
   google-api-python-client で完結させる）
 - 既存のテストを壊さない
-- 【フェーズ U のタスクのみ】services/ を原則変更しない。新しい永続化が必要な場合は、
-  execution-plan-v3.md の該当タスクの「設計メモ」に従い ui/ 層内で完結させる。例外は U3 の
-  services/batch.py における do_chapters / do_clips の引数追加・全呼び出しへの伝播・両方 False の入力検証だけとする
+- 【フェーズ U のタスクのみ】services/ を原則変更しない。UI 固有の軽量な永続化は ui/ 層内で
+  完結させる。限定例外は U3 の services/batch.py における do_chapters / do_clips の入力伝播と、
+  U6 の新規 services/shorts_line.py における工程・人確認状態の atomic / fail closed 永続化だけとする。
+  U6 でも既存 service の生成・投稿処理と queue fingerprint の意味は変更しない
 - 【フェーズ P の実アップロードを伴うタスクのみ】実際に YouTube へアップロードする操作は、
   ユーザーの明示的な承認を得てから実行する。ユニットテストでは googleapiclient を必ずモックする
 - 【フェーズ P】本機能は一般 uploader ではなく scheduled-only feature である。privacyStatus=private、
@@ -109,14 +110,23 @@ uv run pytest
 
 ### 3.2 フェーズ U 特有の観点
 
-- [ ] `git diff --stat` に `src/yt_live_kit/services/` 配下のファイルが含まれていないこと（U0〜U4 は原則違反。ただし U3 の `services/batch.py` は `do_chapters` / `do_clips` の引数追加・`run_batch_job_target()` → `run_batch()` → `pipeline.run()` の全呼び出し伝播・両方 `False` の入力検証に限り許可。U5 も `services/youtube_api.py` は変更しない）
-- [ ] 新しい永続化（チャンネル既定ハンドル等）が `services/` を新設せず、`ui/views/_local_settings.py` のような UI 層のヘルパーで完結しているか
+- [ ] `git diff --stat` の `src/yt_live_kit/services/` 変更がタスクごとの限定例外内か。U3 は `services/batch.py` の入力伝播だけ、U6 は新規 `services/shorts_line.py` のライン安全状態だけを許可し、既存 service の挙動を変えていないか。U5 は `services/youtube_api.py` を変更しない
+- [ ] UI 固有の軽量な永続化（チャンネル既定ハンドル等）が `ui/views/_local_settings.py` で完結しているか。生成・投稿可否を決める U6 の工程 / 人確認状態を UI 層だけへ置かず、限定例外 `services/shorts_line.py` で atomic / fail closed に扱っているか
 - [ ] `ui/pages/` に相当する旧ディレクトリ・旧 import パスが残っていないか（U0 完了後は全タスクで確認）
 - [ ] U5 完了時の IA が公開 3 画面（ライブラリ / 取り込み / 設定）+ `visibility="hidden"` の動画詳細 1 画面であり、`history.py` / `url_path="history"` が残っていないか
 - [ ] 旧「処理済み一覧」を削除しても、v1 / v2 のストレージ管理が `ui/components/storage_manager.py` 経由で設定ページから利用できるか。10 件を超えても 11 件目以降を含む全動画へ到達でき、各動画の元動画容量と個別削除導線、個別 / 一括削除の確認ダイアログ、成果物保持が回帰していないか
 - [ ] U5 の概要欄反映が、外側 primary ボタン → OAuth / チャプター検証 → fetch / merge → `st.dialog(width="large")` の更新前 / 更新後表示 → 確認時だけ update → 成功後だけ mark、の順になっているか。確定前のダイアログ再描画だけは取得済みプレビューを再利用し、確定時は既存 update 内部の fetch を維持しているか
 - [ ] update 失敗時に mark されず、YouTube 更新成功後のローカル mark 失敗は「YouTube 側は更新済み」と分かる日本語警告になるか
 - [ ] ステッパー・確認ダイアログ・共通コピー部品が、複数ページで同じ実装を再発明していないか（`ui/components/clipboard.py` を再利用しているか）
+- [ ] U6 の 3 ワークスペースと 6 工程が別概念として実装され、フル工程はショート作成内、縮約工程は左パネルに常設されているか。手動切り替えがラインを破棄せず、工程 6 の明示 CTA だけが対象を保持して公開・投稿へ移るか
+- [ ] U6 の左パネルが生成前 / 生成中 / 生成後 / 元素材欠損でプレビューを切り替え、編集・確定ボタンを重複配置していないか。折り畳み時もメイン上部に縮約工程が残るか
+- [ ] U6 の品質表示が自動ハード判定 / 自動警告 / 人の全文確認 / 生成条件に分離され、人確認が既定未チェックか。1 行 16 文字超だけで生成を禁止していないか
+- [ ] review fingerprint が `(video_id, clip_id)`、既存 queue fingerprint、canonical 台本 JSON を含み、本文・強調・メタデータ編集で確認を失効させるか。元に戻しても自動復帰せず、生成直前に再検証するか
+- [ ] `line_{clip_id}.json` が atomic 保存され、欠落・破損・出力変更時に証明できない台本確認 / 最終確認を未確認へ戻すか。queue fingerprint の既存意味を変更していないか
+- [ ] `output_fingerprint` が video / clip / review fingerprint、解決済み絶対パス、size、mtime_ns、mp4 内容 SHA-256 を含み、工程 6 直前の不一致で最終プレビュー確認だけを失効させるか
+- [ ] `active_line.json` が atomic で、無効・欠落時は非完了 line を updated_at 降順・clip_id 昇順で決定的に復元し、完了済み line を勝手に再開しないか
+- [ ] 「本日のライン完了 N／3」が現在の `SchedulePolicy.timezone` の日付と、同一 `(source_video_id, source_kind, clip_id)` の当日最新 operation で集計され、LA 基準 upload attempt 台帳と混同されていないか。timezone 変更時は現在値で再集計し、失敗・要照合は完了数から除外され「要対応 N 件」になるか
+- [ ] 行別エディタが本文・時刻・行全体の強調を扱い、ユーザー編集差分を「AI案から変更」とだけ表示するか。差分だけで全文確認を完了できず、証明不能な「Codex が修正」表示がないか
 
 ### 3.3 フェーズ S 特有の観点
 
@@ -163,7 +173,7 @@ uv run pytest
 
 | フェーズ | 最重要の注意点 |
 |----------|----------------|
-| **U** | `services/` を原則触らない。UI 層の並べ替えとテストの再構成だけで完結させる。新しい永続化が必要なら `ui/views/_local_settings.py` のような UI 層ヘルパーに留める。U3 の `services/batch.py` における引数追加・全呼び出し伝播・両方 `False` の入力検証だけは最小例外（[execution-plan-v3.md](./execution-plan-v3.md) §3.2 参照） |
+| **U** | `services/` は原則触らない。例外は U3 の `services/batch.py` 入力伝播と、U6 の新規 `services/shorts_line.py` による工程・人確認状態の atomic / fail closed 永続化だけ。UI 固有の軽量設定は引き続き `_local_settings.py` に置く（[execution-plan-v3.md](./execution-plan-v3.md) §3.2 参照） |
 | **S** | 従量課金 API を使わない。AI 生成は Codex CLI のみ、かつテロップ台本とメタデータは同じ呼び出しで一括生成する。**自動生成をそのまま焼き込まず、必ず人の確認ステップを挟む** |
 | **P** | P1 / P2 を全 API mock で完成してから、同じ本番経路だけを P0 / P3 で別承認により実操作する。private + future publishAt + notify false、audience / synthetic / consent、LA attempt、resumable / reconciliation、永続 operation、confirm race、polling を固定する。private lock 中は P3 を成功扱いにしない |
 
@@ -201,6 +211,7 @@ uv run pytest
 | U3 | `services/channel.py` の `list_archives()` を自動で呼んでいないか（レート制限対策・NFR-05 は v3 でも維持）。`services/batch.py` の変更が `do_chapters` / `do_clips` の引数追加・既定 `True` / `True`・`run_batch_job_target()` → `run_batch()` → `pipeline.run()` の全呼び出し伝播・両方 `False` の入力検証だけか。UI 3 ルートからの `start_job()` kwargs もテストされているか。`_local_settings.py` は U1 で新設済みのため、重複して新規作成していないか |
 | U4 | `config.py` を変更しようとしていないか（設定ページは表示専用 + チャンネル既定ハンドルのみ編集可） |
 | U5 | 正式 IA が公開 3 画面 + 非表示詳細になり旧 history が削除されているか。ストレージ管理を設定へ移し、全動画への到達性、個別 / 一括ダイアログの対象情報、未確定 / 確定境界、StorageError、成果物保持まで AC-15 を維持しているか。概要欄は外側 primary → 検証 → fetch / merge → large dialog の更新前後別表示 → 確認時だけ update → 成功後だけ mark の一本化された流れか。確定時の既存 update 内部 fetch を残し、実 YouTube 書き込みを受け入れ試験で実行していないか |
+| U6 | 3 ワークスペース + 左パネル + 6 工程の責務、人確認の既定未チェック、review / output fingerprint と正しい失効対象、active line 復元、atomic / fail closed ライン状態、`SchedulePolicy.timezone` 日次集計が FR-17 / FR-33 と一致するか。既存 queue fingerprint、生成・投稿 service、各確認ダイアログを壊していないか |
 | S1 | テロップ台本とメタデータを 1 回の Codex 呼び出しで生成しているか。入力字幕が開始・終了・ミリ秒を保持し、区間・行の `start_sec` / `end_sec` が元動画基準の絶対秒で、`TelopSegmentScript` 自身にも区間境界があり、S3 の `累積尺 + 行の絶対秒 - 元区間開始秒` へ一意に変換できるか。S1 は失敗時に例外を送出し、呼び出し側が局所捕捉して既存 telop と他成果物を維持する softfail になっているか |
 | S2 | `TimedCue.emphasis=False` の追加が既存 3 引数構築を壊していないか。プリセット省略 + フックなしで `build_segment_subtitle()` と既存 ASS 出力が v2 完全互換か。通常字幕 / Hook の `\`・波括弧・C0 制御文字・実改行を指定順で安全化してから、選択 preset の強調色と本文復帰色を導出して行全体へ管理タグを付けているか。不明 preset / 不正色 / 空 hook を日本語エラーにし、通常字幕と Hook を同一 ASS に出せるか |
 | S3 | 公開 `NormalizedSegmentBounds` / 正規化 helper の整数 ms を ID・尺（10,000 / 180,000 ms）・encode・字幕 offset / clip の唯一の基準にし、0.5 ms 境界でも一貫するか。入力順を再生・ID・encode 順として保持し、全区間・layout・output 名・明示 hook・preset を source 取得前に検証するか。telop は ffmpeg 前と `build_concatenated_subtitle()` 直呼び境界の両方で tuple 入力に対して再検証し、直呼びでも明示 hook の空文字・半角山カッコを拒否するか。VTT の区間相対 cue に累積 ms を加え、1 回だけ読む fallback、Hook 単独、preset 全伝播、`force_style` なしの 1 回焼き込み、`len(segments) + 3` の進捗契約を満たすか。安全な output 名、`{正式出力stem}.ffmpeg.log`、atomic replace、失敗時の既存 mp4 保護、専用中間ディレクトリ単位の cleanup / keep、エラー型変換、font warning、既存 `build_short()` 不変を確認する |
@@ -216,6 +227,7 @@ uv run pytest
 
 | 日付 | 内容 |
 |------|------|
+| 2026-08-01 | U6 v3.2 確定仕様を反映。フェーズ U の限定 service 例外、左パネルと 6 工程、品質判定 4 分離、review fingerprint、fail closed ライン状態、timezone 日次集計、差分表示のレビュー観点とクイックリファレンスを追加 |
 | 2026-08-01 | P 安全監査の独立レビューを反映。P1 → P2 → P0 → P3 の必須順序、P0 公開可能性の承認、単一 queue record、job crash recovery / fault injection、具体的 poll / lock 判定をレビュー観点へ追加 |
 | 2026-08-01 | P0〜P3 着手前安全監査を反映。P1 / P2 先行、scheduled-only の private + future publishAt、Made for Kids / synthetic media 必須選択、Community Guidelines 既定未同意、metadata、resumable / reconciliation、LA attempt、永続 operation、confirm race、jobs / status bar、polling、実操作別承認をレビュー観点へ追加 |
 | 2026-08-01 | S4 計画レビューを反映。form 外 source、表示順、明示 Codex submit、deep immutable spec、完全 fingerprint、manifest 単独 writer、job ID / latest 表示境界、決定的出力名をレビュー観点へ追加 |
