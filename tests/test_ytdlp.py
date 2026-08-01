@@ -1,8 +1,12 @@
 """yt-dlp ラッパーのユニットテスト."""
 
+import subprocess
+from unittest.mock import patch
+
 import pytest
 
-from yt_live_kit.services.ytdlp import _find_subtitle_file, extract_video_id
+from yt_live_kit.config import Settings
+from yt_live_kit.services.ytdlp import YtdlpError, _run_ytdlp, _find_subtitle_file, extract_video_id, fetch
 
 
 @pytest.mark.parametrize(
@@ -45,3 +49,65 @@ def test_find_subtitle_file_ja_orig_takes_priority(tmp_path):
 
     assert path == orig_path
     assert lang == "ja-orig"
+
+
+@patch("yt_live_kit.services.ytdlp.subprocess.run")
+def test_run_ytdlp_timeout_raises_ytdlp_error(mock_run):
+    mock_run.side_effect = subprocess.TimeoutExpired(cmd=["yt-dlp"], timeout=300)
+    settings = Settings(ytdlp_timeout=300)
+
+    with pytest.raises(YtdlpError, match="タイムアウト"):
+        _run_ytdlp(["--version"], settings)
+
+
+@patch("yt_live_kit.services.ytdlp.subprocess.run")
+def test_run_ytdlp_download_uses_download_timeout(mock_run):
+    mock_run.return_value = subprocess.CompletedProcess(
+        args=[], returncode=0, stdout="", stderr=""
+    )
+    settings = Settings(ytdlp_timeout=300, download_timeout=7200)
+
+    _run_ytdlp(["--skip-download", "https://example.com"], settings, timeout=settings.download_timeout)
+
+    assert mock_run.call_args.kwargs["timeout"] == 7200
+
+
+@patch("yt_live_kit.services.ytdlp.write_text_atomically")
+@patch("yt_live_kit.services.ytdlp.get_ytdlp_version", return_value="2026.07.04")
+@patch("yt_live_kit.services.ytdlp._normalize_subtitle_path")
+@patch("yt_live_kit.services.ytdlp._find_subtitle_file")
+@patch("yt_live_kit.services.ytdlp._download_subtitles")
+@patch("yt_live_kit.services.ytdlp._fetch_metadata")
+@patch("yt_live_kit.services.ytdlp.shutil.which", return_value="/usr/bin/yt-dlp")
+def test_fetch_saves_meta_json_atomically(
+    mock_which,
+    mock_fetch_metadata,
+    mock_download_subtitles,
+    mock_find_subtitle,
+    mock_normalize,
+    mock_version,
+    mock_write_atomic,
+    tmp_path,
+):
+    video_id = "IJvd6k6ZmUo"
+    mock_fetch_metadata.return_value = {
+        "id": video_id,
+        "title": "テスト動画",
+        "upload_date": "20260101",
+        "duration": 3600,
+    }
+    subtitles_dir = tmp_path / video_id / "subtitles"
+    subtitles_dir.mkdir(parents=True)
+    vtt_path = subtitles_dir / f"{video_id}.ja.vtt"
+    vtt_path.write_text("WEBVTT\n\n", encoding="utf-8")
+    mock_find_subtitle.return_value = (vtt_path, "ja")
+    mock_normalize.return_value = subtitles_dir / "ja.vtt"
+
+    settings = Settings(data_dir=tmp_path)
+    meta = fetch(f"https://www.youtube.com/watch?v={video_id}", settings)
+
+    assert meta.id == video_id
+    mock_write_atomic.assert_called_once()
+    path, text = mock_write_atomic.call_args.args
+    assert path.name == "meta.json"
+    assert video_id in text

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import socket
 import time
 from http.client import (
@@ -52,6 +53,15 @@ def _token_path(settings: Settings) -> Path:
     return settings.data_dir / "_config" / "youtube_token.json"
 
 
+def _save_token(token_path: Path, creds_json: str) -> None:
+    """OAuth トークン JSON を保存し、ファイル・親ディレクトリの権限を制限する."""
+    token_path.parent.mkdir(parents=True, exist_ok=True)
+    token_path.write_text(creds_json, encoding="utf-8")
+    os.chmod(token_path, 0o600)
+    # 既存ファイル（client_secret.json 等）のモードは変えず、ディレクトリの一覧権限のみ制限する。
+    os.chmod(token_path.parent, 0o700)
+
+
 def _http_error_to_message(exc: Exception) -> str:
     return f"YouTube API の呼び出しに失敗しました。\n（詳細: {exc}）"
 
@@ -69,8 +79,7 @@ def get_credentials(settings: Settings) -> Any:
             return creds
         if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())
-            token_path.parent.mkdir(parents=True, exist_ok=True)
-            token_path.write_text(creds.to_json(), encoding="utf-8")
+            _save_token(token_path, creds.to_json())
             return creds
 
     if not is_configured(settings):
@@ -85,8 +94,7 @@ def get_credentials(settings: Settings) -> Any:
         str(settings.youtube_client_secret), SCOPES
     )
     creds = flow.run_local_server(port=0)
-    token_path.parent.mkdir(parents=True, exist_ok=True)
-    token_path.write_text(creds.to_json(), encoding="utf-8")
+    _save_token(token_path, creds.to_json())
     return creds
 
 

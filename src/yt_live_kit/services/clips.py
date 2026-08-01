@@ -10,6 +10,7 @@ from pathlib import Path
 
 from yt_live_kit.config import Settings, get_settings
 from yt_live_kit.models.clips import ClipCandidate, ClipCandidatesDocument
+from yt_live_kit.services._fsutil import write_text_atomically
 from yt_live_kit.services.ai_prompt import (
     AiPromptError,
     CodexNotFoundError,
@@ -290,10 +291,7 @@ def save_candidates_file(
     clips_dir = video_dir / "clips"
     clips_dir.mkdir(parents=True, exist_ok=True)
     candidates_path = clips_dir / "candidates.json"
-    candidates_path.write_text(
-        doc.model_dump_json(indent=2),
-        encoding="utf-8",
-    )
+    write_text_atomically(candidates_path, doc.model_dump_json(indent=2))
     return candidates_path, doc
 
 

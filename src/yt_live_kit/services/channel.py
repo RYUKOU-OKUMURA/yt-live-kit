@@ -91,12 +91,20 @@ def normalize_channel_url(text: str) -> tuple[str, str]:
 
 def _run_ytdlp(args: list[str], settings: Settings) -> subprocess.CompletedProcess[str]:
     cmd = [settings.ytdlp_path, *args]
-    return subprocess.run(
-        cmd,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    timeout = settings.ytdlp_timeout
+    try:
+        return subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise ChannelError(
+            f"yt-dlp の実行が {timeout} 秒でタイムアウトしました。"
+            "ネットワーク状況を確認してください。"
+        ) from exc
 
 
 def _parse_json_lines(stdout: str) -> list[dict]:

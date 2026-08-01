@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import tempfile
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
@@ -18,6 +17,7 @@ from yt_live_kit.models.telop import (
     TelopScriptDocument,
     TelopSegmentScript,
 )
+from yt_live_kit.services._fsutil import write_text_atomically
 from yt_live_kit.services.ai_prompt import (
     AiPromptError,
     CodexNotFoundError,
@@ -459,39 +459,12 @@ def validate_telop_script(
     )
 
 
-def _write_text_atomically(path: Path, text: str) -> None:
-    temporary_path: Path | None = None
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            dir=path.parent,
-            prefix=f".{path.name}.",
-            suffix=".tmp",
-            delete=False,
-        ) as temporary:
-            temporary.write(text)
-            temporary_path = Path(temporary.name)
-        temporary_path.replace(path)
-    finally:
-        if temporary_path is not None:
-            try:
-                temporary_path.unlink(missing_ok=True)
-            except OSError:
-                logger.warning(
-                    "一時テキストファイルを削除できませんでした: %s",
-                    temporary_path,
-                    exc_info=True,
-                )
-
-
 def _save_prompt(video_id: str, clip_id: str, prompt: str, settings: Settings) -> Path:
     video_dir = settings.data_dir / video_id
     if not video_dir.is_dir():
         raise TelopError(f"動画ディレクトリが見つかりません: {video_dir}")
     path = video_dir / "shorts" / "telop" / f"prompt_telop_{clip_id}.txt"
-    _write_text_atomically(path, prompt)
+    write_text_atomically(path, prompt)
     return path
 
 
@@ -502,7 +475,7 @@ def _save_document(
     settings: Settings,
 ) -> Path:
     path = settings.data_dir / video_id / "shorts" / "telop" / f"telop_{clip_id}.json"
-    _write_text_atomically(path, document.model_dump_json(indent=2))
+    write_text_atomically(path, document.model_dump_json(indent=2))
     return path
 
 

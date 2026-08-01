@@ -109,6 +109,19 @@ def test_save_candidates_file(tmp_path: Path):
     assert path.is_file()
     assert len(doc.candidates) == 2
     assert path.name == "candidates.json"
+    assert list(path.parent.glob(".*.tmp")) == []
+
+
+@patch("yt_live_kit.services.clips.write_text_atomically")
+def test_save_candidates_file_uses_atomic_helper(mock_write_atomic, tmp_path: Path):
+    video_id = "test_atomic"
+    (tmp_path / video_id).mkdir()
+    settings = Settings(data_dir=tmp_path)
+
+    path, _ = save_candidates_file(video_id, _sample_candidates_json(), settings)
+
+    mock_write_atomic.assert_called_once()
+    assert mock_write_atomic.call_args.args[0] == path
 
 
 def test_save_candidates_file_invalid_raises(tmp_path: Path):

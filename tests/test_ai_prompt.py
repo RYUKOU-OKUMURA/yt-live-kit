@@ -9,6 +9,7 @@ from yt_live_kit.services.ai_prompt import (
     build_chapters_prompt,
     find_project_root,
     generate_chapters,
+    save_chapters_file,
     save_prompt_file,
 )
 from yt_live_kit.services.chapter_validator import validate_chapters
@@ -67,3 +68,17 @@ def test_validate_sample_for_manual_check():
         "0:00 開始\n0:03 短すぎ\n5:00 本編\n"
     )
     assert not invalid.ok
+
+
+def test_save_chapters_file_writes_atomically(tmp_path: Path):
+    video_id = "chapters_atomic"
+    (tmp_path / video_id).mkdir()
+    settings = Settings(data_dir=tmp_path)
+    chapters_text = "0:00 配信開始\n5:30 Codex デモ\n12:00 まとめ\n"
+
+    path, validation = save_chapters_file(video_id, chapters_text, settings)
+
+    assert validation.ok
+    assert path.is_file()
+    assert path.name == "chapters.md"
+    assert list(path.parent.glob(".*.tmp")) == []

@@ -424,10 +424,10 @@ def test_build_short_two_pass_commands_no_mock_of_encode_segment(
     assert mock_run.call_count == 2
     pass1_cmd, pass2_cmd = (call.args[0] for call in mock_run.call_args_list)
 
-    # パス1（切り出し）: -ss は -i の後ろ（精密シーク）
+    # パス1（切り出し）: -ss は -i より前（入力シーク。出力は 0 秒始まり）
     i_index = pass1_cmd.index("-i")
     ss_index = pass1_cmd.index("-ss")
-    assert ss_index > i_index
+    assert ss_index < i_index
     assert pass1_cmd[i_index + 1] == str(tmp_path / "source.mp4")
 
     # パス2（整形）: -ss を一切含まない

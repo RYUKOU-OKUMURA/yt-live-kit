@@ -156,7 +156,7 @@ def test_save_confirmed_telop_script_replace_failure_is_japanese_and_preserves_e
     changed = _valid_document()
     changed["hook_text"] = "変更したフック"
     with (
-        patch.object(Path, "replace", side_effect=OSError("replace failed")),
+        patch("yt_live_kit.services._fsutil.os.replace", side_effect=OSError("replace failed")),
         pytest.raises(TelopError, match="保存できませんでした"),
     ):
         save_confirmed_telop_script("video123", _segments(), changed, settings)

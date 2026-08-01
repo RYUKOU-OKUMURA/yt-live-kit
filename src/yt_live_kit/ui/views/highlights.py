@@ -24,7 +24,6 @@ _NO_CANDIDATES_MESSAGE = (
     "ハイライト候補がありません。「ハイライト候補を生成」するか、"
     "「切り抜き候補から選ぶ」を ON にして候補を表示してください。"
 )
-_USE_CLIPS_TOGGLE_KEY = "highlights_use_clips_toggle"
 
 
 class HighlightsJobError(HighlightsError):
@@ -63,6 +62,11 @@ def sum_duration_sec(segments: Sequence[HighlightSegment]) -> int:
 def segment_checkbox_key(video_id: str, segment_id: str) -> str:
     """区間チェックボックスの session_state キーを返す."""
     return f"hl_cb_{video_id}_{segment_id}"
+
+
+def use_clips_toggle_key(video_id: str) -> str:
+    """切り抜き候補トグルの session_state キーを返す."""
+    return f"highlights_use_clips_{video_id}"
 
 
 def clip_to_highlight_segment(clip: ClipCandidate) -> HighlightSegment:
@@ -332,7 +336,7 @@ def render_highlights_section(result: PipelineResult) -> None:
 
         use_clips = st.toggle(
             "切り抜き候補から選ぶ",
-            key=_USE_CLIPS_TOGGLE_KEY,
+            key=use_clips_toggle_key(result.video_id),
             disabled=busy,
         )
 

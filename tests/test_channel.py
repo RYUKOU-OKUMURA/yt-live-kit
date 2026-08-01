@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from datetime import datetime, timezone
 from subprocess import CompletedProcess
 from unittest.mock import patch
@@ -214,6 +215,15 @@ def test_list_archives_ytdlp_generic_failure(mock_run):
 def test_list_archives_ytdlp_binary_missing(mock_which):
     with pytest.raises(ChannelError, match="yt-dlp が見つかりません"):
         list_archives("@test", settings=Settings(ytdlp_path="missing-ytdlp"))
+
+
+@patch("yt_live_kit.services.channel.subprocess.run")
+@patch("yt_live_kit.services.channel.shutil.which", return_value="/usr/bin/yt-dlp")
+def test_list_archives_ytdlp_timeout_raises_channel_error(mock_which, mock_run):
+    mock_run.side_effect = subprocess.TimeoutExpired(cmd=["yt-dlp"], timeout=300)
+
+    with pytest.raises(ChannelError, match="タイムアウト"):
+        list_archives("@test", settings=Settings(ytdlp_path="yt-dlp", ytdlp_timeout=300))
 
 
 def test_save_and_load_cache_roundtrip(tmp_path):

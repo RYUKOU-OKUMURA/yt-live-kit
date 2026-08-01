@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -12,6 +11,7 @@ from pathlib import Path
 from typing import Literal
 
 from yt_live_kit.config import Settings, get_settings
+from yt_live_kit.services._fsutil import write_text_atomically
 from yt_live_kit.services.history import is_video_targets_complete
 from yt_live_kit.services.jobs import get_active_job, update_job
 from yt_live_kit.services.pipeline import PipelineError, PipelineResult, run
@@ -124,7 +124,7 @@ def append_batch_status(
             for e in combined
         ],
     }
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    write_text_atomically(path, json.dumps(payload, ensure_ascii=False, indent=2))
     return path
 
 
@@ -301,12 +301,7 @@ def write_batch_summary(
         "skipped": skipped,
         "failed": failed,
     }
-    tmp_path = path.parent / f".{job_id}.batch_summary.tmp"
-    tmp_path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-    os.replace(tmp_path, path)
+    write_text_atomically(path, json.dumps(payload, ensure_ascii=False, indent=2))
     return path
 
 
@@ -315,9 +310,7 @@ def write_batch_log(settings: Settings, job_id: str, lines: list[str]) -> Path:
     settings.ensure_data_dir()
     path = batch_log_path(settings, job_id)
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path = path.parent / f".{job_id}.batch_log.tmp"
-    tmp_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    os.replace(tmp_path, path)
+    write_text_atomically(path, "\n".join(lines) + "\n")
     return path
 
 

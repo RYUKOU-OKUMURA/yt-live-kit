@@ -20,6 +20,21 @@ class Settings(BaseSettings):
     sleep: float = Field(default=1.0, ge=0, description="URL 間のスリープ秒数")
     ytdlp_path: str = Field(default="yt-dlp", description="yt-dlp バイナリパス")
     ffmpeg_path: str = Field(default="ffmpeg", description="ffmpeg バイナリパス")
+    ytdlp_timeout: int = Field(
+        default=300,
+        ge=1,
+        description="yt-dlp の字幕・メタデータ取得タイムアウト秒数",
+    )
+    download_timeout: int = Field(
+        default=3600,
+        ge=1,
+        description="yt-dlp の動画本体ダウンロードタイムアウト秒数",
+    )
+    ffmpeg_timeout: int = Field(
+        default=3600,
+        ge=1,
+        description="ffmpeg / ffprobe のタイムアウト秒数",
+    )
     subtitle_font: str | None = Field(
         default=None,
         description="字幕焼き込み用フォント名（未指定時は自動検出）",

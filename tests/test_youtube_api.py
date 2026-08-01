@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import stat
 from datetime import datetime, timedelta, timezone
 from http.client import (
     BadStatusLine,
@@ -104,6 +106,90 @@ class TestIsConfigured:
         settings.youtube_client_secret = tmp_path / "missing.json"
 
         assert youtube_api.is_configured(settings) is False
+
+
+class TestSaveToken:
+    def test_save_token_restricts_file_and_directory_permissions(self, tmp_path: Path) -> None:
+        token_path = tmp_path / "_config" / "youtube_token.json"
+
+        youtube_api._save_token(token_path, '{"token": "secret"}')
+
+        assert token_path.read_text(encoding="utf-8") == '{"token": "secret"}'
+        assert stat.S_IMODE(token_path.stat().st_mode) == 0o600
+        assert stat.S_IMODE(token_path.parent.stat().st_mode) == 0o700
+
+    def test_save_token_does_not_change_existing_client_secret_mode(
+        self, tmp_path: Path
+    ) -> None:
+        config_dir = tmp_path / "_config"
+        config_dir.mkdir()
+        secret_path = config_dir / "client_secret.json"
+        secret_path.write_text("{}", encoding="utf-8")
+        os.chmod(secret_path, 0o644)
+
+        token_path = config_dir / "youtube_token.json"
+        youtube_api._save_token(token_path, '{"token": "secret"}')
+
+        assert stat.S_IMODE(secret_path.stat().st_mode) == 0o644
+        assert stat.S_IMODE(token_path.stat().st_mode) == 0o600
+
+
+class TestGetCredentialsTokenPermissions:
+    def test_refresh_path_saves_token_with_restricted_permissions(
+        self, tmp_path: Path
+    ) -> None:
+        settings = Settings(data_dir=tmp_path)
+        token_path = tmp_path / "_config" / "youtube_token.json"
+        token_path.parent.mkdir(parents=True)
+        token_path.write_text("{}", encoding="utf-8")
+
+        creds = MagicMock()
+        creds.valid = False
+        creds.expired = True
+        creds.refresh_token = "refresh"
+        creds.to_json.return_value = '{"refreshed": true}'
+
+        with (
+            patch(
+                "google.oauth2.credentials.Credentials.from_authorized_user_file",
+                return_value=creds,
+            ),
+            patch("google.auth.transport.requests.Request"),
+        ):
+            result = youtube_api.get_credentials(settings)
+
+        assert result is creds
+        assert token_path.read_text(encoding="utf-8") == '{"refreshed": true}'
+        assert stat.S_IMODE(token_path.stat().st_mode) == 0o600
+        assert stat.S_IMODE(token_path.parent.stat().st_mode) == 0o700
+
+    def test_initial_flow_saves_token_with_restricted_permissions(
+        self, tmp_path: Path
+    ) -> None:
+        secret = tmp_path / "_config" / "client_secret.json"
+        secret.parent.mkdir(parents=True)
+        secret.write_text("{}", encoding="utf-8")
+        settings = Settings(
+            data_dir=tmp_path,
+            youtube_client_secret=secret,
+        )
+        token_path = tmp_path / "_config" / "youtube_token.json"
+
+        creds = MagicMock()
+        creds.to_json.return_value = '{"initial": true}'
+        flow = MagicMock()
+        flow.run_local_server.return_value = creds
+
+        with patch(
+            "google_auth_oauthlib.flow.InstalledAppFlow.from_client_secrets_file",
+            return_value=flow,
+        ):
+            result = youtube_api.get_credentials(settings)
+
+        assert result is creds
+        assert token_path.read_text(encoding="utf-8") == '{"initial": true}'
+        assert stat.S_IMODE(token_path.stat().st_mode) == 0o600
+        assert stat.S_IMODE(token_path.parent.stat().st_mode) == 0o700
 
 
 class TestFetchVideoSnippet:

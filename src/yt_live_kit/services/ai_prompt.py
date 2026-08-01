@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from yt_live_kit.config import Settings, get_settings
+from yt_live_kit.services._fsutil import write_text_atomically
 from yt_live_kit.services.chapter_validator import (
     ValidationResult,
     format_chapters_markdown,
@@ -136,7 +137,7 @@ def save_chapters_file(
     chapters_dir.mkdir(parents=True, exist_ok=True)
     chapters_path = chapters_dir / "chapters.md"
     content = format_chapters_markdown(validation.chapters)
-    chapters_path.write_text(content, encoding="utf-8")
+    write_text_atomically(chapters_path, content)
     return chapters_path, validation
 
 

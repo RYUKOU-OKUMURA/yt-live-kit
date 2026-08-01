@@ -17,12 +17,34 @@ from yt_live_kit.services.ytdlp import YtdlpError, download_video
 
 FFMPEG_DEFAULT = "ffmpeg"
 FFPROBE_DEFAULT = "ffprobe"
+FFMPEG_TIMEOUT_DEFAULT = 3600
 
 ConcatProgressCallback = Callable[[int, int, str], None] | None
 
 
 class FfmpegError(Exception):
     """ffmpeg 実行エラー."""
+
+
+def _run_ffmpeg_command(
+    cmd: list[str],
+    *,
+    ffmpeg_timeout: int = FFMPEG_TIMEOUT_DEFAULT,
+) -> subprocess.CompletedProcess[str]:
+    """ffmpeg / ffprobe コマンドをタイムアウト付きで実行する."""
+    try:
+        return subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=ffmpeg_timeout,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise FfmpegError(
+            f"ffmpeg の実行が {ffmpeg_timeout} 秒でタイムアウトしました。"
+            "処理が長時間かかっている可能性があります。"
+        ) from exc
 
 
 def ffprobe_path_for(ffmpeg_path: str) -> str:
@@ -35,6 +57,7 @@ def probe_duration(
     source: Path,
     *,
     ffprobe_path: str = FFPROBE_DEFAULT,
+    ffmpeg_timeout: int = FFMPEG_TIMEOUT_DEFAULT,
 ) -> float:
     """ffprobe で動画の尺を秒として取得する."""
     path = source.resolve()
@@ -56,12 +79,7 @@ def probe_duration(
         str(path),
     ]
     try:
-        result = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        result = _run_ffmpeg_command(command, ffmpeg_timeout=ffmpeg_timeout)
     except OSError as exc:
         raise FfmpegError(f"ffprobe を実行できませんでした: {exc}") from exc
     if result.returncode != 0:
@@ -213,8 +231,13 @@ def encode_segment(
     extra_filters: list[str] | None = None,
     preset: str = "medium",
     crf: int = 20,
+    ffmpeg_timeout: int = FFMPEG_TIMEOUT_DEFAULT,
 ) -> Path:
-    """指定区間を精密シークで再エンコードする."""
+    """指定区間を入力シークで再エンコードする.
+
+    -ss を -i より前に置く入力シークにより長尺動画の後半切り出しを高速化する。
+    libx264 再エンコードではフレーム精度が保たれる。
+    """
     if end_sec <= start_sec:
         raise FfmpegError("終了時刻は開始時刻より後である必要があります。")
 
@@ -223,10 +246,10 @@ def encode_segment(
     cmd: list[str] = [
         ffmpeg,
         "-y",
-        "-i",
-        str(source),
         "-ss",
         str(start_sec),
+        "-i",
+        str(source),
         "-t",
         str(duration),
     ]
@@ -256,7 +279,7 @@ def encode_segment(
     )
 
     output.parent.mkdir(parents=True, exist_ok=True)
-    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    result = _run_ffmpeg_command(cmd, ffmpeg_timeout=ffmpeg_timeout)
     log_path = save_command_log(
         output.parent,
         cmd,
@@ -303,6 +326,7 @@ def concat_segments(
     *,
     ffmpeg_path: str = FFMPEG_DEFAULT,
     log_dir: Path | None = None,
+    ffmpeg_timeout: int = FFMPEG_TIMEOUT_DEFAULT,
 ) -> Path:
     """エンコード済み区間を concat demuxer で連結する."""
     if not segment_paths:
@@ -328,7 +352,7 @@ def concat_segments(
 
     effective_log_dir = log_dir if log_dir is not None else output_path.parent
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    result = _run_ffmpeg_command(cmd, ffmpeg_timeout=ffmpeg_timeout)
     log_path = save_command_log(
         effective_log_dir,
         cmd,
@@ -442,7 +466,7 @@ def cut_clip(
         reencode=reencode,
     )
 
-    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    result = _run_ffmpeg_command(cmd, ffmpeg_timeout=settings.ffmpeg_timeout)
     log_path = save_command_log(
         output_dir,
         cmd,
@@ -488,6 +512,7 @@ def _probe_video_scale(
     source: Path,
     *,
     ffprobe_path: str = FFPROBE_DEFAULT,
+    ffmpeg_timeout: int = FFMPEG_TIMEOUT_DEFAULT,
 ) -> str | None:
     """元動画の解像度から scale フィルタ文字列を返す（取得失敗時は None）."""
     ffprobe = shutil.which(ffprobe_path)
@@ -506,7 +531,7 @@ def _probe_video_scale(
         "csv=p=0:s=x",
         str(source),
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    result = _run_ffmpeg_command(cmd, ffmpeg_timeout=ffmpeg_timeout)
     if result.returncode != 0:
         return None
 
@@ -553,7 +578,12 @@ def cut_and_concat(
         raise FfmpegError(f"動画ディレクトリが見つかりません: {video_dir}")
 
     source_path = ensure_source_video(video_id, settings)
-    scale = _probe_video_scale(source_path, ffprobe_path=ffprobe_path)
+    ffmpeg_timeout = settings.ffmpeg_timeout
+    scale = _probe_video_scale(
+        source_path,
+        ffprobe_path=ffprobe_path,
+        ffmpeg_timeout=ffmpeg_timeout,
+    )
 
     segments_dir = video_dir / "highlights" / "segments"
     output_dir = video_dir / "highlights" / "output"
@@ -586,6 +616,7 @@ def cut_and_concat(
             end_sec,
             ffmpeg_path=ffmpeg_path,
             scale=scale,
+            ffmpeg_timeout=ffmpeg_timeout,
         )
         encoded_paths.append(seg_path)
 
@@ -601,6 +632,7 @@ def cut_and_concat(
         output_path,
         ffmpeg_path=ffmpeg_path,
         log_dir=concat_log_dir,
+        ffmpeg_timeout=ffmpeg_timeout,
     )
     command_log_path = concat_log_dir / f"{output_path.stem}.ffmpeg.log"
 

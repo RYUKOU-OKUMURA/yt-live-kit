@@ -44,6 +44,16 @@ def cut_clip_button_disabled(*, busy: bool) -> bool:
     return busy
 
 
+def clip_candidate_radio_key(video_id: str) -> str:
+    """切り抜き候補ラジオの session_state キーを返す."""
+    return f"clip_candidate_radio_{video_id}"
+
+
+def cut_clip_button_key(video_id: str) -> str:
+    """切り出しボタンの session_state キーを返す."""
+    return f"cut_clip_{video_id}"
+
+
 def _start_cut_clip(
     result: PipelineResult,
     selected,
@@ -168,7 +178,7 @@ def render_results(result: PipelineResult) -> None:
             range(len(result.clips_candidates)),
             format_func=lambda i: candidate_labels[i],
             label_visibility="collapsed",
-            key="clip_candidate_radio",
+            key=clip_candidate_radio_key(result.video_id),
         )
         selected = result.clips_candidates[selected_idx]
         st.markdown(f"**理由:** {selected.reason}")
@@ -178,7 +188,7 @@ def render_results(result: PipelineResult) -> None:
         cut_clicked = st.button(
             "切り出し",
             type="secondary",
-            key="cut_clip",
+            key=cut_clip_button_key(result.video_id),
             disabled=cut_clip_button_disabled(busy=busy),
         )
 

@@ -19,8 +19,10 @@ from yt_live_kit.ui.components.results import (
     _CLIPS_EMPTY_REQUESTED_MESSAGE,
     _TEMPLATE_NOT_SET_MESSAGE,
     _start_cut_clip,
+    clip_candidate_radio_key,
     clips_empty_message,
     cut_clip_button_disabled,
+    cut_clip_button_key,
     source_cache_note,
 )
 from yt_live_kit.ui.views import intake
@@ -230,6 +232,13 @@ def test_source_cache_note_preserves_existing_behavior(tmp_path) -> None:
 def test_cut_clip_button_disabled_when_busy() -> None:
     assert cut_clip_button_disabled(busy=True) is True
     assert cut_clip_button_disabled(busy=False) is False
+
+
+def test_clip_widget_keys_are_scoped_by_video_id() -> None:
+    assert clip_candidate_radio_key("vid_a") == "clip_candidate_radio_vid_a"
+    assert cut_clip_button_key("vid_a") == "cut_clip_vid_a"
+    assert clip_candidate_radio_key("vid_a") != clip_candidate_radio_key("vid_b")
+    assert cut_clip_button_key("vid_a") != cut_clip_button_key("vid_b")
 
 
 def test_start_cut_clip_starts_job() -> None:

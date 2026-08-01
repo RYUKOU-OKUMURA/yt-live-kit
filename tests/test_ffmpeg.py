@@ -1,6 +1,7 @@
 """ffmpeg サービスのユニットテスト."""
 
 import json
+import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -104,7 +105,7 @@ def test_cut_clip_fails_without_ffmpeg(mock_which, mock_run, tmp_path):
 
 @patch("yt_live_kit.services.ffmpeg.subprocess.run")
 @patch("yt_live_kit.services.ffmpeg.shutil.which")
-def test_encode_segment_ss_after_input(mock_which, mock_run, tmp_path):
+def test_encode_segment_ss_before_input(mock_which, mock_run, tmp_path):
     mock_which.return_value = "/usr/bin/ffmpeg"
 
     def fake_run(cmd, **kwargs):
@@ -123,7 +124,8 @@ def test_encode_segment_ss_after_input(mock_which, mock_run, tmp_path):
     cmd = mock_run.call_args[0][0]
     i_index = cmd.index("-i")
     ss_index = cmd.index("-ss")
-    assert ss_index > i_index
+    # 入力シーク: -ss が -i より前（長尺動画の後半切り出しを高速化）
+    assert ss_index < i_index
     assert cmd[i_index + 1] == str(source)
     assert "-c:v" in cmd
     assert "libx264" in cmd
@@ -300,3 +302,44 @@ def test_cut_clip_accepts_valid_custom_output_name(mock_which, mock_run, tmp_pat
 
     assert result.output_path == video_dir / "clips" / "output" / "my_clip.mp4"
     assert result.output_path.is_file()
+
+
+@patch("yt_live_kit.services.ffmpeg.subprocess.run")
+@patch("yt_live_kit.services.ffmpeg.shutil.which")
+def test_encode_segment_timeout_raises_ffmpeg_error(mock_which, mock_run, tmp_path):
+    mock_which.return_value = "/usr/bin/ffmpeg"
+    mock_run.side_effect = subprocess.TimeoutExpired(cmd=["ffmpeg"], timeout=60)
+
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"fake video")
+    output = tmp_path / "seg.mp4"
+
+    with pytest.raises(FfmpegError, match="タイムアウト"):
+        encode_segment(
+            source,
+            output,
+            10.0,
+            40.0,
+            ffmpeg_path="/usr/bin/ffmpeg",
+            ffmpeg_timeout=60,
+        )
+
+
+@patch("yt_live_kit.services.ffmpeg.subprocess.run")
+@patch("yt_live_kit.services.ffmpeg.shutil.which")
+def test_cut_clip_passes_ffmpeg_timeout(mock_which, mock_run, tmp_path):
+    mock_which.return_value = "/usr/bin/ffmpeg"
+
+    def fake_run(cmd, **kwargs):
+        assert kwargs.get("timeout") == 120
+        output_path = Path(cmd[-1])
+        output_path.write_bytes(b"clip data")
+        return MagicMock(returncode=0, stdout="", stderr="")
+
+    mock_run.side_effect = fake_run
+
+    video_id = "testvid1234"
+    _setup_video_dir(tmp_path, video_id)
+    settings = Settings(data_dir=tmp_path, ffmpeg_timeout=120)
+
+    cut_clip(video_id, "03:42", "16:30", settings, ffmpeg_path="/usr/bin/ffmpeg")

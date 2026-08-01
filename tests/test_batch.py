@@ -259,6 +259,7 @@ def test_batch_status_persistence(tmp_path):
     ]
     path = append_batch_status(entries, settings)
     assert path.is_file()
+    assert list(path.parent.glob(".*.tmp")) == []
 
     loaded = load_batch_status(settings)
     assert len(loaded) == 1

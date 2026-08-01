@@ -11,6 +11,7 @@ from pathlib import Path
 
 from yt_live_kit.config import Settings, get_settings
 from yt_live_kit.models.meta import VideoMeta
+from yt_live_kit.services._fsutil import write_text_atomically
 
 _SUBTITLE_FETCH_ERROR = (
     "字幕が取得できませんでした。公開アーカイブか確認し、yt-dlp を最新にして再実行してください。"
@@ -46,14 +47,27 @@ def extract_video_id(url_or_id: str) -> str:
     raise YtdlpError(f"有効な YouTube URL または動画 ID ではありません: {url_or_id}")
 
 
-def _run_ytdlp(args: list[str], settings: Settings) -> subprocess.CompletedProcess[str]:
+def _run_ytdlp(
+    args: list[str],
+    settings: Settings,
+    *,
+    timeout: int | None = None,
+) -> subprocess.CompletedProcess[str]:
     cmd = [settings.ytdlp_path, *args]
-    return subprocess.run(
-        cmd,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    effective_timeout = settings.ytdlp_timeout if timeout is None else timeout
+    try:
+        return subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=effective_timeout,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise YtdlpError(
+            f"yt-dlp の実行が {effective_timeout} 秒でタイムアウトしました。"
+            "ネットワーク状況を確認してください。"
+        ) from exc
 
 
 def get_ytdlp_version(settings: Settings | None = None) -> str:
@@ -210,10 +224,7 @@ def fetch(url: str, settings: Settings | None = None) -> VideoMeta:
     )
 
     meta_path = video_dir / "meta.json"
-    meta_path.write_text(
-        meta.model_dump_json(indent=2),
-        encoding="utf-8",
-    )
+    write_text_atomically(meta_path, meta.model_dump_json(indent=2))
 
     return meta
 
@@ -242,6 +253,7 @@ def download_video(url: str, output_dir: Path, settings: Settings | None = None)
             url,
         ],
         settings,
+        timeout=settings.download_timeout,
     )
 
     if result.returncode != 0:

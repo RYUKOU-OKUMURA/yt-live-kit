@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from yt_live_kit.config import Settings, get_settings
+from yt_live_kit.services._fsutil import write_text_atomically
 from yt_live_kit.services.compressor import compress_lines
 from yt_live_kit.services.vtt_parser import EmptyVttError, parse_vtt_file
 
@@ -54,10 +55,13 @@ def build_transcripts(video_id: str, settings: Settings | None = None) -> tuple[
     full_path = transcript_dir / "full.txt"
     compressed_path = transcript_dir / "compressed.txt"
 
-    full_path.write_text("\n".join(full_lines) + ("\n" if full_lines else ""), encoding="utf-8")
-    compressed_path.write_text(
+    write_text_atomically(
+        full_path,
+        "\n".join(full_lines) + ("\n" if full_lines else ""),
+    )
+    write_text_atomically(
+        compressed_path,
         "\n".join(compressed_lines) + ("\n" if compressed_lines else ""),
-        encoding="utf-8",
     )
 
     return full_path, compressed_path

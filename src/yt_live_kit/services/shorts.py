@@ -59,6 +59,26 @@ class ShortsError(Exception):
     """ショート動画生成エラー."""
 
 
+def _run_ffmpeg_layout(
+    cmd: list[str],
+    *,
+    ffmpeg_timeout: int,
+) -> subprocess.CompletedProcess[str]:
+    try:
+        return subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=ffmpeg_timeout,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise ShortsError(
+            f"ffmpeg の実行が {ffmpeg_timeout} 秒でタイムアウトしました。"
+            "処理が長時間かかっている可能性があります。"
+        ) from exc
+
+
 @dataclass(frozen=True)
 class ShortResult:
     """ショート動画生成結果."""
@@ -254,6 +274,7 @@ def build_short_from_segments(
 ) -> ShortResult:
     """複数区間を入力順に連結し、ASS テロップ付き縦型動画を生成する."""
     settings = settings or get_settings()
+    ffmpeg_timeout = settings.ffmpeg_timeout
 
     # ダウンロードや ffmpeg を始める前に、安価な入力検証をすべて完了する。
     try:
@@ -326,6 +347,7 @@ def build_short_from_segments(
                     bounds.end_sec,
                     ffmpeg_path=ffmpeg_path,
                     crf=INTERMEDIATE_CRF,
+                    ffmpeg_timeout=ffmpeg_timeout,
                 )
             except FfmpegError as exc:
                 raise ShortsError(str(exc)) from exc
@@ -402,7 +424,7 @@ def build_short_from_segments(
                 use_filter_complex=use_filter_complex,
                 ffmpeg_path=ffmpeg_path,
             )
-            result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+            result = _run_ffmpeg_layout(cmd, ffmpeg_timeout=ffmpeg_timeout)
         except FfmpegError as exc:
             raise ShortsError(str(exc)) from exc
         except OSError as exc:
@@ -482,8 +504,9 @@ def build_short(
     on_progress: Callable[[str], None] | None = None,
     keep_intermediate: bool = False,
 ) -> ShortResult:
-    """縦型ショート動画を生成する（2パス: 精密シークで切り出してから字幕・レイアウトを焼き込む）."""
+    """縦型ショート動画を生成する（2パス: 入力シークで切り出してから字幕・レイアウトを焼き込む）."""
     settings = settings or get_settings()
+    ffmpeg_timeout = settings.ffmpeg_timeout
     duration_sec = validate_short_duration(start, end)
     resolved_output_name = _segment_output_name(start, end, output_name)
 
@@ -493,7 +516,8 @@ def build_short(
 
     source_path = ensure_source_video(video_id, settings)
 
-    # パス1（切り出し）: 精密シークで [start, end] を 0 秒始まりの中間ファイルへ切り出す。
+    # パス1（切り出し）: 入力シークで [start, end] を 0 秒始まりの中間ファイルへ切り出す。
+    # libx264 再エンコードのため出力は 0 秒始まりとなり、パス2 の前提は変わらない。
     segments_dir = video_dir / "shorts" / "segments"
     segments_dir.mkdir(parents=True, exist_ok=True)
     intermediate_path = segments_dir / _intermediate_segment_name(start, end)
@@ -508,6 +532,7 @@ def build_short(
             end,
             ffmpeg_path=ffmpeg_path,
             crf=INTERMEDIATE_CRF,
+            ffmpeg_timeout=ffmpeg_timeout,
         )
     except FfmpegError as exc:
         raise ShortsError(str(exc)) from exc
@@ -560,7 +585,7 @@ def build_short(
             ffmpeg_path=ffmpeg_path,
         )
 
-        result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        result = _run_ffmpeg_layout(cmd, ffmpeg_timeout=ffmpeg_timeout)
         log_path = save_command_log(
             output_dir,
             cmd,

@@ -414,6 +414,9 @@ data/
 | `YTLK_SLEEP` | 一括処理で URL 間に空けるスリープ秒数 | `1` |
 | `YTLK_YTDLP_PATH` | yt-dlp バイナリのパス | `yt-dlp` |
 | `YTLK_FFMPEG_PATH` | ffmpeg バイナリのパス | `ffmpeg` |
+| `YTLK_YTDLP_TIMEOUT` | yt-dlp の字幕・メタデータ取得タイムアウト秒数 | `300` |
+| `YTLK_DOWNLOAD_TIMEOUT` | yt-dlp の動画本体ダウンロードタイムアウト秒数 | `3600` |
+| `YTLK_FFMPEG_TIMEOUT` | ffmpeg / ffprobe のタイムアウト秒数 | `3600` |
 | `YTLK_SUBTITLE_FONT` | 字幕焼き込みに使うフォント名（未指定時は自動検出） | 自動検出 |
 | `YTLK_YOUTUBE_CLIENT_SECRET` | YouTube Data API の OAuth クライアントシークレット JSON のパス | `./data/_config/client_secret.json` |
 

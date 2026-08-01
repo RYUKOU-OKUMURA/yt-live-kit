@@ -21,6 +21,7 @@ from yt_live_kit.ui.views.highlights import (
     format_selection_summary,
     segment_checkbox_key,
     sum_duration_sec,
+    use_clips_toggle_key,
 )
 
 
@@ -64,6 +65,12 @@ def test_sum_duration_sec() -> None:
 
 def test_segment_checkbox_key_includes_video_and_segment_id() -> None:
     assert segment_checkbox_key("vid123", "hl_001") == "hl_cb_vid123_hl_001"
+
+
+def test_use_clips_toggle_key_is_scoped_by_video_id() -> None:
+    assert use_clips_toggle_key("vid_a") == "highlights_use_clips_vid_a"
+    assert use_clips_toggle_key("vid_b") == "highlights_use_clips_vid_b"
+    assert use_clips_toggle_key("vid_a") != use_clips_toggle_key("vid_b")
 
 
 def test_collect_selected_segments_reads_session_state() -> None:
