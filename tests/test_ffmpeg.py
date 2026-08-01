@@ -11,13 +11,18 @@ import pytest
 from yt_live_kit.config import Settings
 from yt_live_kit.models.meta import VideoMeta
 from yt_live_kit.services.ffmpeg import (
+    FFMPEG_CAPABILITY_TIMEOUT_DEFAULT,
     FfmpegError,
     build_concat_list,
     build_ffmpeg_command,
     concat_segments,
     cut_clip,
+    diagnose_ffmpeg,
     encode_segment,
+    ensure_subtitles_filter,
     ffprobe_path_for,
+    parse_ffmpeg_filter_names,
+    probe_ffmpeg_capabilities,
     probe_duration,
 )
 
@@ -40,6 +45,211 @@ def _setup_video_dir(tmp_path: Path, video_id: str = "testvid1234") -> Path:
     )
     (video_dir / "meta.json").write_text(meta.model_dump_json(), encoding="utf-8")
     return video_dir
+
+
+def test_parse_ffmpeg_filter_names_uses_exact_second_column_from_both_streams():
+    names = parse_ffmpeg_filter_names(
+        """Filters:
+  .. subtitles V->V Render text subtitles using libass
+  T.. subtitles_cuda V->V GPU subtitle renderer
+  ... scale V->V Scale video
+""",
+        "  TS subtitles_graphics V->V Render graphical subtitles\n",
+    )
+
+    assert "subtitles" in names
+    assert "subtitles_cuda" in names
+    assert "subtitles_graphics" in names
+    assert "subtitle" not in names
+
+
+def test_parse_ffmpeg_filter_names_ignores_warning_and_legend_lines():
+    names = parse_ffmpeg_filter_names(
+        """Filters:
+  T.. = Timeline support
+  .S. = Slice threading
+  ..C = Command support
+  ... scale V->V Scale video
+""",
+        "warning subtitles unavailable\n",
+    )
+
+    assert names == frozenset({"scale"})
+    assert "subtitles" not in names
+
+
+@patch("yt_live_kit.services.ffmpeg.subprocess.run")
+@patch(
+    "yt_live_kit.services.ffmpeg.shutil.which",
+    return_value="/opt/ffmpeg/bin/ffmpeg",
+)
+def test_probe_ffmpeg_capabilities_uses_resolved_binary_and_short_timeout(
+    mock_which,
+    mock_run,
+):
+    mock_run.return_value = MagicMock(
+        returncode=0,
+        stdout="  T.. subtitles V->V Render text subtitles\n",
+        stderr="",
+    )
+
+    result = probe_ffmpeg_capabilities("configured-ffmpeg")
+
+    mock_which.assert_called_once_with("configured-ffmpeg")
+    assert mock_run.call_args.args[0] == [
+        "/opt/ffmpeg/bin/ffmpeg",
+        "-hide_banner",
+        "-filters",
+    ]
+    assert mock_run.call_args.kwargs["timeout"] == FFMPEG_CAPABILITY_TIMEOUT_DEFAULT
+    assert result.configured_path == "configured-ffmpeg"
+    assert result.resolved_path == "/opt/ffmpeg/bin/ffmpeg"
+    assert result.subtitles_available is True
+
+
+@patch("yt_live_kit.services.ffmpeg.subprocess.run")
+@patch(
+    "yt_live_kit.services.ffmpeg.shutil.which",
+    return_value="/opt/ffmpeg/bin/ffmpeg",
+)
+def test_probe_ffmpeg_capabilities_warning_does_not_fake_subtitles_support(
+    mock_which,
+    mock_run,
+):
+    mock_run.return_value = MagicMock(
+        returncode=0,
+        stdout="  ... scale V->V Scale video\n",
+        stderr="warning subtitles unavailable\n",
+    )
+
+    result = probe_ffmpeg_capabilities("configured-ffmpeg")
+
+    assert result.filter_names == frozenset({"scale"})
+    assert result.subtitles_available is False
+
+
+@patch("yt_live_kit.services.ffmpeg.shutil.which", return_value=None)
+def test_probe_ffmpeg_capabilities_missing_binary_is_actionable(mock_which):
+    with pytest.raises(FfmpegError, match="YTLK_FFMPEG_PATH"):
+        probe_ffmpeg_capabilities("missing-ffmpeg")
+
+
+@patch(
+    "yt_live_kit.services.ffmpeg.shutil.which",
+    side_effect=OSError("path lookup failed"),
+)
+def test_probe_ffmpeg_capabilities_path_lookup_oserror_is_actionable(mock_which):
+    with pytest.raises(FfmpegError, match="YTLK_FFMPEG_PATH") as error:
+        probe_ffmpeg_capabilities("broken-ffmpeg")
+
+    assert "path lookup failed" not in str(error.value)
+
+
+@patch("yt_live_kit.services.ffmpeg.subprocess.run", side_effect=OSError("exec denied"))
+@patch(
+    "yt_live_kit.services.ffmpeg.shutil.which",
+    return_value="/opt/ffmpeg/bin/ffmpeg",
+)
+def test_probe_ffmpeg_capabilities_execution_oserror_is_actionable(
+    mock_which,
+    mock_run,
+):
+    with pytest.raises(FfmpegError, match="実行権限") as error:
+        probe_ffmpeg_capabilities("configured-ffmpeg")
+
+    assert "YTLK_FFMPEG_PATH" in str(error.value)
+    assert "exec denied" in str(error.value)
+
+
+@patch("yt_live_kit.services.ffmpeg.subprocess.run")
+@patch(
+    "yt_live_kit.services.ffmpeg.shutil.which",
+    return_value="/opt/ffmpeg/bin/ffmpeg",
+)
+def test_probe_ffmpeg_capabilities_timeout_is_actionable(mock_which, mock_run):
+    mock_run.side_effect = subprocess.TimeoutExpired(
+        cmd=["/opt/ffmpeg/bin/ffmpeg", "-hide_banner", "-filters"],
+        timeout=3,
+    )
+
+    with pytest.raises(FfmpegError, match="3 秒でタイムアウト") as error:
+        probe_ffmpeg_capabilities("configured-ffmpeg", timeout=3)
+
+    assert "YTLK_FFMPEG_PATH" in str(error.value)
+
+
+@patch("yt_live_kit.services.ffmpeg.subprocess.run")
+@patch(
+    "yt_live_kit.services.ffmpeg.shutil.which",
+    return_value="/opt/ffmpeg/bin/ffmpeg",
+)
+def test_probe_ffmpeg_capabilities_nonzero_is_actionable(mock_which, mock_run):
+    mock_run.return_value = MagicMock(
+        returncode=2,
+        stdout="",
+        stderr="invalid option",
+    )
+
+    with pytest.raises(FfmpegError, match="終了コード: 2") as error:
+        probe_ffmpeg_capabilities("configured-ffmpeg")
+
+    assert "YTLK_FFMPEG_PATH" in str(error.value)
+    assert "invalid option" in str(error.value)
+
+
+@patch("yt_live_kit.services.ffmpeg.subprocess.run")
+@patch(
+    "yt_live_kit.services.ffmpeg.shutil.which",
+    return_value="/opt/ffmpeg/bin/ffmpeg",
+)
+def test_ensure_subtitles_filter_rejects_similar_but_missing_filter(
+    mock_which,
+    mock_run,
+):
+    mock_run.return_value = MagicMock(
+        returncode=0,
+        stdout="  T.. subtitles_cuda V->V GPU subtitle renderer\n",
+        stderr="",
+    )
+
+    with pytest.raises(FfmpegError, match="ffmpeg-full") as error:
+        ensure_subtitles_filter("configured-ffmpeg")
+
+    assert "YTLK_FFMPEG_PATH" in str(error.value)
+
+
+@patch("yt_live_kit.services.ffmpeg.subprocess.run")
+@patch(
+    "yt_live_kit.services.ffmpeg.shutil.which",
+    return_value="/opt/ffmpeg/bin/ffmpeg",
+)
+def test_diagnose_ffmpeg_uses_same_resolved_binary_for_filters_and_version(
+    mock_which,
+    mock_run,
+):
+    mock_run.side_effect = [
+        MagicMock(
+            returncode=0,
+            stdout="  T.. subtitles V->V Render text subtitles\n",
+            stderr="",
+        ),
+        MagicMock(
+            returncode=0,
+            stdout="ffmpeg version 8.0.1 Copyright\nconfiguration details\n",
+            stderr="",
+        ),
+    ]
+
+    result = diagnose_ffmpeg("configured-ffmpeg")
+
+    mock_which.assert_called_once_with("configured-ffmpeg")
+    commands = [item.args[0] for item in mock_run.call_args_list]
+    assert commands == [
+        ["/opt/ffmpeg/bin/ffmpeg", "-hide_banner", "-filters"],
+        ["/opt/ffmpeg/bin/ffmpeg", "-version"],
+    ]
+    assert result.version == "ffmpeg version 8.0.1 Copyright"
+    assert result.subtitles_available is True
 
 
 @patch("yt_live_kit.services.ffmpeg.shutil.which")

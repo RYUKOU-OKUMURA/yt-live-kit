@@ -6,6 +6,7 @@ import streamlit as st
 
 from yt_live_kit.config import Settings, get_settings
 from yt_live_kit.services.ai_prompt import is_codex_available
+from yt_live_kit.services.ffmpeg import FfmpegError, diagnose_ffmpeg
 from yt_live_kit.services.schedule import (
     ScheduleError,
     load_schedule_policy,
@@ -67,8 +68,37 @@ def _render_environment_settings(settings: Settings) -> None:
     st.caption("現在有効な値です。この画面からは変更できません。")
 
     with st.container(border=True):
-        st.markdown("**ffmpeg パス**")
+        st.markdown("**ffmpeg 設定値**")
         st.code(str(settings.ffmpeg_path))
+        try:
+            diagnostics = diagnose_ffmpeg(settings.ffmpeg_path)
+        except FfmpegError as exc:
+            st.markdown("**ffmpeg 解決済みパス**")
+            st.code("取得できません")
+            st.markdown("**ffmpeg バージョン**")
+            st.code("取得できません")
+            st.markdown("**subtitles フィルタ**")
+            st.code("利用可否を確認できません")
+            st.warning(
+                f"FFmpeg の診断に失敗しました。{exc}"
+                " macOS で字幕付きショートを作る場合は ffmpeg-full を導入し、"
+                ".env の YTLK_FFMPEG_PATH にその実体パスを設定してください。",
+                icon=":material/warning:",
+            )
+        else:
+            st.markdown("**ffmpeg 解決済みパス**")
+            st.code(diagnostics.resolved_path)
+            st.markdown("**ffmpeg バージョン**")
+            st.code(diagnostics.version)
+            st.markdown("**subtitles フィルタ**")
+            if diagnostics.subtitles_available:
+                st.success("利用できます。", icon=":material/check_circle:")
+            else:
+                st.warning(
+                    "利用できません。macOS では ffmpeg-full を導入し、"
+                    ".env の YTLK_FFMPEG_PATH にその実体パスを設定してください。",
+                    icon=":material/warning:",
+                )
         st.markdown("**字幕フォント**")
         st.code(settings.subtitle_font or "未指定（自動検出）")
         st.markdown("**データ保存先**")
@@ -79,7 +109,7 @@ def _render_environment_settings(settings: Settings) -> None:
         "プロジェクト直下の `.env` に必要な項目を記載し、アプリを再起動してください。"
     )
     st.code(
-        "YTLK_FFMPEG_PATH=/usr/local/bin/ffmpeg\n"
+        "YTLK_FFMPEG_PATH=/opt/homebrew/opt/ffmpeg-full/bin/ffmpeg\n"
         "YTLK_SUBTITLE_FONT=Noto Sans CJK JP\n"
         "YTLK_DATA_DIR=./data",
         language="dotenv",

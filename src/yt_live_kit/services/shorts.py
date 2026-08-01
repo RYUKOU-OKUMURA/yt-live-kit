@@ -18,6 +18,7 @@ from yt_live_kit.services.ffmpeg import (
     concat_segments,
     encode_segment,
     ensure_source_video,
+    ensure_subtitles_filter,
     find_ffmpeg,
     resolve_output_filename,
     save_command_log,
@@ -268,7 +269,7 @@ def build_short_from_segments(
     preset: str = "default",
     hook_preset: str = "hook",
     output_name: str | None = None,
-    ffmpeg_path: str = FFMPEG_DEFAULT,
+    ffmpeg_path: str | None = None,
     on_progress: ShortsProgressCallback = None,
     keep_intermediate: bool = False,
 ) -> ShortResult:
@@ -320,6 +321,12 @@ def build_short_from_segments(
     if not video_dir.is_dir():
         raise ShortsError(f"動画ディレクトリが見つかりません: {video_dir}")
 
+    configured_ffmpeg_path = ffmpeg_path or settings.ffmpeg_path
+    try:
+        effective_ffmpeg_path = ensure_subtitles_filter(configured_ffmpeg_path)
+    except FfmpegError as exc:
+        raise ShortsError(str(exc)) from exc
+
     output_dir = video_dir / "shorts" / "output"
     output_path = output_dir / formal_name
     log_path = output_dir / f"{output_path.stem}.ffmpeg.log"
@@ -345,7 +352,7 @@ def build_short_from_segments(
                     segment_path,
                     bounds.start_sec,
                     bounds.end_sec,
-                    ffmpeg_path=ffmpeg_path,
+                    ffmpeg_path=effective_ffmpeg_path,
                     crf=INTERMEDIATE_CRF,
                     ffmpeg_timeout=ffmpeg_timeout,
                 )
@@ -364,7 +371,7 @@ def build_short_from_segments(
             concat_segments(
                 segment_paths,
                 concat_path,
-                ffmpeg_path=ffmpeg_path,
+                ffmpeg_path=effective_ffmpeg_path,
                 log_dir=intermediate_dir,
             )
         except FfmpegError as exc:
@@ -422,7 +429,7 @@ def build_short_from_segments(
                 temporary_output,
                 filter_chain,
                 use_filter_complex=use_filter_complex,
-                ffmpeg_path=ffmpeg_path,
+                ffmpeg_path=effective_ffmpeg_path,
             )
             result = _run_ffmpeg_layout(cmd, ffmpeg_timeout=ffmpeg_timeout)
         except FfmpegError as exc:
@@ -500,7 +507,7 @@ def build_short(
     layout: str = "blur",
     burn_subtitles: bool = True,
     output_name: str | None = None,
-    ffmpeg_path: str = FFMPEG_DEFAULT,
+    ffmpeg_path: str | None = None,
     on_progress: Callable[[str], None] | None = None,
     keep_intermediate: bool = False,
 ) -> ShortResult:
@@ -509,12 +516,21 @@ def build_short(
     ffmpeg_timeout = settings.ffmpeg_timeout
     duration_sec = validate_short_duration(start, end)
     resolved_output_name = _segment_output_name(start, end, output_name)
+    build_layout_filter(layout)
 
     video_dir = settings.data_dir / video_id
     if not video_dir.is_dir():
         raise ShortsError(f"動画ディレクトリが見つかりません: {video_dir}")
 
-    source_path = ensure_source_video(video_id, settings)
+    configured_ffmpeg_path = ffmpeg_path or settings.ffmpeg_path
+    try:
+        if burn_subtitles:
+            effective_ffmpeg_path = ensure_subtitles_filter(configured_ffmpeg_path)
+        else:
+            effective_ffmpeg_path = find_ffmpeg(configured_ffmpeg_path)
+        source_path = ensure_source_video(video_id, settings)
+    except FfmpegError as exc:
+        raise ShortsError(str(exc)) from exc
 
     # パス1（切り出し）: 入力シークで [start, end] を 0 秒始まりの中間ファイルへ切り出す。
     # libx264 再エンコードのため出力は 0 秒始まりとなり、パス2 の前提は変わらない。
@@ -530,7 +546,7 @@ def build_short(
             intermediate_path,
             start,
             end,
-            ffmpeg_path=ffmpeg_path,
+            ffmpeg_path=effective_ffmpeg_path,
             crf=INTERMEDIATE_CRF,
             ffmpeg_timeout=ffmpeg_timeout,
         )
@@ -551,7 +567,7 @@ def build_short(
                 start,
                 end,
                 settings,
-                ffmpeg_path=ffmpeg_path,
+                ffmpeg_path=effective_ffmpeg_path,
             )
             font_name = resolve_font(settings.subtitle_font)
             if not is_japanese_font_available(settings.subtitle_font):
@@ -577,15 +593,19 @@ def build_short(
                 on_progress("変換中…")
 
         # パス2（整形）: 0 秒始まりの中間ファイルに対して -ss / -t を使わずレイアウト・字幕を焼き込む。
-        cmd = _build_short_layout_command(
-            intermediate_path,
-            output_path,
-            filter_chain,
-            use_filter_complex=use_filter_complex,
-            ffmpeg_path=ffmpeg_path,
-        )
-
-        result = _run_ffmpeg_layout(cmd, ffmpeg_timeout=ffmpeg_timeout)
+        try:
+            cmd = _build_short_layout_command(
+                intermediate_path,
+                output_path,
+                filter_chain,
+                use_filter_complex=use_filter_complex,
+                ffmpeg_path=effective_ffmpeg_path,
+            )
+            result = _run_ffmpeg_layout(cmd, ffmpeg_timeout=ffmpeg_timeout)
+        except FfmpegError as exc:
+            raise ShortsError(str(exc)) from exc
+        except OSError as exc:
+            raise ShortsError(f"ffmpeg の実行に失敗しました: {exc}") from exc
         log_path = save_command_log(
             output_dir,
             cmd,

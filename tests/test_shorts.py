@@ -1,18 +1,21 @@
 """shorts サービスのユニットテスト."""
 
 import os
-import shutil
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 
 from yt_live_kit.config import Settings
 from yt_live_kit.models.meta import VideoMeta
 from yt_live_kit.models.telop import TelopScriptDocument
-from yt_live_kit.services.ffmpeg import FfmpegError, concat_segments as real_concat_segments
+from yt_live_kit.services.ffmpeg import (
+    FfmpegError,
+    concat_segments as real_concat_segments,
+    ensure_subtitles_filter as real_ensure_subtitles_filter,
+)
 from yt_live_kit.services.subtitle_burn import SubtitleBurnError
 from yt_live_kit.services.telop import TelopError, make_clip_id
 from yt_live_kit.services.shorts import (
@@ -29,6 +32,15 @@ from yt_live_kit.services.shorts import (
     escape_ffmpeg_subtitles_path,
     validate_short_duration,
 )
+
+
+@pytest.fixture(autouse=True)
+def _stub_subtitles_capability_for_unit_tests(monkeypatch):
+    """既存ユニットテストでは capability 検査を独立させる."""
+    monkeypatch.setattr(
+        "yt_live_kit.services.shorts.ensure_subtitles_filter",
+        lambda ffmpeg_path: ffmpeg_path,
+    )
 
 
 def test_build_layout_filter_blur():
@@ -110,25 +122,9 @@ def test_build_subtitle_filter_contains_force_style(tmp_path):
     assert "MarginV=180" in filt
 
 
-def _ffmpeg_with_subtitles_filter() -> str | None:
-    ffmpeg = shutil.which("ffmpeg")
-    if ffmpeg is None:
-        return None
-    probe = subprocess.run(
-        [ffmpeg, "-hide_banner", "-filters"],
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=10,
-    )
-    filters = f"{probe.stdout}\n{probe.stderr}"
-    if probe.returncode != 0 or not any(
-        len(parts) >= 2 and parts[1] == "subtitles"
-        for line in filters.splitlines()
-        if (parts := line.split())
-    ):
-        return None
-    return ffmpeg
+def _configured_ffmpeg_with_subtitles_filter() -> str:
+    """明示 opt-in 後は設定済みバイナリの不備を fail にする."""
+    return real_ensure_subtitles_filter(Settings().ffmpeg_path)
 
 
 @pytest.mark.skipif(
@@ -137,9 +133,7 @@ def _ffmpeg_with_subtitles_filter() -> str | None:
 )
 @pytest.mark.parametrize("with_force_style", [False, True])
 def test_real_ffmpeg_burns_ass_from_escaped_path(tmp_path, with_force_style):
-    ffmpeg = _ffmpeg_with_subtitles_filter()
-    if ffmpeg is None:
-        pytest.skip("subtitles フィルタを利用できる ffmpeg がありません")
+    ffmpeg = _configured_ffmpeg_with_subtitles_filter()
 
     source_path = tmp_path / "color source.mp4"
     source = subprocess.run(
@@ -654,6 +648,100 @@ def test_build_short_rejects_unsafe_output_name_before_source(
     mock_ensure.assert_not_called()
 
 
+def test_build_short_rejects_layout_before_capability_or_source(
+    tmp_path,
+    monkeypatch,
+):
+    video_id = "testvid1234"
+    _setup_video_dir(tmp_path, video_id)
+    capability = MagicMock()
+    source = MagicMock()
+    monkeypatch.setattr(
+        "yt_live_kit.services.shorts.ensure_subtitles_filter", capability
+    )
+    monkeypatch.setattr("yt_live_kit.services.shorts.ensure_source_video", source)
+
+    with pytest.raises(ShortsError, match="不明なレイアウト"):
+        build_short(
+            video_id,
+            10.0,
+            25.0,
+            Settings(data_dir=tmp_path),
+            layout="square",
+        )
+
+    capability.assert_not_called()
+    source.assert_not_called()
+
+
+def test_build_short_capability_failure_precedes_download_and_encode(
+    tmp_path,
+    monkeypatch,
+):
+    video_id = "testvid1234"
+    _setup_video_dir(tmp_path, video_id)
+    capability = MagicMock(side_effect=FfmpegError("字幕フィルタを利用できません。"))
+    source = MagicMock()
+    encode = MagicMock()
+    layout_command = MagicMock()
+    monkeypatch.setattr(
+        "yt_live_kit.services.shorts.ensure_subtitles_filter", capability
+    )
+    monkeypatch.setattr("yt_live_kit.services.shorts.ensure_source_video", source)
+    monkeypatch.setattr("yt_live_kit.services.shorts.encode_segment", encode)
+    monkeypatch.setattr(
+        "yt_live_kit.services.shorts._build_short_layout_command", layout_command
+    )
+    settings = Settings(data_dir=tmp_path, ffmpeg_path="configured-ffmpeg")
+
+    with pytest.raises(ShortsError, match="字幕フィルタ"):
+        build_short(video_id, 10.0, 25.0, settings, burn_subtitles=True)
+
+    capability.assert_called_once_with("configured-ffmpeg")
+    source.assert_not_called()
+    encode.assert_not_called()
+    layout_command.assert_not_called()
+
+
+def test_build_short_without_subtitles_skips_capability_and_uses_resolved_path(
+    tmp_path,
+    monkeypatch,
+):
+    video_id = "testvid1234"
+    _setup_video_dir(tmp_path, video_id)
+    capability = MagicMock()
+    find = MagicMock(return_value="/resolved/bin/ffmpeg")
+    source = MagicMock(return_value=tmp_path / "source.mp4")
+    encode = MagicMock(side_effect=_fake_encode_segment)
+    monkeypatch.setattr(
+        "yt_live_kit.services.shorts.ensure_subtitles_filter", capability
+    )
+    monkeypatch.setattr("yt_live_kit.services.shorts.find_ffmpeg", find)
+    monkeypatch.setattr("yt_live_kit.services.shorts.ensure_source_video", source)
+    monkeypatch.setattr("yt_live_kit.services.shorts.encode_segment", encode)
+    monkeypatch.setattr(
+        "yt_live_kit.services.shorts.subprocess.run", _fake_ffmpeg_run
+    )
+    settings = Settings(data_dir=tmp_path, ffmpeg_path="configured-ffmpeg")
+
+    result = build_short(
+        video_id,
+        10.0,
+        25.0,
+        settings,
+        layout="crop",
+        burn_subtitles=False,
+    )
+
+    capability.assert_not_called()
+    assert find.call_args_list == [
+        call("configured-ffmpeg"),
+        call("/resolved/bin/ffmpeg"),
+    ]
+    assert encode.call_args.kwargs["ffmpeg_path"] == "/resolved/bin/ffmpeg"
+    assert result.burned_subtitles is False
+
+
 @patch("yt_live_kit.services.shorts.subprocess.run")
 @patch("yt_live_kit.services.shorts.find_ffmpeg")
 @patch("yt_live_kit.services.shorts.encode_segment")
@@ -979,10 +1067,15 @@ def test_build_short_from_segments_rejects_bad_segments_before_source(
     video_id = "testvid1234"
     _setup_video_dir(tmp_path, video_id)
     ensure = MagicMock()
+    capability = MagicMock()
     monkeypatch.setattr("yt_live_kit.services.shorts.ensure_source_video", ensure)
+    monkeypatch.setattr(
+        "yt_live_kit.services.shorts.ensure_subtitles_filter", capability
+    )
     with pytest.raises(ShortsError, match=message):
         build_short_from_segments(video_id, segments, Settings(data_dir=tmp_path))
     ensure.assert_not_called()
+    capability.assert_not_called()
 
 
 @pytest.mark.parametrize("duration", [10.0, 180.0])
@@ -1022,14 +1115,74 @@ def test_build_short_from_segments_preflight_rejects_options_before_source(
     _setup_video_dir(tmp_path, video_id)
     ensure = MagicMock()
     encode = MagicMock()
+    capability = MagicMock()
     monkeypatch.setattr("yt_live_kit.services.shorts.ensure_source_video", ensure)
     monkeypatch.setattr("yt_live_kit.services.shorts.encode_segment", encode)
+    monkeypatch.setattr(
+        "yt_live_kit.services.shorts.ensure_subtitles_filter", capability
+    )
     with pytest.raises(ShortsError):
         build_short_from_segments(
             video_id, [(0.0, 10.0)], Settings(data_dir=tmp_path), **kwargs
         )
     ensure.assert_not_called()
     encode.assert_not_called()
+    capability.assert_not_called()
+
+
+def test_build_short_from_segments_capability_failure_has_no_side_effects(
+    tmp_path,
+    monkeypatch,
+):
+    video_id = "testvid1234"
+    _setup_video_dir(tmp_path, video_id)
+    capability = MagicMock(
+        side_effect=FfmpegError("字幕フィルタを利用できません。")
+    )
+    source = MagicMock()
+    encode = MagicMock()
+    concat = MagicMock()
+    layout_command = MagicMock()
+    monkeypatch.setattr(
+        "yt_live_kit.services.shorts.ensure_subtitles_filter", capability
+    )
+    monkeypatch.setattr("yt_live_kit.services.shorts.ensure_source_video", source)
+    monkeypatch.setattr("yt_live_kit.services.shorts.encode_segment", encode)
+    monkeypatch.setattr("yt_live_kit.services.shorts.concat_segments", concat)
+    monkeypatch.setattr(
+        "yt_live_kit.services.shorts._build_short_layout_command", layout_command
+    )
+    settings = Settings(data_dir=tmp_path, ffmpeg_path="configured-ffmpeg")
+
+    with pytest.raises(ShortsError, match="字幕フィルタ"):
+        build_short_from_segments(video_id, [(0.0, 10.0)], settings)
+
+    capability.assert_called_once_with("configured-ffmpeg")
+    source.assert_not_called()
+    encode.assert_not_called()
+    concat.assert_not_called()
+    layout_command.assert_not_called()
+
+
+def test_build_short_from_segments_propagates_one_resolved_ffmpeg_path(
+    tmp_path,
+    monkeypatch,
+):
+    video_id = "testvid1234"
+    _setup_video_dir(tmp_path, video_id)
+    calls = _install_s3_success_mocks(monkeypatch, tmp_path)
+    capability = MagicMock(return_value="/resolved/bin/ffmpeg")
+    monkeypatch.setattr(
+        "yt_live_kit.services.shorts.ensure_subtitles_filter", capability
+    )
+    settings = Settings(data_dir=tmp_path, ffmpeg_path="configured-ffmpeg")
+
+    build_short_from_segments(video_id, [(0.0, 10.0)], settings)
+
+    capability.assert_called_once_with("configured-ffmpeg")
+    assert calls["encode"][0][4]["ffmpeg_path"] == "/resolved/bin/ffmpeg"
+    assert calls["concat"][0][2]["ffmpeg_path"] == "/resolved/bin/ffmpeg"
+    assert calls["run"][0][0] == "/resolved/bin/ffmpeg"
 
 
 def test_build_short_from_segments_rejects_invalid_telop_before_source(

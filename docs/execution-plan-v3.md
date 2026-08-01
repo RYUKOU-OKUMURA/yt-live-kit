@@ -31,6 +31,7 @@
 | P3 | フェーズ P 受け入れ（予約投稿が実際に公開される） | [x] 完了 |
 | P4 | ショート概要欄の定型リンク差し込み（v3 追加要件） | [x] 完了 |
 | S6 | 切り抜き候補からのショート用サブ区間提案（v3 追加要件） | [~] 進行中 |
+| S7 | FFmpeg 字幕フィルタの環境検査と復旧（ホットフィックス） | [~] 進行中 |
 
 **状態の書き方:** `[ ] 未着手` / `[~] 進行中` / `[x] 完了`
 
@@ -178,6 +179,7 @@ data/{video_id}/ ...
 | **P3** | フェーズ P 受け入れ | 実際の予約公開確認、README・版数更新 | AC-27, AC-28 |
 | **P4** | ショート概要欄の定型リンク差し込み | ショート専用テンプレート、開始秒付き元配信 URL、preview 前合成 | FR-29, AC-29 |
 | **S6** | 切り抜き候補からのショート用サブ区間提案 | 親区間内カットプラン生成、採否・境界調整 UI、FR-25 連結への受け渡し | FR-30, AC-30 |
+| **S7** | FFmpeg 字幕フィルタの環境検査と復旧 | libass 対応 FFmpeg の明示設定、生成前 capability 検査、設定画面の診断表示 | FR-24, FR-25, AC-24, AC-25 |
 
 各タスクは「実装 → 単体確認 → Done 条件チェック → **タスク完了コミット**」で閉じる。フェーズ末（U5 / S5 / P3）は「フェーズ受け入れ」も兼ねる。P4 / S6 は v3 受け入れ（P3）完了後に追加された要件であり、P3 の証跡・版数には手を入れない。
 
@@ -1061,6 +1063,47 @@ data/{video_id}/ ...
 - [ ] タスク完了コミット済み
 
 **見積もり目安:** 1.5 日
+
+---
+
+### S7: FFmpeg 字幕フィルタの環境検査と復旧（ホットフィックス）
+
+**目的:** Homebrew 通常版 FFmpeg に `libass` が含まれず、ショート生成の最終工程で `No such filter: 'subtitles'` となる環境を生成前に検知し、`libass` 対応版を明示設定して復旧できるようにする（FR-24 / FR-25）。
+**フェーズ状態:** [~] 進行中
+**前提:** S3 / S4 完了。本タスクは完了済みフェーズのチェックを戻さず、実機障害に対する独立した修復タスクとして扱う。
+
+**変更ファイル範囲:**
+- `src/yt_live_kit/services/ffmpeg.py`
+- `src/yt_live_kit/services/shorts.py`
+- `src/yt_live_kit/ui/views/settings.py`
+- `tests/test_ffmpeg.py`
+- `tests/test_shorts.py`
+- `tests/test_ui_settings_page.py`
+- `README.md`
+- `docs/tech-stack.md`
+- `docs/execution-plan-v3.md`
+- `.env`（ローカル実行設定。Git 管理対象外）
+
+**作業:**
+
+- [x] S7-1. 実際に後段へ渡す FFmpeg パスを一度だけ解決し、短い専用タイムアウトで `-filters` を実行してフィルタ名列の `subtitles` を完全一致検査する service API を追加する。バイナリ不在・実行不能・タイムアウト・異常終了・フィルタ不足は、原因と `YTLK_FFMPEG_PATH` による対処を含む日本語の `FfmpegError` にする
+- [x] S7-2. `build_short_from_segments()` は全純粋入力検証後かつ元動画取得・encode・concat 前に `subtitles` capability を必須検査する。`build_short()` は layout を含む全純粋入力検証後、`burn_subtitles=True` の場合だけ同じ検査を行い、`False` では通常版 FFmpeg を許容する。設定値と明示引数がずれないよう、有効 FFmpeg パスを全後段へ伝播する
+- [x] S7-3. 設定画面へ、設定値、解決済み実パス、バージョン、字幕フィルタ利用可否を読み取り専用で表示する。診断失敗でページ全体を落とさず、日本語の警告と `ffmpeg-full` / `.env` の案内を出す
+- [x] S7-4. README と技術スタックを更新し、macOS の字幕付きショートでは keg-only の `ffmpeg-full` を明示パスで使うこと、`libass` 単体導入や通常版 FFmpeg のアップグレードだけでは既存バイナリへフィルタが追加されないこと、字幕なし生成は通常版でも可能なことを記載する
+- [x] S7-5. capability parser の完全一致、missing binary / OSError / timeout / nonzero / missing filter、入力不正時の probe 未実行、capability 不足時の download / encode / concat / layout 未実行、字幕なし分岐、設定 UI の成功・警告をユニットテストする。opt-in 実統合テストは未 opt-in 時だけ skip し、opt-in 後の設定バイナリ不在・フィルタ不足を fail にする
+- [x] S7-6. `ffmpeg-full` をローカル導入し、`.env` の `YTLK_FFMPEG_PATH` を明示設定する。指定バイナリの `subtitles` フィルタ、同梱 `ffprobe`、実 ASS 焼き込み統合テスト、対象ショートの再生成を確認する
+
+**Done 条件:**
+
+- [x] `subtitles` 非対応 FFmpeg では動画取得・encode より前に対処可能な日本語エラーで停止する
+- [x] 字幕なし単一区間生成は `subtitles` 非対応 FFmpeg でも回帰しない
+- [x] 設定画面だけで実際の FFmpeg と字幕対応可否を確認できる
+- [x] `ffmpeg-full` を明示したローカル環境で実 ASS 焼き込みと対象ショート生成が成功する
+- [x] `uv run pytest` が全件通過し、新規 pip 依存・グローバル強制 link・字幕なし自動再試行が無い
+- [x] 独立レビューで重大指摘が無い
+- [ ] タスク完了コミット済み
+
+**見積もり目安:** 0.5 日
 
 ---
 

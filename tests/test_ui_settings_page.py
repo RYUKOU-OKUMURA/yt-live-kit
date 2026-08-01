@@ -5,9 +5,26 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock, call, patch
 
+import pytest
+
 from yt_live_kit.config import Settings
+from yt_live_kit.services.ffmpeg import FfmpegDiagnostics, FfmpegError
 from yt_live_kit.services.schedule import ScheduleError, SchedulePolicy
 from yt_live_kit.ui.views import settings as settings_page
+
+
+@pytest.fixture(autouse=True)
+def _stub_ffmpeg_diagnostics(monkeypatch) -> None:
+    monkeypatch.setattr(
+        settings_page,
+        "diagnose_ffmpeg",
+        lambda configured_path: FfmpegDiagnostics(
+            configured_path=configured_path,
+            resolved_path="/resolved/bin/ffmpeg",
+            version="ffmpeg version 8.0.1",
+            subtitles_available=True,
+        ),
+    )
 
 
 def _settings(tmp_path: Path, *, subtitle_font: str | None = None) -> Settings:
@@ -124,6 +141,105 @@ def test_environment_settings_explains_automatic_font_detection(
     settings_page._render_environment_settings(_settings(tmp_path))
 
     assert call("未指定（自動検出）") in code.call_args_list
+
+
+@patch.object(settings_page.st, "success")
+@patch.object(settings_page.st, "warning")
+@patch.object(settings_page.st, "code")
+@patch.object(settings_page.st, "container")
+def test_environment_settings_shows_ffmpeg_diagnostics_success(
+    container: MagicMock,
+    code: MagicMock,
+    warning: MagicMock,
+    success: MagicMock,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    container.return_value.__enter__.return_value = container.return_value
+    diagnose = MagicMock(
+        return_value=FfmpegDiagnostics(
+            configured_path="/opt/tools/ffmpeg",
+            resolved_path="/opt/homebrew/opt/ffmpeg-full/bin/ffmpeg",
+            version="ffmpeg version 8.0.1-full",
+            subtitles_available=True,
+        )
+    )
+    monkeypatch.setattr(settings_page, "diagnose_ffmpeg", diagnose)
+    settings = _settings(tmp_path)
+
+    settings_page._render_environment_settings(settings)
+
+    diagnose.assert_called_once_with("/opt/tools/ffmpeg")
+    assert call("/opt/tools/ffmpeg") in code.call_args_list
+    assert call("/opt/homebrew/opt/ffmpeg-full/bin/ffmpeg") in code.call_args_list
+    assert call("ffmpeg version 8.0.1-full") in code.call_args_list
+    assert any("利用できます" in item.args[0] for item in success.call_args_list)
+    warning.assert_not_called()
+
+
+@patch.object(settings_page.st, "success")
+@patch.object(settings_page.st, "warning")
+@patch.object(settings_page.st, "code")
+@patch.object(settings_page.st, "container")
+def test_environment_settings_keeps_page_alive_on_ffmpeg_diagnostic_failure(
+    container: MagicMock,
+    code: MagicMock,
+    warning: MagicMock,
+    success: MagicMock,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    container.return_value.__enter__.return_value = container.return_value
+    diagnose = MagicMock(
+        side_effect=FfmpegError(
+            "ffmpeg が見つかりません。YTLK_FFMPEG_PATH を確認してください。"
+        )
+    )
+    monkeypatch.setattr(settings_page, "diagnose_ffmpeg", diagnose)
+
+    settings_page._render_environment_settings(_settings(tmp_path))
+
+    assert call("取得できません") in code.call_args_list
+    message = warning.call_args.args[0]
+    assert "ffmpeg-full" in message
+    assert ".env" in message
+    assert "YTLK_FFMPEG_PATH" in message
+    success.assert_not_called()
+
+
+@patch.object(settings_page.st, "success")
+@patch.object(settings_page.st, "warning")
+@patch.object(settings_page.st, "code")
+@patch.object(settings_page.st, "container")
+def test_environment_settings_warns_when_subtitles_filter_is_missing(
+    container: MagicMock,
+    code: MagicMock,
+    warning: MagicMock,
+    success: MagicMock,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    container.return_value.__enter__.return_value = container.return_value
+    monkeypatch.setattr(
+        settings_page,
+        "diagnose_ffmpeg",
+        MagicMock(
+            return_value=FfmpegDiagnostics(
+                configured_path="ffmpeg",
+                resolved_path="/opt/homebrew/bin/ffmpeg",
+                version="ffmpeg version 8.0.1",
+                subtitles_available=False,
+            )
+        ),
+    )
+
+    settings_page._render_environment_settings(_settings(tmp_path))
+
+    message = warning.call_args.args[0]
+    assert "ffmpeg-full" in message
+    assert ".env" in message
+    assert "YTLK_FFMPEG_PATH" in message
+    success.assert_not_called()
 
 
 @patch.object(settings_page.st, "form_submit_button", return_value=True)

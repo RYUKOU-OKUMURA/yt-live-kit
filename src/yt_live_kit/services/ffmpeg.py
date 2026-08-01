@@ -18,12 +18,37 @@ from yt_live_kit.services.ytdlp import YtdlpError, download_video
 FFMPEG_DEFAULT = "ffmpeg"
 FFPROBE_DEFAULT = "ffprobe"
 FFMPEG_TIMEOUT_DEFAULT = 3600
+FFMPEG_CAPABILITY_TIMEOUT_DEFAULT = 10
 
 ConcatProgressCallback = Callable[[int, int, str], None] | None
 
 
 class FfmpegError(Exception):
     """ffmpeg 実行エラー."""
+
+
+@dataclass(frozen=True)
+class FfmpegCapabilities:
+    """FFmpeg バイナリの解決結果と利用可能なフィルタ."""
+
+    configured_path: str
+    resolved_path: str
+    filter_names: frozenset[str]
+
+    @property
+    def subtitles_available(self) -> bool:
+        """subtitles フィルタを利用できるか返す."""
+        return "subtitles" in self.filter_names
+
+
+@dataclass(frozen=True)
+class FfmpegDiagnostics:
+    """設定画面に表示する FFmpeg 診断結果."""
+
+    configured_path: str
+    resolved_path: str
+    version: str
+    subtitles_available: bool
 
 
 def _run_ffmpeg_command(
@@ -118,7 +143,13 @@ class ConcatResult:
 
 
 def find_ffmpeg(ffmpeg_path: str = FFMPEG_DEFAULT) -> str:
-    resolved = shutil.which(ffmpeg_path)
+    try:
+        resolved = shutil.which(ffmpeg_path)
+    except OSError as exc:
+        raise FfmpegError(
+            f"ffmpeg のパスを確認できませんでした（パス: {ffmpeg_path}）。"
+            "実行可能な ffmpeg を確認し、YTLK_FFMPEG_PATH に明示してください。"
+        ) from exc
     if resolved is None:
         raise FfmpegError(
             f"ffmpeg が見つかりません（パス: {ffmpeg_path}）。"
@@ -128,6 +159,163 @@ def find_ffmpeg(ffmpeg_path: str = FFMPEG_DEFAULT) -> str:
 
 
 _find_ffmpeg = find_ffmpeg
+
+
+def parse_ffmpeg_filter_names(stdout: str, stderr: str) -> frozenset[str]:
+    """``ffmpeg -filters`` 出力の表データ行からフィルタ名を取得する."""
+    names: set[str] = set()
+    for line in f"{stdout}\n{stderr}".splitlines():
+        columns = line.split()
+        if len(columns) < 3:
+            continue
+
+        flags, filter_name, signature = columns[:3]
+        valid_flags = (
+            len(flags) in {2, 3}
+            and flags[0] in {"T", "."}
+            and flags[1] in {"S", "."}
+            and (len(flags) == 2 or flags[2] in {"C", "."})
+        )
+        input_types, separator, output_types = signature.partition("->")
+        valid_signature = (
+            separator == "->"
+            and bool(input_types)
+            and bool(output_types)
+            and all(character in "AVN|" for character in input_types)
+            and all(character in "AVN|" for character in output_types)
+        )
+        if valid_flags and valid_signature:
+            names.add(filter_name)
+    return frozenset(names)
+
+
+def _run_ffmpeg_inspection(
+    cmd: list[str],
+    *,
+    timeout: int,
+    purpose: str,
+) -> subprocess.CompletedProcess[str]:
+    """FFmpeg 診断用の短時間サブプロセスを実行する."""
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise FfmpegError(
+            f"ffmpeg の{purpose}が {timeout} 秒でタイムアウトしました。"
+            "実行可能な ffmpeg か確認し、YTLK_FFMPEG_PATH に正しいパスを設定してください。"
+        ) from exc
+    except OSError as exc:
+        raise FfmpegError(
+            f"ffmpeg の{purpose}を実行できませんでした。"
+            "ファイルの実行権限と YTLK_FFMPEG_PATH の設定を確認してください。"
+            f"（原因: {exc}）"
+        ) from exc
+
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip()
+        raise FfmpegError(
+            f"ffmpeg の{purpose}に失敗しました（終了コード: {result.returncode}）。"
+            "YTLK_FFMPEG_PATH に実行可能な FFmpeg のパスを設定してください。"
+            + (f"（詳細: {detail}）" if detail else "")
+        )
+    return result
+
+
+def probe_ffmpeg_capabilities(
+    ffmpeg_path: str = FFMPEG_DEFAULT,
+    *,
+    timeout: int = FFMPEG_CAPABILITY_TIMEOUT_DEFAULT,
+) -> FfmpegCapabilities:
+    """実際の FFmpeg バイナリが公開するフィルタを調べる."""
+    resolved_path = find_ffmpeg(ffmpeg_path)
+    result = _run_ffmpeg_inspection(
+        [resolved_path, "-hide_banner", "-filters"],
+        timeout=timeout,
+        purpose="字幕フィルタ検査",
+    )
+    return FfmpegCapabilities(
+        configured_path=ffmpeg_path,
+        resolved_path=resolved_path,
+        filter_names=parse_ffmpeg_filter_names(
+            result.stdout or "",
+            result.stderr or "",
+        ),
+    )
+
+
+def get_ffmpeg_version(
+    ffmpeg_path: str = FFMPEG_DEFAULT,
+    *,
+    timeout: int = FFMPEG_CAPABILITY_TIMEOUT_DEFAULT,
+) -> str:
+    """``ffmpeg -version`` の先頭行を返す."""
+    resolved_path = find_ffmpeg(ffmpeg_path)
+    return _get_ffmpeg_version_from_resolved(resolved_path, timeout=timeout)
+
+
+def _get_ffmpeg_version_from_resolved(
+    resolved_path: str,
+    *,
+    timeout: int,
+) -> str:
+    """解決済みパスに対して ``-version`` を実行する."""
+    result = _run_ffmpeg_inspection(
+        [resolved_path, "-version"],
+        timeout=timeout,
+        purpose="バージョン確認",
+    )
+    lines = [
+        line.strip()
+        for line in f"{result.stdout or ''}\n{result.stderr or ''}".splitlines()
+        if line.strip()
+    ]
+    if not lines:
+        raise FfmpegError(
+            "ffmpeg のバージョン情報が空でした。"
+            "YTLK_FFMPEG_PATH に正しい FFmpeg のパスを設定してください。"
+        )
+    return lines[0]
+
+
+def diagnose_ffmpeg(
+    ffmpeg_path: str = FFMPEG_DEFAULT,
+    *,
+    timeout: int = FFMPEG_CAPABILITY_TIMEOUT_DEFAULT,
+) -> FfmpegDiagnostics:
+    """パス、バージョン、subtitles 利用可否を診断する."""
+    capabilities = probe_ffmpeg_capabilities(ffmpeg_path, timeout=timeout)
+    version = _get_ffmpeg_version_from_resolved(
+        capabilities.resolved_path,
+        timeout=timeout,
+    )
+    return FfmpegDiagnostics(
+        configured_path=capabilities.configured_path,
+        resolved_path=capabilities.resolved_path,
+        version=version,
+        subtitles_available=capabilities.subtitles_available,
+    )
+
+
+def ensure_subtitles_filter(
+    ffmpeg_path: str = FFMPEG_DEFAULT,
+    *,
+    timeout: int = FFMPEG_CAPABILITY_TIMEOUT_DEFAULT,
+) -> str:
+    """subtitles フィルタが使える解決済み FFmpeg パスを返す."""
+    capabilities = probe_ffmpeg_capabilities(ffmpeg_path, timeout=timeout)
+    if not capabilities.subtitles_available:
+        raise FfmpegError(
+            "指定された FFmpeg で subtitles フィルタを利用できません。"
+            "macOS では ffmpeg-full を導入し、YTLK_FFMPEG_PATH に"
+            "ffmpeg-full の ffmpeg 実体パスを設定してください。"
+            f"（検査対象: {capabilities.resolved_path}）"
+        )
+    return capabilities.resolved_path
 
 
 def load_meta(video_dir: Path) -> VideoMeta:

@@ -10,7 +10,7 @@ YouTube 公開ライブアーカイブから字幕を取得し、AI でチャプ
 | **Python 3.11+** | 実行環境 | pyenv 等で管理 |
 | **[uv](https://github.com/astral-sh/uv)** | 依存管理・実行 | `curl -LsSf https://astral.sh/uv/install.sh \| sh` |
 | **yt-dlp** | 字幕・動画取得 | **最新版推奨**（2025.02.19 以前では字幕取得失敗の実績あり） |
-| **ffmpeg** | 動画切り出し | システム PATH 上に配置（切り抜き機能で使用） |
+| **ffmpeg** | 動画切り出し・字幕焼き込み | 字幕付きショートは `subtitles` フィルタ対応版が必要 |
 | **Codex CLI** | チャプター・候補の自動生成 | 未導入時は画面に日本語で手順が表示されます |
 
 ## セットアップ（初回のみ）
@@ -363,17 +363,26 @@ yt-dlp --version
 
 ## ffmpeg
 
-切り抜き機能ではシステム PATH 上の `ffmpeg` を使用します。未インストールの場合:
+切り抜きと字幕なしの単一区間ショートは、通常版 `ffmpeg` で利用できます。macOS で字幕付きショートを作る場合は、`subtitles` フィルタを含む `ffmpeg-full` を使用してください。
 
 ```bash
-# macOS（Homebrew）
-brew install ffmpeg
+# macOS（Homebrew、字幕付きショート用）
+brew install ffmpeg-full
 
 # バージョン確認
-ffmpeg -version
+"$(brew --prefix ffmpeg-full)/bin/ffmpeg" -version
+
+# subtitles フィルタ確認
+"$(brew --prefix ffmpeg-full)/bin/ffmpeg" -hide_banner -filters | grep subtitles
 ```
 
-環境変数 `YTLK_FFMPEG_PATH` で別パスを指定できます。
+`ffmpeg-full` は keg-only のため、グローバルに強制 link せず、プロジェクト直下の `.env` で実体を明示します。Apple Silicon Mac の例は次のとおりです。Intel Mac の一般的なパスは `/usr/local/opt/ffmpeg-full/bin/ffmpeg` です。
+
+```dotenv
+YTLK_FFMPEG_PATH=/opt/homebrew/opt/ffmpeg-full/bin/ffmpeg
+```
+
+`brew install libass` を単独で実行したり、通常版 `ffmpeg` をアップグレードしたりしても、既存の FFmpeg バイナリに `subtitles` フィルタが後から追加されるわけではありません。設定画面で解決済みパス、バージョン、`subtitles` 利用可否を確認できます。
 
 ---
 
@@ -407,6 +416,8 @@ export YTLK_SUBTITLE_FONT="Noto Sans CJK JP"
 | 一括処理で一部失敗 | ログで失敗 URL を確認。`--skip-existing` で再実行すると成功分はスキップされる |
 | yt-dlp 警告が出る | 上記「yt-dlp の更新」を実施 |
 | 切り出しが失敗 | ffmpeg が PATH にあるか確認。`YTLK_FFMPEG_PATH` を設定 |
+| ショート生成で `subtitles` フィルタが利用できない | `ffmpeg-full` を導入し、keg-only の実体パスを `.env` の `YTLK_FFMPEG_PATH` に設定。`libass` 単体の追加や通常版 FFmpeg の upgrade だけでは既存バイナリは変わらない |
+| 字幕対応版 FFmpeg を用意できない | 単一区間の通常ショートは CLI の `--no-subtitles` で生成可能。字幕が必要な生成では自動的に字幕なしへ切り替えない |
 | yt-dlp が「No supported JavaScript runtime」と警告 | 字幕取得のみの用途では通常問題なし。警告を消す場合は [deno](https://deno.com/) のインストールを検討 |
 | ショート動画の字幕が豆腐（□）になる | 日本語フォントが見つかっていません。上記「日本語字幕のフォントについて」を参照し、`YTLK_SUBTITLE_FONT` を設定 |
 | チャンネル一覧が表示されない | 限定公開・メンバー限定の配信は対象外。`@handle` の綴りを確認し、「再取得」を試す |
