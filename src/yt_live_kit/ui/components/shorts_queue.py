@@ -89,6 +89,53 @@ def _candidate_label(candidate: ClipCandidate | HighlightSegment) -> str:
     )
 
 
+def install_line_snapshot(
+    *,
+    video_id: str,
+    source: str,
+    original_candidate: ClipCandidate | HighlightSegment,
+    segments: Sequence[HighlightSegment],
+    layout: str,
+    preset: str,
+    hook_preset: str,
+) -> tuple[ShortsQueueTarget, str]:
+    """区間確定済みの 1 本を既存 S4 snapshot 契約へ載せる."""
+    normalized = normalize_queue_candidates(segments, source="highlights")
+    targets = build_shorts_queue_targets(normalized, mode="concat")
+    fingerprint = make_shorts_queue_fingerprint(
+        video_id=video_id,
+        source=source,
+        mode="concat",
+        original_candidates=(original_candidate,),
+        segments=normalized,
+        layout=layout,
+        preset=preset,
+        hook_preset=hook_preset,
+    )
+    _clear_snapshot(video_id)
+    st.session_state[_state_key(video_id, "snapshot")] = {
+        "fingerprint": fingerprint,
+        "source": source,
+        "mode": "concat",
+        "layout": layout,
+        "preset": preset,
+        "hook_preset": hook_preset,
+        "targets": targets,
+        "original_candidates": (original_candidate,),
+        "selected_ids": (original_candidate.id,),
+        "segments": normalized,
+    }
+    return targets[0], fingerprint
+
+
+def install_line_confirmed_spec(
+    video_id: str,
+    spec: ShortsQueueClipSpec,
+) -> None:
+    """工程 UI で確認した spec を既存 S4 の確認済み集合へ登録する."""
+    _dict_state(video_id, "confirmed")[spec.target_id] = spec
+
+
 def _store_job_id(video_id: str, job_id: str) -> None:
     values = dict(_job_ids())
     values[video_id] = job_id
@@ -242,6 +289,34 @@ def _confirm_queue_overwrite_dialog(
             specs=specs,
             settings=settings,
         )
+
+
+def start_or_confirm_line_generation(
+    *,
+    video_id: str,
+    title: str,
+    spec: ShortsQueueClipSpec,
+    snapshot_fingerprint: str,
+    settings: Settings,
+) -> None:
+    """工程 UI の 1 本を既存 S4 ジョブ・上書き確認境界へ接続する."""
+    output_path = settings.data_dir / video_id / "shorts" / "output" / spec.output_name
+    if output_path.is_file():
+        _confirm_queue_overwrite_dialog(
+            video_id=video_id,
+            title=title,
+            specs=(spec,),
+            snapshot_fingerprint=snapshot_fingerprint,
+            existing_names=(spec.output_name,),
+            settings=settings,
+        )
+        return
+    _start_queue_job(
+        video_id=video_id,
+        title=title,
+        specs=(spec,),
+        settings=settings,
+    )
 
 
 def _render_snapshot_form(
