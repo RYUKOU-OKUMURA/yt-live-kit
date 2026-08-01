@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
@@ -13,6 +14,7 @@ from yt_live_kit.config import Settings
 from yt_live_kit.models.clips import ClipCandidate
 from yt_live_kit.models.highlights import HighlightSegment
 from yt_live_kit.models.telop import TelopLine, TelopScriptDocument, TelopSegmentScript
+from yt_live_kit.models.upload import UploadOperation
 from yt_live_kit.services.ai_prompt import AiPromptError
 from yt_live_kit.services.jobs import get_active_job
 from yt_live_kit.services.schedule import ScheduleError, load_schedule_policy
@@ -30,10 +32,13 @@ from yt_live_kit.services.shorts_line import (
     record_upload_operation,
     reconcile_output,
     load_line_state,
+    make_generation_spec_fingerprint,
     resolve_active_line,
     save_active_line,
     save_line_state,
+    run_line_reservation_transaction,
     set_review_fingerprint,
+    set_generation_spec,
     summarize_daily_lines,
     make_review_fingerprint,
 )
@@ -45,14 +50,15 @@ from yt_live_kit.services.shorts_queue import (
     build_shorts_queue_targets,
     load_latest_shorts_queue_result,
     make_shorts_queue_clip_spec,
+    make_shorts_queue_fingerprint,
 )
 from yt_live_kit.services.telop import (
     TelopError,
     generate_telop_script,
-    normalize_seconds_to_milliseconds,
     save_confirmed_telop_script,
     validate_telop_script,
 )
+from yt_live_kit.services.subtitle_burn import TELOP_PRESETS
 from yt_live_kit.services.upload_queue import UploadQueueError, list_operations
 from yt_live_kit.ui.components.short_cut import ParentOption, render_short_cut_section
 from yt_live_kit.ui.components.shorts_queue import (
@@ -60,6 +66,7 @@ from yt_live_kit.ui.components.shorts_queue import (
     clear_line_snapshot,
     install_line_confirmed_spec,
     install_line_snapshot,
+    restore_line_snapshot,
     start_or_confirm_line_generation,
 )
 from yt_live_kit.ui.views._local_settings import (
@@ -95,6 +102,7 @@ _NEXT_ACTIONS = {
 }
 _SESSION_PREFIX = "shorts_line_context"
 PreviewMode = Literal["source", "generating", "output", "source_missing"]
+CandidateKey = tuple[Literal["clips", "highlights"], str]
 
 
 def _safe(value: object) -> str:
@@ -132,23 +140,35 @@ def is_human_review_current(state: LineState, review_fingerprint: str) -> bool:
     )
 
 
-def ordered_candidate_ids(
-    candidates: Sequence[ClipCandidate | HighlightSegment],
-    preferred_candidate_ids: Sequence[str],
-) -> tuple[str, ...]:
-    """引き継ぎ順を先頭に保ち、残りを元表示順で並べる。"""
-    available = {candidate.id for candidate in candidates}
-    values: list[str] = []
-    for candidate_id in preferred_candidate_ids:
-        if candidate_id in available and candidate_id not in values:
-            values.append(candidate_id)
-    values.extend(candidate.id for candidate in candidates if candidate.id not in values)
+def ordered_candidate_keys(
+    clip_candidates: Sequence[ClipCandidate],
+    highlight_candidates: Sequence[HighlightSegment],
+    preferred_candidate_keys: Sequence[CandidateKey],
+) -> tuple[CandidateKey, ...]:
+    """source と ID の identity を保ったまま引き継ぎ順を先頭へ置く。"""
+    natural: list[CandidateKey] = [
+        *(("clips", candidate.id) for candidate in clip_candidates),
+        *(("highlights", candidate.id) for candidate in highlight_candidates),
+    ]
+    available = set(natural)
+    values: list[CandidateKey] = []
+    for key in preferred_candidate_keys:
+        if key in available and key not in values:
+            values.append(key)
+    values.extend(key for key in natural if key not in values)
     return tuple(values)
 
 
-def _candidate_handoff_label(candidate: ClipCandidate | HighlightSegment) -> str:
+def _candidate_handoff_label(
+    candidate: ClipCandidate | HighlightSegment,
+    source: Literal["clips", "highlights"] | None = None,
+) -> str:
+    source_label = (
+        "切り抜き" if source == "clips" else "ハイライト" if source else None
+    )
+    prefix = f"［{source_label}］" if source_label else ""
     return _safe(
-        f"{candidate.id}: {candidate.title}（{candidate.start} → {candidate.end}）"
+        f"{prefix}{candidate.id}: {candidate.title}（{candidate.start} → {candidate.end}）"
     )
 
 
@@ -166,20 +186,25 @@ def _save_context(video_id: str, value: dict[str, object]) -> None:
 
 
 def _spec_matches_lineage(spec: ShortsQueueClipSpec, state: LineState) -> bool:
-    """manifest spec が exact line の queue・target・review に属するか判定する。"""
-    if spec.target_id != state.clip_id or state.review_fingerprint is None:
+    """persisted full-spec proof と一致する manifest spec だけを認める。"""
+    if (
+        spec.target_id != state.clip_id
+        or state.review_fingerprint is None
+        or state.generation_spec_fingerprint is None
+    ):
         return False
     try:
         return (
-            make_review_fingerprint(
+            make_generation_spec_fingerprint(
                 state.video_id,
                 state.clip_id,
                 state.queue_fingerprint,
-                spec.telop_document,
+                state.review_fingerprint,
+                spec.to_dict(),
             )
-            == state.review_fingerprint
+            == state.generation_spec_fingerprint
         )
-    except (LineStateError, ShortsQueueError):
+    except (LineStateError, ShortsQueueError, ValueError):
         return False
 
 
@@ -214,6 +239,132 @@ def _as_highlight(candidate: ClipCandidate | HighlightSegment) -> HighlightSegme
         duration_sec=candidate.duration_sec,
         reason=candidate.reason,
     )
+
+
+def _material_context_payload(
+    *,
+    source: str,
+    original_candidate: ClipCandidate | HighlightSegment,
+    target: ShortsQueueTarget,
+    defaults: ShortsLineDefaults,
+) -> dict[str, object]:
+    return {
+        "source": source,
+        "original_kind": (
+            "clip" if isinstance(original_candidate, ClipCandidate) else "highlight"
+        ),
+        "original_candidate": original_candidate.model_dump(mode="json"),
+        "target": {
+            "target_id": target.target_id,
+            "segments": [segment.to_dict() for segment in target.segments],
+            "output_name": target.output_name,
+        },
+        "defaults": {
+            "layout": defaults.layout,
+            "preset": defaults.preset,
+            "hook_preset": defaults.hook_preset,
+        },
+    }
+
+
+def _restore_material_context(
+    state: LineState,
+) -> tuple[
+    str,
+    ClipCandidate | HighlightSegment,
+    ShortsQueueTarget,
+    ShortsLineDefaults,
+] | None:
+    """LineState 内の immutable material evidence を full queue hash で検証する。"""
+    if state.material_context_json is None:
+        return None
+    try:
+        raw = json.loads(state.material_context_json)
+        if not isinstance(raw, dict) or set(raw) != {
+            "source",
+            "original_kind",
+            "original_candidate",
+            "target",
+            "defaults",
+        }:
+            return None
+        source = raw["source"]
+        kind = raw["original_kind"]
+        if source not in {"clips", "highlights"}:
+            return None
+        if kind == "clip" and source == "clips":
+            original: ClipCandidate | HighlightSegment = ClipCandidate.model_validate(
+                raw["original_candidate"]
+            )
+        elif kind == "highlight" and source == "highlights":
+            original = HighlightSegment.model_validate(raw["original_candidate"])
+        else:
+            return None
+        target_raw = raw["target"]
+        defaults_raw = raw["defaults"]
+        if not isinstance(target_raw, dict) or set(target_raw) != {
+            "target_id",
+            "segments",
+            "output_name",
+        }:
+            return None
+        if not isinstance(defaults_raw, dict) or set(defaults_raw) != {
+            "layout",
+            "preset",
+            "hook_preset",
+        }:
+            return None
+        segments_raw = target_raw["segments"]
+        if not isinstance(segments_raw, list):
+            return None
+        segments = tuple(
+            ShortsQueueSegmentSpec.from_dict(value) for value in segments_raw
+        )
+        target = ShortsQueueTarget(
+            str(target_raw["target_id"]),
+            segments,
+            str(target_raw["output_name"]),
+        )
+        rebuilt = build_shorts_queue_targets(segments, mode="concat")[0]
+        if target != rebuilt or target.target_id != state.clip_id:
+            return None
+        defaults = ShortsLineDefaults(
+            str(defaults_raw["layout"]),
+            str(defaults_raw["preset"]),
+            str(defaults_raw["hook_preset"]),
+        )
+        if (
+            defaults.layout not in {"blur", "crop"}
+            or defaults.preset not in TELOP_PRESETS
+            or defaults.hook_preset not in TELOP_PRESETS
+        ):
+            return None
+        queue_fingerprint = make_shorts_queue_fingerprint(
+            video_id=state.video_id,
+            source=source,
+            mode="concat",
+            original_candidates=(original,),
+            segments=segments,
+            layout=defaults.layout,
+            preset=defaults.preset,
+            hook_preset=defaults.hook_preset,
+        )
+        if queue_fingerprint != state.queue_fingerprint:
+            return None
+        return source, original, target, defaults
+    except (TypeError, ValueError, ShortsQueueError):
+        return None
+
+
+def _persisted_generation_spec(state: LineState) -> ShortsQueueClipSpec | None:
+    if state.generation_spec_json is None:
+        return None
+    try:
+        raw = json.loads(state.generation_spec_json)
+        spec = ShortsQueueClipSpec.from_dict(raw)
+    except (TypeError, ValueError, json.JSONDecodeError, ShortsQueueError):
+        return None
+    return spec if _spec_matches_lineage(spec, state) else None
 
 
 def _generate_line_telop(
@@ -326,7 +477,18 @@ def _start_line(
             preset=defaults.preset,
             hook_preset=defaults.hook_preset,
         )
-        state = create_line_state(video_id, target.target_id, queue_fingerprint)
+        material_context = _material_context_payload(
+            source=_source_for(option),
+            original_candidate=option.candidate,
+            target=target,
+            defaults=defaults,
+        )
+        state = create_line_state(
+            video_id,
+            target.target_id,
+            queue_fingerprint,
+            material_context=material_context,
+        )
         save_line_state(state, settings)
         save_active_line(video_id, target.target_id, settings)
     except (LineStateError, ShortsQueueError, TelopError) as exc:
@@ -359,24 +521,28 @@ def _restore_context(
     state: LineState,
     settings: Settings,
 ) -> dict[str, object] | None:
-    """検証済み manifest から機械的に証明できる対象だけを復元する."""
-    try:
-        result = load_latest_shorts_queue_result(video_id, settings)
-    except ShortsQueueError:
+    """永続 material/spec proof から exact S4 line-mode state まで復元する。"""
+    material = _restore_material_context(state)
+    if material is None:
         return None
-    if result is None:
-        result_specs: tuple[ShortsQueueClipSpec, ...] = ()
-    else:
-        result_specs = result.clip_specs
-    spec = next(
-        (value for value in result_specs if _spec_matches_lineage(value, state)),
-        None,
-    )
+    source, original, target, defaults = material
+    spec = _persisted_generation_spec(state)
+    if spec is not None and (
+        spec.target_id != target.target_id
+        or spec.segments != target.segments
+        or spec.output_name != target.output_name
+        or spec.layout != defaults.layout
+        or spec.preset != defaults.preset
+        or spec.hook_preset != defaults.hook_preset
+    ):
+        return None
+    document: TelopScriptDocument | None = None
     if spec is not None:
-        target = ShortsQueueTarget(spec.target_id, spec.segments, spec.output_name)
-        defaults = ShortsLineDefaults(spec.layout, spec.preset, spec.hook_preset)
-        document = spec.telop_document
-    else:
+        try:
+            document = spec.telop_document
+        except ShortsQueueError:
+            return None
+    elif state.review_fingerprint is not None:
         script_path = (
             settings.data_dir
             / video_id
@@ -388,25 +554,8 @@ def _restore_context(
             document = TelopScriptDocument.model_validate_json(
                 script_path.read_text(encoding="utf-8")
             )
-            segment_specs = tuple(
-                ShortsQueueSegmentSpec(
-                    id=f"segment_{index:03d}",
-                    title=f"区間 {index}",
-                    start_ms=normalize_seconds_to_milliseconds(segment.start_sec),
-                    end_ms=normalize_seconds_to_milliseconds(segment.end_sec),
-                    reason="保存済みテロップ台本から復元",
-                )
-                for index, segment in enumerate(document.segments, start=1)
-            )
-            target = build_shorts_queue_targets(segment_specs, mode="concat")[0]
-        except (OSError, UnicodeError, ValueError, TelopError, ShortsQueueError):
-            return None
-        if target.target_id != state.clip_id:
-            return None
-        try:
             if (
-                state.review_fingerprint is None
-                or make_review_fingerprint(
+                make_review_fingerprint(
                     video_id,
                     state.clip_id,
                     state.queue_fingerprint,
@@ -414,17 +563,33 @@ def _restore_context(
                 )
                 != state.review_fingerprint
             ):
-                return None
-        except LineStateError:
-            return None
-        defaults = load_shorts_line_defaults(settings)
+                document = None
+        except (OSError, UnicodeError, ValueError, LineStateError):
+            document = None
+    try:
+        restore_line_snapshot(
+            video_id=video_id,
+            source=source,
+            original_candidate=original,
+            target=target,
+            layout=defaults.layout,
+            preset=defaults.preset,
+            hook_preset=defaults.hook_preset,
+            expected_fingerprint=state.queue_fingerprint,
+            confirmed_spec=spec,
+        )
+    except ShortsQueueError:
+        return None
     context: dict[str, object] = {
         "title": video_id,
         "target": target,
         "queue_fingerprint": state.queue_fingerprint,
         "defaults": defaults,
-        "draft": document,
+        "original_candidate": original,
+        "source": source,
     }
+    if document is not None:
+        context["draft"] = document
     if spec is not None:
         context["confirmed_spec"] = spec
     _save_context(video_id, context)
@@ -674,6 +839,23 @@ def record_line_upload(
         )
 
 
+def run_line_upload_transaction(
+    video_id: str,
+    clip_id: str,
+    output_path: Path,
+    settings: Settings,
+    start_upload: Callable[[], UploadOperation],
+) -> UploadOperation:
+    """投稿 side effect を exact line lock 内の検証・記録へ接続する。"""
+    return run_line_reservation_transaction(
+        video_id,
+        clip_id,
+        output_path,
+        settings,
+        start_upload,
+    )
+
+
 def validate_line_reservation(
     video_id: str,
     clip_id: str,
@@ -704,7 +886,7 @@ def render_shorts_line(
     clip_candidates: Sequence[ClipCandidate],
     highlight_candidates: Sequence[HighlightSegment],
     settings: Settings,
-    preferred_candidate_ids: Sequence[str] = (),
+    preferred_candidate_keys: Sequence[CandidateKey] = (),
 ) -> None:
     """1 本の区間確定から予約導線までを工程として描画する."""
     try:
@@ -719,18 +901,25 @@ def render_shorts_line(
     if state is None:
         render_stage_bar(LineStage.MATERIAL_SELECTION)
         st.subheader("素材を選び、区間を決める")
-        candidates = [*clip_candidates, *highlight_candidates]
-        if not candidates:
+        candidate_by_key: dict[CandidateKey, ClipCandidate | HighlightSegment] = {
+            **{("clips", candidate.id): candidate for candidate in clip_candidates},
+            **{
+                ("highlights", candidate.id): candidate
+                for candidate in highlight_candidates
+            },
+        }
+        if not candidate_by_key:
             st.info("素材候補がありません。素材候補ワークスペースで生成してください。")
             return
-        candidate_by_id = {candidate.id: candidate for candidate in candidates}
-        ordered_ids = ordered_candidate_ids(candidates, preferred_candidate_ids)
-        preferred = tuple(
-            candidate_id
-            for candidate_id in preferred_candidate_ids
-            if candidate_id in candidate_by_id
+        ordered_keys = ordered_candidate_keys(
+            clip_candidates,
+            highlight_candidates,
+            preferred_candidate_keys,
         )
-        default_ids = list(preferred or ordered_ids[:1])
+        preferred = tuple(
+            key for key in preferred_candidate_keys if key in candidate_by_key
+        )
+        default_keys = list(preferred or ordered_keys[:1])
         selection_key = f"line_material_selection_{video_id}"
         transfer_marker_key = f"line_material_transfer_marker_{video_id}"
         stored_selection = st.session_state.get(selection_key)
@@ -738,37 +927,41 @@ def render_shorts_line(
         if (
             st.session_state.get(transfer_marker_key) != transfer_marker
             or not isinstance(stored_selection, list)
-            or any(value not in candidate_by_id for value in stored_selection)
+            or any(value not in candidate_by_key for value in stored_selection)
         ):
             st.session_state.pop(selection_key, None)
             st.session_state[transfer_marker_key] = transfer_marker
-        selected_ids = st.multiselect(
+        selected_keys = st.multiselect(
             "ショート作成対象（選択順）",
-            ordered_ids,
-            default=default_ids,
-            format_func=lambda value: _candidate_handoff_label(candidate_by_id[value]),
+            ordered_keys,
+            default=default_keys,
+            format_func=lambda value: _candidate_handoff_label(
+                candidate_by_key[value], value[0]
+            ),
             key=selection_key,
         )
-        if not selected_ids:
+        if not selected_keys:
             st.info("ショート作成対象を 1 件以上選択してください。")
             return
         st.caption(
             "選択順: "
             + " → ".join(
-                f"{index}. {_candidate_handoff_label(candidate_by_id[candidate_id])}"
-                for index, candidate_id in enumerate(selected_ids, start=1)
+                f"{index}. {_candidate_handoff_label(candidate_by_key[candidate_key], candidate_key[0])}"
+                for index, candidate_key in enumerate(selected_keys, start=1)
             )
         )
         target_key = f"line_material_target_{video_id}"
-        if st.session_state.get(target_key) not in selected_ids:
-            st.session_state[target_key] = selected_ids[0]
-        selected_id = st.radio(
+        if st.session_state.get(target_key) not in selected_keys:
+            st.session_state[target_key] = selected_keys[0]
+        selected_key = st.radio(
             "今回作る候補（1 本ずつ進めます）",
-            selected_ids,
-            format_func=lambda value: _candidate_handoff_label(candidate_by_id[value]),
+            selected_keys,
+            format_func=lambda value: _candidate_handoff_label(
+                candidate_by_key[value], value[0]
+            ),
             key=target_key,
         )
-        selected = candidate_by_id[selected_id]
+        selected = candidate_by_key[selected_key]
         if selected.duration_sec > 180:
             render_short_cut_section(
                 video_id=video_id,
@@ -938,11 +1131,19 @@ def render_shorts_line(
                 preset=defaults.preset,
                 hook_preset=defaults.hook_preset,
             )
+            previous_state = state
+            state = set_generation_spec(
+                previous_state,
+                review_fingerprint,
+                spec.to_dict(),
+            )
+            if state != previous_state:
+                save_line_state(state, settings, expected_state=previous_state)
             context["confirmed_spec"] = spec
             context["draft"] = saved.document
             _save_context(video_id, context)
             install_line_confirmed_spec(video_id, spec)
-        except (TelopError, ShortsQueueError) as exc:
+        except (LineStateError, TelopError, ShortsQueueError) as exc:
             st.error(_safe(exc))
 
     output_path, manifest_spec = _find_output(state, settings)

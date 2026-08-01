@@ -36,9 +36,9 @@ from yt_live_kit.services.youtube_api import (
 )
 from yt_live_kit.ui.components.clipboard import render_copy_button
 from yt_live_kit.ui.components.shorts_line import (
-    record_line_upload,
     render_main_line_summary,
     render_shorts_line,
+    run_line_upload_transaction,
     validate_line_reservation,
 )
 from yt_live_kit.ui.components.upload import render_upload_section
@@ -542,6 +542,9 @@ class CandidateTransfer:
     fingerprint: str
 
 
+CandidateKey = tuple[Literal["clips", "highlights"], str]
+
+
 def make_candidate_fingerprint(
     source: Literal["clips", "highlights"],
     candidates: list[ClipCandidate] | list[HighlightSegment],
@@ -580,6 +583,28 @@ def _transfer_key(video_id: str, source: str) -> str:
     return f"shorts_line_transfer_{video_id}_{source}"
 
 
+def _transfer_order_key(video_id: str) -> str:
+    return f"shorts_line_transfer_order_{video_id}"
+
+
+def _load_transfer_order(video_id: str) -> tuple[CandidateKey, ...]:
+    raw = st.session_state.get(_transfer_order_key(video_id))
+    if not isinstance(raw, list):
+        return ()
+    values: list[CandidateKey] = []
+    for item in raw:
+        if (
+            isinstance(item, (list, tuple))
+            and len(item) == 2
+            and item[0] in {"clips", "highlights"}
+            and isinstance(item[1], str)
+        ):
+            key: CandidateKey = (item[0], item[1])
+            if key not in values:
+                values.append(key)
+    return tuple(values)
+
+
 def _load_transfer(video_id: str, source: str) -> CandidateTransfer | None:
     raw = st.session_state.get(_transfer_key(video_id, source))
     if not isinstance(raw, dict):
@@ -600,16 +625,26 @@ def _save_transfer(video_id: str, transfer: CandidateTransfer) -> None:
         "selected_ids": transfer.selected_ids,
         "fingerprint": transfer.fingerprint,
     }
+    order = list(_load_transfer_order(video_id))
+    selected = {(transfer.source, candidate_id) for candidate_id in transfer.selected_ids}
+    order = [
+        key for key in order if key[0] != transfer.source or key in selected
+    ]
+    for candidate_id in transfer.selected_ids:
+        key: CandidateKey = (transfer.source, candidate_id)
+        if key not in order:
+            order.append(key)
+    st.session_state[_transfer_order_key(video_id)] = order
 
 
-def _valid_transfer_ids(
+def _valid_transfer_candidates(
     video_id: str,
     *,
     clips: list[ClipCandidate],
     highlights: list[HighlightSegment],
-) -> tuple[str, ...]:
+) -> tuple[CandidateKey, ...]:
     """全 workspace 描画前に引き継ぎを再検証し、stale 状態を破棄する."""
-    values: list[str] = []
+    valid: list[CandidateKey] = []
     invalidated = False
     for source, candidates in (("clips", clips), ("highlights", highlights)):
         transfer = _load_transfer(video_id, source)
@@ -624,7 +659,11 @@ def _valid_transfer_ids(
             st.session_state.pop(_transfer_key(video_id, source), None)
             invalidated = True
         else:
-            values.extend(current.selected_ids)
+            valid.extend((source, candidate_id) for candidate_id in current.selected_ids)
+    valid_set = set(valid)
+    values = [key for key in _load_transfer_order(video_id) if key in valid_set]
+    values.extend(key for key in valid if key not in values)
+    st.session_state[_transfer_order_key(video_id)] = values
     if invalidated:
         st.warning("候補が更新されました。ショート作成対象を選び直してください。")
     return tuple(values)
@@ -858,21 +897,13 @@ def _render_publish_workspace(
                         settings,
                     )
                 ),
-                before_confirm=lambda clip_id, output_path: (
-                    validate_line_reservation(
+                reservation_transaction=lambda clip_id, output_path, start_upload: (
+                    run_line_upload_transaction(
                         video.video_id,
                         clip_id,
                         output_path,
                         settings,
-                    )
-                ),
-                on_operation_started=lambda clip_id, operation_id, output_path: (
-                    record_line_upload(
-                        video.video_id,
-                        clip_id,
-                        operation_id,
-                        output_path,
-                        settings,
+                        start_upload,
                     )
                 ),
             )
@@ -960,7 +991,7 @@ def render_video_detail_page(
         return
 
     clips, highlights = _load_material_candidates(result, settings)
-    preferred_transfer_ids = _valid_transfer_ids(
+    preferred_transfer_candidates = _valid_transfer_candidates(
         video.video_id,
         clips=clips,
         highlights=highlights,
@@ -1017,7 +1048,7 @@ def render_video_detail_page(
             clip_candidates=clips,
             highlight_candidates=highlights,
             settings=settings,
-            preferred_candidate_ids=preferred_transfer_ids,
+            preferred_candidate_keys=preferred_transfer_candidates,
         )
         render_shorts_section(result, expanded=False)
     else:

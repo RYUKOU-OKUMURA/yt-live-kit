@@ -147,6 +147,44 @@ def clear_line_snapshot(video_id: str) -> None:
     _clear_snapshot(video_id)
 
 
+def restore_line_snapshot(
+    *,
+    video_id: str,
+    source: str,
+    original_candidate: ClipCandidate | HighlightSegment,
+    target: ShortsQueueTarget,
+    layout: str,
+    preset: str,
+    hook_preset: str,
+    expected_fingerprint: str,
+    confirmed_spec: ShortsQueueClipSpec | None = None,
+) -> None:
+    """永続 material evidence と一致する exact line-mode S4 state を復元する。"""
+    restored_target, fingerprint = install_line_snapshot(
+        video_id=video_id,
+        source=source,
+        original_candidate=original_candidate,
+        segments=target.highlight_segments(),
+        layout=layout,
+        preset=preset,
+        hook_preset=hook_preset,
+    )
+    if restored_target != target or fingerprint != expected_fingerprint:
+        _clear_snapshot(video_id)
+        raise ShortsQueueError(
+            "保存済みラインの生成 snapshot が queue fingerprint と一致しません。"
+        )
+    if confirmed_spec is not None:
+        if (
+            confirmed_spec.target_id != target.target_id
+            or confirmed_spec.segments != target.segments
+            or confirmed_spec.output_name != target.output_name
+        ):
+            _clear_snapshot(video_id)
+            raise ShortsQueueError("保存済み生成 spec がライン対象と一致しません。")
+        install_line_confirmed_spec(video_id, confirmed_spec)
+
+
 def _store_job_id(video_id: str, job_id: str) -> None:
     values = dict(_job_ids())
     values[video_id] = job_id

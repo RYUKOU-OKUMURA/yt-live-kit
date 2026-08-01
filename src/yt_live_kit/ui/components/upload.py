@@ -29,7 +29,7 @@ from yt_live_kit.services.shorts_queue import (
     ShortsQueueResult,
     load_latest_shorts_queue_result,
 )
-from yt_live_kit.services.shorts_line import LineStateError
+from yt_live_kit.services.shorts_line import LineReservationStartedError, LineStateError
 from yt_live_kit.services.upload_queue import UploadQueueError, load_operation
 from yt_live_kit.ui.state import set_active_job_id
 
@@ -159,6 +159,9 @@ def upload_preview_dialog(
     dialog_nonce: str,
     before_confirm: Callable[[str, Path], None] | None = None,
     on_operation_started: Callable[[str, str, Path], None] | None = None,
+    reservation_transaction: (
+        Callable[[str, Path, Callable[[], UploadOperation]], UploadOperation] | None
+    ) = None,
 ) -> None:
     """全 snapshot を表示し、明示選択と同意後だけ service confirm を呼ぶ."""
     st.warning(
@@ -227,8 +230,8 @@ def upload_preview_dialog(
             except LineStateError as exc:
                 st.error(_safe_text(exc))
                 return
-        try:
-            operation = confirm_and_start_upload(
+        def start_upload() -> UploadOperation:
+            return confirm_and_start_upload(
                 preview,
                 self_declared_made_for_kids=made_for_kids,
                 contains_synthetic_media=synthetic,
@@ -236,7 +239,31 @@ def upload_preview_dialog(
                 settings=settings,
                 now=datetime.now(timezone.utc),
             )
-        except ScheduleError as exc:
+
+        try:
+            operation = (
+                reservation_transaction(
+                    preview.clip_id,
+                    preview.video_path,
+                    start_upload,
+                )
+                if reservation_transaction is not None
+                else start_upload()
+            )
+        except LineReservationStartedError as exc:
+            operation = exc.operation
+            _store_operation_id(preview.source_video_id, operation.operation_id)
+            set_active_job_id(operation.job_id)
+            message = (
+                "予約投稿ジョブは開始済みですが、ライン状態へ記録できませんでした。"
+                f" operation {_safe_text(operation.operation_id)} を確認してください。"
+                f" 詳細: {_safe_text(exc)}"
+            )
+            _store_post_start_error(preview.source_video_id, message)
+            st.error(message)
+            st.rerun()
+            return
+        except (LineStateError, ScheduleError) as exc:
             st.error(_safe_text(exc))
             return
         _store_operation_id(preview.source_video_id, operation.operation_id)
@@ -281,6 +308,9 @@ def _open_preview(
     before_preview: Callable[[str, Path], None] | None = None,
     before_confirm: Callable[[str, Path], None] | None = None,
     on_operation_started: Callable[[str, str, Path], None] | None = None,
+    reservation_transaction: (
+        Callable[[str, Path, Callable[[], UploadOperation]], UploadOperation] | None
+    ) = None,
 ) -> None:
     if item.output_path is None:
         st.error("投稿できるショート動画ファイルがありません。")
@@ -322,6 +352,7 @@ def _open_preview(
         uuid.uuid4().hex,
         before_confirm,
         on_operation_started,
+        reservation_transaction,
     )
 
 
@@ -332,6 +363,9 @@ def render_upload_section(
     before_preview: Callable[[str, Path], None] | None = None,
     before_confirm: Callable[[str, Path], None] | None = None,
     on_operation_started: Callable[[str, str, Path], None] | None = None,
+    reservation_transaction: (
+        Callable[[str, Path, Callable[[], UploadOperation]], UploadOperation] | None
+    ) = None,
 ) -> None:
     """最新の検証済み shorts queue から成功 item の投稿入口を描画する."""
     post_start_error = _pop_post_start_error(video_id)
@@ -390,4 +424,5 @@ def render_upload_section(
                     before_preview=before_preview,
                     before_confirm=before_confirm,
                     on_operation_started=on_operation_started,
+                    reservation_transaction=reservation_transaction,
                 )

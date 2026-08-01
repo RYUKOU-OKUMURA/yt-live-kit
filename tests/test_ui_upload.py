@@ -159,6 +159,41 @@ def test_dialog_confirm_passes_explicit_choices_and_stores_operation(tmp_path: P
     set_job.assert_called_once_with("job-1")
 
 
+def test_dialog_runs_confirm_inside_reservation_transaction(tmp_path: Path) -> None:
+    preview = _preview(tmp_path)
+    operation = _operation(tmp_path)
+    transaction = MagicMock(
+        side_effect=lambda _clip_id, _path, start_upload: start_upload()
+    )
+    with (
+        patch.object(upload.st, "container", side_effect=_container),
+        patch.object(upload.st, "warning"),
+        patch.object(upload.st, "markdown"),
+        patch.object(upload.st, "write"),
+        patch.object(upload.st, "code"),
+        patch.object(upload.st, "text_area"),
+        patch.object(upload.st, "caption"),
+        patch.object(upload.st, "segmented_control", side_effect=["はい", "いいえ"]),
+        patch.object(upload.st, "checkbox", return_value=True),
+        patch.object(upload.st, "button", return_value=True),
+        patch.object(upload.st, "success"),
+        patch.object(upload.st, "rerun"),
+        patch.object(upload, "confirm_and_start_upload", return_value=operation) as confirm,
+        patch.object(upload, "_store_operation_id"),
+        patch.object(upload, "set_active_job_id"),
+    ):
+        upload.upload_preview_dialog.__wrapped__(
+            preview,
+            Settings(data_dir=tmp_path),
+            "open-transaction",
+            reservation_transaction=transaction,
+        )
+
+    transaction.assert_called_once()
+    assert transaction.call_args.args[:2] == ("clip-1", preview.video_path)
+    confirm.assert_called_once()
+
+
 def test_dialog_revalidates_line_immediately_before_confirm(tmp_path: Path) -> None:
     preview = _preview(tmp_path)
     before_confirm = MagicMock(

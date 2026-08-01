@@ -9,6 +9,8 @@ from pathlib import Path
 from unittest.mock import MagicMock, call, patch
 
 from yt_live_kit.config import Settings
+from yt_live_kit.models.clips import ClipCandidate
+from yt_live_kit.models.highlights import HighlightSegment
 from yt_live_kit.models.meta import VideoMeta
 from yt_live_kit.services.history import ProcessedVideo
 from yt_live_kit.services.pipeline import PipelineResult
@@ -143,6 +145,48 @@ def test_candidate_transfer_preserves_order_and_invalidates_on_change() -> None:
         current_fingerprint=changed,
         candidate_ids={"clip-1", "clip-2"},
     ) is None
+
+
+def test_candidate_transfer_preserves_global_source_identity_and_order() -> None:
+    clip = ClipCandidate(
+        id="same",
+        title="切り抜き",
+        start="0:00:00",
+        end="0:00:20",
+        duration_sec=20,
+        reason="理由",
+    )
+    highlight = HighlightSegment(
+        id="same",
+        title="ハイライト",
+        start="0:01:00",
+        end="0:01:20",
+        duration_sec=20,
+        reason="理由",
+    )
+    session_state: dict[str, object] = {}
+    with patch.object(video_detail.st, "session_state", session_state):
+        video_detail._save_transfer(
+            "video-1",
+            video_detail.CandidateTransfer(
+                "highlights",
+                ("same",),
+                video_detail.make_candidate_fingerprint("highlights", [highlight]),
+            ),
+        )
+        video_detail._save_transfer(
+            "video-1",
+            video_detail.CandidateTransfer(
+                "clips",
+                ("same",),
+                video_detail.make_candidate_fingerprint("clips", [clip]),
+            ),
+        )
+        assert video_detail._valid_transfer_candidates(
+            "video-1",
+            clips=[clip],
+            highlights=[highlight],
+        ) == (("highlights", "same"), ("clips", "same"))
 
 
 def test_description_applied_ids_round_trip_and_mark(tmp_path: Path) -> None:

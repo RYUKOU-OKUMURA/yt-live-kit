@@ -11,6 +11,7 @@ import pytest
 
 from yt_live_kit.config import Settings
 from yt_live_kit.models.clips import ClipCandidate
+from yt_live_kit.models.highlights import HighlightSegment
 from yt_live_kit.models.telop import TelopScriptDocument
 from yt_live_kit.services.shorts_line import (
     DailyLineSummary,
@@ -24,15 +25,17 @@ from yt_live_kit.services.shorts_line import (
     record_output,
     save_active_line,
     save_line_state,
+    set_generation_spec,
     set_review_fingerprint,
 )
 from yt_live_kit.services.shorts_queue import (
     ShortsQueueItemResult,
     build_shorts_queue_targets,
     make_shorts_queue_clip_spec,
+    make_shorts_queue_fingerprint,
     normalize_queue_candidates,
 )
-from yt_live_kit.ui.components import shorts_line
+from yt_live_kit.ui.components import shorts_line, shorts_queue as shorts_queue_ui
 from yt_live_kit.ui.views._local_settings import (
     ShortsLineDefaults,
     load_shorts_line_defaults,
@@ -43,6 +46,11 @@ def _reviewed_output_state(output_path: Path, settings: Settings):
     review = "b" * 64
     state = create_line_state("video-1", "clip-1", "a" * 64, review_fingerprint=review)
     state = confirm_review(state, review)
+    state = set_generation_spec(
+        state,
+        review,
+        {"target_id": "clip-1", "layout": "blur", "preset": "default"},
+    )
     state = record_output(state, output_path)
     state = confirm_preview(state, output_path)
     save_line_state(state, settings)
@@ -161,6 +169,8 @@ def test_manifest_output_is_rejected_when_review_lineage_changed(tmp_path: Path)
     state = create_line_state(
         "video-1", target.target_id, queue_fingerprint, review_fingerprint=review_a
     )
+    state = confirm_review(state, review_a)
+    state = set_generation_spec(state, review_a, spec_a.to_dict())
     item = ShortsQueueItemResult(
         target_id=target.target_id,
         status="succeeded",
@@ -197,8 +207,70 @@ def test_manifest_output_is_rejected_when_review_lineage_changed(tmp_path: Path)
             preset="default",
             hook_preset="hook",
         )
+        state_b = confirm_review(state_b, state_b.review_fingerprint or "")
+        state_b = set_generation_spec(
+            state_b,
+            state_b.review_fingerprint or "",
+            spec_b.to_dict(),
+        )
         assert shorts_line._spec_matches_lineage(spec_a, state_b) is False
         assert shorts_line._spec_matches_lineage(spec_b, state_b) is True
+
+
+def test_manifest_output_is_rejected_after_layout_queue_change(tmp_path: Path) -> None:
+    target, document, blur_spec = _lineage_fixture()
+    candidate = ClipCandidate(
+        id="clip-source",
+        title="短い候補",
+        start="0:00:00",
+        end="0:00:20",
+        duration_sec=20,
+        reason="理由",
+    )
+    crop_queue = make_shorts_queue_fingerprint(
+        video_id="video-1",
+        source="clips",
+        mode="concat",
+        original_candidates=(candidate,),
+        segments=target.segments,
+        layout="crop",
+        preset="default",
+        hook_preset="hook",
+    )
+    crop_spec = make_shorts_queue_clip_spec(
+        target,
+        document,
+        layout="crop",
+        preset="default",
+        hook_preset="hook",
+    )
+    review = make_review_fingerprint(
+        "video-1", target.target_id, crop_queue, document
+    )
+    state = create_line_state(
+        "video-1", target.target_id, crop_queue, review_fingerprint=review
+    )
+    state = confirm_review(state, review)
+    state = set_generation_spec(state, review, crop_spec.to_dict())
+    output = tmp_path / target.output_name
+    output.write_bytes(b"old-blur-output")
+    item = ShortsQueueItemResult(
+        target_id=target.target_id,
+        status="succeeded",
+        output_path=output,
+        log_path=None,
+        font_warning=None,
+        title_candidates=("タイトル",),
+        description="説明",
+        tags=("タグ",),
+        error=None,
+    )
+    result = MagicMock(clip_specs=(blur_spec,), items=(item,))
+    with patch.object(shorts_line, "load_latest_shorts_queue_result", return_value=result):
+        assert shorts_line._find_output(state, Settings(data_dir=tmp_path)) == (
+            None,
+            None,
+        )
 
 
 def test_stale_context_spec_is_cleared_after_review_change() -> None:
@@ -222,42 +294,44 @@ def test_stale_context_spec_is_cleared_after_review_change() -> None:
     save_context.assert_called_once_with("video-1", context)
 
 
-def test_ordered_candidate_ids_preserve_handoff_order_for_mixed_candidates() -> None:
-    short = ClipCandidate(
-        id="short",
-        title="短い",
+def test_ordered_candidate_keys_preserve_source_order_and_colliding_ids() -> None:
+    clip = ClipCandidate(
+        id="same",
+        title="切り抜き",
         start="0:00:00",
-        end="0:00:20",
-        duration_sec=20,
-        reason="理由",
-    )
-    long = ClipCandidate(
-        id="long",
-        title="長い",
-        start="0:01:00",
-        end="0:05:00",
+        end="0:04:00",
         duration_sec=240,
         reason="理由",
     )
-    assert shorts_line.ordered_candidate_ids(
-        (long, short), ("short", "long")
-    ) == ("short", "long")
+    highlight = HighlightSegment(
+        id="same",
+        title="ハイライト",
+        start="0:01:00",
+        end="0:01:20",
+        duration_sec=20,
+        reason="理由",
+    )
+    assert shorts_line.ordered_candidate_keys(
+        (clip,),
+        (highlight,),
+        (("highlights", "same"), ("clips", "same")),
+    ) == (("highlights", "same"), ("clips", "same"))
 
 
 def test_mixed_handoff_preselects_order_and_does_not_force_long_cut(
     tmp_path: Path,
 ) -> None:
-    long = ClipCandidate(
-        id="long",
-        title="長い",
+    clip = ClipCandidate(
+        id="same",
+        title="長い切り抜き",
         start="0:01:00",
         end="0:05:00",
         duration_sec=240,
         reason="理由",
     )
-    short = ClipCandidate(
-        id="short",
-        title="短い",
+    highlight = HighlightSegment(
+        id="same",
+        title="短いハイライト",
         start="0:00:00",
         end="0:00:20",
         duration_sec=20,
@@ -273,9 +347,11 @@ def test_mixed_handoff_preselects_order_and_does_not_force_long_cut(
         patch.object(
             shorts_line.st,
             "multiselect",
-            return_value=["short", "long"],
+            return_value=[("highlights", "same"), ("clips", "same")],
         ) as multiselect,
-        patch.object(shorts_line.st, "radio", return_value="short"),
+        patch.object(
+            shorts_line.st, "radio", return_value=("highlights", "same")
+        ),
         patch.object(shorts_line.st, "caption"),
         patch.object(shorts_line.st, "write"),
         patch.object(shorts_line.st, "button", return_value=False),
@@ -283,14 +359,23 @@ def test_mixed_handoff_preselects_order_and_does_not_force_long_cut(
         shorts_line.render_shorts_line(
             video_id="video-1",
             title="動画",
-            clip_candidates=(long, short),
-            highlight_candidates=(),
+            clip_candidates=(clip,),
+            highlight_candidates=(highlight,),
             settings=Settings(data_dir=tmp_path),
-            preferred_candidate_ids=("short", "long"),
+            preferred_candidate_keys=(
+                ("highlights", "same"),
+                ("clips", "same"),
+            ),
         )
 
-    assert multiselect.call_args.args[1] == ("short", "long")
-    assert multiselect.call_args.kwargs["default"] == ["short", "long"]
+    assert multiselect.call_args.args[1] == (
+        ("highlights", "same"),
+        ("clips", "same"),
+    )
+    assert multiselect.call_args.kwargs["default"] == [
+        ("highlights", "same"),
+        ("clips", "same"),
+    ]
     cut.assert_not_called()
 
 
@@ -405,13 +490,42 @@ def test_sidebar_is_display_only_and_shows_daily_progress(tmp_path: Path) -> Non
 
 def test_sidebar_restores_persisted_segment_preview_after_restart(tmp_path: Path) -> None:
     target, document, spec = _lineage_fixture()
-    queue_fingerprint = "a" * 64
+    candidate = ClipCandidate(
+        id="clip-source",
+        title="短い候補",
+        start="0:00:00",
+        end="0:00:20",
+        duration_sec=20,
+        reason="理由",
+    )
+    queue_fingerprint = make_shorts_queue_fingerprint(
+        video_id="video-1",
+        source="clips",
+        mode="concat",
+        original_candidates=(candidate,),
+        segments=target.segments,
+        layout="blur",
+        preset="default",
+        hook_preset="hook",
+    )
     review = make_review_fingerprint(
         "video-1", target.target_id, queue_fingerprint, document
     )
-    state = create_line_state(
-        "video-1", target.target_id, queue_fingerprint, review_fingerprint=review
+    material = shorts_line._material_context_payload(
+        source="clips",
+        original_candidate=candidate,
+        target=target,
+        defaults=ShortsLineDefaults(),
     )
+    state = create_line_state(
+        "video-1",
+        target.target_id,
+        queue_fingerprint,
+        review_fingerprint=review,
+        material_context=material,
+    )
+    state = confirm_review(state, review)
+    state = set_generation_spec(state, review, spec.to_dict())
     source = tmp_path / "video-1" / "clips" / "source" / "source.mp4"
     source.parent.mkdir(parents=True)
     source.write_bytes(b"source")
@@ -434,6 +548,146 @@ def test_sidebar_restores_persisted_segment_preview_after_restart(tmp_path: Path
     assert video.call_args.args[0] == source
     assert video.call_args.kwargs["start_time"] == 0
     assert video.call_args.kwargs["end_time"] == 20
+
+
+def test_pre_script_restart_restores_target_and_telop_retry(tmp_path: Path) -> None:
+    target, document, _spec = _lineage_fixture()
+    candidate = ClipCandidate(
+        id="clip-source",
+        title="短い候補",
+        start="0:00:00",
+        end="0:00:20",
+        duration_sec=20,
+        reason="理由",
+    )
+    queue_fingerprint = make_shorts_queue_fingerprint(
+        video_id="video-1",
+        source="clips",
+        mode="concat",
+        original_candidates=(candidate,),
+        segments=target.segments,
+        layout="blur",
+        preset="default",
+        hook_preset="hook",
+    )
+    material = shorts_line._material_context_payload(
+        source="clips",
+        original_candidate=candidate,
+        target=target,
+        defaults=ShortsLineDefaults(),
+    )
+    state = create_line_state(
+        "video-1",
+        target.target_id,
+        queue_fingerprint,
+        material_context=material,
+    )
+    settings = Settings(data_dir=tmp_path)
+    save_line_state(state, settings)
+    session_state: dict[str, object] = {}
+    with patch.object(shorts_line.st, "session_state", session_state):
+        context = shorts_line._restore_context("video-1", state, settings)
+        assert context is not None and context["target"] == target
+        assert "draft" not in context
+        with patch.object(
+            shorts_line,
+            "generate_telop_script",
+            return_value=MagicMock(document=document),
+        ):
+            shorts_line._generate_line_telop(
+                video_id="video-1",
+                target=target,
+                state=state,
+                context=context,
+                settings=settings,
+            )
+
+    persisted = load_line_state("video-1", target.target_id, settings)
+    assert persisted is not None
+    assert persisted.review_fingerprint == make_review_fingerprint(
+        "video-1", target.target_id, queue_fingerprint, document
+    )
+    assert persisted.review_confirmed_fingerprint is None
+
+
+def test_restart_restores_s4_snapshot_and_can_confirm_overwrite(tmp_path: Path) -> None:
+    target, document_a, _spec_a = _lineage_fixture()
+    document_b = document_a.model_copy(update={"hook_text": "再起動後の台本"})
+    spec_b = make_shorts_queue_clip_spec(
+        target,
+        document_b,
+        layout="blur",
+        preset="default",
+        hook_preset="hook",
+    )
+    candidate = ClipCandidate(
+        id="clip-source",
+        title="短い候補",
+        start="0:00:00",
+        end="0:00:20",
+        duration_sec=20,
+        reason="理由",
+    )
+    queue_fingerprint = make_shorts_queue_fingerprint(
+        video_id="video-1",
+        source="clips",
+        mode="concat",
+        original_candidates=(candidate,),
+        segments=target.segments,
+        layout="blur",
+        preset="default",
+        hook_preset="hook",
+    )
+    review = make_review_fingerprint(
+        "video-1", target.target_id, queue_fingerprint, document_b
+    )
+    material = shorts_line._material_context_payload(
+        source="clips",
+        original_candidate=candidate,
+        target=target,
+        defaults=ShortsLineDefaults(),
+    )
+    state = create_line_state(
+        "video-1",
+        target.target_id,
+        queue_fingerprint,
+        review_fingerprint=review,
+        material_context=material,
+    )
+    state = confirm_review(state, review)
+    state = set_generation_spec(state, review, spec_b.to_dict())
+    settings = Settings(data_dir=tmp_path)
+    output = tmp_path / "video-1" / "shorts" / "output" / spec_b.output_name
+    output.parent.mkdir(parents=True)
+    output.write_bytes(b"old-same-target-output")
+    session_state: dict[str, object] = {}
+    with (
+        patch.object(shorts_line.st, "session_state", session_state),
+        patch.object(shorts_queue_ui.st, "session_state", session_state),
+    ):
+        context = shorts_line._restore_context("video-1", state, settings)
+        assert context is not None and context["confirmed_spec"] == spec_b
+        with (
+            patch.object(
+                shorts_queue_ui, "get_selected_video_id", return_value="video-1"
+            ),
+            patch.object(shorts_queue_ui, "is_busy", return_value=False),
+            patch.object(shorts_queue_ui.st, "warning"),
+            patch.object(shorts_queue_ui.st, "markdown"),
+            patch.object(shorts_queue_ui.st, "button", return_value=True),
+            patch.object(shorts_queue_ui.st, "error"),
+            patch.object(shorts_queue_ui, "_start_queue_job") as start,
+        ):
+            shorts_queue_ui._confirm_queue_overwrite_dialog.__wrapped__(
+                video_id="video-1",
+                title="動画",
+                specs=(spec_b,),
+                snapshot_fingerprint=queue_fingerprint,
+                existing_names=(spec_b.output_name,),
+                settings=settings,
+            )
+
+    start.assert_called_once()
 
 
 def test_line_defaults_are_read_only_with_safe_fallback(tmp_path: Path) -> None:
