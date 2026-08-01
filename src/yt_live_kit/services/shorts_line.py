@@ -1043,6 +1043,14 @@ def run_line_reservation_transaction(
             )
         except LineStateError as exc:
             raise LineReservationStartedError(str(exc), operation) from exc
+        if (
+            completed.current_stage != LineStage.RESERVED
+            or completed.upload_operation_id != operation.operation_id
+        ):
+            raise LineReservationStartedError(
+                "投稿開始後に完成動画が変わったため、ラインへ予約完了を記録できませんでした。",
+                operation,
+            )
         return operation
 
 

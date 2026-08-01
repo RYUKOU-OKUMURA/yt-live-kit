@@ -24,6 +24,7 @@ from yt_live_kit.models.upload import (
 )
 from yt_live_kit.services.schedule import SchedulePolicy
 from yt_live_kit.services.shorts_line import (
+    LineReservationStartedError,
     LineStage,
     LineState,
     LineStateError,
@@ -480,6 +481,40 @@ def test_reservation_transaction_rejects_stale_state_and_serializes_tabs(
     assert any(isinstance(error, LineStateError) for error in errors)
     persisted = load_line_state("video-1", "clip-1", second_settings)
     assert persisted is not None and persisted.current_stage == LineStage.RESERVED
+
+
+def test_reservation_transaction_raises_started_error_if_output_changes_in_callback(
+    tmp_path: Path,
+) -> None:
+    settings = _settings(tmp_path)
+    state, output = _confirmed_state(tmp_path)
+    save_line_state(state, settings)
+    operation = _operation(
+        tmp_path,
+        operation_id="changed-during-start",
+        source_video_id="video-1",
+        clip_id="clip-1",
+    ).model_copy(update={"video_path": output})
+
+    def start_and_replace_output() -> UploadOperation:
+        output.write_bytes(b"changed-during-upload-start")
+        return operation
+
+    with pytest.raises(LineReservationStartedError) as raised:
+        run_line_reservation_transaction(
+            "video-1",
+            "clip-1",
+            output,
+            settings,
+            start_and_replace_output,
+        )
+
+    assert raised.value.operation == operation
+    persisted = load_line_state("video-1", "clip-1", settings)
+    assert persisted is not None
+    assert persisted.current_stage == LineStage.FINAL_REVIEW
+    assert persisted.preview_confirmed_fingerprint is None
+    assert persisted.upload_operation_id is None
 
 
 def test_state_cannot_advance_beyond_persisted_gate_evidence() -> None:
