@@ -151,6 +151,28 @@ class LineState(_FrozenModel):
             raise ValueError("出力が無い状態で最終確認済みにはできません。")
         if self.output_fingerprint is not None and self.review_fingerprint is None:
             raise ValueError("output fingerprint には生成時の review fingerprint が必要です。")
+        review_is_current = (
+            self.review_fingerprint is not None
+            and self.review_confirmed_fingerprint == self.review_fingerprint
+        )
+        output_is_available = self.output_fingerprint is not None
+        preview_is_current = (
+            self.output_fingerprint is not None
+            and self.preview_confirmed_fingerprint == self.output_fingerprint
+        )
+        if self.current_stage in {
+            LineStage.GENERATION,
+            LineStage.FINAL_REVIEW,
+            LineStage.RESERVATION,
+        } and not review_is_current:
+            raise ValueError("現在工程に必要な台本確認がありません。")
+        if self.current_stage in {
+            LineStage.FINAL_REVIEW,
+            LineStage.RESERVATION,
+        } and not output_is_available:
+            raise ValueError("現在工程に必要なショート出力がありません。")
+        if self.current_stage == LineStage.RESERVATION and not preview_is_current:
+            raise ValueError("予約工程に必要な最終確認がありません。")
         if self.current_stage == LineStage.RESERVED and self.upload_operation_id is None:
             raise ValueError("予約完了状態には投稿 operation ID が必要です。")
         return self
@@ -336,6 +358,13 @@ def _replace_state(state: LineState, **updates: object) -> LineState:
         raise LineStateError("ライン状態を安全に更新できませんでした。") from exc
 
 
+def _state_timestamp(state: LineState, value: datetime | None, label: str) -> datetime:
+    timestamp = _timestamp(value, label)
+    if timestamp < state.updated_at:
+        raise LineStateError(f"{label}を過去へ戻すことはできません。")
+    return timestamp
+
+
 def create_line_state(
     video_id: str,
     clip_id: str,
@@ -389,7 +418,7 @@ def set_review_fingerprint(
         preview_confirmed_fingerprint=None,
         preview_confirmed_at=None,
         current_stage=LineStage.TELOP_REVIEW,
-        updated_at=_timestamp(now, "更新日時"),
+        updated_at=_state_timestamp(state, now, "更新日時"),
     )
 
 
@@ -408,7 +437,7 @@ def confirm_review(
         raise LineStateError("台本が変更されています。現在の内容をもう一度確認してください。")
     if not gate.hard_valid:
         raise LineStateError("台本の自動ハード判定を通過していないため確認できません。")
-    timestamp = _timestamp(now, "台本確認日時")
+    timestamp = _state_timestamp(state, now, "台本確認日時")
     return _replace_state(
         state,
         review_confirmed_fingerprint=current,
@@ -437,7 +466,7 @@ def record_output(
         state.review_fingerprint,
         output_path,
     )
-    timestamp = _timestamp(now, "出力更新日時")
+    timestamp = _state_timestamp(state, now, "出力更新日時")
     return _replace_state(
         state,
         output_fingerprint=output,
@@ -458,7 +487,7 @@ def reconcile_output(
     _ensure_not_reserved(state)
     if state.review_fingerprint is None:
         return state
-    timestamp = _timestamp(now, "出力確認日時")
+    timestamp = _state_timestamp(state, now, "出力確認日時")
     try:
         current = make_output_fingerprint(
             state.video_id,
@@ -514,7 +543,7 @@ def confirm_preview(
     )
     if current != state.output_fingerprint:
         raise LineStateError("表示後にショート出力が変更されました。もう一度確認してください。")
-    timestamp = _timestamp(now, "最終確認日時")
+    timestamp = _state_timestamp(state, now, "最終確認日時")
     return _replace_state(
         state,
         preview_confirmed_fingerprint=current,
@@ -527,10 +556,11 @@ def confirm_preview(
 def record_upload_operation(
     state: LineState,
     operation_id: str,
+    output_path: Path | None = None,
     *,
     now: datetime | None = None,
 ) -> LineState:
-    """最終確認済みラインへ予約 operation を結び付けて完了にする。"""
+    """工程 6 直前に出力を再検証して予約 operation を結び付ける。"""
     _ensure_not_reserved(state)
     if (
         state.output_fingerprint is None
@@ -540,7 +570,19 @@ def record_upload_operation(
     operation_id = operation_id.strip() if isinstance(operation_id, str) else ""
     if not operation_id:
         raise LineStateError("投稿 operation ID が正しくありません。")
-    timestamp = _timestamp(now, "予約更新日時")
+    if output_path is None or state.review_fingerprint is None:
+        raise LineStateError("予約直前に完成動画を再確認できませんでした。")
+    current_output = make_output_fingerprint(
+        state.video_id,
+        state.clip_id,
+        state.review_fingerprint,
+        output_path,
+    )
+    if current_output != state.output_fingerprint:
+        raise LineStateError(
+            "最終確認後にショート出力が変更されました。もう一度プレビューを確認してください。"
+        )
+    timestamp = _state_timestamp(state, now, "予約更新日時")
     return _replace_state(
         state,
         upload_operation_id=operation_id,
@@ -686,10 +728,9 @@ def resolve_active_line(video_id: str, settings: Settings) -> LineState | None:
     ]
     if not unfinished:
         return None
-    return sorted(
-        unfinished,
-        key=lambda state: (-state.updated_at.timestamp(), state.clip_id),
-    )[0]
+    unfinished.sort(key=lambda state: state.clip_id)
+    unfinished.sort(key=lambda state: state.updated_at, reverse=True)
+    return unfinished[0]
 
 
 def recover_line_state(

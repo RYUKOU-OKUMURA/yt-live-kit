@@ -273,7 +273,7 @@ def test_preview_rechecks_output_and_upload_requires_preview(tmp_path: Path) -> 
     output = _output(tmp_path)
     state = record_output(state, output, now=NOW + timedelta(seconds=2))
     with pytest.raises(LineStateError, match="最終確認"):
-        record_upload_operation(state, "op-1")
+        record_upload_operation(state, "op-1", output)
 
     output.write_bytes(b"changed-after-render")
     with pytest.raises(LineStateError, match="変更"):
@@ -281,11 +281,42 @@ def test_preview_rechecks_output_and_upload_requires_preview(tmp_path: Path) -> 
 
     state = reconcile_output(state, output, now=NOW + timedelta(seconds=3))
     state = confirm_preview(state, output, now=NOW + timedelta(seconds=4))
-    completed = record_upload_operation(state, "op-1", now=NOW + timedelta(seconds=5))
+    completed = record_upload_operation(
+        state,
+        "op-1",
+        output,
+        now=NOW + timedelta(seconds=5),
+    )
     assert completed.current_stage == LineStage.RESERVED
     assert completed.upload_operation_id == "op-1"
     with pytest.raises(LineStateError, match="編集できません"):
         set_review_fingerprint(completed, "b" * 64)
+
+
+def test_reservation_rechecks_output_after_preview_confirmation(tmp_path: Path) -> None:
+    state, output = _confirmed_state(tmp_path)
+    previous = output.stat()
+    output.write_bytes(b"changed-before-reservation")
+    os.utime(output, ns=(previous.st_atime_ns, previous.st_mtime_ns + 1_000_000))
+    with pytest.raises(LineStateError, match="最終確認後"):
+        record_upload_operation(state, "op-1", output)
+
+
+def test_state_cannot_advance_beyond_persisted_gate_evidence() -> None:
+    state = create_line_state("video-1", "clip-1", QUEUE_FP, now=NOW)
+    for stage in (
+        LineStage.GENERATION,
+        LineStage.FINAL_REVIEW,
+        LineStage.RESERVATION,
+    ):
+        with pytest.raises(Exception, match="必要な"):
+            LineState.model_validate({**state.model_dump(), "current_stage": stage})
+    with pytest.raises(LineStateError, match="過去"):
+        set_review_fingerprint(
+            state,
+            _review_fingerprint(),
+            now=NOW - timedelta(seconds=1),
+        )
 
 
 def test_line_state_atomic_round_trip_and_corrupt_fail_closed(tmp_path: Path) -> None:
@@ -339,7 +370,12 @@ def test_active_pointer_and_deterministic_fallback(tmp_path: Path) -> None:
 def test_completed_lines_are_not_reopened_by_pointer_or_fallback(tmp_path: Path) -> None:
     settings = _settings(tmp_path)
     state, _output_path = _confirmed_state(tmp_path)
-    state = record_upload_operation(state, "op-1", now=NOW + timedelta(seconds=4))
+    state = record_upload_operation(
+        state,
+        "op-1",
+        _output_path,
+        now=NOW + timedelta(seconds=4),
+    )
     save_line_state(state, settings)
     assert resolve_active_line("video-1", settings) is None
     with pytest.raises(LineStateError, match="予約完了"):
