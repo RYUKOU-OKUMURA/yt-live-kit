@@ -30,6 +30,7 @@
 | P2 | スケジュールポリシー + 原子的な予約確定 + 投稿確認 UI | [x] 完了 |
 | P3 | フェーズ P 受け入れ（予約投稿が実際に公開される） | [x] 完了 |
 | P4 | ショート概要欄の定型リンク差し込み（v3 追加要件） | [x] 完了 |
+| S6 | 切り抜き候補からのショート用サブ区間提案（v3 追加要件） | [~] 進行中 |
 
 **状態の書き方:** `[ ] 未着手` / `[~] 進行中` / `[x] 完了`
 
@@ -176,8 +177,9 @@ data/{video_id}/ ...
 | **P2** | スケジュールポリシー + 原子的な予約確定 + 投稿確認 UI | 予約枠の自動割り当て、確認後再検証、ジョブ / UI 復元 | FR-28, AC-27 |
 | **P3** | フェーズ P 受け入れ | 実際の予約公開確認、README・版数更新 | AC-27, AC-28 |
 | **P4** | ショート概要欄の定型リンク差し込み | ショート専用テンプレート、開始秒付き元配信 URL、preview 前合成 | FR-29, AC-29 |
+| **S6** | 切り抜き候補からのショート用サブ区間提案 | 親区間内カットプラン生成、採否・境界調整 UI、FR-25 連結への受け渡し | FR-30, AC-30 |
 
-各タスクは「実装 → 単体確認 → Done 条件チェック → **タスク完了コミット**」で閉じる。フェーズ末（U5 / S5 / P3）は「フェーズ受け入れ」も兼ねる。P4 は v3 受け入れ（P3）完了後に追加された要件であり、P3 の証跡・版数には手を入れない。
+各タスクは「実装 → 単体確認 → Done 条件チェック → **タスク完了コミット**」で閉じる。フェーズ末（U5 / S5 / P3）は「フェーズ受け入れ」も兼ねる。P4 / S6 は v3 受け入れ（P3）完了後に追加された要件であり、P3 の証跡・版数には手を入れない。
 
 ---
 
@@ -1018,6 +1020,50 @@ data/{video_id}/ ...
 
 ---
 
+### S6: 切り抜き候補からのショート用サブ区間提案（v3 追加要件）
+
+**目的:** 10〜15 分の切り抜き候補を選んだときに、その中から合計 180 秒以内のサブ区間を AI が提案し、人が採否・境界を確認して、既存のジャンプカット連結（FR-25）で 1 本のショートにできるようにする（FR-30 / AC-30）。
+**フェーズ状態:** [~] 進行中
+**前提:** S3 / S4 完了、P3 完了（0.3.0）。本タスクは v3 受け入れ後の追加要件であり、P3 の証跡・版数・受け入れ記録は変更しない。
+
+**背景:** 現在、ショートセクションは切り抜き候補の `start` / `end` をそのまま 1 区間として扱うため（[`ui/views/shorts.py`](../src/yt_live_kit/ui/views/shorts.py) の `interval_from_timestamps` → `validate_interval_duration`）、660 秒の候補は 180 秒上限で弾かれて先へ進めない。連結経路（`build_short_from_segments`）は既にあるが、キュー量産は候補 1 件 = 1 区間として扱うため、長い候補の内部を刻む経路が存在しない。S6 はこの欠けている 1 手を埋める。
+
+**変更ファイル範囲:**
+- `prompts/short_cut.md`（新規。親区間内の字幕からサブ区間を提案させるテンプレート）
+- `src/yt_live_kit/models/short_cut.py`（新規。カットプラン文書モデル）
+- `src/yt_live_kit/services/short_cut.py`（新規。プロンプト構築・Codex 呼び出し・検証・保存・読込。`highlights.py` と同型）
+- `src/yt_live_kit/ui/components/short_cut.py`（新規。提案生成・採否・境界調整・連結生成の導線）
+- `src/yt_live_kit/ui/views/shorts.py`（新設セクションの呼び出しのみ追加。既存の単一区間経路は変更しない）
+- `tests/test_short_cut.py` / `tests/test_ui_short_cut.py`（新規）
+- `README.md`（導線の説明を追記）
+- `docs/requirements-v3.md` / `docs/execution-plan-v3.md`（FR-30 / AC-30 / 本タスクの進捗）
+
+**作業:**
+
+- [x] S6-1. `prompts/short_cut.md` を追加する。プレースホルダは `{{segment_transcript}}`、出力は `candidates` 配列（`cut_001` 連番、`title` / `start` / `end` / `duration_sec` / `reason`）。制約は「2〜5 個・各区間 5〜120 秒・合計 30〜170 秒・時系列順・非重複・すべて親区間内・文の途中で切らない」
+- [x] S6-2. `models/short_cut.py` に `ShortCutDocument`（`parent_id` / `parent_start_ms` / `parent_end_ms` / `candidates: list[HighlightSegment]`）を追加する
+- [x] S6-3. `services/short_cut.py` を実装する。`build_short_cut_prompt()` は [`services/telop.py`](../src/yt_live_kit/services/telop.py) の区間内 VTT 整形を再利用し、絶対時刻付きで親区間だけを渡す。`validate_short_cut()` は純粋関数として親区間包含・時系列・非重複・個別尺・合計尺・`duration_sec` 一致・半角山カッコを検証する。合計尺の境界は `shorts.py` の `MIN_DURATION_SEC` / `MAX_DURATION_SEC` を import して単一の正本にする
+- [x] S6-4. `suggest_short_cuts()` を実装する。保存先は `data/{video_id}/shorts/cutplan/cut_{parent_id}.json` へ atomic 書き込み。検証失敗時は既存ファイルを書き換えず日本語エラーで拒否する。Codex 未導入時は保存済みプロンプトを使う手動フォールバックを案内する（`highlights.py` と同じ扱い）
+- [x] S6-5. `ui/components/short_cut.py` を実装する。親候補が 180 秒超のときだけ導線を出し、「区間を提案」submit 時だけ Codex ジョブを開始する。提案は採否チェックと開始 / 終了の調整入力を持ち、合計尺を常時表示する。10〜180 秒の範囲外では作成ボタンを無効化し日本語で案内する。生成は既存 `build_short_from_segments()` をジョブから呼ぶ
+- [x] S6-6. `ui/views/shorts.py` から新セクションを呼び出す。既存の単一区間経路・キュー量産導線には手を入れない
+- [x] S6-7. テストを追加する（提案 JSON の正常系、親範囲外 / 逆順 / 重複 / 個別尺 / 合計尺 / `duration_sec` 不一致 / 山カッコの各拒否、atomic 保存と既存ファイル保護、Codex 未導入時の案内、180 秒以下の候補で導線が出ないこと、UI 純粋関数の合計尺・作成可否判定、既存ショート生成の非回帰）
+- [~] S6-8. `uv run pytest` を全件通し、README と進捗チェック・AC-30 を更新してコミットする（pytest 934 件通過・README 追記・AC 更新まで完了。コミットと実機確認が残り）
+- [ ] S6-9. 実機確認: 実配信 1 本で、660 秒級の切り抜き候補 → 区間提案 → 採否・境界調整 → 連結生成 を通しで実行し、UI 表示・Codex の再実行が起きないこと・つなぎ目・出力解像度（`ffprobe`）を目視確認する。AC-30 の残り 4 項目はここで確定する
+
+**Done 条件:**
+
+- [ ] AC-30 の全項目が満たされている
+- [ ] 660 秒の切り抜き候補から、人の確認を経て 180 秒以内のショートが 1 本生成できる
+- [ ] Codex 呼び出しが明示 submit 時に限られ、通常 rerun で再実行されない
+- [ ] 既存の単一区間ショート生成・キュー量産・ハイライトまとめに回帰が無い
+- [ ] エラーはすべて日本語で、半角山カッコを含まない
+- [ ] `uv run pytest` が全件通過し、従量課金 API・新規 pip 依存の追加が無い
+- [ ] タスク完了コミット済み
+
+**見積もり目安:** 1.5 日
+
+---
+
 ## 7. 出力ディレクトリ・ソースコード構成（v3 追加分）
 
 ### 7.1 ソースコード構成
@@ -1039,16 +1085,19 @@ src/yt_live_kit/ui/
     clipboard.py             ← v3（U2 で results.py から移設）
     storage_manager.py       ← v3（U5。旧 history.py のストレージ管理を設定ページから利用）
     upload.py                ← v3（P2。予約 preview / confirm / operation 復元表示だけ）
+    short_cut.py             ← v3（S6。サブ区間提案の生成 / 採否 / 境界調整 / 連結生成の導線）
     results.py                # v2 から継続。クリップボード関数は clipboard.py に委譲
     status_bar.py             # v2 から継続。U5 で案内先をライブラリへ更新
 
 src/yt_live_kit/models/
   upload.py                  ← v3（P1。channel / content snapshot / operation / result）
+  short_cut.py               ← v3（S6。カットプラン文書）
 
 src/yt_live_kit/services/
   youtube_api.py             # v2 から継続。P1 で mine channel / resumable upload / poll を追加
   upload_queue.py            ← v3（P1。operation / attempt / job target / reconciliation）
   schedule.py                ← v3（P2。IANA policy / slot queue / confirm transaction）
+  short_cut.py               ← v3（S6。親区間内カットプランの生成 / 検証 / 保存）
 ```
 
 ### 7.2 出力データ構成（v2 の構成に v3 分を追加）
@@ -1070,6 +1119,9 @@ data/
     └── shorts/
         ├── telop/                  ← v3（S1）
         │   └── telop_{clip_id}.json    # テロップ台本 + フック文言 + タイトル案 + 説明文 + タグ
+        ├── cutplan/                ← v3（S6）
+        │   ├── cut_{parent_id}.json     # 親候補内のサブ区間提案（人が確認する前の AI 提案）
+        │   └── cut_{parent_id}.prompt.md # Codex 未導入時の手動フォールバック用プロンプト
         ├── segments/                ← v3（S3。中間ファイル、既定で削除）
         │   └── {clip_id}/
         │       ├── seg_001.mp4 ...
@@ -1228,7 +1280,8 @@ PLAN0 要件・計画の確定
 
 **P1〜P3 完了後（0.3.0 リリース済み）の次アクション:**
 
-1. **P4 に着手する。** ショート概要欄へのチャンネル URL・元配信リンクの定型差し込み（FR-29 / AC-29）を実装する
+1. ~~**P4 に着手する。**~~ 完了。ショート概要欄へのチャンネル URL・元配信リンクの定型差し込み（FR-29 / AC-29）
+2. **S6 に着手する。** 切り抜き候補からのショート用サブ区間提案（FR-30 / AC-30）を実装する
 
 ---
 
@@ -1236,6 +1289,7 @@ PLAN0 要件・計画の確定
 
 | 日付 | 内容 |
 |------|------|
+| 2026-08-01 | v3 受け入れ完了後の追加要件として S6（切り抜き候補からのショート用サブ区間提案、FR-30 / AC-30）を定義。長い候補を刻む経路が既存 UI に無いことを背景として明記し、提案 service の純粋関数化、明示 submit 時のみの Codex 呼び出し、FR-25 と同一の境界正規化、既存導線の非回帰を計画上固定 |
 | 2026-08-01 | v3 受け入れ完了後の追加要件として P4（ショート概要欄の定型リンク差し込み、FR-29 / AC-29）を定義。長尺用テンプレートと分離し、preview 生成前の合成と日本語 fail closed を計画上固定 |
 | 2026-08-01 | P 安全監査の独立レビューを反映。P0 の公開可能性を承認範囲へ追加し、slot + full operation を単一 queue record へ統合、job ID 先行予約とクラッシュ recovery / fault injection、poll 回数・間隔・terminal・private lock 判定表、P1 → P2 → P0 → P3 の必須順序を固定 |
 | 2026-08-01 | P0〜P3 着手前安全監査を反映。P1 / P2 の本番安全契約を実機 probe より先に変更し、private 固定、aware `publishAt`、Made for Kids / synthetic media 必須選択、Community Guidelines 同意、metadata 制約、resumable / reconciliation、LA attempt 台帳、永続 operation、confirm race、jobs / status bar、polling、実操作別承認を固定。一般 uploader ではなく scheduled-only feature として即時 public / unlisted を対象外のまま維持 |

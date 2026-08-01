@@ -25,6 +25,7 @@ from yt_live_kit.services.shorts import (
     build_short,
 )
 from yt_live_kit.services.subtitle_burn import is_japanese_font_available
+from yt_live_kit.ui.components.short_cut import render_short_cut_section
 from yt_live_kit.ui.components.shorts_queue import render_shorts_queue
 from yt_live_kit.ui.state import set_active_job_id
 
@@ -478,6 +479,14 @@ def render_shorts_section(
 
         if output_path is not None and interval is not None:
             _render_existing_output(output_path, interval=interval)
+
+        render_short_cut_section(
+            video_id=video_id,
+            title=result.title,
+            clip_candidates=clip_candidates,
+            highlight_candidates=highlight_candidates,
+            settings=settings,
+        )
 
         render_shorts_queue(
             video_id=video_id,
