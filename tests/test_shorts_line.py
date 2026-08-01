@@ -298,8 +298,11 @@ def test_reservation_rechecks_output_after_preview_confirmation(tmp_path: Path) 
     previous = output.stat()
     output.write_bytes(b"changed-before-reservation")
     os.utime(output, ns=(previous.st_atime_ns, previous.st_mtime_ns + 1_000_000))
-    with pytest.raises(LineStateError, match="最終確認後"):
-        record_upload_operation(state, "op-1", output)
+    invalidated = record_upload_operation(state, "op-1", output)
+    assert invalidated.current_stage == LineStage.FINAL_REVIEW
+    assert invalidated.review_confirmed_fingerprint == state.review_confirmed_fingerprint
+    assert invalidated.preview_confirmed_fingerprint is None
+    assert invalidated.upload_operation_id is None
 
 
 def test_state_cannot_advance_beyond_persisted_gate_evidence() -> None:
@@ -311,7 +314,7 @@ def test_state_cannot_advance_beyond_persisted_gate_evidence() -> None:
     ):
         with pytest.raises(Exception, match="必要な"):
             LineState.model_validate({**state.model_dump(), "current_stage": stage})
-    with pytest.raises(LineStateError, match="過去"):
+    with pytest.raises(LineStateError, match="後"):
         set_review_fingerprint(
             state,
             _review_fingerprint(),
@@ -332,6 +335,90 @@ def test_line_state_atomic_round_trip_and_corrupt_fail_closed(tmp_path: Path) ->
     with pytest.raises(LineStateError, match="壊れている"):
         load_line_state("video-1", "clip-1", settings)
     assert path.read_text(encoding="utf-8") == "{broken"
+
+
+def test_stale_confirmed_snapshot_cannot_restore_newer_invalidation(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    confirmed, _output_path = _confirmed_state(tmp_path)
+    save_line_state(confirmed, settings)
+    stale_confirmed = confirmed
+
+    invalidated = set_review_fingerprint(
+        confirmed,
+        _review_fingerprint(_document(text="変更後")),
+        now=NOW + timedelta(seconds=4),
+    )
+    save_line_state(invalidated, settings, expected_state=confirmed)
+    with pytest.raises(LineStateError, match="古い"):
+        save_line_state(stale_confirmed, settings)
+
+    restored = load_line_state("video-1", "clip-1", settings)
+    assert restored == invalidated
+    assert restored is not None
+    assert restored.review_confirmed_fingerprint is None
+
+
+def test_save_compare_and_swap_rejects_concurrent_replacement(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    state = create_line_state("video-1", "clip-1", QUEUE_FP, now=NOW)
+    save_line_state(state, settings)
+    first = set_review_fingerprint(
+        state,
+        _review_fingerprint(),
+        now=NOW + timedelta(seconds=1),
+    )
+    save_line_state(first, settings, expected_state=state)
+
+    competing = set_review_fingerprint(
+        state,
+        _review_fingerprint(_document(text="別の編集")),
+        now=NOW + timedelta(seconds=2),
+    )
+    with pytest.raises(LineStateError, match="別の操作"):
+        save_line_state(competing, settings, expected_state=state)
+    assert load_line_state("video-1", "clip-1", settings) == first
+
+
+def test_record_upload_mismatch_returns_and_persists_invalidated_state(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    state, output = _confirmed_state(tmp_path)
+    save_line_state(state, settings)
+    previous = output.stat()
+    output.write_bytes(b"replaced-after-preview")
+    os.utime(output, ns=(previous.st_atime_ns, previous.st_mtime_ns + 1_000_000))
+
+    invalidated = record_upload_operation(
+        state,
+        "op-not-recorded",
+        output,
+        settings=settings,
+        now=NOW + timedelta(seconds=4),
+    )
+    assert invalidated.current_stage == LineStage.FINAL_REVIEW
+    assert invalidated.preview_confirmed_fingerprint is None
+    assert invalidated.upload_operation_id is None
+    assert load_line_state("video-1", "clip-1", settings) == invalidated
+
+
+def test_atomic_parent_creation_error_is_normalized(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    state = create_line_state("video-1", "clip-1", QUEUE_FP, now=NOW)
+    directory = line_state_path("video-1", "clip-1", settings).parent
+    directory.mkdir(parents=True)
+    real_mkdir = Path.mkdir
+    calls = 0
+
+    def fail_second_mkdir(path: Path, *args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise OSError("mkdir failure")
+        return real_mkdir(path, *args, **kwargs)
+
+    with patch.object(Path, "mkdir", fail_second_mkdir):
+        with pytest.raises(LineStateError, match="安全に保存"):
+            save_line_state(state, settings)
+    assert not line_state_path("video-1", "clip-1", settings).exists()
 
 
 def test_atomic_replace_failure_preserves_previous_line(tmp_path: Path) -> None:
@@ -400,15 +487,54 @@ def test_recovery_keeps_machine_evidence_but_clears_both_human_confirmations(tmp
     assert recovered.preview_confirmed_at is None
     assert recovered.current_stage == LineStage.TELOP_REVIEW
 
+    operation = _operation(
+        tmp_path,
+        operation_id="op-machine-proof",
+        source_video_id=state.video_id,
+        clip_id=state.clip_id,
+        state="reserved",
+        created_at=NOW + timedelta(minutes=2),
+    )
     completed = recover_line_state(
         state.video_id,
         state.clip_id,
         state.queue_fingerprint,
-        upload_operation_id="op-machine-proof",
+        upload_operation=operation,
         now=NOW + timedelta(minutes=2),
     )
     assert completed.current_stage == LineStage.RESERVED
     assert completed.upload_operation_id == "op-machine-proof"
+
+    with pytest.raises(LineStateError, match="一致しません"):
+        recover_line_state(
+            state.video_id,
+            state.clip_id,
+            state.queue_fingerprint,
+            upload_operation=_operation(
+                tmp_path,
+                operation_id="wrong-source",
+                source_video_id="other-video",
+                clip_id=state.clip_id,
+                state="reserved",
+                created_at=NOW + timedelta(minutes=3),
+            ),
+            now=NOW + timedelta(minutes=3),
+        )
+    with pytest.raises(LineStateError, match="未完了"):
+        recover_line_state(
+            state.video_id,
+            state.clip_id,
+            state.queue_fingerprint,
+            upload_operation=_operation(
+                tmp_path,
+                operation_id="failed",
+                source_video_id=state.video_id,
+                clip_id=state.clip_id,
+                state="failed",
+                created_at=NOW + timedelta(minutes=4),
+            ),
+            now=NOW + timedelta(minutes=4),
+        )
 
 
 def test_line_state_rejects_identity_traversal_and_inconsistent_confirmation() -> None:
@@ -422,6 +548,15 @@ def test_line_state_rejects_identity_traversal_and_inconsistent_confirmation() -
     )
     with pytest.raises(Exception, match="一致しません"):
         LineState.model_validate(payload)
+    with pytest.raises(Exception, match="未完了"):
+        LineState.model_validate(
+            {
+                **create_line_state(
+                    "video-1", "clip-1", QUEUE_FP, now=NOW
+                ).model_dump(),
+                "upload_operation_id": "op-without-reserved-stage",
+            }
+        )
 
 
 def test_daily_summary_uses_policy_timezone_latest_source_key_and_attention(tmp_path: Path) -> None:

@@ -8,13 +8,23 @@ import os
 import threading
 import uuid
 from collections.abc import Iterable, Sequence
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Literal
+from typing import Iterator, Literal
 from zoneinfo import ZoneInfo
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
+import fcntl
+
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 from yt_live_kit.config import Settings
 from yt_live_kit.models.telop import TelopScriptDocument
@@ -175,6 +185,8 @@ class LineState(_FrozenModel):
             raise ValueError("予約工程に必要な最終確認がありません。")
         if self.current_stage == LineStage.RESERVED and self.upload_operation_id is None:
             raise ValueError("予約完了状態には投稿 operation ID が必要です。")
+        if self.current_stage != LineStage.RESERVED and self.upload_operation_id is not None:
+            raise ValueError("未完了のラインに投稿 operation ID は保存できません。")
         return self
 
 
@@ -360,8 +372,8 @@ def _replace_state(state: LineState, **updates: object) -> LineState:
 
 def _state_timestamp(state: LineState, value: datetime | None, label: str) -> datetime:
     timestamp = _timestamp(value, label)
-    if timestamp < state.updated_at:
-        raise LineStateError(f"{label}を過去へ戻すことはできません。")
+    if timestamp <= state.updated_at:
+        raise LineStateError(f"{label}は現在の更新日時より後にしてください。")
     return timestamp
 
 
@@ -558,9 +570,10 @@ def record_upload_operation(
     operation_id: str,
     output_path: Path | None = None,
     *,
+    settings: Settings | None = None,
     now: datetime | None = None,
 ) -> LineState:
-    """工程 6 直前に出力を再検証して予約 operation を結び付ける。"""
+    """工程 6 直前に再検証し、差分時は未確認状態を返して保存する。"""
     _ensure_not_reserved(state)
     if (
         state.output_fingerprint is None
@@ -572,23 +585,33 @@ def record_upload_operation(
         raise LineStateError("投稿 operation ID が正しくありません。")
     if output_path is None or state.review_fingerprint is None:
         raise LineStateError("予約直前に完成動画を再確認できませんでした。")
-    current_output = make_output_fingerprint(
-        state.video_id,
-        state.clip_id,
-        state.review_fingerprint,
-        output_path,
-    )
-    if current_output != state.output_fingerprint:
-        raise LineStateError(
-            "最終確認後にショート出力が変更されました。もう一度プレビューを確認してください。"
-        )
     timestamp = _state_timestamp(state, now, "予約更新日時")
-    return _replace_state(
+    try:
+        checked = reconcile_output(state, output_path, now=timestamp)
+    except LineStateError:
+        checked = _replace_state(
+            state,
+            preview_confirmed_fingerprint=None,
+            preview_confirmed_at=None,
+            current_stage=LineStage.FINAL_REVIEW,
+            updated_at=timestamp,
+        )
+    if (
+        checked.output_fingerprint != state.output_fingerprint
+        or checked.preview_confirmed_fingerprint != checked.output_fingerprint
+    ):
+        if settings is not None:
+            save_line_state(checked, settings, expected_state=state)
+        return checked
+    completed = _replace_state(
         state,
         upload_operation_id=operation_id,
         current_stage=LineStage.RESERVED,
         updated_at=timestamp,
     )
+    if settings is not None:
+        save_line_state(completed, settings, expected_state=state)
+    return completed
 
 
 def line_state_path(video_id: str, clip_id: str, settings: Settings) -> Path:
@@ -612,9 +635,9 @@ def _active_line_path(video_id: str, settings: Settings) -> Path:
 
 
 def _atomic_write(path: Path, payload: dict[str, object]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.parent / f".{path.name}.{uuid.uuid4().hex}.tmp"
     try:
+        path.parent.mkdir(parents=True, exist_ok=True)
         with temporary.open("w", encoding="utf-8") as handle:
             json.dump(payload, handle, ensure_ascii=False, indent=2)
             handle.write("\n")
@@ -632,12 +655,55 @@ def _atomic_write(path: Path, payload: dict[str, object]) -> None:
             pass
 
 
-def save_line_state(state: LineState, settings: Settings) -> Path:
-    """ライン状態を同一ディレクトリ内の一時ファイルから atomic 保存する。"""
+@contextmanager
+def _line_lock(video_id: str, settings: Settings) -> Iterator[None]:
+    """同一動画の状態確認と atomic replace をプロセス間で直列化する。"""
+    directory = _active_line_path(video_id, settings).parent
+    lock_path = directory / ".line.lock"
+    with _WRITE_LOCK:
+        try:
+            directory.mkdir(parents=True, exist_ok=True)
+            with lock_path.open("a+b") as lock_file:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+                try:
+                    yield
+                finally:
+                    fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+        except LineStateError:
+            raise
+        except OSError as exc:
+            raise LineStateError(
+                "ショート生産ラインの保存ロックを取得できませんでした。"
+            ) from exc
+
+
+def save_line_state(
+    state: LineState,
+    settings: Settings,
+    *,
+    expected_state: LineState | None = None,
+) -> Path:
+    """古い snapshot を拒否してライン状態を atomic 保存する。"""
     if not isinstance(state, LineState):
         raise LineStateError("保存するライン状態が正しくありません。")
     path = line_state_path(state.video_id, state.clip_id, settings)
-    with _WRITE_LOCK:
+    with _line_lock(state.video_id, settings):
+        persisted = load_line_state(state.video_id, state.clip_id, settings)
+        if expected_state is not None and persisted != expected_state:
+            raise LineStateError(
+                "ライン状態が別の操作で更新されました。最新状態を読み直してください。"
+            )
+        if persisted is not None:
+            if state.updated_at < persisted.updated_at:
+                raise LineStateError(
+                    "古いライン状態では新しい確認状態を上書きできません。"
+                )
+            if state.updated_at == persisted.updated_at:
+                if state == persisted:
+                    return path
+                raise LineStateError(
+                    "同じ更新日時に異なるライン状態があるため保存を停止しました。"
+                )
         _atomic_write(path, state.model_dump(mode="json"))
     return path
 
@@ -672,14 +738,14 @@ def save_active_line(
     now: datetime | None = None,
 ) -> Path:
     """保存済みの未完了ラインだけを明示 active pointer にする。"""
-    state = load_line_state(video_id, clip_id, settings)
-    if state is None:
-        raise LineStateError("選択するショート生産ラインが保存されていません。")
-    if state.current_stage == LineStage.RESERVED:
-        raise LineStateError("予約完了したラインを作成中として選択できません。")
     pointer = ActiveLinePointer(clip_id=clip_id, updated_at=_timestamp(now, "選択更新日時"))
     path = _active_line_path(video_id, settings)
-    with _WRITE_LOCK:
+    with _line_lock(video_id, settings):
+        state = load_line_state(video_id, clip_id, settings)
+        if state is None:
+            raise LineStateError("選択するショート生産ラインが保存されていません。")
+        if state.current_stage == LineStage.RESERVED:
+            raise LineStateError("予約完了したラインを作成中として選択できません。")
         _atomic_write(path, pointer.model_dump(mode="json"))
     return path
 
@@ -740,7 +806,7 @@ def recover_line_state(
     *,
     review_fingerprint: str | None = None,
     output_fingerprint: str | None = None,
-    upload_operation_id: str | None = None,
+    upload_operation: UploadOperation | None = None,
     now: datetime | None = None,
 ) -> LineState:
     """機械的に証明済みの evidence だけから、人確認を外して再構成する。"""
@@ -752,11 +818,18 @@ def recover_line_state(
         now=now,
     )
     output = _validate_digest(output_fingerprint, "output fingerprint", optional=True)
-    operation_id = (
-        upload_operation_id.strip()
-        if isinstance(upload_operation_id, str) and upload_operation_id.strip()
-        else None
-    )
+    operation_id: str | None = None
+    if upload_operation is not None:
+        if not isinstance(upload_operation, UploadOperation):
+            raise LineStateError("復元する投稿 operation が正しくありません。")
+        if (
+            upload_operation.source_video_id != video_id
+            or upload_operation.clip_id != clip_id
+        ):
+            raise LineStateError("投稿 operation が復元対象のラインと一致しません。")
+        if upload_operation.state not in _COMPLETED_UPLOAD_STATES:
+            raise LineStateError("未完了の投稿 operation から予約完了を復元できません。")
+        operation_id = upload_operation.operation_id
     stage = LineStage.RESERVED if operation_id is not None else LineStage.TELOP_REVIEW
     return _replace_state(
         state,
