@@ -670,6 +670,7 @@ def _valid_transfer_candidates(
 
 
 def _set_workspace(video_id: str, workspace: Workspace) -> None:
+    """widget callback 内で次 rerun の作業選択を更新する."""
     st.session_state[f"detail_workspace_{video_id}"] = workspace
 
 
@@ -826,13 +827,13 @@ def _render_materials_workspace(
 
     if selected_ids:
         st.caption(f"ショート作成へ引き継ぐ候補: {len(selected_ids)} 件")
-        if st.button(
+        st.button(
             "選択した候補でショート作成へ",
             key=f"materials_to_shorts_{result.video_id}_{source}",
             type="primary",
-        ):
-            _set_workspace(result.video_id, "shorts")
-            st.rerun()
+            on_click=_set_workspace,
+            args=(result.video_id, "shorts"),
+        )
 
     st.divider()
     st.markdown("#### 補助操作")
@@ -877,12 +878,12 @@ def _render_publish_workspace(
                 )
             else:
                 st.info("先にショートを作成してください。")
-            if st.button(
+            st.button(
                 "ショート生産ラインへ",
                 key=f"publish_to_shorts_{video.video_id}",
-            ):
-                _set_workspace(video.video_id, "shorts")
-                st.rerun()
+                on_click=_set_workspace,
+                args=(video.video_id, "shorts"),
+            )
         else:
             render_upload_section(
                 video.video_id,

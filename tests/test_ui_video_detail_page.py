@@ -14,6 +14,12 @@ from yt_live_kit.models.highlights import HighlightSegment
 from yt_live_kit.models.meta import VideoMeta
 from yt_live_kit.services.history import ProcessedVideo
 from yt_live_kit.services.pipeline import PipelineResult
+from yt_live_kit.services.shorts_line import (
+    confirm_review,
+    create_line_state,
+    load_line_state,
+    save_line_state,
+)
 from yt_live_kit.services.youtube_api import YouTubeAPIError
 from yt_live_kit.ui.components.clipboard import build_clipboard_copy_html
 from yt_live_kit.ui.views import video_detail
@@ -59,6 +65,33 @@ def _result(tmp_path: Path, *, chapters: str = "", candidates: tuple = ()) -> Pi
         clips_candidates=candidates,
         clips_candidates_path=None,
     )
+
+
+def _save_confirmed_line(settings: Settings):
+    review_fingerprint = "b" * 64
+    state = create_line_state(
+        "vid1234567",
+        "clip-confirmed",
+        "a" * 64,
+        review_fingerprint=review_fingerprint,
+    )
+    state = confirm_review(state, review_fingerprint)
+    save_line_state(state, settings)
+    return state
+
+
+def _invoke_button_callback(label_to_click: str):
+    def button(label: str, **kwargs: object) -> bool:
+        if label == label_to_click:
+            callback = kwargs.get("on_click")
+            assert callable(callback)
+            callback(
+                *(kwargs.get("args") or ()),
+                **(kwargs.get("kwargs") or {}),
+            )
+        return False
+
+    return button
 
 
 def test_detail_summary_keeps_generated_and_reservable_counts_separate() -> None:
@@ -187,6 +220,179 @@ def test_candidate_transfer_preserves_global_source_identity_and_order() -> None
             clips=[clip],
             highlights=[highlight],
         ) == (("highlights", "same"), ("clips", "same"))
+
+
+def test_materials_to_shorts_callback_preserves_job_transfer_and_confirmed_line(
+    tmp_path: Path,
+) -> None:
+    settings = Settings(data_dir=tmp_path)
+    candidate = ClipCandidate(
+        id="clip-1",
+        title="候補",
+        start="0:00:00",
+        end="0:00:20",
+        duration_sec=20,
+        reason="理由",
+    )
+    fingerprint = video_detail.make_candidate_fingerprint("clips", [candidate])
+    transfer_payload = {
+        "source": "clips",
+        "selected_ids": (candidate.id,),
+        "fingerprint": fingerprint,
+    }
+    session_state: dict[str, object] = {
+        "detail_workspace_vid1234567": "materials",
+        "active_job_id": "job-running",
+        "shorts_line_transfer_vid1234567_clips": transfer_payload,
+        "shorts_line_transfer_order_vid1234567": [("clips", candidate.id)],
+    }
+    confirmed_line = _save_confirmed_line(settings)
+    jobs_dir = tmp_path / "_jobs"
+    jobs_dir.mkdir()
+    current_job = jobs_dir / "current.json"
+    current_job.write_text('{"job_id":"job-running"}', encoding="utf-8")
+    job_before = current_job.read_bytes()
+
+    with (
+        patch.object(video_detail.st, "session_state", session_state),
+        patch.object(
+            video_detail.st,
+            "button",
+            side_effect=_invoke_button_callback(
+                "選択した候補でショート作成へ"
+            ),
+        ) as button,
+        patch.object(video_detail.st, "container", return_value=nullcontext()),
+        patch.object(video_detail.st, "caption"),
+        patch.object(video_detail.st, "markdown"),
+        patch.object(video_detail.st, "write"),
+        patch.object(video_detail.st, "divider"),
+        patch.object(video_detail.st, "rerun") as rerun,
+        patch.object(video_detail, "render_highlights_section"),
+        patch.object(video_detail, "start_job") as start_job,
+    ):
+        video_detail._render_materials_workspace(
+            _result(tmp_path),
+            settings,
+            clips=[candidate],
+            highlights=[],
+        )
+
+    navigation_call = next(
+        item
+        for item in button.call_args_list
+        if item.args[0] == "選択した候補でショート作成へ"
+    )
+    assert navigation_call.kwargs["on_click"] is video_detail._set_workspace
+    assert navigation_call.kwargs["args"] == ("vid1234567", "shorts")
+    assert session_state["detail_workspace_vid1234567"] == "shorts"
+    assert session_state["active_job_id"] == "job-running"
+    assert session_state["shorts_line_transfer_vid1234567_clips"] == transfer_payload
+    assert session_state["shorts_line_transfer_order_vid1234567"] == [
+        ("clips", candidate.id)
+    ]
+    assert load_line_state("vid1234567", "clip-confirmed", settings) == confirmed_line
+    assert current_job.read_bytes() == job_before
+    assert not (tmp_path / "_schedule" / "queue.json").exists()
+    start_job.assert_not_called()
+    rerun.assert_not_called()
+
+
+def test_publish_to_shorts_callback_preserves_job_transfer_and_confirmed_line(
+    tmp_path: Path,
+) -> None:
+    settings = Settings(data_dir=tmp_path)
+    video = _video(transcript=True, chapters=True, clips=True)
+    result = _result(tmp_path, chapters=_VALID_CHAPTERS)
+    transfer_payload = {
+        "source": "clips",
+        "selected_ids": ("clip-1",),
+        "fingerprint": "c" * 64,
+    }
+    session_state: dict[str, object] = {
+        "detail_workspace_vid1234567": "publish",
+        "active_job_id": "job-running",
+        "shorts_line_transfer_vid1234567_clips": transfer_payload,
+        "shorts_line_transfer_order_vid1234567": [("clips", "clip-1")],
+    }
+    confirmed_line = _save_confirmed_line(settings)
+    jobs_dir = tmp_path / "_jobs"
+    jobs_dir.mkdir()
+    current_job = jobs_dir / "current.json"
+    current_job.write_text('{"job_id":"job-running"}', encoding="utf-8")
+    job_before = current_job.read_bytes()
+
+    with (
+        patch.object(video_detail.st, "session_state", session_state),
+        patch.object(
+            video_detail.st,
+            "button",
+            side_effect=_invoke_button_callback("ショート生産ラインへ"),
+        ) as button,
+        patch.object(video_detail.st, "container", return_value=nullcontext()),
+        patch.object(video_detail.st, "markdown"),
+        patch.object(video_detail.st, "caption"),
+        patch.object(video_detail.st, "success"),
+        patch.object(video_detail.st, "info"),
+        patch.object(video_detail.st, "rerun") as rerun,
+        patch.object(video_detail, "_render_description_control"),
+        patch.object(video_detail, "render_upload_section") as upload_section,
+        patch.object(video_detail, "run_line_upload_transaction") as transaction,
+        patch.object(video_detail, "start_job") as start_job,
+    ):
+        video_detail._render_publish_workspace(
+            video,
+            result,
+            settings,
+            busy=False,
+            summary=video_detail.DetailSummary(1, 1, 0, False),
+        )
+
+    navigation_call = next(
+        item
+        for item in button.call_args_list
+        if item.args[0] == "ショート生産ラインへ"
+    )
+    assert navigation_call.kwargs["on_click"] is video_detail._set_workspace
+    assert navigation_call.kwargs["args"] == ("vid1234567", "shorts")
+    assert session_state["detail_workspace_vid1234567"] == "shorts"
+    assert session_state["active_job_id"] == "job-running"
+    assert session_state["shorts_line_transfer_vid1234567_clips"] == transfer_payload
+    assert session_state["shorts_line_transfer_order_vid1234567"] == [
+        ("clips", "clip-1")
+    ]
+    assert load_line_state("vid1234567", "clip-confirmed", settings) == confirmed_line
+    assert current_job.read_bytes() == job_before
+    assert not (tmp_path / "_schedule" / "queue.json").exists()
+    upload_section.assert_not_called()
+    transaction.assert_not_called()
+    start_job.assert_not_called()
+    rerun.assert_not_called()
+
+
+def test_workspace_widget_key_is_only_written_inside_callback_helper() -> None:
+    tree = ast.parse(Path(video_detail.__file__).read_text(encoding="utf-8"))
+    assignment_functions: list[str] = []
+    direct_call_functions: list[str] = []
+    for function in (
+        node for node in tree.body if isinstance(node, ast.FunctionDef)
+    ):
+        for node in ast.walk(function):
+            if isinstance(node, ast.Assign):
+                if any(
+                    "detail_workspace_" in ast.unparse(target)
+                    for target in node.targets
+                ):
+                    assignment_functions.append(function.name)
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "_set_workspace"
+            ):
+                direct_call_functions.append(function.name)
+
+    assert assignment_functions == ["_set_workspace"]
+    assert direct_call_functions == []
 
 
 def test_description_applied_ids_round_trip_and_mark(tmp_path: Path) -> None:
