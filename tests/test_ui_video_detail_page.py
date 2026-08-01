@@ -360,10 +360,12 @@ def test_render_detail_draws_only_selected_workspace(tmp_path: Path) -> None:
         )
         publish = stack.enter_context(patch("yt_live_kit.ui.views.video_detail._render_publish_workspace"))
         stack.enter_context(patch("yt_live_kit.ui.views.video_detail._render_details_and_regeneration"))
+        subheader = stack.enter_context(
+            patch("yt_live_kit.ui.views.video_detail.st.subheader")
+        )
         for command in (
             "header",
             "caption",
-            "subheader",
             "info",
         ):
             stack.enter_context(
@@ -375,6 +377,7 @@ def test_render_detail_draws_only_selected_workspace(tmp_path: Path) -> None:
     line.assert_called_once()
     shorts.assert_called_once_with(result, expanded=False)
     publish.assert_not_called()
+    subheader.assert_not_called()
 
 
 _VALID_CHAPTERS = "0:00 はじめに\n0:10 本題\n0:20 まとめ"

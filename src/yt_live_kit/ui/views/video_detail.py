@@ -762,7 +762,6 @@ def _render_materials_workspace(
     clips: list[ClipCandidate],
     highlights: list[HighlightSegment],
 ) -> None:
-    st.subheader("素材候補")
     st.caption("候補を確認し、作成するショートへ同じ順序で引き継ぎます。")
     available: list[Literal["clips", "highlights"]] = []
     if clips:
@@ -848,7 +847,6 @@ def _render_publish_workspace(
     busy: bool,
     summary: DetailSummary,
 ) -> None:
-    st.subheader("公開・投稿")
     validation = validate_chapters(result.chapters_text)
     chapter_count = len(
         [line for line in result.chapters_text.splitlines() if line.strip()]
@@ -1041,7 +1039,6 @@ def render_video_detail_page(
             highlights=highlights,
         )
     elif selected_workspace == "shorts":
-        st.subheader("ショート作成")
         render_shorts_line(
             video_id=video.video_id,
             title=result.title,
