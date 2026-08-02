@@ -624,6 +624,64 @@ def test_output_fingerprint_mismatch_cannot_be_reused(tmp_path: Path) -> None:
     )
 
 
+def test_interrupted_rerun_reuses_only_proven_success_item(tmp_path: Path) -> None:
+    settings = Settings(data_dir=tmp_path)
+    first, second = _specs(2)
+    first_short = _successful_short_result(tmp_path, first)
+    first_item = ShortsQueueItemResult(
+        target_id=first.target_id,
+        status="succeeded",
+        output_path=first_short.output_path,
+        log_path=first_short.command_log_path,
+        font_warning=None,
+        title_candidates=tuple(first.telop_document.title_candidates),
+        description=first.telop_document.description,
+        tags=tuple(first.telop_document.tags),
+        error=None,
+        input_fingerprint=shorts_queue_service.make_shorts_queue_input_fingerprint(
+            "video", first
+        ),
+        output_fingerprint=shorts_queue_service.make_shorts_queue_output_fingerprint(
+            first_short.output_path, settings
+        ),
+    )
+    old_manifest = tmp_path / "video" / "shorts" / "queue" / "queue_interrupted.json"
+    now = datetime.now(timezone.utc)
+    interrupted = ShortsQueueResult(
+        video_id="video",
+        job_id="interrupted",
+        owner_job_id="interrupted",
+        status="interrupted",
+        created_at=now,
+        updated_at=now,
+        clip_specs=(first, second),
+        items=(first_item,),
+        success_count=1,
+        failure_count=0,
+        manifest_path=old_manifest,
+    )
+    old_manifest.parent.mkdir(parents=True, exist_ok=True)
+    old_manifest.write_text(json.dumps(interrupted.to_dict(), ensure_ascii=False), encoding="utf-8")
+    loaded = load_shorts_queue_result("video", "interrupted", settings)
+    reuse = reusable_shorts_queue_items(loaded, settings)
+
+    with patch(
+        "yt_live_kit.services.shorts_queue.build_short_from_segments",
+        return_value=_successful_short_result(tmp_path, second),
+    ) as build:
+        result = run_shorts_queue(
+            "video",
+            [first, second],
+            settings,
+            job_id="rerun",
+            reuse_items=reuse,
+        )
+
+    build.assert_called_once()
+    assert [item.target_id for item in result.items] == [first.target_id, second.target_id]
+    assert result.items[0] == first_item
+
+
 def test_owner_mismatch_is_rejected_before_recovery(tmp_path: Path) -> None:
     settings = Settings(data_dir=tmp_path)
     spec = _specs(1)[0]

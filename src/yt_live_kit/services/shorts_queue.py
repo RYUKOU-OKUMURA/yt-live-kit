@@ -785,21 +785,24 @@ def make_shorts_queue_output_fingerprint(
         resolved_root = settings.data_dir.resolve(strict=False)
         resolved_path = path.resolve(strict=True)
         resolved_path.relative_to(resolved_root)
-        stat = resolved_path.stat()
-        if not resolved_path.is_file() or stat.st_size <= 0:
+        before = resolved_path.stat()
+        if not resolved_path.is_file() or before.st_size <= 0:
             raise OSError("empty output")
         digest = hashlib.sha256()
         with resolved_path.open("rb") as stream:
             for chunk in iter(lambda: stream.read(1024 * 1024), b""):
                 digest.update(chunk)
+        after = resolved_path.stat()
+        if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
+            raise OSError("output changed during fingerprinting")
     except (OSError, RuntimeError, ValueError) as exc:
         raise ShortsQueueError(
             "ショート量産成果物を安全に確認できないため、再利用できません。"
         ) from exc
     payload = {
         "path": str(resolved_path),
-        "size": stat.st_size,
-        "mtime_ns": stat.st_mtime_ns,
+        "size": after.st_size,
+        "mtime_ns": after.st_mtime_ns,
         "sha256": digest.hexdigest(),
     }
     return hashlib.sha256(_canonical_json(payload).encode("utf-8")).hexdigest()

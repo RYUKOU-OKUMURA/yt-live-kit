@@ -81,6 +81,16 @@ def _safe_text(value: object) -> str:
     return str(value).replace("<", "〈").replace(">", "〉")
 
 
+def _is_nonempty_file(path: Path) -> tuple[bool, str | None]:
+    """予約入口で成果物の欠損・空ファイルを日本語へ変換する."""
+    try:
+        if not path.is_file() or path.stat().st_size == 0:
+            return False, "生成済み動画ファイルが見つからないか、空になっています。"
+    except OSError:
+        return False, "生成済み動画ファイルを確認できませんでした。"
+    return True, None
+
+
 def _operation_ids() -> dict[str, str]:
     raw = st.session_state.get(_OPERATION_IDS_KEY)
     if not isinstance(raw, dict):
@@ -559,6 +569,19 @@ def render_upload_section(
         with st.container(border=True):
             st.markdown(f"**{_safe_text(item.title_candidates[0])}**")
             st.caption(_safe_text(item.target_id))
+            if item.output_path is None:
+                st.warning(
+                    "生成済みショート動画ファイルが manifest にありません。"
+                    "予約投稿せず、ショート生成を再実行してください。"
+                )
+                continue
+            if isinstance(item.output_path, Path):
+                output_ready, output_warning = _is_nonempty_file(item.output_path)
+                if not output_ready:
+                    st.warning(
+                        f"{output_warning} 予約投稿せず、ショート生成を再実行してください。"
+                    )
+                    continue
             try:
                 operation = _resolve_operation(video_id, item.target_id, settings)
             except UploadQueueError:

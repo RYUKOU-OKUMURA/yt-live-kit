@@ -772,6 +772,36 @@ def test_upload_section_blocks_interrupted_manifest_with_recovery_guidance(
     button.assert_not_called()
 
 
+def test_upload_section_blocks_missing_output_before_reservation_controls(
+    tmp_path: Path,
+) -> None:
+    item = MagicMock(
+        status="succeeded",
+        output_path=tmp_path / "missing.mp4",
+        title_candidates=("欠損動画",),
+        target_id="clip-1",
+    )
+    result = MagicMock(status="done", items=(item,), job_id="shorts-job", clip_specs=())
+    policy = SchedulePolicy()
+    requested = datetime(2026, 8, 5, 15, 45, tzinfo=ZoneInfo(policy.timezone))
+    with (
+        patch.object(upload, "load_latest_shorts_queue_result", return_value=result),
+        patch.object(upload, "get_next_upload_slot", return_value=(policy, requested)),
+        patch.object(upload, "_resolve_operation") as resolve,
+        patch.object(upload.st, "container", side_effect=_container),
+        patch.object(upload.st, "caption"),
+        patch.object(upload.st, "markdown"),
+        patch.object(upload.st, "info"),
+        patch.object(upload.st, "warning") as warning,
+        patch.object(upload.st, "button") as button,
+    ):
+        upload.render_upload_section("source-1", Settings(data_dir=tmp_path))
+
+    resolve.assert_not_called()
+    button.assert_not_called()
+    assert any("予約投稿せず" in call.args[0] for call in warning.call_args_list)
+
+
 def test_invalid_schedule_or_unclicked_button_creates_no_preview_operation_or_job(
     tmp_path: Path,
 ) -> None:
