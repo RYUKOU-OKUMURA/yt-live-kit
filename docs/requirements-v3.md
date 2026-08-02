@@ -570,13 +570,13 @@ Streamlit は、エントリスクリプト（[`src/yt_live_kit/ui/app.py`](../s
 - [x] upload attempt は America/Los_Angeles の実試行日で resumable upload session 前に記録され、失敗も数え、`YTLK_VIDEO_UPLOAD_DAILY_LIMIT` の 1・上限・上限超過境界を超えない。read-only API と予約枠件数は別に扱われる
 - [x] upload job target が `job_id` を受け、`YouTubeAPIError` が jobs の既知例外として日本語表示され、status bar が upload / shorts queue 等の非 pipeline 完了結果を誤って pipeline として読まない
 - [x] `videos.list(part="status,processingDetails")` が processing 10 秒 × 30、公開 30 秒 × 20 の terminal / timeout 契約と fake clock でテストされ、判定表により private lock を予約投稿成功として扱わない
-- [ ] 通常の予約 operation が processing poll 後に終了しても、予約時刻後の publication poll を明示 CTA または bounded follow-up job から起動でき、再起動後も同じ operation へ結果を追記できる
+- [x] 通常の予約 operation が processing poll 後に終了しても、予約時刻後の publication poll を明示 CTA または bounded follow-up job から起動でき、再起動後も同じ operation へ結果を追記できる
 - [x] P0 のテストアップロードで非公開ロックの有無が確認され、記録されている
 - [x] P0 の専用承認に、private lock 非該当時は probe 動画が指定時刻に public となり得ることまで含まれている
 
 ### AC-28: v3 総合受け入れ
 
-- [ ] AC-18〜AC-27 がすべて満たされている（P3 の実公開受け入れは完了済み。R1 監査で判明した通常 operation の公開後 poll 接続は H1-5 へ移す）
+- [x] AC-18〜AC-27 がすべて満たされている（P3 の実公開受け入れは完了済み。R1 監査で判明した通常 operation の公開後 poll 接続は H1-5 で完了）
 - [x] v1 / v2 の機能に回帰が無い（`uv run pytest` が全件通過する）
 - [x] 実配信 1 本から、チャプター生成 → ショート複数本の生成 → 予約投稿までを通しで実行できる
 - [x] 実 upload、審査フォーム提出、P3 の実予約公開について、各操作ごとの対象と内容を提示した別々の明示承認記録がある
