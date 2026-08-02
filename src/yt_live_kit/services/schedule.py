@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import re
 import uuid
 from datetime import date, datetime, time, timedelta, timezone
@@ -24,6 +23,8 @@ from pydantic import (
 from yt_live_kit.config import Settings
 from yt_live_kit.models.upload import UploadChannel, UploadContentSnapshot, UploadOperation
 from yt_live_kit.services.jobs import start_job
+from yt_live_kit.services._fsutil import write_text_atomically
+from yt_live_kit.services._paths import PathConfinementError, confined_path
 from yt_live_kit.services.upload_queue import (
     UploadQueueError,
     count_upload_attempts,
@@ -148,49 +149,74 @@ class UploadPreview(BaseModel):
 
 
 def _config_path(settings: Settings) -> Path:
-    return settings.data_dir / "_config" / "schedule_policy.json"
-
-
-def _atomic_write(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.parent / f".{path.name}.{uuid.uuid4().hex}.tmp"
     try:
-        with temporary.open("w", encoding="utf-8") as handle:
-            json.dump(payload, handle, ensure_ascii=False, indent=2)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temporary, path)
-    except OSError as exc:
-        raise ScheduleError(f"投稿スケジュールを安全に保存できませんでした: {exc}") from exc
-    finally:
-        try:
-            temporary.unlink(missing_ok=True)
-        except OSError:
-            pass
+        return confined_path(
+            settings.data_dir,
+            "_config",
+            "schedule_policy.json",
+            label="投稿スケジュール設定保存先",
+        )
+    except PathConfinementError as exc:
+        raise ScheduleError(
+            "投稿スケジュール設定の保存先を安全に扱えません。"
+        ) from exc
+
+
+def _policy_text(policy: SchedulePolicy) -> str:
+    return json.dumps(
+        policy.model_dump(mode="json"),
+        ensure_ascii=False,
+        indent=2,
+    ) + "\n"
 
 
 def load_schedule_policy(settings: Settings) -> SchedulePolicy:
     """保存済み policy を読む。未作成だけ既定値、破損は fail closed."""
-    with schedule_lock(settings):
-        path = _config_path(settings)
-        if not path.exists():
-            return SchedulePolicy()
-        try:
+    try:
+        with schedule_lock(settings):
+            path = _config_path(settings)
+            if not path.exists():
+                return SchedulePolicy()
             raw = json.loads(path.read_text(encoding="utf-8"))
             return SchedulePolicy.model_validate(raw)
-        except (OSError, UnicodeError, json.JSONDecodeError, ValidationError) as exc:
-            raise ScheduleError(
-                "投稿スケジュール設定が壊れているため読み込めません。手動で修復してください。"
-            ) from exc
+    except ScheduleError:
+        raise
+    except UploadQueueError as exc:
+        raise ScheduleError(
+            "投稿スケジュール設定の lock を取得できないため読み込めません。"
+        ) from exc
+    except PathConfinementError as exc:
+        raise ScheduleError(
+            "投稿スケジュール設定の保存先を安全に扱えません。"
+        ) from exc
+    except (OSError, UnicodeError, json.JSONDecodeError, ValidationError) as exc:
+        raise ScheduleError(
+            "投稿スケジュール設定が壊れているため読み込めません。手動で修復してください。"
+        ) from exc
 
 
 def save_schedule_policy(policy: SchedulePolicy, settings: Settings) -> Path:
     if not isinstance(policy, SchedulePolicy):
         raise ScheduleError("投稿スケジュールの入力が正しくありません。")
-    with schedule_lock(settings):
-        path = _config_path(settings)
-        _atomic_write(path, policy.model_dump(mode="json"))
-        return path
+    try:
+        with schedule_lock(settings):
+            path = _config_path(settings)
+            write_text_atomically(path, _policy_text(policy), mode=0o600)
+            return path
+    except ScheduleError:
+        raise
+    except UploadQueueError as exc:
+        raise ScheduleError(
+            "投稿スケジュール設定の lock を取得できないため保存できません。"
+        ) from exc
+    except PathConfinementError as exc:
+        raise ScheduleError(
+            "投稿スケジュール設定の保存先を安全に扱えません。"
+        ) from exc
+    except (OSError, UnicodeError) as exc:
+        raise ScheduleError(
+            "投稿スケジュールを安全に保存できませんでした。"
+        ) from exc
 
 
 def make_schedule_policy(

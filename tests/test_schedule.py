@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import stat
 import threading
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
@@ -184,10 +185,92 @@ def test_schedule_policy_atomic_round_trip_and_corrupt_fail_closed(tmp_path: Pat
     saved = json.loads(path.read_text(encoding="utf-8"))
     assert saved["daily_times"] == ["09:00", "18:30", "21:30"]
     assert "daily_time" not in saved
+    assert path.read_text(encoding="utf-8").endswith("\n")
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
     assert not tuple(path.parent.glob("*.tmp"))
     path.write_text("{broken", encoding="utf-8")
     with pytest.raises(ScheduleError, match="壊れて"):
         load_schedule_policy(settings)
+
+
+def test_schedule_policy_rejects_config_symlink_outside_without_leaking_path(
+    tmp_path: Path,
+) -> None:
+    settings = _settings(tmp_path)
+    outside = tmp_path / "outside-config"
+    outside.mkdir()
+    settings.data_dir.mkdir(parents=True)
+    (settings.data_dir / "_config").symlink_to(outside, target_is_directory=True)
+
+    for operation in (
+        lambda: load_schedule_policy(settings),
+        lambda: save_schedule_policy(SchedulePolicy(), settings),
+    ):
+        with pytest.raises(ScheduleError) as caught:
+            operation()
+        assert "outside-config" not in str(caught.value)
+        assert "投稿スケジュール設定" in str(caught.value)
+
+
+def test_schedule_policy_save_failure_preserves_existing_formal_file(
+    tmp_path: Path,
+) -> None:
+    settings = _settings(tmp_path)
+    path = save_schedule_policy(SchedulePolicy(daily_time="18:00"), settings)
+    before = path.read_text(encoding="utf-8")
+
+    with (
+        patch(
+            "yt_live_kit.services.schedule.write_text_atomically",
+            side_effect=OSError("write /secret/path"),
+        ),
+        pytest.raises(ScheduleError, match="安全に保存できませんでした") as caught,
+    ):
+        save_schedule_policy(SchedulePolicy(daily_time="21:00"), settings)
+
+    assert "write /secret/path" not in str(caught.value)
+    assert path.read_text(encoding="utf-8") == before
+
+
+def test_schedule_policy_read_oserror_is_normalized_without_leaking_detail(
+    tmp_path: Path,
+) -> None:
+    settings = _settings(tmp_path)
+    save_schedule_policy(SchedulePolicy(), settings)
+
+    with (
+        patch(
+            "yt_live_kit.services.schedule.Path.read_text",
+            side_effect=OSError("read /secret/path"),
+        ),
+        pytest.raises(ScheduleError, match="壊れて") as caught,
+    ):
+        load_schedule_policy(settings)
+
+    assert "read /secret/path" not in str(caught.value)
+
+
+@pytest.mark.parametrize("operation", ["load", "save"])
+def test_schedule_policy_lock_error_is_normalized_at_service_boundary(
+    tmp_path: Path,
+    operation: str,
+) -> None:
+    settings = _settings(tmp_path)
+
+    with (
+        patch(
+            "yt_live_kit.services.schedule.schedule_lock",
+            side_effect=UploadQueueError("lock /secret/path"),
+        ),
+        pytest.raises(ScheduleError) as caught,
+    ):
+        if operation == "load":
+            load_schedule_policy(settings)
+        else:
+            save_schedule_policy(SchedulePolicy(), settings)
+
+    assert "lock /secret/path" not in str(caught.value)
+    assert "投稿スケジュール設定" in str(caught.value)
 
 
 def test_schedule_policy_loads_legacy_daily_time_and_saves_plural_format(
