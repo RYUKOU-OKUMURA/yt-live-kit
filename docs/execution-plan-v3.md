@@ -1409,7 +1409,7 @@ data/{video_id}/ ...
 
 **作業:**
 
-- [ ] H1-1. jobs のプロセス間排他と pointer fail-closed。`services/jobs.py` / `tests/test_jobs.py` を対象に、data root 単位の advisory lock、owner PID / token、UUID temp + flush + fsync + replace、壊れた `current.json` からの running job scan を実装する。2 process 同時開始の勝者が 1 件、live worker を orphan close しない、破損 pointer で busy を fail-open にしないテストを Done とする。見積もり 1〜1.5 日
+- [x] H1-1. jobs のプロセス間排他と pointer fail-closed。`services/jobs.py` / `tests/test_jobs.py` を対象に、data root 単位の advisory lock、owner PID / token、UUID temp + flush + fsync + replace、壊れた `current.json` からの running job scan を実装する。2 process 同時開始の勝者が 1 件、live worker を orphan close しない、破損 pointer で busy を fail-open にしないテストを Done とする。`1083 passed, 2 skipped`。タスク単位コミット済み。見積もり 1〜1.5 日
 - [ ] H1-2. video ID の path confinement。`services/_paths.py` を新設し、`services/ytdlp.py` / `history.py` / `jobs.py` / `shorts_queue.py` / `shorts_line.py` / `upload_queue.py` と対応テストを段階移行する。通常の 11 文字 ID は互換、`.` / `..` / separator / root 外 symlink は副作用前に日本語で拒否し、解決後 path が `data_dir` 配下であることを Done とする。見積もり 1 日
 - [ ] H1-3. queue crash recovery。`services/shorts_queue.py` / `ui/components/shorts_queue.py` / `ui/components/upload.py` と対応テストを対象に、owner job ID、`interrupted` terminal state、再起動 recovery table、既存成功 item の再利用可否を schema で固定する。途中クラッシュ後に予約不可、状態と再実行方法が日本語表示され、正常 `done` manifest の互換があることを Done とする。見積もり 0.5〜1 日
 - [x] H1-4. OAuth token とローカル設定の atomic persistence。`services/youtube_api.py`、`ui/views/_local_settings.py` と対応テストを対象に、権限 600 の同一 directory temp、flush + fsync + replace、advisory lock、lock 内再読込 + merge を共通化する。中断時に旧 JSON が残り、2 process 更新で ID 集合を失わないことを Done とする。見積もり 0.5〜1 日
@@ -1763,6 +1763,7 @@ U7（概要欄 fingerprint 化）は保留 = v4 候補（優先度③: チャプ
 
 | 日付 | 内容 |
 |------|------|
+| 2026-08-02 | **H1-1 完了。** `jobs.py` に data root advisory lock、owner PID / token、UUID temp + flush / fsync / atomic replace、current pointer の状態区別、strict running scan、live worker 保護を実装。実 2 process 競合と fault injection を含む jobs テスト 42 件、全体 `1083 passed, 2 skipped` を確認した。H1-2〜H1-5 は未着手のまま維持する |
 | 2026-08-02 | **R1 完了。** 途中 queue の予約 fail-closed、旧 datetime の UTC 正規化、legacy `build_short()` の atomic 出力保護を `be83adb`、binary identity 付き `yt-dlp --version` warning cache・Streamlit 1.55 下限・uv 設定・seek 文書整合を `a969681` で実装。変更前 1063 から変更後 1074 passed / 2 skipped、cache miss 240.56 ms から hit 平均 0.215 ms、`uv lock --check` / `uv sync --locked` 成功、safety / performance の独立レビュー APPROVE を確認した |
 | 2026-08-02 | **R1 計画の独立レビューを反映。** P3 の単発公開証跡と通常 operation の publication poll 未接続を区別し、後者を FR-27 / AC-28 の未完了へ戻した。構造課題を H1-1〜H1-6、生成速度検証を G1-1〜G1-3 として変更範囲・Done・依存・見積もり付きで正式化。Streamlit 最低版は stateful expander 導入版 1.55、FFmpeg seek は現行 input seek を正本とし G1 で境界比較する方針へ明確化した |
 | 2026-08-02 | **R1 全体リファクタリング・性能・長期運用監査を開始。** 1063 tests の回帰基準と実データの所要時間を採取し、即時の fail-closed 修正・安全な rerun 高速化・別タスクへ分ける構造課題を定義した。U6 / P5 の実機完了前に R1 を挟み、FFmpeg 生成方式の変更は benchmark と要件改訂を先行させる |

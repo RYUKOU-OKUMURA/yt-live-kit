@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import multiprocessing
+import os
 import threading
 import time
 from contextlib import contextmanager
@@ -12,6 +14,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from yt_live_kit.config import Settings
+from yt_live_kit.services import jobs as jobs_service
 from yt_live_kit.services.clips import ClipsError
 from yt_live_kit.services.jobs import (
     JobBusyError,
@@ -44,6 +47,27 @@ def _patch_real_thread():
 
     with patch("yt_live_kit.services.jobs.threading.Thread", side_effect=factory) as mock_thread:
         yield mock_thread, threads
+
+
+def _start_job_in_process(data_dir: str, barrier, result_queue) -> None:
+    """独立 process から start_job() を呼ぶ H1-1 用 worker."""
+    settings = Settings(data_dir=data_dir)
+    barrier.wait(timeout=10)
+
+    def target_fn(*, report, settings, job_id, **_kwargs):
+        time.sleep(0.5)
+
+    try:
+        job_id = start_job(
+            "single",
+            target_fn,
+            settings=settings,
+            requested_job_id=f"job-{os.getpid()}",
+        )
+    except JobBusyError:
+        result_queue.put(("busy", None))
+    else:
+        result_queue.put(("ok", job_id))
 
 
 def test_create_update_read_roundtrip(tmp_path):
@@ -658,3 +682,180 @@ def test_start_job_reports_shorts_error_message(tmp_path):
     assert state is not None
     assert state.status == "failed"
     assert state.error == "動画ディレクトリが見つかりません: /tmp/video1234567"
+
+
+def test_start_job_persists_owner_pid_token_and_atomic_outputs(tmp_path):
+    settings = Settings(data_dir=tmp_path)
+    entered = threading.Event()
+    release = threading.Event()
+
+    def target_fn(*, report, settings, **_kwargs):
+        entered.set()
+        assert release.wait(timeout=5)
+
+    with _patch_real_thread() as (_mock_thread, threads):
+        job_id = start_job("single", target_fn, settings=settings)
+        assert entered.wait(timeout=5)
+
+        job_payload = json.loads(
+            (tmp_path / "_jobs" / f"{job_id}.json").read_text(encoding="utf-8")
+        )
+        current_payload = json.loads(
+            (tmp_path / "_jobs" / "current.json").read_text(encoding="utf-8")
+        )
+        assert job_payload["owner_pid"] == os.getpid()
+        assert isinstance(job_payload["owner_token"], str)
+        assert job_payload["owner_token"]
+        assert current_payload["owner_pid"] == job_payload["owner_pid"]
+        assert current_payload["owner_token"] == job_payload["owner_token"]
+        assert not list((tmp_path / "_jobs").glob("*.tmp"))
+
+        release.set()
+        threads[-1].join(timeout=5)
+
+
+def test_atomic_job_replace_failure_preserves_previous_json(tmp_path):
+    settings = Settings(data_dir=tmp_path)
+    job = create_job("single", settings=settings)
+    path = tmp_path / "_jobs" / f"{job.job_id}.json"
+    before = path.read_bytes()
+
+    with patch("yt_live_kit.services.jobs.os.replace", side_effect=OSError("fault")):
+        with pytest.raises(OSError, match="fault"):
+            update_job(job.job_id, settings=settings, message="新しい状態")
+
+    assert path.read_bytes() == before
+    assert not list((tmp_path / "_jobs").glob("*.tmp"))
+
+
+def test_atomic_job_fsync_failure_preserves_previous_json(tmp_path):
+    settings = Settings(data_dir=tmp_path)
+    job = create_job("single", settings=settings)
+    path = tmp_path / "_jobs" / f"{job.job_id}.json"
+    before = path.read_bytes()
+
+    with patch("yt_live_kit.services.jobs.os.fsync", side_effect=OSError("fault")):
+        with pytest.raises(OSError, match="fault"):
+            update_job(job.job_id, settings=settings, message="新しい状態")
+
+    assert path.read_bytes() == before
+    assert not list((tmp_path / "_jobs").glob("*.tmp"))
+
+
+def test_current_pointer_states_are_distinguished_and_fail_closed(tmp_path):
+    settings = Settings(data_dir=tmp_path)
+    assert jobs_service._read_current_pointer(settings).status == "missing"
+    assert not is_busy(settings)
+
+    running = create_job("single", settings=settings)
+    assert jobs_service._read_current_pointer(settings).status == "valid"
+    (tmp_path / "_jobs" / "current.json").unlink()
+    assert jobs_service._read_current_pointer(settings).status == "missing"
+    assert is_busy(settings)
+    assert get_active_job(settings) is not None
+    assert get_active_job(settings).job_id == running.job_id
+
+    (tmp_path / "_jobs" / "current.json").write_text("{broken", encoding="utf-8")
+    assert jobs_service._read_current_pointer(settings).status == "corrupt"
+    assert is_busy(settings)
+
+    (tmp_path / "_jobs" / "current.json").write_text(
+        json.dumps({"job_id": "missing-target"}), encoding="utf-8"
+    )
+    assert jobs_service._read_current_pointer(settings).status == "target_missing"
+    assert is_busy(settings)
+    with pytest.raises(JobBusyError):
+        start_job("single", lambda **_kwargs: None, settings=settings)
+
+
+def test_corrupt_pointer_with_no_running_job_stays_busy(tmp_path):
+    settings = Settings(data_dir=tmp_path)
+    finished = create_job("single", settings=settings)
+    update_job(finished.job_id, settings=settings, status="done")
+    (tmp_path / "_jobs" / "current.json").write_text("{broken", encoding="utf-8")
+
+    assert read_current_job(settings) is None
+    assert is_busy(settings)
+    with pytest.raises(JobBusyError):
+        start_job("single", lambda **_kwargs: None, settings=settings)
+
+
+def test_missing_pointer_with_corrupt_job_scan_stays_busy(tmp_path):
+    settings = Settings(data_dir=tmp_path)
+    jobs_dir = tmp_path / "_jobs"
+    jobs_dir.mkdir(parents=True)
+    (jobs_dir / "unknown.json").write_text("{broken", encoding="utf-8")
+
+    assert jobs_service._read_current_pointer(settings).status == "missing"
+    assert is_busy(settings)
+    with pytest.raises(JobBusyError):
+        start_job("single", lambda **_kwargs: None, settings=settings)
+
+
+def test_close_orphans_does_not_close_live_worker(tmp_path):
+    settings = Settings(data_dir=tmp_path)
+    entered = threading.Event()
+    release = threading.Event()
+
+    def target_fn(*, report, settings, **_kwargs):
+        entered.set()
+        assert release.wait(timeout=5)
+
+    with _patch_real_thread() as (_mock_thread, threads):
+        job_id = start_job("single", target_fn, settings=settings)
+        assert entered.wait(timeout=5)
+        assert close_orphans(settings) == []
+        live = read_job(job_id, settings)
+        assert live is not None
+        assert live.status == "running"
+
+        release.set()
+        threads[-1].join(timeout=5)
+
+    finished = read_job(job_id, settings)
+    assert finished is not None
+    assert finished.status == "done"
+
+
+def test_lock_failure_is_fail_closed_and_does_not_start_job(tmp_path):
+    settings = Settings(data_dir=tmp_path)
+    with patch(
+        "yt_live_kit.services.jobs.fcntl.flock", side_effect=OSError("lock fault")
+    ) as flock:
+        assert is_busy(settings)
+        with pytest.raises(JobBusyError, match="排他ロック"):
+            start_job("single", lambda **_kwargs: None, settings=settings)
+    assert flock.call_count >= 2
+    assert not list((tmp_path / "_jobs").glob("*.json"))
+
+
+@pytest.mark.skipif(
+    "fork" not in multiprocessing.get_all_start_methods(),
+    reason="fork が利用できない環境では process 境界テストを実行しない",
+)
+def test_two_process_start_has_exactly_one_winner(tmp_path):
+    context = multiprocessing.get_context("fork")
+    barrier = context.Barrier(2)
+    result_queue = context.Queue()
+    processes = [
+        context.Process(
+            target=_start_job_in_process,
+            args=(str(tmp_path), barrier, result_queue),
+        )
+        for _ in range(2)
+    ]
+    for process in processes:
+        process.start()
+
+    outcomes = [result_queue.get(timeout=10) for _ in processes]
+    for process in processes:
+        process.join(timeout=10)
+        assert process.exitcode == 0
+
+    assert sorted(outcome[0] for outcome in outcomes) == ["busy", "ok"]
+    jobs = list(jobs_service.list_jobs(Settings(data_dir=tmp_path)))
+    assert len(jobs) == 1
+    assert jobs[0].status == "running"
+
+    interrupted = close_orphans(Settings(data_dir=tmp_path))
+    assert interrupted == [jobs[0].job_id]
