@@ -96,14 +96,15 @@ class TestIsConfigured:
     def test_true_when_file_exists(self, tmp_path) -> None:
         secret = tmp_path / "client_secret.json"
         secret.write_text("{}", encoding="utf-8")
-        settings = MagicMock()
-        settings.youtube_client_secret = secret
+        settings = Settings(data_dir=tmp_path, youtube_client_secret=secret)
 
         assert youtube_api.is_configured(settings) is True
 
     def test_false_when_file_missing(self, tmp_path) -> None:
-        settings = MagicMock()
-        settings.youtube_client_secret = tmp_path / "missing.json"
+        settings = Settings(
+            data_dir=tmp_path,
+            youtube_client_secret=tmp_path / "missing.json",
+        )
 
         assert youtube_api.is_configured(settings) is False
 
@@ -111,8 +112,9 @@ class TestIsConfigured:
 class TestSaveToken:
     def test_save_token_restricts_file_and_directory_permissions(self, tmp_path: Path) -> None:
         token_path = tmp_path / "_config" / "youtube_token.json"
+        settings = Settings(data_dir=tmp_path)
 
-        youtube_api._save_token(token_path, '{"token": "secret"}')
+        youtube_api._save_token(settings, '{"token": "secret"}')
 
         assert token_path.read_text(encoding="utf-8") == '{"token": "secret"}'
         assert stat.S_IMODE(token_path.stat().st_mode) == 0o600
@@ -128,7 +130,7 @@ class TestSaveToken:
         os.chmod(secret_path, 0o644)
 
         token_path = config_dir / "youtube_token.json"
-        youtube_api._save_token(token_path, '{"token": "secret"}')
+        youtube_api._save_token(Settings(data_dir=tmp_path), '{"token": "secret"}')
 
         assert stat.S_IMODE(secret_path.stat().st_mode) == 0o644
         assert stat.S_IMODE(token_path.stat().st_mode) == 0o600

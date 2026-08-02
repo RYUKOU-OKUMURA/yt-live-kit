@@ -9,6 +9,7 @@ from pathlib import Path
 
 from yt_live_kit.config import Settings, get_settings
 from yt_live_kit.services._fsutil import advisory_lock, write_text_atomically
+from yt_live_kit.services._paths import confined_path
 from yt_live_kit.services.subtitle_burn import TELOP_PRESETS
 
 _ARCHIVED_VIDEOS_FILENAME = "archived_videos.json"
@@ -28,19 +29,39 @@ class ShortsLineDefaults:
 
 
 def _archived_videos_path(settings: Settings) -> Path:
-    return settings.data_dir / "_config" / _ARCHIVED_VIDEOS_FILENAME
+    return confined_path(
+        settings.data_dir,
+        "_config",
+        _ARCHIVED_VIDEOS_FILENAME,
+        label="アーカイブ設定保存先",
+    )
 
 
 def _description_applied_videos_path(settings: Settings) -> Path:
-    return settings.data_dir / "_config" / _DESCRIPTION_APPLIED_VIDEOS_FILENAME
+    return confined_path(
+        settings.data_dir,
+        "_config",
+        _DESCRIPTION_APPLIED_VIDEOS_FILENAME,
+        label="概要欄反映設定保存先",
+    )
 
 
 def _channel_handle_path(settings: Settings) -> Path:
-    return settings.data_dir / "_config" / _CHANNEL_HANDLE_FILENAME
+    return confined_path(
+        settings.data_dir,
+        "_config",
+        _CHANNEL_HANDLE_FILENAME,
+        label="チャンネル設定保存先",
+    )
 
 
 def _shorts_defaults_path(settings: Settings) -> Path:
-    return settings.data_dir / "_config" / _SHORTS_DEFAULTS_FILENAME
+    return confined_path(
+        settings.data_dir,
+        "_config",
+        _SHORTS_DEFAULTS_FILENAME,
+        label="ショート既定値保存先",
+    )
 
 
 def load_shorts_line_defaults(
@@ -74,16 +95,25 @@ def _snapshot_map() -> dict[Path, set[str]]:
     return snapshots
 
 
+def _snapshot_key(path: Path) -> Path:
+    return path.resolve(strict=False)
+
+
 def _remember_id_set(path: Path, ids: set[str]) -> None:
-    _snapshot_map()[path] = set(ids)
+    _snapshot_map()[_snapshot_key(path)] = set(ids)
 
 
 def _consume_id_set_snapshot(path: Path) -> set[str] | None:
-    return _snapshot_map().pop(path, None)
+    return _snapshot_map().pop(_snapshot_key(path), None)
 
 
 def _setting_lock_path(path: Path) -> Path:
-    return path.with_name(f".{path.name}.lock")
+    return confined_path(
+        path.parent.parent,
+        "_config",
+        f".{path.name}.lock",
+        label="ローカル設定ロック保存先",
+    )
 
 
 def _read_id_set(path: Path) -> set[str]:
@@ -115,7 +145,7 @@ def _save_id_set(ids: set[str], path: Path) -> Path:
         # Save 呼び出し前に読まれた snapshot があれば、その差分だけを
         # lock 内で読み直した最新値へ適用する。これで別プロセスの追加を失わない。
         current = _read_id_set(path)
-        snapshot = _snapshot_map().get(path)
+        snapshot = _snapshot_map().get(_snapshot_key(path))
         if snapshot is None:
             merged = desired
         else:

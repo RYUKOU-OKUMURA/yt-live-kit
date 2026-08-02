@@ -8,13 +8,16 @@ import os
 import time
 from pathlib import Path
 from queue import Empty
+from unittest.mock import patch
 
 import pytest
 
 from yt_live_kit.config import Settings
 from yt_live_kit.services._fsutil import advisory_lock
 from yt_live_kit.services import youtube_api
+from yt_live_kit.services._paths import PathConfinementError
 from yt_live_kit.ui.views._local_settings import (
+    get_default_channel_handle,
     load_description_applied_ids,
     load_archived_ids,
     save_archived_ids,
@@ -49,7 +52,7 @@ def _save_id_set_worker(
 
 
 def _save_token_worker(
-    token_path: str,
+    data_dir: str,
     value: str,
     barrier: multiprocessing.synchronize.Barrier,
     results: multiprocessing.queues.Queue,
@@ -60,7 +63,9 @@ def _save_token_worker(
         barrier.wait(timeout=10)
         if attempted is not None:
             attempted.set()
-        youtube_api._save_token(Path(token_path), json.dumps({"value": value}))
+        youtube_api._save_token(
+            Settings(data_dir=Path(data_dir)), json.dumps({"value": value})
+        )
     except BaseException as exc:  # pragma: no cover - asserted by parent
         results.put(f"{type(exc).__name__}: {exc}")
         raise
@@ -125,6 +130,122 @@ def test_two_process_id_set_updates_merge_inside_lock(tmp_path: Path) -> None:
     }
 
 
+@pytest.mark.parametrize("use_relative_data_dir", [False, True])
+def test_external_config_symlink_is_rejected_before_oauth_or_local_side_effects(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    use_relative_data_dir: bool,
+) -> None:
+    data_dir = tmp_path / "data"
+    outside = tmp_path / "outside"
+    data_dir.mkdir()
+    outside.mkdir()
+    (outside / "youtube_token.json").write_text(
+        '{"escaped": true}', encoding="utf-8"
+    )
+    (outside / "description_applied_videos.json").write_text(
+        '["escaped-video"]\n', encoding="utf-8"
+    )
+    (outside / "channel_handle.txt").write_text(
+        "@escaped\n", encoding="utf-8"
+    )
+    try:
+        (data_dir / "_config").symlink_to(outside, target_is_directory=True)
+    except OSError as exc:  # pragma: no cover - platform capability
+        pytest.skip(f"symlink を作成できない環境: {exc}")
+
+    if use_relative_data_dir:
+        monkeypatch.chdir(tmp_path)
+        settings = Settings(data_dir=Path("data"))
+    else:
+        settings = Settings(data_dir=data_dir)
+
+    with pytest.raises(youtube_api.YouTubeAPIError, match="安全に扱えません"):
+        youtube_api._token_path(settings)
+    with pytest.raises(youtube_api.YouTubeAPIError, match="安全に扱えません"):
+        youtube_api.is_configured(settings)
+    with pytest.raises(youtube_api.YouTubeAPIError, match="安全に扱えません"):
+        youtube_api._save_token(settings, '{"new": true}')
+    with (
+        patch(
+            "google.oauth2.credentials.Credentials.from_authorized_user_file"
+        ) as read_token,
+        pytest.raises(youtube_api.YouTubeAPIError, match="安全に扱えません"),
+    ):
+        youtube_api.get_credentials(settings)
+    read_token.assert_not_called()
+
+    with pytest.raises(PathConfinementError, match="安全に扱えません"):
+        load_description_applied_ids(settings)
+    with pytest.raises(PathConfinementError, match="安全に扱えません"):
+        save_description_applied_ids({"new-video"}, settings)
+    with pytest.raises(PathConfinementError, match="安全に扱えません"):
+        get_default_channel_handle(settings)
+    with pytest.raises(PathConfinementError, match="安全に扱えません"):
+        save_default_channel_handle("@new-channel", settings)
+
+    assert not (outside / ".description_applied_videos.json.lock").exists()
+    assert not (outside / ".channel_handle.txt.lock").exists()
+    assert (outside / "youtube_token.json").read_text(encoding="utf-8") == (
+        '{"escaped": true}'
+    )
+    assert (outside / "description_applied_videos.json").read_text(
+        encoding="utf-8"
+    ) == '["escaped-video"]\n'
+    assert (outside / "channel_handle.txt").read_text(encoding="utf-8") == (
+        "@escaped\n"
+    )
+
+
+def test_external_local_settings_lock_symlink_is_rejected_before_write(
+    tmp_path: Path,
+) -> None:
+    data_dir = tmp_path / "data"
+    settings = Settings(data_dir=data_dir)
+    config_dir = data_dir / "_config"
+    outside = tmp_path / "outside"
+    data_dir.mkdir()
+    config_dir.mkdir()
+    outside.mkdir()
+    outside_lock_target = outside / "lock-target"
+    outside_lock_target.write_text("keep", encoding="utf-8")
+    try:
+        (config_dir / ".description_applied_videos.json.lock").symlink_to(
+            outside_lock_target
+        )
+    except OSError as exc:  # pragma: no cover - platform capability
+        pytest.skip(f"symlink を作成できない環境: {exc}")
+
+    with pytest.raises(PathConfinementError, match="安全に扱えません"):
+        save_description_applied_ids({"must-not-write"}, settings)
+
+    assert not (config_dir / "description_applied_videos.json").exists()
+    assert outside_lock_target.read_text(encoding="utf-8") == "keep"
+
+
+def test_external_oauth_lock_symlink_is_rejected_before_write(tmp_path: Path) -> None:
+    data_dir = tmp_path / "data"
+    config_dir = data_dir / "_config"
+    outside = tmp_path / "outside"
+    data_dir.mkdir()
+    config_dir.mkdir()
+    outside.mkdir()
+    outside_lock_target = outside / "lock-target"
+    outside_lock_target.write_text("keep", encoding="utf-8")
+    try:
+        (config_dir / ".youtube_token.json.lock").symlink_to(outside_lock_target)
+    except OSError as exc:  # pragma: no cover - platform capability
+        pytest.skip(f"symlink を作成できない環境: {exc}")
+
+    with pytest.raises(youtube_api.YouTubeAPIError, match="安全に扱えません"):
+        youtube_api._save_token(
+            Settings(data_dir=data_dir), '{"must_not_write": true}'
+        )
+
+    assert not (config_dir / "youtube_token.json").exists()
+    assert outside_lock_target.read_text(encoding="utf-8") == "keep"
+
+
 def test_two_process_token_writes_leave_valid_complete_json(tmp_path: Path) -> None:
     token_path = tmp_path / "_config" / "youtube_token.json"
     context = multiprocessing.get_context("spawn")
@@ -133,7 +254,7 @@ def test_two_process_token_writes_leave_valid_complete_json(tmp_path: Path) -> N
     processes = [
         context.Process(
             target=_save_token_worker,
-            args=(str(token_path), value, barrier, results),
+            args=(str(tmp_path), value, barrier, results),
         )
         for value in ("first", "second")
     ]
@@ -200,7 +321,7 @@ def test_two_process_writer_waits_for_advisory_lock(
         writer = context.Process(
             target=writer_target,
             args=(
-                str(tmp_path / "_config" / "youtube_token.json"),
+                str(tmp_path),
                 "blocked-token",
                 writer_barrier,
                 results,
@@ -233,6 +354,26 @@ def test_id_set_merge_preserves_concurrent_addition_and_explicit_removal(
     assert load_archived_ids(settings) == {"concurrent", "keep"}
 
 
+def test_id_set_snapshot_merge_normalizes_relative_and_absolute_data_dir(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    relative_settings = Settings(data_dir=Path("data"))
+    absolute_settings = Settings(data_dir=tmp_path / "data")
+
+    save_archived_ids({"keep", "remove"}, relative_settings)
+    desired = load_archived_ids(relative_settings)
+    (tmp_path / "data" / "_config" / "archived_videos.json").write_text(
+        '["concurrent", "keep", "remove"]\n', encoding="utf-8"
+    )
+
+    desired.remove("remove")
+    save_archived_ids(desired, absolute_settings)
+
+    assert load_archived_ids(absolute_settings) == {"concurrent", "keep"}
+
+
 @pytest.mark.parametrize(
     ("writer", "path_name", "old_value", "new_value"),
     [
@@ -260,7 +401,7 @@ def test_fault_injection_preserves_previous_json(
 
     if writer == "token":
         def save() -> None:
-            youtube_api._save_token(path, new_value)
+            youtube_api._save_token(Settings(data_dir=tmp_path), new_value)
     else:
         settings = Settings(data_dir=tmp_path)
 

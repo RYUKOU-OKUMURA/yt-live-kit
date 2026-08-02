@@ -26,6 +26,7 @@ from yt_live_kit.models.upload import (
     UploadStatusObservation,
 )
 from yt_live_kit.services._fsutil import advisory_lock, write_text_atomically
+from yt_live_kit.services._paths import PathConfinementError, confined_path
 from yt_live_kit.services.ffmpeg import FfmpegError, ffprobe_path_for, probe_duration
 
 SCOPES = ["https://www.googleapis.com/auth/youtube.force-ssl"]
@@ -47,17 +48,43 @@ class YouTubeAPIError(Exception):
 
 def is_configured(settings: Settings) -> bool:
     """OAuth クライアントシークレットが配置済みか."""
+    # 存在確認も _config の解決先を検査してから行う。標準の secret path が
+    # 外部 symlink を経由する構成で、外部ファイルを読んだことにしない。
+    try:
+        confined_path(settings.data_dir, "_config", label="OAuth 設定保存先")
+    except PathConfinementError as exc:
+        raise YouTubeAPIError(str(exc)) from exc
     return settings.youtube_client_secret.is_file()
 
 
 def _token_path(settings: Settings) -> Path:
-    return settings.data_dir / "_config" / "youtube_token.json"
+    try:
+        return confined_path(
+            settings.data_dir,
+            "_config",
+            "youtube_token.json",
+            label="OAuth トークン保存先",
+        )
+    except PathConfinementError as exc:
+        raise YouTubeAPIError(str(exc)) from exc
 
 
-def _save_token(token_path: Path, creds_json: str) -> None:
+def _save_token(settings: Settings, creds_json: str) -> None:
     """OAuth トークン JSON を保存し、ファイル・親ディレクトリの権限を制限する."""
+    token_path = _token_path(settings)
+
+    lock_name = f".{token_path.name}.lock"
+    try:
+        lock_path = confined_path(
+            settings.data_dir,
+            "_config",
+            lock_name,
+            label="OAuth トークンロック保存先",
+        )
+    except PathConfinementError as exc:
+        raise YouTubeAPIError(str(exc)) from exc
+
     token_path.parent.mkdir(parents=True, exist_ok=True)
-    lock_path = token_path.with_name(f".{token_path.name}.lock")
     with advisory_lock(lock_path):
         # 既存ファイル（client_secret.json 等）のモードは変えず、ディレクトリの一覧権限のみ制限する。
         os.chmod(token_path.parent, 0o700)
@@ -81,7 +108,7 @@ def get_credentials(settings: Settings) -> Any:
             return creds
         if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())
-            _save_token(token_path, creds.to_json())
+            _save_token(settings, creds.to_json())
             return creds
 
     if not is_configured(settings):
@@ -96,7 +123,7 @@ def get_credentials(settings: Settings) -> Any:
         str(settings.youtube_client_secret), SCOPES
     )
     creds = flow.run_local_server(port=0)
-    _save_token(token_path, creds.to_json())
+    _save_token(settings, creds.to_json())
     return creds
 
 
