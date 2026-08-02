@@ -123,7 +123,7 @@ def choose_initial_workspace(
 def count_reservable_shorts(video_id: str, settings: Settings) -> int:
     """最新の検証済み manifest にある実在成功出力だけを数える."""
     result = load_latest_shorts_queue_result(video_id, settings)
-    if result is None:
+    if result is None or result.status != "done":
         return 0
     return sum(
         item.status == "succeeded"

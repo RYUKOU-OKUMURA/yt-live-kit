@@ -671,6 +671,7 @@ def test_upload_section_passes_first_segment_start_to_preview(tmp_path: Path) ->
         target_id="clip-1",
     )
     result = MagicMock(
+        status="done",
         items=(item,),
         job_id="shorts-job",
         clip_specs=(
@@ -716,6 +717,36 @@ def test_upload_section_passes_first_segment_start_to_preview(tmp_path: Path) ->
     assert "shorts_description_template.txt" in info.call_args.args[0]
 
 
+def test_upload_section_blocks_partial_running_manifest(tmp_path: Path) -> None:
+    output = tmp_path / "partial.mp4"
+    output.write_bytes(b"video")
+    item = MagicMock(
+        status="succeeded",
+        output_path=output,
+        title_candidates=("途中成功",),
+        target_id="clip-1",
+    )
+    result = MagicMock(
+        status="running",
+        items=(item,),
+        job_id="shorts-job",
+        clip_specs=(),
+    )
+
+    with (
+        patch.object(upload, "load_latest_shorts_queue_result", return_value=result),
+        patch.object(upload, "get_next_upload_slot") as next_slot,
+        patch.object(upload.st, "caption"),
+        patch.object(upload.st, "info") as info,
+        patch.object(upload.st, "button") as button,
+    ):
+        upload.render_upload_section("source-1", Settings(data_dir=tmp_path))
+
+    assert "生成が完了していない" in info.call_args.args[0]
+    next_slot.assert_not_called()
+    button.assert_not_called()
+
+
 def test_invalid_schedule_or_unclicked_button_creates_no_preview_operation_or_job(
     tmp_path: Path,
 ) -> None:
@@ -726,7 +757,7 @@ def test_invalid_schedule_or_unclicked_button_creates_no_preview_operation_or_jo
         description="説明文",
         tags=("タグ",),
     )
-    result = MagicMock(items=(item,), job_id="shorts-job", clip_specs=())
+    result = MagicMock(status="done", items=(item,), job_id="shorts-job", clip_specs=())
     settings = Settings(data_dir=tmp_path)
     policy = SchedulePolicy()
     initial = datetime(2026, 8, 5, 9, 0, tzinfo=ZoneInfo(policy.timezone))
@@ -881,7 +912,7 @@ def test_queue_corruption_shows_japanese_error_and_hides_post_action(tmp_path: P
         title_candidates=("予約タイトル",),
         target_id="clip-1",
     )
-    result = MagicMock(items=(item,), job_id="shorts-job")
+    result = MagicMock(status="done", items=(item,), job_id="shorts-job")
     with (
         patch.object(upload, "load_latest_shorts_queue_result", return_value=result),
         patch.object(upload, "_resolve_operation", side_effect=UploadQueueError("raw error")),

@@ -105,6 +105,27 @@ def test_detail_summary_keeps_generated_and_reservable_counts_separate() -> None
     assert summary == video_detail.DetailSummary(5, 4, 1, True)
 
 
+def test_count_reservable_shorts_requires_completed_manifest(tmp_path: Path) -> None:
+    output = tmp_path / "short.mp4"
+    output.write_bytes(b"video")
+    item = MagicMock(status="succeeded", output_path=output)
+    settings = Settings(data_dir=tmp_path)
+
+    with patch.object(
+        video_detail,
+        "load_latest_shorts_queue_result",
+        return_value=MagicMock(status="running", items=(item,)),
+    ):
+        assert video_detail.count_reservable_shorts("vid1234567", settings) == 0
+
+    with patch.object(
+        video_detail,
+        "load_latest_shorts_queue_result",
+        return_value=MagicMock(status="done", items=(item,)),
+    ):
+        assert video_detail.count_reservable_shorts("vid1234567", settings) == 1
+
+
 def test_initial_workspace_prioritizes_running_job_for_current_video() -> None:
     from yt_live_kit.services.jobs import JobState
 

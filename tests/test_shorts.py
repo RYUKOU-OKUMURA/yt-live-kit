@@ -794,6 +794,43 @@ def test_build_short_removes_intermediate_when_pass2_fails(
 @patch("yt_live_kit.services.shorts.find_ffmpeg")
 @patch("yt_live_kit.services.shorts.encode_segment")
 @patch("yt_live_kit.services.shorts.ensure_source_video")
+def test_build_short_pass2_failure_preserves_existing_output(
+    mock_ensure,
+    mock_encode_segment,
+    mock_find_ffmpeg,
+    mock_run,
+    tmp_path,
+):
+    mock_find_ffmpeg.return_value = "/usr/bin/ffmpeg"
+    mock_ensure.return_value = tmp_path / "source.mp4"
+    mock_encode_segment.side_effect = _fake_encode_segment
+    mock_run.side_effect = _fake_ffmpeg_run_fail
+
+    video_id = "testvid1234"
+    video_dir = _setup_video_dir(tmp_path, video_id)
+    existing = video_dir / "shorts" / "output" / "short_10_25.mp4"
+    existing.parent.mkdir(parents=True)
+    existing.write_bytes(b"old output")
+
+    with pytest.raises(ShortsError, match="ショート動画の生成に失敗"):
+        build_short(
+            video_id,
+            10.0,
+            25.0,
+            Settings(data_dir=tmp_path),
+            layout="crop",
+            burn_subtitles=False,
+            ffmpeg_path="/usr/bin/ffmpeg",
+        )
+
+    assert existing.read_bytes() == b"old output"
+    assert not list(existing.parent.glob(".short_10_25.*.mp4"))
+
+
+@patch("yt_live_kit.services.shorts.subprocess.run")
+@patch("yt_live_kit.services.shorts.find_ffmpeg")
+@patch("yt_live_kit.services.shorts.encode_segment")
+@patch("yt_live_kit.services.shorts.ensure_source_video")
 def test_build_short_keeps_intermediate_when_pass2_fails_and_keep_requested(
     mock_ensure,
     mock_encode_segment,

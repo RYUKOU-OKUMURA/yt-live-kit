@@ -12,14 +12,22 @@ from yt_live_kit.services.history import (
 )
 
 
-def _write_meta(video_dir: Path, video_id: str, title: str) -> None:
+def _write_meta(
+    video_dir: Path,
+    video_id: str,
+    title: str,
+    *,
+    fetched_at: datetime | None = None,
+) -> None:
     meta = {
         "id": video_id,
         "title": title,
         "url": f"https://www.youtube.com/watch?v={video_id}",
         "duration": 3600,
         "ytdlp_version": "2026.7.4",
-        "fetched_at": datetime(2026, 7, 30, tzinfo=timezone.utc).isoformat(),
+        "fetched_at": (
+            fetched_at or datetime(2026, 7, 30, tzinfo=timezone.utc)
+        ).isoformat(),
         "subtitle_lang": "ja",
     }
     video_dir.mkdir(parents=True, exist_ok=True)
@@ -43,6 +51,30 @@ def test_list_processed_videos(tmp_path: Path):
 
     videos = list_processed_videos(settings)
     assert len(videos) == 2
+
+
+def test_list_processed_videos_normalizes_legacy_naive_datetime_to_utc(
+    tmp_path: Path,
+) -> None:
+    settings = Settings(data_dir=tmp_path)
+    _write_meta(
+        tmp_path / "legacyVideo1",
+        "legacyVideo1",
+        "旧データ",
+        fetched_at=datetime(2026, 7, 30, 12, 0),
+    )
+    _write_meta(
+        tmp_path / "awareVideo01",
+        "awareVideo01",
+        "新データ",
+        fetched_at=datetime(2026, 7, 30, 13, 0, tzinfo=timezone.utc),
+    )
+
+    videos = list_processed_videos(settings)
+
+    assert [video.video_id for video in videos] == ["awareVideo01", "legacyVideo1"]
+    assert all(video.fetched_at is not None for video in videos)
+    assert all(video.fetched_at.utcoffset().total_seconds() == 0 for video in videos)
 
 
 def test_is_video_processed(tmp_path: Path):

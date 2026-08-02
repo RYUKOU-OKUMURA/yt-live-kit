@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 
 from yt_live_kit.config import Settings, get_settings
 from yt_live_kit.models.meta import VideoMeta
@@ -19,6 +19,15 @@ class ProcessedVideo:
     has_chapters: bool
     has_transcript: bool
     has_clips: bool
+
+
+def _as_utc(value: datetime | None) -> datetime | None:
+    """旧 metadata の naive 日時を UTC とみなし、比較可能な aware 日時へ揃える."""
+    if value is None:
+        return None
+    if value.tzinfo is None or value.utcoffset() is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
 
 
 def list_processed_videos(settings: Settings | None = None) -> list[ProcessedVideo]:
@@ -46,7 +55,7 @@ def list_processed_videos(settings: Settings | None = None) -> list[ProcessedVid
             ProcessedVideo(
                 video_id=meta.id,
                 title=meta.title,
-                fetched_at=meta.fetched_at,
+                fetched_at=_as_utc(meta.fetched_at),
                 has_chapters=(entry / "chapters" / "chapters.md").is_file(),
                 has_transcript=(entry / "transcript" / "full.txt").is_file(),
                 has_clips=(entry / "clips" / "candidates.json").is_file(),
@@ -54,7 +63,7 @@ def list_processed_videos(settings: Settings | None = None) -> list[ProcessedVid
         )
 
     results.sort(
-        key=lambda v: v.fetched_at or datetime.min.replace(tzinfo=None),
+        key=lambda v: v.fetched_at or datetime.min.replace(tzinfo=timezone.utc),
         reverse=True,
     )
     return results

@@ -556,6 +556,7 @@ def build_short(
     ass_path: Path | None = None
     font_name: str | None = None
     font_warning: str | None = None
+    temporary_output: Path | None = None
 
     # 中間ファイルを作った後は、字幕生成・パス2 のどこで失敗しても片付ける。
     try:
@@ -585,6 +586,14 @@ def build_short(
         output_dir = video_dir / "shorts" / "output"
         output_dir.mkdir(parents=True, exist_ok=True)
         output_path = output_dir / resolved_output_name
+        with tempfile.NamedTemporaryFile(
+            dir=output_dir,
+            prefix=f".{output_path.stem}.",
+            suffix=".mp4",
+            delete=False,
+        ) as temporary:
+            temporary_output = Path(temporary.name)
+        temporary_output.unlink(missing_ok=True)
 
         if on_progress:
             if burn_subtitles:
@@ -596,7 +605,7 @@ def build_short(
         try:
             cmd = _build_short_layout_command(
                 intermediate_path,
-                output_path,
+                temporary_output,
                 filter_chain,
                 use_filter_complex=use_filter_complex,
                 ffmpeg_path=effective_ffmpeg_path,
@@ -621,11 +630,25 @@ def build_short(
                 + (f"\n（詳細: {stderr}）" if stderr else "")
             )
 
-        if not output_path.is_file() or output_path.stat().st_size == 0:
+        if not temporary_output.is_file() or temporary_output.stat().st_size == 0:
             raise ShortsError(
                 f"ショート動画ファイルが生成されませんでした。ログ: {log_path}"
             )
+        try:
+            temporary_output.replace(output_path)
+        except OSError as exc:
+            raise ShortsError(f"ショート動画の保存に失敗しました: {exc}") from exc
+        temporary_output = None
     finally:
+        if temporary_output is not None:
+            try:
+                temporary_output.unlink(missing_ok=True)
+            except OSError:
+                logger.warning(
+                    "失敗した一時出力を削除できませんでした: %s",
+                    temporary_output,
+                    exc_info=True,
+                )
         # keep_intermediate=False（既定）なら、パス2 の成否によらず中間ファイルを片付ける。
         # keep_intermediate=True はデバッグ用途のため成功・失敗どちらでも残す。
         if not keep_intermediate:

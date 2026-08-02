@@ -472,6 +472,12 @@ def render_upload_section(
     if result is None:
         st.info("まとめて生成したショートがありません。先にショートを生成してください。")
         return
+    if result.status != "done":
+        st.info(
+            "ショート生成が完了していないため、まだ予約投稿できません。"
+            "生成の完了後にもう一度確認してください。"
+        )
+        return
     succeeded = tuple(item for item in result.items if item.status == "succeeded")
     if not succeeded:
         st.info("予約投稿できる生成済みショートがありません。")
