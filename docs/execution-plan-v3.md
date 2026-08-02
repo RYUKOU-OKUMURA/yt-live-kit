@@ -37,7 +37,7 @@
 | P5 | 投稿枠の複数化 + ライン既定値の設定化（v3.2） | [~] 進行中 |
 | R1 | 全体リファクタリング・性能・長期運用監査 | [x] 完了 |
 | H1 | 長期運用 hardening | [~] 進行中 |
-| G1 | FFmpeg single-pass benchmark | [ ] 未着手 |
+| G1 | FFmpeg single-pass benchmark | [x] 完了 |
 | U7 | 概要欄反映の最新性判定（保留: 優先度③のため v4 送り。候補引き継ぎは U6 に統合） | [保留] |
 | U8 | エラー通知の構造化とページ先頭の整理 | [ ] 未着手 |
 | S9 | ローカル Whisper による字幕精度の底上げ（要件改訂が前提） | [ ] 未着手 |
@@ -1430,21 +1430,21 @@ data/{video_id}/ ...
 ### G1: FFmpeg single-pass benchmark
 
 **目的:** 生成時間の大半を占める複数 encode pass を変更する前に、速度差と品質差を再現可能な形で測り、production 実装へ進む価値があるか判断する。
-**フェーズ状態:** [ ] 未着手
+**フェーズ状態:** [x] 完了
 **前提:** R1 完了。production の `services/shorts.py` / `ffmpeg.py` は変更せず、benchmark 用試作だけを作る。ローカル素材以外の外部 API は使わない。
 **変更ファイル範囲:** `benchmarks/ffmpeg_single_pass.py`、`docs/benchmarks/ffmpeg-single-pass.md`、`docs/execution-plan-v3.md`。採用決定時の要件変更と production 実装は G2 として別計画にする。
 
 **作業:**
 
-- [ ] G1-1. 15 秒 / 60 秒 / 180 秒、単一区間 / 3 区間、字幕なし / 通常字幕 / Hook 付きの代表 fixture を 3 種以上固定し、現行 input seek、同じ encode 条件の output seek、single-pass filter graph 試作を同じ codec / CRF / preset で各 3 回計測する
-- [ ] G1-2. warm wall time の median / min / max、出力尺、先頭・末尾 frame、audio start / end PTS、区間接続、字幕 cue、解像度・pixel format、出力容量を比較し、実機目視結果を記録する
-- [ ] G1-3. 速度短縮が 25％未満、または 1 frame 超の境界差・音ズレ・字幕差がある場合は不採用とする。採用候補なら requirements-v3 の FR-25 / AC-25 改訂と G2 の変更範囲・rollback を先にレビューして commit する
+- [x] G1-1. 15 秒 / 60 秒 / 180 秒、単一区間 / 3 区間、字幕なし / 通常字幕 / Hook 付きの代表 fixture を 3 種固定し、現行 input seek、同じ encode 条件の output seek、single-pass filter graph 試作を同じ codec / CRF / preset で warmup 1 回後に各 3 回計測した。case ごとに mode 順を rotate し、FFmpeg 8.1.2-full の字幕 filter を使用した。標準版で字幕 filter が無い場合の blocker も確認した
+- [x] G1-2. warm wall time の median / min / max、出力尺、先頭・末尾 frame、audio start / end PTS、区間接続、字幕 cue、解像度・pixel format、出力容量を `docs/benchmarks/ffmpeg-single-pass.md` と harness の JSON report に記録した。single-pass の短縮は 15 秒 21.98％、60 秒 22.68％、180 秒 23.08％で、境界差は最大 1 frame、audio expected duration 誤差は 0 秒だった。保持した一時 output の代表フレームを 3 mode で目視し、字幕 / Hook / layout / 接続の明確な回帰がないことを確認した
+- [x] G1-3. 全ケース共通の速度 25％ gate を満たさず不採用とした。requirements-v3 の FR-25 / AC-25 改訂、G2 の production 実装、rollback 変更は行っていない
 
 **Done 条件:**
 
-- [ ] 別環境で再実行できる command、fixture 条件、FFmpeg version、計測結果が残っている
-- [ ] production code と既存生成物を変更していない
-- [ ] 採否と根拠が独立レビューされ、計画更新を commit 済み
+- [x] 別環境で再実行できる command、fixture 条件、FFmpeg version、計測結果が残っている
+- [x] production code と既存生成物を変更していない
+- [x] 採否と根拠が独立レビューされ、計画更新を commit 済み
 
 **見積もり目安:** 0.5〜1 日
 
@@ -1763,6 +1763,7 @@ U7（概要欄 fingerprint 化）は保留 = v4 候補（優先度③: チャプ
 
 | 日付 | 内容 |
 |------|------|
+| 2026-08-02 | **G1 完了。** `f8c2034` で production 非変更の FFmpeg benchmark harness と測定記録を追加。独立再レビューは APPROVE、速度 gate は 15 秒 21.98％ / 60 秒 22.68％ / 180 秒 23.08％で全ケース不採用。境界差は最大 1 frame、audio expected duration 誤差は 0 秒、代表フレームで字幕 / Hook / layout / 接続を確認した。 |
 | 2026-08-02 | **H1-1 完了。** `jobs.py` に data root advisory lock、owner PID / token、UUID temp + flush / fsync / atomic replace、current pointer の状態区別、strict running scan、live worker 保護を実装。実 2 process 競合と fault injection を含む jobs テスト 42 件、全体 `1083 passed, 2 skipped` を確認した。H1-2〜H1-5 は未着手のまま維持する |
 | 2026-08-02 | **R1 完了。** 途中 queue の予約 fail-closed、旧 datetime の UTC 正規化、legacy `build_short()` の atomic 出力保護を `be83adb`、binary identity 付き `yt-dlp --version` warning cache・Streamlit 1.55 下限・uv 設定・seek 文書整合を `a969681` で実装。変更前 1063 から変更後 1074 passed / 2 skipped、cache miss 240.56 ms から hit 平均 0.215 ms、`uv lock --check` / `uv sync --locked` 成功、safety / performance の独立レビュー APPROVE を確認した |
 | 2026-08-02 | **R1 計画の独立レビューを反映。** P3 の単発公開証跡と通常 operation の publication poll 未接続を区別し、後者を FR-27 / AC-28 の未完了へ戻した。構造課題を H1-1〜H1-6、生成速度検証を G1-1〜G1-3 として変更範囲・Done・依存・見積もり付きで正式化。Streamlit 最低版は stateful expander 導入版 1.55、FFmpeg seek は現行 input seek を正本とし G1 で境界比較する方針へ明確化した |
