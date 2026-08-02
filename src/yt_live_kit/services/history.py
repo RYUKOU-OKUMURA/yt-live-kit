@@ -61,7 +61,7 @@ def list_processed_videos(settings: Settings | None = None) -> list[ProcessedVid
 
     results: list[ProcessedVideo] = []
     for entry in data_dir.iterdir():
-        if entry.name in RESERVED_DATA_DIR_NAMES:
+        if entry.name in RESERVED_DATA_DIR_NAMES or not entry.is_dir():
             continue
 
         meta_path = _video_path(entry.name, settings, "meta.json")

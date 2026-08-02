@@ -56,6 +56,17 @@ def test_list_processed_videos(tmp_path: Path):
     assert len(videos) == 2
 
 
+def test_list_processed_videos_skips_root_jobs_lock_file(tmp_path: Path) -> None:
+    settings = Settings(data_dir=tmp_path)
+    video_id = "videoAaaaaaa"
+    _write_meta(tmp_path / video_id, video_id, "動画A")
+    (tmp_path / ".jobs.lock").touch()
+
+    videos = list_processed_videos(settings)
+
+    assert [video.video_id for video in videos] == [video_id]
+
+
 def test_list_processed_videos_accepts_underscore_leading_youtube_id(
     tmp_path: Path,
 ) -> None:
