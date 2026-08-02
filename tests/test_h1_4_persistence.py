@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import json
 import multiprocessing
+import os
+import time
 from pathlib import Path
 from queue import Empty
 
 import pytest
 
 from yt_live_kit.config import Settings
+from yt_live_kit.services._fsutil import advisory_lock
 from yt_live_kit.services import youtube_api
 from yt_live_kit.ui.views._local_settings import (
     load_description_applied_ids,
@@ -25,16 +28,23 @@ def _save_id_set_worker(
     video_id: str,
     barrier: multiprocessing.synchronize.Barrier,
     results: multiprocessing.queues.Queue,
+    done: multiprocessing.synchronize.Event | None = None,
+    attempted: multiprocessing.synchronize.Event | None = None,
 ) -> None:
     try:
         settings = Settings(data_dir=Path(data_dir))
         ids = load_description_applied_ids(settings)
         ids.add(video_id)
         barrier.wait(timeout=10)
+        if attempted is not None:
+            attempted.set()
         save_description_applied_ids(ids, settings)
     except BaseException as exc:  # pragma: no cover - asserted by parent
         results.put(f"{type(exc).__name__}: {exc}")
         raise
+    finally:
+        if done is not None:
+            done.set()
     results.put("ok")
 
 
@@ -43,14 +53,37 @@ def _save_token_worker(
     value: str,
     barrier: multiprocessing.synchronize.Barrier,
     results: multiprocessing.queues.Queue,
+    done: multiprocessing.synchronize.Event | None = None,
+    attempted: multiprocessing.synchronize.Event | None = None,
 ) -> None:
     try:
         barrier.wait(timeout=10)
+        if attempted is not None:
+            attempted.set()
         youtube_api._save_token(Path(token_path), json.dumps({"value": value}))
     except BaseException as exc:  # pragma: no cover - asserted by parent
         results.put(f"{type(exc).__name__}: {exc}")
         raise
+    finally:
+        if done is not None:
+            done.set()
     results.put("ok")
+
+
+def _hold_lock_worker(
+    lock_path: str,
+    ready: multiprocessing.synchronize.Event,
+    release: multiprocessing.synchronize.Event,
+    results: multiprocessing.queues.Queue,
+) -> None:
+    try:
+        with advisory_lock(Path(lock_path)):
+            ready.set()
+            release.wait(timeout=10)
+    except BaseException as exc:  # pragma: no cover - asserted by parent
+        results.put(f"{type(exc).__name__}: {exc}")
+        raise
+    results.put("released")
 
 
 def _join_processes(processes: list[multiprocessing.Process]) -> None:
@@ -111,6 +144,78 @@ def test_two_process_token_writes_leave_valid_complete_json(tmp_path: Path) -> N
     assert _read_results(results) == ["ok", "ok"]
     payload = json.loads(token_path.read_text(encoding="utf-8"))
     assert payload in ({"value": "first"}, {"value": "second"})
+
+
+@pytest.mark.parametrize(
+    ("kind", "lock_path", "writer_target", "writer_args"),
+    [
+        (
+            "local settings",
+            "_config/.description_applied_videos.json.lock",
+            _save_id_set_worker,
+            ("video",),
+        ),
+        (
+            "OAuth token",
+            "_config/.youtube_token.json.lock",
+            _save_token_worker,
+            ("token",),
+        ),
+    ],
+)
+def test_two_process_writer_waits_for_advisory_lock(
+    tmp_path: Path,
+    kind: str,
+    lock_path: str,
+    writer_target,
+    writer_args: tuple[str],
+) -> None:
+    context = multiprocessing.get_context("spawn")
+    ready = context.Event()
+    release = context.Event()
+    done = context.Event()
+    attempted = context.Event()
+    results = context.Queue()
+    holder = context.Process(
+        target=_hold_lock_worker,
+        args=(str(tmp_path / lock_path), ready, release, results),
+    )
+    holder.start()
+    assert ready.wait(timeout=10), f"{kind} lock holder did not start"
+    writer_barrier = context.Barrier(1)
+
+    if writer_args == ("video",):
+        writer = context.Process(
+            target=writer_target,
+            args=(
+                str(tmp_path),
+                "blocked-video",
+                writer_barrier,
+                results,
+                done,
+                attempted,
+            ),
+        )
+    else:
+        writer = context.Process(
+            target=writer_target,
+            args=(
+                str(tmp_path / "_config" / "youtube_token.json"),
+                "blocked-token",
+                writer_barrier,
+                results,
+                done,
+                attempted,
+            ),
+        )
+    writer.start()
+    assert attempted.wait(timeout=10), f"{kind} writer did not reach save"
+    time.sleep(0.1)
+    assert not done.is_set(), f"{kind} writer bypassed advisory lock"
+
+    release.set()
+    _join_processes([holder, writer])
+    assert done.is_set()
 
 
 def test_id_set_merge_preserves_concurrent_addition_and_explicit_removal(
@@ -191,3 +296,36 @@ def test_fault_injection_preserves_previous_channel_handle(
 
     assert path.read_text(encoding="utf-8") == "@old-channel\n"
     assert list(path.parent.glob(".*.tmp")) == []
+
+
+def test_failed_id_set_save_keeps_snapshot_for_retry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = Settings(data_dir=tmp_path)
+    save_description_applied_ids({"base"}, settings)
+    desired = load_description_applied_ids(settings)
+    desired.add("new")
+    path = tmp_path / "_config" / "description_applied_videos.json"
+
+    real_replace = os.replace
+    replace_calls = 0
+
+    def fail_once(source: object, destination: object) -> None:
+        nonlocal replace_calls
+        replace_calls += 1
+        if replace_calls == 1:
+            raise OSError("injected replace failure")
+        real_replace(source, destination)
+
+    monkeypatch.setattr("yt_live_kit.services._fsutil.os.replace", fail_once)
+    with pytest.raises(OSError, match="injected replace failure"):
+        save_description_applied_ids(desired, settings)
+
+    path.write_text('["base", "concurrent"]\n', encoding="utf-8")
+    save_description_applied_ids(desired, settings)
+    assert load_description_applied_ids(settings) == {
+        "base",
+        "concurrent",
+        "new",
+    }

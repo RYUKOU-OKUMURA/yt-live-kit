@@ -115,14 +115,16 @@ def _save_id_set(ids: set[str], path: Path) -> Path:
         # Save 呼び出し前に読まれた snapshot があれば、その差分だけを
         # lock 内で読み直した最新値へ適用する。これで別プロセスの追加を失わない。
         current = _read_id_set(path)
-        snapshot = _consume_id_set_snapshot(path)
+        snapshot = _snapshot_map().get(path)
         if snapshot is None:
             merged = desired
         else:
             additions = desired - snapshot
             removals = snapshot - desired
             merged = (current - removals) | additions
-        return _write_id_set_locked(merged, path)
+        saved_path = _write_id_set_locked(merged, path)
+        _consume_id_set_snapshot(path)
+        return saved_path
 
 
 def load_archived_ids(settings: Settings | None = None) -> set[str]:
@@ -163,11 +165,12 @@ def mark_description_applied(
     """動画 ID を概要欄反映済みとして記録する（U5 成功時用）."""
     settings = settings or get_settings()
     path = _description_applied_videos_path(settings)
-    _consume_id_set_snapshot(path)
     with advisory_lock(_setting_lock_path(path)):
         ids = _read_id_set(path)
         ids.add(video_id)
-        return _write_id_set_locked(ids, path)
+        saved_path = _write_id_set_locked(ids, path)
+        _consume_id_set_snapshot(path)
+        return saved_path
 
 
 def get_default_channel_handle(settings: Settings | None = None) -> str | None:
