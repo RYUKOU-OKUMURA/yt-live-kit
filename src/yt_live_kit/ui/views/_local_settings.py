@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import threading
 from dataclasses import dataclass
 from pathlib import Path
@@ -16,6 +17,7 @@ _ARCHIVED_VIDEOS_FILENAME = "archived_videos.json"
 _DESCRIPTION_APPLIED_VIDEOS_FILENAME = "description_applied_videos.json"
 _CHANNEL_HANDLE_FILENAME = "channel_handle.txt"
 _SHORTS_DEFAULTS_FILENAME = "shorts_defaults.json"
+_LEGACY_SHORTS_DEFAULTS_FILENAME = "short_defaults.json"
 _ID_SET_SNAPSHOTS = threading.local()
 
 
@@ -64,27 +66,63 @@ def _shorts_defaults_path(settings: Settings) -> Path:
     )
 
 
-def load_shorts_line_defaults(
-    settings: Settings | None = None,
-) -> ShortsLineDefaults:
-    """保存済み既定値を読み、欠落・破損時は現行既定へ安全に戻す."""
-    settings = settings or get_settings()
+def _legacy_shorts_defaults_path(settings: Settings) -> Path:
+    return confined_path(
+        settings.data_dir,
+        "_config",
+        _LEGACY_SHORTS_DEFAULTS_FILENAME,
+        label="ショート既定値保存先",
+    )
+
+
+def _path_entry_exists(path: Path) -> bool:
+    """通常ファイルだけでなく、壊れた symlink も存在するものとして扱う."""
     try:
-        raw = json.loads(_shorts_defaults_path(settings).read_text(encoding="utf-8"))
+        return os.path.lexists(path)
+    except OSError:
+        # canonical の存在確認に失敗した場合も legacy へフォールバックせず、
+        # canonical の読み込み失敗として現行既定へ戻す。
+        return True
+
+
+def _read_shorts_line_defaults(path: Path) -> ShortsLineDefaults:
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError):
         return ShortsLineDefaults()
     if not isinstance(raw, dict):
         return ShortsLineDefaults()
+
     layout = raw.get("layout")
     preset = raw.get("preset")
     hook_preset = raw.get("hook_preset")
-    if layout not in {"blur", "crop"}:
+    if not isinstance(layout, str) or layout not in {"blur", "crop"}:
         return ShortsLineDefaults()
     if not isinstance(preset, str) or preset not in TELOP_PRESETS:
         return ShortsLineDefaults()
     if not isinstance(hook_preset, str) or hook_preset not in TELOP_PRESETS:
         return ShortsLineDefaults()
     return ShortsLineDefaults(layout, preset, hook_preset)
+
+
+def load_shorts_line_defaults(
+    settings: Settings | None = None,
+) -> ShortsLineDefaults:
+    """保存済み既定値を読み、欠落・破損時は現行既定へ安全に戻す.
+
+    ``shorts_defaults.json`` が canonical であり、旧 ``short_defaults.json`` は
+    canonical が存在しない場合だけ読み込む。canonical が壊れていても legacy
+    の値で復旧しないことで、意図しない旧設定の復活を防ぐ。
+    """
+    settings = settings or get_settings()
+    canonical_path = _shorts_defaults_path(settings)
+    if _path_entry_exists(canonical_path):
+        return _read_shorts_line_defaults(canonical_path)
+
+    legacy_path = _legacy_shorts_defaults_path(settings)
+    if not _path_entry_exists(legacy_path):
+        return ShortsLineDefaults()
+    return _read_shorts_line_defaults(legacy_path)
 
 
 def save_shorts_line_defaults(

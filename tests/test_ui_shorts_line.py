@@ -6,6 +6,7 @@ from contextlib import contextmanager
 import inspect
 import json
 from pathlib import Path
+import stat
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -41,6 +42,7 @@ from yt_live_kit.ui.components import shorts_line, shorts_queue as shorts_queue_
 from yt_live_kit.ui.views._local_settings import (
     ShortsLineDefaults,
     load_shorts_line_defaults,
+    save_shorts_line_defaults,
 )
 
 
@@ -881,34 +883,139 @@ def test_generation_preflight_failure_preserves_generation_stage_and_human_revie
     assert not (tmp_path / "video-1" / "shorts" / "queue").exists()
 
 
-def test_line_defaults_are_read_only_with_safe_fallback(tmp_path: Path) -> None:
-    settings = Settings(data_dir=tmp_path)
-    assert load_shorts_line_defaults(settings) == ShortsLineDefaults()
+def _write_line_defaults(path: Path, defaults: dict[str, object]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(defaults), encoding="utf-8")
 
-    path = tmp_path / "_config" / "shorts_defaults.json"
-    path.parent.mkdir(parents=True)
-    path.write_text(
-        json.dumps(
-            {"layout": "crop", "preset": "boxed", "hook_preset": "hook"}
-        ),
-        encoding="utf-8",
+
+def test_line_defaults_use_canonical_file_when_present(tmp_path: Path) -> None:
+    settings = Settings(data_dir=tmp_path)
+    _write_line_defaults(
+        tmp_path / "_config" / "shorts_defaults.json",
+        {"layout": "crop", "preset": "boxed", "hook_preset": "hook"},
     )
     assert load_shorts_line_defaults(settings) == ShortsLineDefaults(
         "crop", "boxed", "hook"
     )
 
-    path.write_text(
-        json.dumps(
-            {"layout": "crop", "preset": "unknown", "hook_preset": "hook"}
-        ),
-        encoding="utf-8",
+
+def test_line_defaults_read_legacy_file_only_when_canonical_is_absent(
+    tmp_path: Path,
+) -> None:
+    settings = Settings(data_dir=tmp_path)
+    _write_line_defaults(
+        tmp_path / "_config" / "short_defaults.json",
+        {"layout": "crop", "preset": "boxed", "hook_preset": "hook"},
+    )
+    assert load_shorts_line_defaults(settings) == ShortsLineDefaults(
+        "crop", "boxed", "hook"
+    )
+
+
+def test_line_defaults_prefer_canonical_when_both_files_exist(tmp_path: Path) -> None:
+    settings = Settings(data_dir=tmp_path)
+    _write_line_defaults(
+        tmp_path / "_config" / "shorts_defaults.json",
+        {"layout": "crop", "preset": "boxed", "hook_preset": "hook"},
+    )
+    _write_line_defaults(
+        tmp_path / "_config" / "short_defaults.json",
+        {"layout": "blur", "preset": "default", "hook_preset": "hook"},
+    )
+    assert load_shorts_line_defaults(settings) == ShortsLineDefaults(
+        "crop", "boxed", "hook"
+    )
+
+
+def test_corrupt_canonical_does_not_restore_legacy_values(tmp_path: Path) -> None:
+    settings = Settings(data_dir=tmp_path)
+    canonical_path = tmp_path / "_config" / "shorts_defaults.json"
+    _write_line_defaults(
+        canonical_path,
+        {"layout": "not-a-layout", "preset": "default", "hook_preset": "hook"},
+    )
+    _write_line_defaults(
+        tmp_path / "_config" / "short_defaults.json",
+        {"layout": "crop", "preset": "boxed", "hook_preset": "hook"},
     )
     assert load_shorts_line_defaults(settings) == ShortsLineDefaults()
 
-    path.write_text(
-        json.dumps(
-            {"layout": "crop", "preset": "boxed", "hook_preset": "unknown"}
-        ),
+    canonical_path.write_text("{not valid json", encoding="utf-8")
+    assert load_shorts_line_defaults(settings) == ShortsLineDefaults()
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("layout", []),
+        ("preset", []),
+        ("hook_preset", {}),
+    ],
+)
+def test_line_defaults_invalid_unhashable_values_fail_safe(
+    tmp_path: Path,
+    field: str,
+    value: object,
+) -> None:
+    settings = Settings(data_dir=tmp_path)
+    defaults: dict[str, object] = {
+        "layout": "blur",
+        "preset": "default",
+        "hook_preset": "hook",
+    }
+    defaults[field] = value
+    _write_line_defaults(tmp_path / "_config" / "shorts_defaults.json", defaults)
+    assert load_shorts_line_defaults(settings) == ShortsLineDefaults()
+
+
+def test_save_line_defaults_uses_canonical_path_and_secure_atomic_contract(
+    tmp_path: Path,
+) -> None:
+    settings = Settings(data_dir=tmp_path)
+    legacy_path = tmp_path / "_config" / "short_defaults.json"
+    _write_line_defaults(
+        legacy_path,
+        {"layout": "blur", "preset": "default", "hook_preset": "hook"},
+    )
+
+    saved_path = save_shorts_line_defaults(
+        ShortsLineDefaults("crop", "boxed", "hook"), settings
+    )
+
+    canonical_path = tmp_path / "_config" / "shorts_defaults.json"
+    assert saved_path == canonical_path
+    assert json.loads(canonical_path.read_text(encoding="utf-8")) == {
+        "layout": "crop",
+        "preset": "boxed",
+        "hook_preset": "hook",
+    }
+    assert json.loads(legacy_path.read_text(encoding="utf-8")) == {
+        "layout": "blur",
+        "preset": "default",
+        "hook_preset": "hook",
+    }
+    assert stat.S_IMODE(canonical_path.stat().st_mode) == 0o600
+    lock_path = tmp_path / "_config" / ".shorts_defaults.json.lock"
+    assert stat.S_IMODE(lock_path.stat().st_mode) == 0o600
+
+
+@pytest.mark.parametrize("filename", ["shorts_defaults.json", "short_defaults.json"])
+def test_external_symlink_path_is_rejected_as_confinement_error(
+    tmp_path: Path,
+    filename: str,
+) -> None:
+    settings = Settings(data_dir=tmp_path)
+    outside = tmp_path.parent / f"outside-{filename}"
+    outside.write_text(
+        json.dumps({"layout": "crop", "preset": "boxed", "hook_preset": "hook"}),
         encoding="utf-8",
     )
-    assert load_shorts_line_defaults(settings) == ShortsLineDefaults()
+    config_dir = tmp_path / "_config"
+    config_dir.mkdir()
+    (config_dir / filename).symlink_to(outside)
+
+    with pytest.raises(ValueError, match="データディレクトリ外"):
+        load_shorts_line_defaults(settings)
+    if filename == "shorts_defaults.json":
+        with pytest.raises(ValueError, match="データディレクトリ外"):
+            save_shorts_line_defaults(ShortsLineDefaults(), settings)

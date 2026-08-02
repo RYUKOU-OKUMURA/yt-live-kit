@@ -1337,7 +1337,7 @@ data/{video_id}/ ...
 **変更ファイル範囲:**
 - `src/yt_live_kit/services/schedule.py`（`SchedulePolicy` を `daily_times` リスト対応へ拡張。旧 `daily_time` 単一値の読み込み互換 = 要素 1 個のリスト。`assign_next_slot` は日内の枠を時刻順に埋めてから翌 `interval_days` 日へ進む。重複時刻・不正形式は日本語エラー）
 - `src/yt_live_kit/ui/views/settings.py`（枠リストの編集 UI、ショート既定値（レイアウト・通常 / Hook プリセット）の編集 UI）
-- `src/yt_live_kit/ui/views/_local_settings.py`（既定値の保存関数を追加。保存先 `data/_config/short_defaults.json`）
+- `src/yt_live_kit/ui/views/_local_settings.py`（既定値の保存関数を追加。保存先 `data/_config/shorts_defaults.json`）
 - `tests/test_schedule.py`（複数枠の割り当て順、互換読み込み、重複・不正の拒否、DST 跨ぎ）
 - `tests/test_ui_settings_page.py`（編集フォームが保存関数を正しく呼ぶこと）
 - `docs/execution-plan-v3.md`（進捗チェック）
