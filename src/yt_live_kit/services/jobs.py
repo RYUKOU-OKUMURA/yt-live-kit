@@ -651,8 +651,9 @@ def _owner_lease_path(settings: Settings, owner_token: str) -> Path:
 class _OwnerLease:
     """worker の実行期間だけ保持する process-safe advisory lease."""
 
-    def __init__(self, handle: Any) -> None:
+    def __init__(self, handle: Any, path: Path) -> None:
         self._handle = handle
+        self._path = path
 
     @classmethod
     def acquire(cls, settings: Settings, owner_token: str) -> _OwnerLease:
@@ -667,11 +668,20 @@ class _OwnerLease:
         try:
             fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError as exc:
-            handle.close()
+            try:
+                handle.close()
+            except OSError:
+                pass
             raise JobBusyError(
                 "worker lease を取得できないため、処理を開始できません。"
             ) from exc
-        return cls(handle)
+        except BaseException:
+            try:
+                handle.close()
+            except OSError:
+                pass
+            raise
+        return cls(handle, path)
 
     def release(self) -> None:
         handle = self._handle
@@ -679,11 +689,36 @@ class _OwnerLease:
             return
         self._handle = None
         try:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
-        except OSError:
-            pass
+            # 自分の FD が保持している inode と path の inode が同じ場合だけ
+            # unlink する。release と再 acquire の競合で、同一 token の新しい
+            # lease file を誤って削除しないため、unlink は lock 保持中に行う。
+            try:
+                handle_stat = os.fstat(handle.fileno())
+                path_stat = self._path.stat()
+            except FileNotFoundError:
+                pass
+            except OSError:
+                pass
+            else:
+                if (
+                    handle_stat.st_dev == path_stat.st_dev
+                    and handle_stat.st_ino == path_stat.st_ino
+                ):
+                    try:
+                        self._path.unlink()
+                    except FileNotFoundError:
+                        pass
+                    except OSError:
+                        pass
         finally:
-            handle.close()
+            try:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+            except OSError:
+                pass
+            try:
+                handle.close()
+            except OSError:
+                pass
 
 
 def _owner_lease_is_held(settings: Settings, owner_token: str) -> bool:
@@ -808,6 +843,35 @@ def _mark_worker_failure(
     )
 
 
+def _mark_setup_failure(settings: Settings, job_id: str, exc: BaseException) -> None:
+    """thread の起動準備失敗を terminal state にして再送出可能にする."""
+    user_message, needs_log = _error_message_for(exc)
+    if needs_log:
+        try:
+            _write_error_log(settings, job_id, exc)
+        except OSError:
+            # ログ失敗で running のまま残さず、状態更新を優先する。
+            pass
+    if isinstance(exc, Exception):
+        status: JobStatus = "failed"
+        final_message = user_message
+    else:
+        status = "interrupted"
+        final_message = "処理が中断されました"
+    # start_job() は _job_store_lock を保持しているため、public の
+    # update_job() を再度通さず、同じ lock 内で atomic write する。
+    _update_job_unlocked(
+        job_id,
+        settings=settings,
+        fields={
+            "status": status,
+            "finished_at": datetime.now(timezone.utc),
+            "error": final_message,
+            "message": final_message,
+        },
+    )
+
+
 def _target_accepts_video_id(target_fn: Callable[..., Any]) -> bool:
     """target_fn が video_id キーワード引数を受け取れるか調べる.
 
@@ -841,9 +905,9 @@ def start_job(
 ) -> str:
     """バックグラウンドで target_fn を実行し、job_id を返す.
 
-    busy 判定・job JSON・current pointer の作成・worker thread 起動準備を
-    data root の process / advisory lock 内で行う。これにより同じ data root
-    を共有する複数 process でも勝者を 1 件にする。
+    busy 判定・owner lease の取得・job JSON・current pointer の作成・worker
+    thread 起動準備を data root の process / advisory lock 内で行う。これに
+    より同じ data root を共有する複数 process でも勝者を 1 件にする。
     """
     settings = settings or get_settings()
     if requested_job_id is not None:
@@ -856,99 +920,121 @@ def start_job(
                 raise JobBusyError()
 
             owner_token = uuid.uuid4().hex
-            state = _create_job_unlocked(
-                kind,
-                video_id=video_id,
-                title=title,
-                total=total,
-                requested_job_id=requested_job_id,
-                owner_pid=os.getpid(),
-                owner_token=owner_token,
-                settings=settings,
-            )
-            job_id = state.job_id
-
-            def report(
-                *,
-                stage: str | None = None,
-                message: str | None = None,
-                current: int | None = None,
-                total: int | None = None,
-            ) -> None:
-                fields: dict[str, Any] = {}
-                if stage is not None:
-                    fields["stage"] = stage
-                if message is not None:
-                    fields["message"] = message
-                if current is not None:
-                    fields["current"] = current
-                if total is not None:
-                    fields["total"] = total
-                if fields:
-                    update_job(job_id, settings=settings, **fields)
-
-            def worker() -> None:
-                try:
-                    try:
-                        call_kwargs: dict[str, Any] = dict(kwargs)
-                        if _target_accepts_video_id(target_fn):
-                            call_kwargs["video_id"] = video_id
-                        target_fn(
-                            report=report,
-                            settings=settings,
-                            job_id=job_id,
-                            **call_kwargs,
-                        )
-                    except Exception as exc:
-                        _mark_worker_failure(
-                            settings,
-                            job_id,
-                            exc,
-                            status="failed",
-                        )
-                        return
-                    except BaseException as exc:
-                        _mark_worker_failure(
-                            settings,
-                            job_id,
-                            exc,
-                            status="interrupted",
-                            message="処理が中断されました",
-                        )
-                        raise
-
-                    result_ref = video_id
-                    current = read_job(job_id, settings)
-                    if current is not None:
-                        # upload / shorts_queue 等の target が永続参照を明示した場合は
-                        # pipeline 用 video_id で上書きしない。
-                        if current.result_ref:
-                            result_ref = current.result_ref
-                        elif current.video_id:
-                            result_ref = current.video_id
-
-                    update_job(
-                        job_id,
-                        settings=settings,
-                        status="done",
-                        finished_at=datetime.now(timezone.utc),
-                        result_ref=result_ref,
-                        message="完了しました",
-                    )
-                finally:
-                    _unregister_worker(settings, owner_token)
-                    lease.release()
-
+            # lease は job state より先に取得する。取得失敗時に running JSON や
+            # current pointer を残さず、直後の次 job を開始できるようにする。
             lease = _OwnerLease.acquire(settings, owner_token)
+            job_id: str | None = None
+            thread_started = False
+            worker_registered = False
             try:
-                thread = threading.Thread(target=worker, daemon=True)
+                state = _create_job_unlocked(
+                    kind,
+                    video_id=video_id,
+                    title=title,
+                    total=total,
+                    requested_job_id=requested_job_id,
+                    owner_pid=os.getpid(),
+                    owner_token=owner_token,
+                    settings=settings,
+                )
+                job_id = state.job_id
+
+                def report(
+                    *,
+                    stage: str | None = None,
+                    message: str | None = None,
+                    current: int | None = None,
+                    total: int | None = None,
+                ) -> None:
+                    fields: dict[str, Any] = {}
+                    if stage is not None:
+                        fields["stage"] = stage
+                    if message is not None:
+                        fields["message"] = message
+                    if current is not None:
+                        fields["current"] = current
+                    if total is not None:
+                        fields["total"] = total
+                    if fields:
+                        update_job(job_id, settings=settings, **fields)
+
+                def worker() -> None:
+                    try:
+                        try:
+                            call_kwargs: dict[str, Any] = dict(kwargs)
+                            if _target_accepts_video_id(target_fn):
+                                call_kwargs["video_id"] = video_id
+                            target_fn(
+                                report=report,
+                                settings=settings,
+                                job_id=job_id,
+                                **call_kwargs,
+                            )
+                        except Exception as exc:
+                            _mark_worker_failure(
+                                settings,
+                                job_id,
+                                exc,
+                                status="failed",
+                            )
+                            return
+                        except BaseException as exc:
+                            _mark_worker_failure(
+                                settings,
+                                job_id,
+                                exc,
+                                status="interrupted",
+                                message="処理が中断されました",
+                            )
+                            raise
+
+                        result_ref = video_id
+                        current = read_job(job_id, settings)
+                        if current is not None:
+                            # upload / shorts_queue 等の target が永続参照を明示した場合は
+                            # pipeline 用 video_id で上書きしない。
+                            if current.result_ref:
+                                result_ref = current.result_ref
+                            elif current.video_id:
+                                result_ref = current.video_id
+
+                        update_job(
+                            job_id,
+                            settings=settings,
+                            status="done",
+                            finished_at=datetime.now(timezone.utc),
+                            result_ref=result_ref,
+                            message="完了しました",
+                        )
+                    finally:
+                        # running state のまま lease を解放する瞬間を作らない。
+                        # close_orphans() からは lease と active worker の両方が
+                        # live である期間だけ worker を live と認識させる。
+                        try:
+                            lease.release()
+                        finally:
+                            _unregister_worker(settings, owner_token)
+
+                try:
+                    thread = threading.Thread(target=worker, daemon=True)
+                except BaseException as exc:
+                    _mark_setup_failure(settings, job_id, exc)
+                    raise
+
                 _register_worker(settings, owner_token)
+                worker_registered = True
                 try:
                     thread.start()
-                except BaseException:
-                    _unregister_worker(settings, owner_token)
+                except BaseException as exc:
+                    _mark_setup_failure(settings, job_id, exc)
                     raise
-            except BaseException:
-                lease.release()
-                raise
+                thread_started = True
+            finally:
+                if not thread_started:
+                    try:
+                        lease.release()
+                    finally:
+                        if worker_registered:
+                            _unregister_worker(settings, owner_token)
+            assert job_id is not None
     return job_id

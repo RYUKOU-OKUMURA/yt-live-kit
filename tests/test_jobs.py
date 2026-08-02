@@ -196,7 +196,74 @@ def test_requested_job_json_failure_does_not_start_thread(tmp_path):
     thread.assert_not_called()
 
 
-def test_thread_start_failure_leaves_requested_job_json_for_recovery(tmp_path):
+def test_lease_acquire_failure_leaves_no_job_and_allows_retry(tmp_path):
+    settings = Settings(data_dir=tmp_path)
+    with (
+        patch(
+            "yt_live_kit.services.jobs._OwnerLease.acquire",
+            side_effect=JobBusyError("lease fault"),
+        ) as acquire,
+        patch("yt_live_kit.services.jobs.threading.Thread") as thread,
+    ):
+        with pytest.raises(JobBusyError, match="lease fault"):
+            start_job(
+                "upload",
+                lambda **_kwargs: None,
+                settings=settings,
+                requested_job_id="lease-failed",
+            )
+
+    acquire.assert_called_once()
+    thread.assert_not_called()
+    assert read_job("lease-failed", settings) is None
+    assert read_current_job(settings) is None
+    assert not is_busy(settings)
+
+    with _patch_real_thread() as (_mock_thread, threads):
+        retry_job_id = start_job("single", lambda **_kwargs: None, settings=settings)
+        threads[-1].join(timeout=5)
+    retry = read_job(retry_job_id, settings)
+    assert retry is not None
+    assert retry.status == "done"
+
+
+def test_thread_constructor_failure_terminalizes_job_and_allows_retry(tmp_path):
+    settings = Settings(data_dir=tmp_path)
+    with patch(
+        "yt_live_kit.services.jobs.threading.Thread",
+        side_effect=RuntimeError("thread constructor fault"),
+    ):
+        with pytest.raises(RuntimeError, match="thread constructor fault"):
+            start_job(
+                "upload",
+                lambda **_kwargs: None,
+                settings=settings,
+                requested_job_id="constructor-failed",
+            )
+
+    state = read_job("constructor-failed", settings)
+    assert state is not None
+    assert state.status == "failed"
+    assert state.error == "予期しないエラーが発生しました。しばらくしてから再度お試しください。"
+    current = read_current_job(settings)
+    assert current is not None
+    assert current.job_id == state.job_id
+    assert current.status == "failed"
+    assert get_active_job(settings) is None
+    assert not is_busy(settings)
+    assert state.owner_token is not None
+    assert not jobs_service._owner_lease_is_held(settings, state.owner_token)
+    assert not jobs_service._owner_lease_path(settings, state.owner_token).exists()
+
+    with _patch_real_thread() as (_mock_thread, threads):
+        retry_job_id = start_job("single", lambda **_kwargs: None, settings=settings)
+        threads[-1].join(timeout=5)
+    retry = read_job(retry_job_id, settings)
+    assert retry is not None
+    assert retry.status == "done"
+
+
+def test_thread_start_failure_terminalizes_requested_job_and_allows_retry(tmp_path):
     settings = Settings(data_dir=tmp_path)
     thread = MagicMock()
     thread.start.side_effect = RuntimeError("thread fault")
@@ -208,9 +275,23 @@ def test_thread_start_failure_leaves_requested_job_json_for_recovery(tmp_path):
             )
     state = read_job("job-saved-before-thread", settings)
     assert state is not None
-    assert state.status == "running"
+    assert state.status == "failed"
+    current = read_current_job(settings)
+    assert current is not None
+    assert current.job_id == state.job_id
+    assert current.status == "failed"
+    assert get_active_job(settings) is None
+    assert not is_busy(settings)
     assert state.owner_token is not None
     assert not jobs_service._owner_lease_is_held(settings, state.owner_token)
+    assert not jobs_service._owner_lease_path(settings, state.owner_token).exists()
+
+    with _patch_real_thread() as (_mock_thread, threads):
+        retry_job_id = start_job("single", lambda **_kwargs: None, settings=settings)
+        threads[-1].join(timeout=5)
+    retry = read_job(retry_job_id, settings)
+    assert retry is not None
+    assert retry.status == "done"
 
 
 def test_read_job_returns_none_for_broken_json(tmp_path):
@@ -757,9 +838,15 @@ def test_start_job_persists_owner_pid_token_and_atomic_outputs(tmp_path):
         assert current_payload["owner_pid"] == job_payload["owner_pid"]
         assert current_payload["owner_token"] == job_payload["owner_token"]
         assert not list((tmp_path / "_jobs").glob("*.tmp"))
+        lease_path = jobs_service._owner_lease_path(
+            settings, job_payload["owner_token"]
+        )
+        assert lease_path.is_file()
 
         release.set()
         threads[-1].join(timeout=5)
+
+    assert not lease_path.exists()
 
 
 def test_atomic_job_replace_failure_preserves_previous_json(tmp_path):
