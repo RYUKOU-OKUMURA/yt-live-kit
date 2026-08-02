@@ -17,7 +17,11 @@ from yt_live_kit.models.upload import (
     UploadOperation,
     UploadStatusObservation,
 )
-from yt_live_kit.services.schedule import SchedulePolicy, UploadPreview
+from yt_live_kit.services.schedule import (
+    SchedulePolicy,
+    UploadPreview,
+    save_schedule_policy,
+)
 from yt_live_kit.services.upload_queue import UploadQueueError
 from yt_live_kit.ui.components import upload
 
@@ -374,7 +378,7 @@ def test_metadata_editor_supports_title_candidates_free_edit_and_native_tags() -
 
 
 def test_schedule_editor_uses_native_date_time_and_job_item_unique_keys() -> None:
-    policy = SchedulePolicy(timezone="America/New_York")
+    policy = SchedulePolicy(daily_times=["09:00"], timezone="America/New_York")
     initial = datetime(2026, 8, 5, 14, 30, tzinfo=ZoneInfo(policy.timezone))
     date_input = MagicMock(return_value=date(2026, 8, 6))
     time_input = MagicMock(return_value=time(16, 45))
@@ -422,7 +426,7 @@ def test_schedule_editor_rejects_dst_before_preview(
     publish_date: date,
     publish_time: time,
 ) -> None:
-    policy = SchedulePolicy(timezone="America/New_York")
+    policy = SchedulePolicy(daily_times=["09:00"], timezone="America/New_York")
     with (
         patch.object(upload.st, "date_input", return_value=publish_date),
         patch.object(upload.st, "time_input", return_value=publish_time),
@@ -682,7 +686,7 @@ def test_upload_section_passes_first_segment_start_to_preview(tmp_path: Path) ->
         ),
     )
     settings = Settings(data_dir=tmp_path)
-    policy = SchedulePolicy()
+    policy = SchedulePolicy(daily_times=["09:00"])
     requested = datetime(2026, 8, 5, 15, 45, tzinfo=ZoneInfo(policy.timezone))
     with (
         patch.object(upload, "load_latest_shorts_queue_result", return_value=result),
@@ -782,7 +786,7 @@ def test_upload_section_blocks_missing_output_before_reservation_controls(
         target_id="clip-1",
     )
     result = MagicMock(status="done", items=(item,), job_id="shorts-job", clip_specs=())
-    policy = SchedulePolicy()
+    policy = SchedulePolicy(daily_times=["09:00"])
     requested = datetime(2026, 8, 5, 15, 45, tzinfo=ZoneInfo(policy.timezone))
     with (
         patch.object(upload, "load_latest_shorts_queue_result", return_value=result),
@@ -820,7 +824,7 @@ def test_upload_section_validates_legacy_manifest_before_reservation(
         job_id="legacy-job",
         clip_specs=(MagicMock(target_id="clip-1"),),
     )
-    policy = SchedulePolicy()
+    policy = SchedulePolicy(daily_times=["09:00"])
     requested = datetime(2026, 8, 5, 15, 45, tzinfo=ZoneInfo(policy.timezone))
     settings = Settings(data_dir=tmp_path)
     with (
@@ -857,7 +861,7 @@ def test_invalid_schedule_or_unclicked_button_creates_no_preview_operation_or_jo
     )
     result = MagicMock(status="done", items=(item,), job_id="shorts-job", clip_specs=())
     settings = Settings(data_dir=tmp_path)
-    policy = SchedulePolicy()
+    policy = SchedulePolicy(daily_times=["09:00"])
     initial = datetime(2026, 8, 5, 9, 0, tzinfo=ZoneInfo(policy.timezone))
     reservation_transaction = MagicMock()
 
@@ -1062,6 +1066,8 @@ def test_queue_corruption_shows_japanese_error_and_hides_post_action(tmp_path: P
         target_id="clip-1",
     )
     result = MagicMock(status="done", items=(item,), job_id="shorts-job")
+    settings = Settings(data_dir=tmp_path)
+    save_schedule_policy(SchedulePolicy(daily_times=["09:00"]), settings)
     with (
         patch.object(upload, "load_latest_shorts_queue_result", return_value=result),
         patch.object(upload, "_resolve_operation", side_effect=UploadQueueError("raw error")),
@@ -1073,7 +1079,7 @@ def test_queue_corruption_shows_japanese_error_and_hides_post_action(tmp_path: P
         patch.object(upload.st, "error") as error,
         patch.object(upload.st, "button") as button,
     ):
-        upload.render_upload_section("source-1", Settings(data_dir=tmp_path))
+        upload.render_upload_section("source-1", settings)
     message = error.call_args.args[0]
     assert "予約投稿を停止" in message
     assert "raw error" not in message

@@ -18,6 +18,7 @@ from yt_live_kit.models.upload import UploadChannel, UploadContentSnapshot
 from yt_live_kit.services.schedule import (
     ScheduleError,
     SchedulePolicy,
+    SchedulePolicyNotConfigured,
     assign_next_slot,
     build_upload_preview,
     confirm_and_start_upload,
@@ -73,6 +74,7 @@ def _preview(tmp_path: Path, settings: Settings, **overrides):
         "now": NOW,
     }
     values.update(overrides)
+    save_schedule_policy(SchedulePolicy(daily_times=["09:00"]), settings)
     with (
         patch("yt_live_kit.services.schedule.fetch_mine_channel", return_value=CHANNEL),
         patch("yt_live_kit.services.youtube_api.probe_duration", return_value=30.0),
@@ -162,15 +164,19 @@ def test_schedule_policy_rejects_invalid_hhmm(daily_time: str) -> None:
 
 
 def test_schedule_policy_interval_and_timezone_boundaries() -> None:
-    assert SchedulePolicy(interval_days=1, timezone="America/Los_Angeles").interval_days == 1
+    assert SchedulePolicy(
+        daily_times=["09:00"],
+        interval_days=1,
+        timezone="America/Los_Angeles",
+    ).interval_days == 1
     with pytest.raises(ValidationError):
-        SchedulePolicy(interval_days=0)
+        SchedulePolicy(daily_times=["09:00"], interval_days=0)
     with pytest.raises(ValidationError, match="IANA"):
-        SchedulePolicy(timezone="Not/A_Zone")
+        SchedulePolicy(daily_times=["09:00"], timezone="Not/A_Zone")
     with pytest.raises(ValidationError):
-        SchedulePolicy(interval_days="1")
+        SchedulePolicy(daily_times=["09:00"], interval_days="1")
     with pytest.raises(ValidationError):
-        SchedulePolicy(interval_days=True)
+        SchedulePolicy(daily_times=["09:00"], interval_days=True)
 
 
 def test_schedule_policy_atomic_round_trip_and_corrupt_fail_closed(tmp_path: Path) -> None:
@@ -204,7 +210,7 @@ def test_schedule_policy_rejects_config_symlink_outside_without_leaking_path(
 
     for operation in (
         lambda: load_schedule_policy(settings),
-        lambda: save_schedule_policy(SchedulePolicy(), settings),
+        lambda: save_schedule_policy(SchedulePolicy(daily_times=["09:00"]), settings),
     ):
         with pytest.raises(ScheduleError) as caught:
             operation()
@@ -236,7 +242,7 @@ def test_schedule_policy_read_oserror_is_normalized_without_leaking_detail(
     tmp_path: Path,
 ) -> None:
     settings = _settings(tmp_path)
-    save_schedule_policy(SchedulePolicy(), settings)
+    save_schedule_policy(SchedulePolicy(daily_times=["09:00"]), settings)
 
     with (
         patch(
@@ -267,7 +273,7 @@ def test_schedule_policy_lock_error_is_normalized_at_service_boundary(
         if operation == "load":
             load_schedule_policy(settings)
         else:
-            save_schedule_policy(SchedulePolicy(), settings)
+            save_schedule_policy(SchedulePolicy(daily_times=["09:00"]), settings)
 
     assert "lock /secret/path" not in str(caught.value)
     assert "投稿スケジュール設定" in str(caught.value)
@@ -306,6 +312,52 @@ def test_schedule_policy_loads_legacy_daily_time_and_saves_plural_format(
     )
     with pytest.raises(ScheduleError, match="壊れて"):
         load_schedule_policy(settings)
+
+
+def test_schedule_policy_load_requires_explicit_configuration(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+
+    with pytest.raises(SchedulePolicyNotConfigured, match="未設定"):
+        load_schedule_policy(settings)
+
+    assert not (settings.data_dir / "_config" / "schedule_policy.json").exists()
+
+
+def test_unconfigured_schedule_stops_before_preview_or_slot_side_effects(
+    tmp_path: Path,
+) -> None:
+    settings = _settings(tmp_path)
+    video_path = _video(tmp_path)
+
+    with (
+        patch("yt_live_kit.services.schedule.fetch_mine_channel") as fetch_channel,
+        patch("yt_live_kit.services.schedule.list_operations") as list_operations_mock,
+        patch("yt_live_kit.services.schedule.count_upload_attempts") as attempts,
+        pytest.raises(SchedulePolicyNotConfigured, match="未設定"),
+    ):
+        build_upload_preview(
+            source_video_id="source-1",
+            source_kind="shorts_queue",
+            clip_id="clip-1",
+            video_path=video_path,
+            title="予約タイトル",
+            description="説明文",
+            tags=("タグ1",),
+            settings=settings,
+            now=NOW,
+        )
+
+    fetch_channel.assert_not_called()
+    list_operations_mock.assert_not_called()
+    attempts.assert_not_called()
+
+    with (
+        patch("yt_live_kit.services.schedule.list_operations") as list_operations_mock,
+        pytest.raises(SchedulePolicyNotConfigured, match="未設定"),
+    ):
+        get_next_upload_slot(settings, now=NOW)
+
+    list_operations_mock.assert_not_called()
 
 
 def test_assign_next_slot_requires_aware_now_and_returns_tokyo_aware() -> None:
@@ -434,7 +486,7 @@ def test_make_requested_publish_at_rejects_dst_nonexistent_and_ambiguous(
     publish_date: date,
     publish_time: time,
 ) -> None:
-    policy = SchedulePolicy(timezone="America/New_York")
+    policy = SchedulePolicy(daily_times=["09:00"], timezone="America/New_York")
     with pytest.raises(ScheduleError, match="DST"):
         make_requested_publish_at(policy, publish_date, publish_time)
 
@@ -443,7 +495,7 @@ def test_requested_publish_at_is_policy_aware_and_exactly_preserved_in_preview(
     tmp_path: Path,
 ) -> None:
     settings = _settings(tmp_path)
-    policy = SchedulePolicy()
+    policy = SchedulePolicy(daily_times=["09:00"])
     requested = make_requested_publish_at(policy, date(2026, 8, 4), time(15, 45))
 
     preview = _preview(tmp_path, settings, requested_publish_at=requested)
@@ -465,7 +517,7 @@ def test_requested_publish_at_rejects_lead_shortage_without_side_effects(
 ) -> None:
     settings = _settings(tmp_path)
     requested = make_requested_publish_at(
-        SchedulePolicy(),
+        SchedulePolicy(daily_times=["09:00"]),
         date(2026, 8, 1),
         time(9, minute),
     )
@@ -480,7 +532,7 @@ def test_requested_publish_at_accepts_exact_ten_minute_lead_and_rejects_naive(
 ) -> None:
     settings = _settings(tmp_path)
     exact_boundary = make_requested_publish_at(
-        SchedulePolicy(),
+        SchedulePolicy(daily_times=["09:00"]),
         date(2026, 8, 1),
         time(9, 10),
     )
@@ -504,8 +556,9 @@ def test_get_next_upload_slot_returns_policy_and_current_available_slot(
     tmp_path: Path,
 ) -> None:
     settings = _settings(tmp_path)
+    save_schedule_policy(SchedulePolicy(daily_times=["09:00"]), settings)
     policy, slot = get_next_upload_slot(settings, now=NOW)
-    assert policy == SchedulePolicy()
+    assert policy == SchedulePolicy(daily_times=["09:00"])
     assert slot == datetime(2026, 8, 2, 9, 0, tzinfo=ZoneInfo("Asia/Tokyo"))
 
 
@@ -606,7 +659,7 @@ def test_confirm_preserves_manual_publish_at_through_operation_and_job_start(
 ) -> None:
     settings = _settings(tmp_path)
     requested = make_requested_publish_at(
-        SchedulePolicy(),
+        SchedulePolicy(daily_times=["09:00"]),
         date(2026, 8, 4),
         time(15, 45),
     )
@@ -647,7 +700,7 @@ def test_requested_publish_at_rejects_existing_slot_before_read_only_api(
 ) -> None:
     settings = _settings(tmp_path)
     requested = make_requested_publish_at(
-        SchedulePolicy(),
+        SchedulePolicy(daily_times=["09:00"]),
         date(2026, 8, 4),
         time(15, 45),
     )
@@ -689,7 +742,7 @@ def test_manual_slot_confirm_race_creates_no_new_operation_job_or_attempt(
 ) -> None:
     settings = _settings(tmp_path)
     requested = make_requested_publish_at(
-        SchedulePolicy(),
+        SchedulePolicy(daily_times=["09:00"]),
         date(2026, 8, 4),
         time(15, 45),
     )

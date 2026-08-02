@@ -49,12 +49,16 @@ class ScheduleError(Exception):
     """予約投稿の安全な準備・確定に失敗したエラー."""
 
 
+class SchedulePolicyNotConfigured(ScheduleError):
+    """投稿時刻がまだ設定されていない."""
+
+
 class SchedulePolicy(BaseModel):
     """IANA timezone 上の複数投稿時刻と日間隔."""
 
     model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
 
-    daily_times: tuple[str, ...] = ("09:00",)
+    daily_times: tuple[str, ...]
     interval_days: int = Field(default=1, ge=1)
     timezone: str = "Asia/Tokyo"
 
@@ -171,12 +175,32 @@ def _policy_text(policy: SchedulePolicy) -> str:
 
 
 def load_schedule_policy(settings: Settings) -> SchedulePolicy:
-    """保存済み policy を読む。未作成だけ既定値、破損は fail closed."""
+    """保存済み policy を読む。未作成は未設定、破損は fail closed."""
     try:
         with schedule_lock(settings):
             path = _config_path(settings)
-            if not path.exists():
-                return SchedulePolicy()
+            try:
+                path.stat()
+            except FileNotFoundError as exc:
+                # stat() だけでは壊れた symlink も未作成と区別できないため、
+                # lstat() で path 自体の存在を確認してから未設定を判定する。
+                try:
+                    path.lstat()
+                except FileNotFoundError:
+                    raise SchedulePolicyNotConfigured(
+                        "投稿スケジュールが未設定です。設定ページで投稿時刻を保存してください。"
+                    ) from exc
+                except OSError as lstat_exc:
+                    raise ScheduleError(
+                        "投稿スケジュール設定が壊れているため読み込めません。手動で修復してください。"
+                    ) from lstat_exc
+                raise ScheduleError(
+                    "投稿スケジュール設定が壊れているため読み込めません。手動で修復してください。"
+                ) from exc
+            except OSError as exc:
+                raise ScheduleError(
+                    "投稿スケジュール設定が壊れているため読み込めません。手動で修復してください。"
+                ) from exc
             raw = json.loads(path.read_text(encoding="utf-8"))
             return SchedulePolicy.model_validate(raw)
     except ScheduleError:

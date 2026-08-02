@@ -9,7 +9,11 @@ import pytest
 
 from yt_live_kit.config import Settings
 from yt_live_kit.services.ffmpeg import FfmpegDiagnostics, FfmpegError
-from yt_live_kit.services.schedule import ScheduleError, SchedulePolicy
+from yt_live_kit.services.schedule import (
+    ScheduleError,
+    SchedulePolicy,
+    SchedulePolicyNotConfigured,
+)
 from yt_live_kit.ui.views import settings as settings_page
 
 
@@ -309,6 +313,43 @@ def test_schedule_placeholder_is_visible(
     assert "次の空き枠" in caption.call_args.args[0]
 
 
+def test_schedule_form_shows_empty_values_when_policy_is_unconfigured(
+    tmp_path: Path,
+) -> None:
+    save = MagicMock()
+    with (
+        patch.object(
+            settings_page,
+            "load_schedule_policy",
+            side_effect=SchedulePolicyNotConfigured("未設定"),
+        ) as load,
+        patch.object(settings_page, "count_upload_attempts", return_value=0),
+        patch.object(settings_page, "_save_schedule_policy", save),
+        patch.object(settings_page.st, "subheader"),
+        patch.object(settings_page.st, "caption"),
+        patch.object(settings_page.st, "form") as form,
+        patch.object(settings_page.st, "form_submit_button", return_value=False),
+        patch.object(settings_page.st, "text_area", return_value="") as text_area,
+        patch.object(settings_page.st, "number_input", return_value=1) as number,
+        patch.object(
+            settings_page.st,
+            "text_input",
+            return_value="Asia/Tokyo",
+        ) as text_input,
+        patch.object(settings_page.st, "container") as container,
+    ):
+        form.return_value.__enter__.return_value = form.return_value
+        container.return_value.__enter__.return_value = container.return_value
+
+        settings_page._render_schedule_placeholder(_settings(tmp_path))
+
+    load.assert_called_once()
+    assert text_area.call_args.kwargs["value"] == ""
+    assert number.call_args.kwargs["value"] == 1
+    assert text_input.call_args.kwargs["value"] == "Asia/Tokyo"
+    save.assert_not_called()
+
+
 @patch.object(settings_page, "_save_schedule_policy")
 @patch.object(settings_page.st, "container")
 @patch.object(settings_page.st, "form")
@@ -317,7 +358,11 @@ def test_schedule_placeholder_is_visible(
 @patch.object(settings_page.st, "text_area", return_value="09:00\n18:00")
 @patch.object(settings_page.st, "number_input", return_value=1)
 @patch.object(settings_page, "count_upload_attempts", return_value=3)
-@patch.object(settings_page, "load_schedule_policy", return_value=SchedulePolicy())
+@patch.object(
+    settings_page,
+    "load_schedule_policy",
+    return_value=SchedulePolicy(daily_times=["09:00"]),
+)
 def test_schedule_form_does_not_save_before_submit(
     load: MagicMock,
     attempts: MagicMock,

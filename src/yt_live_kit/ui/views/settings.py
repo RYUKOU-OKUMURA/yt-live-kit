@@ -11,6 +11,7 @@ from yt_live_kit.services.ai_prompt import is_codex_available
 from yt_live_kit.services.ffmpeg import FfmpegError, diagnose_ffmpeg
 from yt_live_kit.services.schedule import (
     ScheduleError,
+    SchedulePolicyNotConfigured,
     load_schedule_policy,
     make_schedule_policy,
     save_schedule_policy,
@@ -277,6 +278,8 @@ def _render_schedule_placeholder(settings: Settings) -> None:
     st.caption("生成済みショートを次の空き枠へ予約するときの設定です。")
     try:
         policy = load_schedule_policy(settings)
+    except SchedulePolicyNotConfigured:
+        policy = None
     except ScheduleError as exc:
         st.error(str(exc))
         return
@@ -289,18 +292,18 @@ def _render_schedule_placeholder(settings: Settings) -> None:
     with st.form("schedule_policy_form"):
         daily_times = st.text_area(
             "投稿時刻（1行1件、HH:MM）",
-            value="\n".join(sorted(policy.daily_times)),
+            value="" if policy is None else "\n".join(sorted(policy.daily_times)),
             help="半角数字の24時間表記を1行に1件ずつ入力してください。",
         )
         interval_days = st.number_input(
             "投稿間隔（日）",
             min_value=1,
             step=1,
-            value=policy.interval_days,
+            value=1 if policy is None else policy.interval_days,
         )
         timezone_name = st.text_input(
             "IANA timezone",
-            value=policy.timezone,
+            value="Asia/Tokyo" if policy is None else policy.timezone,
             help="例: Asia/Tokyo",
         )
         submitted = st.form_submit_button(

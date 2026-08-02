@@ -776,7 +776,7 @@ def test_line_state_rejects_identity_traversal_and_inconsistent_confirmation() -
 def test_daily_summary_uses_policy_timezone_latest_source_key_and_attention(tmp_path: Path) -> None:
     # Tokyo 8/1 の開始直後。UTC ではまだ 7/31。
     now = datetime(2026, 7, 31, 15, 30, tzinfo=timezone.utc)
-    policy = SchedulePolicy(timezone="Asia/Tokyo")
+    policy = SchedulePolicy(daily_times=["09:00"], timezone="Asia/Tokyo")
     operations = [
         _operation(
             tmp_path,
@@ -819,7 +819,7 @@ def test_daily_summary_uses_policy_timezone_latest_source_key_and_attention(tmp_
 
     utc_summary = summarize_daily_lines(
         operations,
-        SchedulePolicy(timezone="UTC"),
+        SchedulePolicy(daily_times=["09:00"], timezone="UTC"),
         now=now,
     )
     assert utc_summary.completed_count == 2
@@ -833,7 +833,7 @@ def test_latest_operation_tie_breaks_by_operation_id(tmp_path: Path) -> None:
     second = _operation(tmp_path, operation_id="b", state="needs_reconciliation", created_at=NOW)
     summary = summarize_daily_lines(
         (first, second),
-        SchedulePolicy(timezone="Asia/Tokyo"),
+        SchedulePolicy(daily_times=["09:00"], timezone="Asia/Tokyo"),
         now=NOW,
     )
     assert summary.completed_count == 0
