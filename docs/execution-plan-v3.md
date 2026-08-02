@@ -27,7 +27,7 @@
 | S5 | フェーズ S 受け入れ（実配信 1 本からショート複数本を通しで作る） | [x] 完了 |
 | P0 | 安全な実機 upload probe（P1 / P2 完了後） | [x] 完了 |
 | P1 | 安全なアップロードサービス | [x] 完了 |
-| P2 | スケジュールポリシー + 原子的な予約確定 + 投稿確認 UI | [~] 進行中 |
+| P2 | スケジュールポリシー + 原子的な予約確定 + 投稿確認 UI | [x] 完了 |
 | P3 | フェーズ P 受け入れ（予約投稿が実際に公開される） | [x] 完了 |
 | P4 | ショート概要欄の定型リンク差し込み（v3 追加要件） | [x] 完了 |
 | S6 | 切り抜き候補からのショート用サブ区間提案（v3 追加要件） | [x] 完了 |
@@ -918,7 +918,7 @@ data/{video_id}/ ...
   - preview 全項目表示、Made for Kids / synthetic media 未選択と Community Guidelines 既定未チェック、未確定時 side effect なし、確定後の channel / file / metadata / audience / synthetic / consent / slot / attempt 再検証、各 race で start_job / API 未呼び出し
   - lock 順序と同時 confirm で勝者 1 件、単一 queue record の operation / slot / 先行 job ID、各境界の fault injection、start_job 同期失敗時 rollback、二重クリック、同一 job / operation、P1-8 に従う再起動復元
   - status bar / upload component が upload operation を表示し pipeline result と混同しないこと、`needs_reconciliation` の自動再送導線が無いこと
-- [ ] P2-10. 投稿ごとの予約日時編集を追加する。現在の次の空き枠を初期値として、公開・投稿カードで policy timezone の日付・時刻を変更できるようにする。指定日時は aware datetime、現在から最低 10 分先、既存 slot と非重複、DST の ambiguous / nonexistent 拒否を preview 前に検証する。確認ダイアログへ指定日時と UTC `Z` を固定表示し、確定時は同じ指定日時で channel / file / metadata / slot / attempt を再検証する。未確認・競合・不正日時では operation / job / upload attempt を作らず、対象テスト・全件テスト・欠陥優先レビュー・コミットを行う
+- [x] P2-10. 投稿ごとの予約日時編集を追加する。現在の次の空き枠を初期値として、公開・投稿カードで policy timezone の日付・時刻を変更できるようにする。指定日時は aware datetime、現在から最低 10 分先、既存 slot と非重複、DST の ambiguous / nonexistent 拒否を preview 前に検証する。確認ダイアログへ指定日時と UTC `Z` を固定表示し、確定時は同じ指定日時で channel / file / metadata / slot / attempt を再検証する。未確認・競合・不正日時では operation / job / upload attempt を作らず、対象テスト・全件テスト・欠陥優先レビュー・コミットを行う
 
 **Done 条件:**
 
@@ -1234,7 +1234,7 @@ data/{video_id}/ ...
   - [x] U6-12d. 「公開・投稿で予約する」は callback または描画前の遷移要求適用で workspace を切り替え、描画後の widget key 直接代入を行わない。例外時は operation を作らず、動画と確認済みライン状態を維持する
   - [x] U6-12e. 公開・投稿でタイトル候補選択・タイトル自由編集・説明文編集・タグ追加削除・予約日時確認を可能にする。編集値から新しい preview を構築し、編集後は以前の確認を失効させ、実送信 snapshot を確認ダイアログへ固定表示する。metadata 検証前および最終確定前は operation / 投稿 job を作らない
   - [x] U6-12f. 対象回帰テストと `uv run pytest` 全件を通し、欠陥優先レビューを完了して大タスクコミットする
-- [ ] U6-13. workspace 遷移の残存例外を解消する。「選択した候補でショート作成へ」「ショート生産ラインへ」を含む `detail_workspace_{video_id}` の全プログラム遷移を callback または widget 描画前の遷移要求へ統一し、描画済み widget key を直接変更しない。現在の生成 job、候補引き継ぎ、確認済みライン状態を維持し、遷移だけでは operation / job を作らない。全遷移経路の回帰テスト・全件テスト・欠陥優先レビュー・コミットを行う
+- [x] U6-13. workspace 遷移の残存例外を解消する。「選択した候補でショート作成へ」「ショート生産ラインへ」を含む `detail_workspace_{video_id}` の全プログラム遷移を callback または widget 描画前の遷移要求へ統一し、描画済み widget key を直接変更しない。現在の生成 job、候補引き継ぎ、確認済みライン状態を維持し、遷移だけでは operation / job を作らない。全遷移経路の回帰テスト・全件テスト・欠陥優先レビュー・コミットを行う
 
 **Done 条件:**
 
