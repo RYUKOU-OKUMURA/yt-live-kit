@@ -35,7 +35,7 @@
 | S8 | 区間内容の可視化 + プレビュー幅修正（v3.2・最優先） | [x] 完了 |
 | U6 | ショート生産ライン UI（v3.2 改訂: 作業選択型 IA + 工程 UI） | [~] 進行中 |
 | P5 | 投稿枠の複数化 + ライン既定値の設定化（v3.2） | [~] 進行中 |
-| R1 | 全体リファクタリング・性能・長期運用監査 | [~] 進行中 |
+| R1 | 全体リファクタリング・性能・長期運用監査 | [x] 完了 |
 | H1 | 長期運用 hardening | [ ] 未着手 |
 | G1 | FFmpeg single-pass benchmark | [ ] 未着手 |
 | U7 | 概要欄反映の最新性判定（保留: 優先度③のため v4 送り。候補引き継ぎは U6 に統合） | [保留] |
@@ -1363,7 +1363,7 @@ data/{video_id}/ ...
 ### R1: 全体リファクタリング・性能・長期運用監査
 
 **目的:** U6 / P5 の途中で一度立ち止まり、既存挙動を変えずにコード全体の回帰基準、生成・画面応答のボトルネック、再起動や途中失敗を含む長期運用上の穴を確認する。即時に安全性と効果を証明できる小さな変更だけを実装し、生成方式・永続化境界・プロセス間排他に触れる構造変更は別タスクとして切り出す。
-**フェーズ状態:** [~] 進行中
+**フェーズ状態:** [x] 完了
 **前提:** U6-8 / P5-2 までのコードを freeze した独立タスクとして扱う。R1 はフェーズ U の追加実装ではないため、下記に限定した既存 service の保守変更を許可する。外部 API、実 upload、実 Codex 呼び出しは行わない。
 
 **変更ファイル範囲:**
@@ -1381,21 +1381,21 @@ data/{video_id}/ ...
 **作業:**
 
 - [x] R1-1. 回帰基準と実測を採取する。Apple M2 / 16 GB / macOS 26.5.2 で `uv run pytest -q` は 1063 passed / 2 skipped、4.23〜4.91 秒。処理済み 48 本の warm 計測は履歴読込 30 回平均 2.65 ms、latest manifest 全件走査 30 回平均 4.19 ms、`yt-dlp --version` 10 回平均 237.28 ms、20,328,048 bytes mp4 の SHA-256 10 回平均 65.25 ms。60 秒ショートの最終 FFmpeg pass 約 48 秒は 1 回の運用観測であり、G1 の再現 benchmark 前は傾向としてだけ扱う
-- [ ] R1-2. 監査結果を `docs/refactor-review-2026-08-02.md` に記録し、今回修正・計測後に着手・保留を分ける。要件違反となる一括整形、無計測の大規模分割、生成方式の変更は行わない
-- [ ] R1-3. 実装契約のずれを直す。`st.expander` の `key` / `on_change` を導入した Streamlit 1.55 を最低版とし、現在 lock 済みの 1.60 は解決版として区別する。uv の deprecated 設定を現行形式へ移す。FFmpeg seek は現行実装・テストの `-ss` を `-i` より前に置く input seek を正本とし、長尺後半の decode を省きながら再 encode で 0 秒始まりの中間ファイルを作る契約へ文書だけを合わせる。R1 では seek 順を変更せず、既存 S5 の実機受け入れを根拠に維持し、G1 で input / output seek の境界 frame と速度も比較する
-- [ ] R1-4. 小さな fail-closed 修正を行う。未完了 queue manifest は予約対象にしない、旧 metadata の naive datetime は UTC として正規化して aware 値との混在で履歴一覧を落とさない、既存単体生成経路も失敗時に以前の完成 mp4 を保持する。`shorts_line` の途中結果表示は維持するが、upload と予約可能件数は manifest 全体が `done` になるまで 0 とする
-- [ ] R1-5. 安全な rerun 高速化を行う。service の純粋 helper が解決済みパス、device、inode、size、`mtime_ns` を binary identity として返し、UI はその identity、設定パス、timeout を key に TTL 600 秒・最大 4 件で `yt-dlp --version` の警告文字列だけを cache する。出力 mp4 の SHA-256 は工程 6 直前の内容再検証を維持し、stat だけを信頼する cache へ置き換えない
-- [ ] R1-6. 構造課題を実行可能な H1 と G1 に分け、各タスク ID、変更範囲、Done 条件、依存、見積もりを本計画へ追加する。P3 の単発公開受け入れ証跡は維持する一方、通常予約 operation の publication poll 未接続は現行 FR-27 / AC-28 の未完了項目として明示する
-- [ ] R1-7. 対象テストと `uv run pytest -q` を通し、実装者と別のサブエージェントが欠陥優先レビューを行う。指摘修正後に計測を再実行し、進捗更新・コミットする
+- [x] R1-2. 監査結果を `docs/refactor-review-2026-08-02.md` に記録し、今回修正・計測後に着手・保留を分ける。要件違反となる一括整形、無計測の大規模分割、生成方式の変更は行わない
+- [x] R1-3. 実装契約のずれを直す。`st.expander` の `key` / `on_change` を導入した Streamlit 1.55 を最低版とし、現在 lock 済みの 1.60 は解決版として区別する。uv の deprecated 設定を現行形式へ移す。FFmpeg seek は現行実装・テストの `-ss` を `-i` より前に置く input seek を正本とし、長尺後半の decode を省きながら再 encode で 0 秒始まりの中間ファイルを作る契約へ文書だけを合わせる。R1 では seek 順を変更せず、既存 S5 の実機受け入れを根拠に維持し、G1 で input / output seek の境界 frame と速度も比較する
+- [x] R1-4. 小さな fail-closed 修正を行う。未完了 queue manifest は予約対象にしない、旧 metadata の naive datetime は UTC として正規化して aware 値との混在で履歴一覧を落とさない、既存単体生成経路も失敗時に以前の完成 mp4 を保持する。`shorts_line` の途中結果表示は維持するが、upload と予約可能件数は manifest 全体が `done` になるまで 0 とする
+- [x] R1-5. 安全な rerun 高速化を行う。service の純粋 helper が解決済みパス、device、inode、size、`mtime_ns` を binary identity として返し、UI はその identity、設定パス、timeout を key に TTL 600 秒・最大 4 件で `yt-dlp --version` の警告文字列だけを cache する。出力 mp4 の SHA-256 は工程 6 直前の内容再検証を維持し、stat だけを信頼する cache へ置き換えない
+- [x] R1-6. 構造課題を実行可能な H1 と G1 に分け、各タスク ID、変更範囲、Done 条件、依存、見積もりを本計画へ追加する。P3 の単発公開受け入れ証跡は維持する一方、通常予約 operation の publication poll 未接続は現行 FR-27 / AC-28 の未完了項目として明示する
+- [x] R1-7. 対象テストと `uv run pytest -q` を通し、実装者と別のサブエージェントが欠陥優先レビューを行う。指摘修正後に計測を再実行し、進捗更新・コミットする
 
 **Done 条件:**
 
-- [ ] 既存 1063 passed / 2 skipped から回帰が無く、新規テストを含む全件が通る
-- [ ] 外部 API、実 upload、実 Codex 呼び出し、新規 pip 依存、生成品質の変更が無い
-- [ ] 即時修正と構造課題が混ざらず、後者に再現条件・影響・推奨順が記録されている
-- [ ] rerun 高速化は実測で確認され、安全境界の再検証を弱めていない
-- [ ] `uv lock --check` と `uv sync --locked` が警告なく成功する
-- [ ] 独立レビューの指摘が解消され、タスク完了コミット済み
+- [x] 既存 1063 passed / 2 skipped から回帰が無く、新規テストを含む 1074 passed / 2 skipped が通る
+- [x] 外部 API、実 upload、実 Codex 呼び出し、新規 pip 依存、生成品質の変更が無い
+- [x] 即時修正と構造課題が混ざらず、後者に再現条件・影響・推奨順が記録されている
+- [x] rerun 高速化は cache miss 240.56 ms、hit 30 回平均 0.215 ms と実測され、安全境界の再検証を弱めていない
+- [x] `uv lock --check` と `uv sync --locked` が警告なく成功する
+- [x] safety / performance の独立レビューで blocker が解消され、タスク完了コミット済み
 
 **見積もり目安:** 0.5〜1 日
 
@@ -1750,8 +1750,8 @@ U7（概要欄 fingerprint 化）は保留 = v4 候補（優先度③: チャプ
 1. ~~**P4 に着手する。**~~ 完了。~~**S7 を閉じる。**~~ 完了（`9ebf251`）
 2. ~~**S8 に着手する（最優先）。**~~ 完了。実機確認で S6-9 を吸収し、S6 / S8 をクローズ済み
 3. ~~**U6 のコード実装を進める。**~~ U6-8 まで完了。実機確認の U6-9 は未完了
-4. **R1 を先に完了する。** 回帰基準、局所的な fail-closed 修正、rerun 高速化、H1 / G1 の実行計画を確定する
-5. R1 後は **H1-1 → H1-5 → H1-2 → H1-3 → H1-4** の順で hardening する。通常予約 operation の publication poll を再接続し、FR-27 / AC-27 / AC-28 を再度完了へ戻す
+4. ~~**R1 を先に完了する。**~~ 完了（`6632793` / `be83adb` / `a969681`）。回帰基準、局所的な fail-closed 修正、rerun 高速化、H1 / G1 の実行計画を確定済み
+5. 次は **H1-1 → H1-5 → H1-2 → H1-3 → H1-4** の順で hardening する。通常予約 operation の publication poll を再接続し、FR-27 / AC-27 / AC-28 を再度完了へ戻す
 6. H1 完了後に **P5-3** を実装し、**U6-9 + P5-4** を同じ実機ライン 3 周で確認して M15 を達成する
 7. **G1** は R1 後に production 非変更で実行できる。採用候補でも R1 / H1 / P5 に混ぜず、要件改訂済みの G2 を別途作る
 8. **U8**（構造化エラー通知、AC-33）は R1 完了後いつでも着手可（P5 と独立）。**U7 は保留（v4 候補）**
@@ -1763,6 +1763,7 @@ U7（概要欄 fingerprint 化）は保留 = v4 候補（優先度③: チャプ
 
 | 日付 | 内容 |
 |------|------|
+| 2026-08-02 | **R1 完了。** 途中 queue の予約 fail-closed、旧 datetime の UTC 正規化、legacy `build_short()` の atomic 出力保護を `be83adb`、binary identity 付き `yt-dlp --version` warning cache・Streamlit 1.55 下限・uv 設定・seek 文書整合を `a969681` で実装。変更前 1063 から変更後 1074 passed / 2 skipped、cache miss 240.56 ms から hit 平均 0.215 ms、`uv lock --check` / `uv sync --locked` 成功、safety / performance の独立レビュー APPROVE を確認した |
 | 2026-08-02 | **R1 計画の独立レビューを反映。** P3 の単発公開証跡と通常 operation の publication poll 未接続を区別し、後者を FR-27 / AC-28 の未完了へ戻した。構造課題を H1-1〜H1-6、生成速度検証を G1-1〜G1-3 として変更範囲・Done・依存・見積もり付きで正式化。Streamlit 最低版は stateful expander 導入版 1.55、FFmpeg seek は現行 input seek を正本とし G1 で境界比較する方針へ明確化した |
 | 2026-08-02 | **R1 全体リファクタリング・性能・長期運用監査を開始。** 1063 tests の回帰基準と実データの所要時間を採取し、即時の fail-closed 修正・安全な rerun 高速化・別タスクへ分ける構造課題を定義した。U6 / P5 の実機完了前に R1 を挟み、FFmpeg 生成方式の変更は benchmark と要件改訂を先行させる |
 | 2026-08-01 | **U6 確定仕様を計画化。** 3 ワークスペースと 6 工程の責務、左パネルの常設プレビュー、品質チェックの 4 分離、review fingerprint と編集時失効、atomic / fail closed な `services/shorts_line.py`、`SchedulePolicy.timezone` 基準の日次完了数を固定。U6 の見積もりを 4〜5 日へ改訂し、完成イメージを視覚リファレンスとして追加。あわせて S7 / S8 本文のフェーズ状態を進捗サマリーどおり完了へ整合 |

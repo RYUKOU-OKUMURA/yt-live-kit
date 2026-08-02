@@ -11,7 +11,7 @@
 
 | 項目 | 実測 | 判定 |
 |------|------|------|
-| 全テスト | 1063 passed / 2 skipped、4.23〜4.91 秒 | 回帰基準 |
+| 全テスト | 変更前 1063 passed / 2 skipped、変更後 1074 passed / 2 skipped | 回帰なし、新規 11 tests |
 | 処理済み動画 | 48 本。30 回 min 2.44 / mean 2.65 / p95 2.95 / max 3.59 ms | 今回の規模では優先度低 |
 | queue manifest 全件走査 | 48 本。30 回 min 3.84 / mean 4.19 / p95 4.58 / max 6.75 ms | 件数増加時の候補。現在は保留 |
 | `yt-dlp --version` | 10 回 min 207.29 / mean 237.28 / p95 241.85 / max 277.95 ms | 全 rerun から外す効果を再計測する |
@@ -23,7 +23,7 @@
 
 今回の環境では、テストや JSON 読込より FFmpeg encode と Streamlit rerun ごとの外部バイナリ起動が大きい。生成全体の主ボトルネック断定は G1 の end-to-end stage breakdown 後に行う。
 
-## 2. 今回直す項目
+## 2. R1 で直した項目
 
 | 優先 | 項目 | 理由 | 安全境界 |
 |------|------|------|----------|
@@ -32,6 +32,10 @@
 | P1 | 旧単体生成の atomic 出力 | `build_short()` は完成 mp4 を直接上書きし、失敗や中断で以前の成果物を壊し得る | 同じ出力ディレクトリの一時 mp4 を検証後に `replace()` |
 | P2 | `yt-dlp --version` の rerun cache | 全 rerun で平均約 237 ms の subprocess が走る | resolved path、device、inode、size、`mtime_ns`、設定 path、timeout を key に TTL 600 秒・最大 4 件。警告文字列だけを cache し fetch 本体は変えない |
 | P2 | 依存・FFmpeg 契約の文書整合 | stateful expander は Streamlit 1.55 で導入された一方、最低版が 1.40。seek の文書と実装・テストが逆 | 最低版を 1.55、lock 解決版を 1.60 と区別する。seek 順は変更せず現行 input seek を正本として文書を直し、G1 で境界 frame と速度を比較 |
+
+5 項目はすべて実装済み。安全修正は commit `be83adb`、依存・文書・rerun cache は `a969681` に分けた。独立レビューは safety / performance の 2 系統で行い、未解消 blocker はない。
+
+**rerun 再計測:** cache miss は 240.56 ms、同じ binary identity / path / timeout の cache hit 30 回は min 0.178 / mean 0.215 / p95 0.222 / max 0.899 ms。通常 rerun から平均約 237 ms の subprocess 待ちを外せた。これは Streamlit runtime 外の `MemoryCacheStorageManager` での再計測であり、実ブラウザでは U6-9 の操作確認時にも体感と warning 更新を確認する。
 
 ## 3. H1 / G1 として分離した構造課題
 
@@ -84,7 +88,7 @@
 
 ## 5. 推奨順
 
-1. R1 の局所修正と全件回帰を完了する
+1. R1 の局所修正と全件回帰 — 完了
 2. H1-1 jobs hardening
 3. H1-5 公開後 polling の運用接続
 4. H1-2 path confinement
