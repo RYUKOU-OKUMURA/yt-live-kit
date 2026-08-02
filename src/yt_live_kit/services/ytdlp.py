@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import subprocess
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -36,6 +38,66 @@ class SubtitleNotFoundError(YtdlpError):
     def __init__(self, message: str = _SUBTITLE_FETCH_ERROR) -> None:
         super().__init__(message)
 
+
+@dataclass(frozen=True)
+class YtdlpBinaryIdentity:
+    """解決済み yt-dlp バイナリの内容を再検査するための軽量 identity.
+
+    ``size`` / ``mtime_ns`` は高速な UI 診断 cache の無効化に使う値であり、
+    生成物の内容検証を置き換えるものではない。ファイルが見つからない場合は
+    ``MISSING_YTDLP_BINARY_IDENTITY`` を返す。
+    """
+
+    resolved_path: str
+    device: int
+    inode: int
+    size: int
+    mtime_ns: int
+
+    @property
+    def is_missing(self) -> bool:
+        """バイナリが解決できなかった identity か."""
+        return self == MISSING_YTDLP_BINARY_IDENTITY
+
+
+MISSING_YTDLP_BINARY_IDENTITY = YtdlpBinaryIdentity(
+    resolved_path="",
+    device=-1,
+    inode=-1,
+    size=-1,
+    mtime_ns=-1,
+)
+
+
+def get_ytdlp_binary_identity(
+    configured_path: str | os.PathLike[str],
+) -> YtdlpBinaryIdentity:
+    """設定された yt-dlp の解決済みパスと stat identity を返す.
+
+    この helper はバージョン取得やネットワークアクセスを行わず、PATH 解決と
+    ``stat`` だけを行う。バイナリが無い、解決後に消えた、または stat に失敗した
+    場合は常に同じ欠損 sentinel を返すため、UI の warning cache key に安全に使える。
+    """
+    try:
+        resolved = shutil.which(os.fspath(configured_path))
+    except (OSError, TypeError):
+        return MISSING_YTDLP_BINARY_IDENTITY
+    if resolved is None:
+        return MISSING_YTDLP_BINARY_IDENTITY
+
+    try:
+        path = Path(resolved).resolve(strict=True)
+        stat_result = path.stat()
+    except (OSError, RuntimeError):
+        return MISSING_YTDLP_BINARY_IDENTITY
+
+    return YtdlpBinaryIdentity(
+        resolved_path=str(path),
+        device=int(stat_result.st_dev),
+        inode=int(stat_result.st_ino),
+        size=int(stat_result.st_size),
+        mtime_ns=int(stat_result.st_mtime_ns),
+    )
 
 def extract_video_id(url_or_id: str) -> str:
     """YouTube URL または動画 ID から video_id を抽出する."""

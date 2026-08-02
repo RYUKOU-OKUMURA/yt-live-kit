@@ -131,7 +131,7 @@ uv run pytest
 ### 3.3 フェーズ S 特有の観点
 
 - [ ] Codex CLI 呼び出しが 1 区間セットあたり 1 回で完結しているか（テロップ台本とメタデータを別々に 2 回呼んでいないか、S1）
-- [ ] `-ss` を `-i` の後ろに置く精密シークになっているか（`encode_segment` を正しく使っているか、S3）
+- [ ] `-ss` を `-i` の前に置く入力シークになっているか（`encode_segment` を正しく使っているか、長尺後半の decode を省き、再エンコードで 0 秒始まりの中間ファイルを作る契約、S3）。境界 frame と速度の比較は G1 で行う
 - [ ] 複数区間連結時の字幕タイムオフセットが、区間の**累積**尺で正しく計算されているか（区間ごとの `start_sec` だけを引くと連結後にズレる、S3）
 - [ ] S3 が `NormalizedSegmentBounds` / 公開正規化 helper の整数 ms を ID・尺・encode・字幕 offset / clip の唯一の基準にし、入力順を再生・ID・encode 順として保持して sort / dedupe していないか。ffmpeg 前と `build_concatenated_subtitle()` の公開境界で全区間と確認済み telop document を再検証しているか
 - [ ] S3 の最終 mp4 が一時 `.mp4` への生成成功後だけ atomic replace され、失敗時に既存正式 mp4 が維持されるか。`keep_intermediate` が専用中間ディレクトリ全体へ成功・失敗とも適用され、元動画・ASS・S1 JSON・最終 mp4 / ログを削除していないか
@@ -176,6 +176,7 @@ uv run pytest
 | **U** | `services/` は原則触らない。例外は U3 の `services/batch.py` 入力伝播と、U6 の新規 `services/shorts_line.py` による工程・人確認状態の atomic / fail closed 永続化だけ。UI 固有の軽量設定は引き続き `_local_settings.py` に置く（[execution-plan-v3.md](./execution-plan-v3.md) §3.2 参照） |
 | **S** | 従量課金 API を使わない。AI 生成は Codex CLI のみ、かつテロップ台本とメタデータは同じ呼び出しで一括生成する。**自動生成をそのまま焼き込まず、必ず人の確認ステップを挟む** |
 | **P** | P1 / P2 を全 API mock で完成してから、同じ本番経路だけを P0 / P3 で別承認により実操作する。private + future publishAt + notify false、audience / synthetic / consent、LA attempt、resumable / reconciliation、永続 operation、confirm race、polling を固定する。private lock 中は P3 を成功扱いにしない |
+| **R1** | 既存 `build_short()` の legacy 経路は、失敗時に以前の完成 mp4 を保護する最終出力の atomic replace に限り変更できる。`build_short_from_segments()`、queue fingerprint、upload transaction、工程 6 の output fingerprint、seek 順は変更しない。R1 の入力 seek 契約は既存実装・テストを文書へ反映し、single-pass 化や seek 方式の変更は G1 で比較してから別タスクにする |
 
 ---
 
@@ -214,7 +215,7 @@ uv run pytest
 | U6 | 3 ワークスペース + 左パネル + 6 工程の責務、人確認の既定未チェック、review / output fingerprint と正しい失効対象、active line 復元、atomic / fail closed ライン状態、`SchedulePolicy.timezone` 日次集計が FR-17 / FR-33 と一致するか。既存 queue fingerprint、生成・投稿 service、各確認ダイアログを壊していないか |
 | S1 | テロップ台本とメタデータを 1 回の Codex 呼び出しで生成しているか。入力字幕が開始・終了・ミリ秒を保持し、区間・行の `start_sec` / `end_sec` が元動画基準の絶対秒で、`TelopSegmentScript` 自身にも区間境界があり、S3 の `累積尺 + 行の絶対秒 - 元区間開始秒` へ一意に変換できるか。S1 は失敗時に例外を送出し、呼び出し側が局所捕捉して既存 telop と他成果物を維持する softfail になっているか |
 | S2 | `TimedCue.emphasis=False` の追加が既存 3 引数構築を壊していないか。プリセット省略 + フックなしで `build_segment_subtitle()` と既存 ASS 出力が v2 完全互換か。通常字幕 / Hook の `\`・波括弧・C0 制御文字・実改行を指定順で安全化してから、選択 preset の強調色と本文復帰色を導出して行全体へ管理タグを付けているか。不明 preset / 不正色 / 空 hook を日本語エラーにし、通常字幕と Hook を同一 ASS に出せるか |
-| S3 | 公開 `NormalizedSegmentBounds` / 正規化 helper の整数 ms を ID・尺（10,000 / 180,000 ms）・encode・字幕 offset / clip の唯一の基準にし、0.5 ms 境界でも一貫するか。入力順を再生・ID・encode 順として保持し、全区間・layout・output 名・明示 hook・preset を source 取得前に検証するか。telop は ffmpeg 前と `build_concatenated_subtitle()` 直呼び境界の両方で tuple 入力に対して再検証し、直呼びでも明示 hook の空文字・半角山カッコを拒否するか。VTT の区間相対 cue に累積 ms を加え、1 回だけ読む fallback、Hook 単独、preset 全伝播、`force_style` なしの 1 回焼き込み、`len(segments) + 3` の進捗契約を満たすか。安全な output 名、`{正式出力stem}.ffmpeg.log`、atomic replace、失敗時の既存 mp4 保護、専用中間ディレクトリ単位の cleanup / keep、エラー型変換、font warning、既存 `build_short()` 不変を確認する |
+| S3 | 公開 `NormalizedSegmentBounds` / 正規化 helper の整数 ms を ID・尺（10,000 / 180,000 ms）・encode・字幕 offset / clip の唯一の基準にし、0.5 ms 境界でも一貫するか。入力順を再生・ID・encode 順として保持し、全区間・layout・output 名・明示 hook・preset を source 取得前に検証するか。telop は ffmpeg 前と `build_concatenated_subtitle()` 直呼び境界の両方で tuple 入力に対して再検証し、直呼びでも明示 hook の空文字・半角山カッコを拒否するか。VTT の区間相対 cue に累積 ms を加え、1 回だけ読む fallback、Hook 単独、preset 全伝播、`force_style` なしの 1 回焼き込み、`len(segments) + 3` の進捗契約を満たすか。安全な output 名、`{正式出力stem}.ffmpeg.log`、atomic replace、失敗時の既存 mp4 保護、専用中間ディレクトリ単位の cleanup / keep、エラー型変換、font warningを確認する。legacy `build_short()` は原則不変だが、R1 に限り失敗時の既存出力を守る atomic replace だけを許可し、それ以外の挙動を変えていないか確認する |
 | S4 | form 外の source 切替と表示順、明示 Codex submit、不変 fingerprint と全台本確定が一致する時だけ開始するか。pure service、deep immutable spec、正規化台本、決定的出力名、softfail、単独 writer manifest、非永続 `manifest_path`、video ID 別 job ID と A → B → A 表示分離、latest tie-break、上書き dialog、busy / 二重開始防止まで確認する |
 | P0 | P1 / P2 の安全経路だけを使い、実 upload と審査フォームが別承認か。private lock / processing を poll し、lock を成功扱いにしていないか |
 | P1 | private / aware future publishAt / notify false、metadata、audience / synthetic / consent、resumable、LA attempt、operation、job_id、kind dispatch を API mock で固定したか |

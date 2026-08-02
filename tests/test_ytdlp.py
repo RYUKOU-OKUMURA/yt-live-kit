@@ -6,7 +6,42 @@ from unittest.mock import patch
 import pytest
 
 from yt_live_kit.config import Settings
-from yt_live_kit.services.ytdlp import YtdlpError, _run_ytdlp, _find_subtitle_file, extract_video_id, fetch
+from yt_live_kit.services.ytdlp import (
+    MISSING_YTDLP_BINARY_IDENTITY,
+    YtdlpError,
+    _find_subtitle_file,
+    _run_ytdlp,
+    extract_video_id,
+    fetch,
+    get_ytdlp_binary_identity,
+)
+
+
+def test_get_ytdlp_binary_identity_returns_resolved_stat_values(tmp_path):
+    binary = tmp_path / "yt-dlp"
+    binary.write_bytes(b"#!/bin/sh\n")
+    binary.chmod(0o755)
+    expected = binary.resolve().stat()
+
+    identity = get_ytdlp_binary_identity(str(binary))
+
+    assert identity.resolved_path == str(binary.resolve())
+    assert identity.device == expected.st_dev
+    assert identity.inode == expected.st_ino
+    assert identity.size == expected.st_size
+    assert identity.mtime_ns == expected.st_mtime_ns
+    assert identity.is_missing is False
+
+
+def test_get_ytdlp_binary_identity_uses_deterministic_missing_sentinel(monkeypatch):
+    monkeypatch.setattr("yt_live_kit.services.ytdlp.shutil.which", lambda _: None)
+
+    first = get_ytdlp_binary_identity("missing-yt-dlp")
+    second = get_ytdlp_binary_identity("missing-yt-dlp")
+
+    assert first == MISSING_YTDLP_BINARY_IDENTITY
+    assert second == first
+    assert first.is_missing is True
 
 
 @pytest.mark.parametrize(

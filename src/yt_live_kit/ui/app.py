@@ -8,14 +8,10 @@ import streamlit as st
 
 from yt_live_kit import __version__
 from yt_live_kit.config import get_settings
-from yt_live_kit.services.ytdlp import check_ytdlp_version_warning
 from yt_live_kit.ui.components.results import render_results
 from yt_live_kit.ui.components.shorts_line import render_sidebar_line_context
 from yt_live_kit.ui.components.status_bar import render_status_bar
-from yt_live_kit.ui.views.intake import render_intake_page
-from yt_live_kit.ui.views.library import render_library_page
-from yt_live_kit.ui.views.settings import render_settings_page
-from yt_live_kit.ui.views.video_detail import render_video_detail_page
+from yt_live_kit.ui.runtime_checks import check_ytdlp_version_warning_cached
 from yt_live_kit.ui.state import (
     clear_job_error,
     get_interrupted_notices,
@@ -26,6 +22,10 @@ from yt_live_kit.ui.state import (
     interrupted_notices_shown,
     mark_interrupted_notices_shown,
 )
+from yt_live_kit.ui.views.intake import render_intake_page
+from yt_live_kit.ui.views.library import render_library_page
+from yt_live_kit.ui.views.settings import render_settings_page
+from yt_live_kit.ui.views.video_detail import render_video_detail_page
 
 st.set_page_config(page_title="yt-live-kit", page_icon="📺", layout="wide")
 
@@ -49,7 +49,8 @@ if job_error:
 st.title("yt-live-kit")
 st.caption(f"v{__version__} — YouTube ライブアーカイブのタイムライン生成")
 
-ytdlp_warning = check_ytdlp_version_warning()
+app_settings = get_settings()
+ytdlp_warning = check_ytdlp_version_warning_cached(app_settings)
 if ytdlp_warning:
     st.warning(ytdlp_warning)
 
@@ -90,7 +91,7 @@ page = st.navigation(
 )
 with st.sidebar:
     render_status_bar()
-    render_sidebar_line_context(get_selected_video_id(), get_settings())
+    render_sidebar_line_context(get_selected_video_id(), app_settings)
 page.run()
 
 result = get_result()
