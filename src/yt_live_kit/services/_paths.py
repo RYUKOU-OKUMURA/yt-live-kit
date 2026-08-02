@@ -44,11 +44,12 @@ def confined_path(
     *parts: str | Path,
     label: str = "保存先",
 ) -> Path:
-    """解決後も data root 配下にある lexical path を返す。
+    """fragment から構築した path が解決後も data root 配下にあることを確認して返す。
 
     ``resolve(strict=False)`` を使うため、まだ作成されていない末尾も検査
     できる。既存の親 directory / symlink が root 外を指す場合は拒否する。
-    返却値は既存の相対・絶対 path 形状を保ち、検査だけを canonical path で行う。
+    ``parts`` は data root からの fragment であり、既に構築済みの candidate
+    path の検証には ``validate_confined_candidate`` を使う。
     """
     for part in parts:
         if any(component in {".", ".."} for component in Path(part).parts):
@@ -64,6 +65,37 @@ def confined_path(
         resolved_candidate.relative_to(resolved_root)
     except (OSError, RuntimeError, ValueError) as exc:
         raise PathConfinementError(f"{label}がデータディレクトリ外のため安全に扱えません。") from exc
+    return candidate
+
+
+def validate_confined_candidate(
+    data_dir: Path,
+    candidate: Path,
+    *,
+    label: str = "保存先",
+) -> Path:
+    """既に構築済みの candidate path を data root 内として検証して返す。
+
+    candidate を ``data_dir.joinpath(...)`` で再構築しないことが重要である。
+    とくに相対 ``data_dir`` と ``data/...`` の相対 candidate を組み合わせると、
+    root が二重になり、実際の symlink 境界と異なる path を検査してしまう。
+    返却値は入力 candidate の相対・絶対 path 形状を維持する。
+    """
+    candidate = Path(candidate)
+    if any(component in {".", ".."} for component in candidate.parts):
+        raise PathConfinementError(
+            f"{label}にパスのトラバーサルは指定できません。"
+        )
+
+    root = Path(data_dir)
+    try:
+        resolved_root = root.resolve(strict=False)
+        resolved_candidate = candidate.resolve(strict=False)
+        resolved_candidate.relative_to(resolved_root)
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise PathConfinementError(
+            f"{label}がデータディレクトリ外のため安全に扱えません。"
+        ) from exc
     return candidate
 
 

@@ -47,6 +47,7 @@ from yt_live_kit.services._paths import (
     confined_path,
     safe_identifier,
     safe_video_identifier,
+    validate_confined_candidate,
 )
 
 _QUEUE_VERSION = 1
@@ -186,7 +187,7 @@ def _validate_operation_paths(operation: UploadOperation, settings: Settings) ->
         (operation.content.video_path, "投稿 snapshot 保存先"),
     ):
         try:
-            confined_path(settings.data_dir, path, label=label)
+            validate_confined_candidate(settings.data_dir, path, label=label)
         except PathConfinementError as exc:
             raise UploadQueueError(str(exc)) from exc
 
@@ -381,7 +382,9 @@ def create_reserved_operation(
     _safe_video_identifier(source_video_id)
     _safe_identifier(clip_id, "clip ID")
     try:
-        confined_path(settings.data_dir, content.video_path, label="投稿動画保存先")
+        validate_confined_candidate(
+            settings.data_dir, content.video_path, label="投稿動画保存先"
+        )
     except PathConfinementError as exc:
         raise UploadQueueError(str(exc)) from exc
     created = _utc_timestamp(now, "operation 作成日時")

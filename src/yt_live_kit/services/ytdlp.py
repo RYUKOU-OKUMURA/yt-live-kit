@@ -19,6 +19,7 @@ from yt_live_kit.services._paths import (
     confined_video_path,
     confined_path,
     safe_identifier,
+    validate_confined_candidate,
 )
 
 _SUBTITLE_FETCH_ERROR = (
@@ -242,7 +243,7 @@ def _validate_directory_entries(
 ) -> None:
     try:
         for entry in directory.iterdir():
-            confined_path(settings.data_dir, entry, label=label)
+            validate_confined_candidate(settings.data_dir, entry, label=label)
     except PathConfinementError as exc:
         raise YtdlpError(str(exc)) from exc
     except (OSError, RuntimeError) as exc:
@@ -332,7 +333,9 @@ def download_video(url: str, output_dir: Path, settings: Settings | None = None)
     settings = settings or get_settings()
     extract_video_id(url)
     try:
-        output_dir = confined_path(settings.data_dir, output_dir, label="動画保存先")
+        output_dir = validate_confined_candidate(
+            settings.data_dir, output_dir, label="動画保存先"
+        )
     except PathConfinementError as exc:
         raise YtdlpError(str(exc)) from exc
 
@@ -371,7 +374,9 @@ def download_video(url: str, output_dir: Path, settings: Settings | None = None)
     mp4_files = sorted(output_dir.glob("*.mp4"))
     if mp4_files:
         try:
-            return confined_path(settings.data_dir, mp4_files[0], label="動画保存先")
+            return validate_confined_candidate(
+                settings.data_dir, mp4_files[0], label="動画保存先"
+            )
         except PathConfinementError as exc:
             raise YtdlpError(str(exc)) from exc
 
@@ -384,6 +389,8 @@ def download_video(url: str, output_dir: Path, settings: Settings | None = None)
             "ダウンロードした動画ファイルが見つかりません。"
         )
     try:
-        return confined_path(settings.data_dir, video_files[0], label="動画保存先")
+        return validate_confined_candidate(
+            settings.data_dir, video_files[0], label="動画保存先"
+        )
     except PathConfinementError as exc:
         raise YtdlpError(str(exc)) from exc

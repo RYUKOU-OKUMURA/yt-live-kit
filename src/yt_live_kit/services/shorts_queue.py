@@ -29,8 +29,8 @@ from yt_live_kit.services.shorts import (
 from yt_live_kit.services._paths import (
     PathConfinementError,
     confined_video_path,
-    confined_path,
     safe_identifier,
+    validate_confined_candidate,
 )
 from yt_live_kit.services.subtitle_burn import SubtitleBurnError, get_telop_preset
 from yt_live_kit.services.telop import (
@@ -552,6 +552,27 @@ def _optional_path(value: object, label: str) -> Path | None:
     return Path(_require_string(value, label))
 
 
+def _normalized_lexical_path(path: Path) -> Path:
+    """symlink を解決せず、比較可能な lexical absolute path に揃える."""
+    return Path(os.path.abspath(os.fspath(path)))
+
+
+def _has_symlink_component(path: Path, data_dir: Path) -> bool:
+    """data root 自体を除き、candidate の lexical path に symlink があるか返す."""
+    root = _normalized_lexical_path(data_dir)
+    candidate = _normalized_lexical_path(path)
+    try:
+        relative = candidate.relative_to(root)
+    except ValueError:
+        return False
+    current = root
+    for component in relative.parts:
+        current /= component
+        if current.is_symlink():
+            return True
+    return False
+
+
 def _safe_path_identifier(value: object, label: str) -> str:
     try:
         return safe_identifier(value, label)
@@ -762,7 +783,9 @@ def _validate_result_paths(result: ShortsQueueResult, settings: Settings) -> Non
             paths.append(item.log_path)
     try:
         for path in paths:
-            confined_path(settings.data_dir, path, label="ショート量産成果物")
+            validate_confined_candidate(
+                settings.data_dir, path, label="ショート量産成果物"
+            )
     except PathConfinementError as exc:
         raise ShortsQueueError(str(exc)) from exc
 
@@ -786,7 +809,9 @@ def make_shorts_queue_output_fingerprint(
     """安全な絶対 path・stat・内容から immutable output fingerprint を作る."""
     settings = settings or get_settings()
     try:
-        confined_path(settings.data_dir, path, label="ショート量産成果物")
+        validate_confined_candidate(
+            settings.data_dir, path, label="ショート量産成果物"
+        )
         resolved_root = settings.data_dir.resolve(strict=False)
         resolved_path = path.resolve(strict=True)
         resolved_path.relative_to(resolved_root)
@@ -847,6 +872,9 @@ def can_reuse_shorts_queue_item(
             spec.output_name,
             label="ショート量産成果物",
         )
+        validate_confined_candidate(
+            settings.data_dir, item.output_path, label="ショート量産成果物"
+        )
         actual_path = item.output_path.resolve(strict=True)
         if actual_path != expected_path.resolve(strict=True):
             return False
@@ -884,26 +912,43 @@ def can_reserve_shorts_queue_item(
 ) -> bool:
     """予約直前に成果物の存在と、現行 schema の証跡を再検証する.
 
-    schema 1 の正常 done manifest は読み込み互換を保つため、path の安全性と
-    非空ファイルだけを確認する。schema 2 以降は入力・出力 fingerprint まで
-    一致しない成功 item を予約対象にしない。
+    schema 1 の正常 done manifest は読み込み互換を保つため、spec から導く
+    canonical output path と一致する非 symlink の非空ファイルだけを確認する。
+    schema 2 以降は入力・出力 fingerprint まで一致しない成功 item を予約対象に
+    しない。
     """
     settings = settings or get_settings()
     if item.status != "succeeded" or item.output_path is None:
         return False
-    try:
-        confined_path(settings.data_dir, item.output_path, label="ショート量産成果物")
-        if not item.output_path.is_file() or item.output_path.stat().st_size <= 0:
-            return False
-    except (OSError, PathConfinementError):
-        return False
-    if result.schema_version == LEGACY_SCHEMA_VERSION:
-        return True
     spec = next(
         (value for value in result.clip_specs if value.target_id == item.target_id),
         None,
     )
-    return spec is not None and can_reuse_shorts_queue_item(
+    if spec is None:
+        return False
+    if result.schema_version == LEGACY_SCHEMA_VERSION:
+        try:
+            expected_path = confined_video_path(
+                settings.data_dir,
+                _safe_path_identifier(result.video_id, "動画 ID"),
+                "shorts",
+                "output",
+                spec.output_name,
+                label="ショート量産成果物",
+            )
+            validate_confined_candidate(
+                settings.data_dir, item.output_path, label="ショート量産成果物"
+            )
+            if _normalized_lexical_path(item.output_path) != _normalized_lexical_path(
+                expected_path
+            ):
+                return False
+            if _has_symlink_component(item.output_path, settings.data_dir):
+                return False
+            return item.output_path.is_file() and item.output_path.stat().st_size > 0
+        except (OSError, PathConfinementError):
+            return False
+    return can_reuse_shorts_queue_item(
         video_id=result.video_id,
         spec=spec,
         item=item,

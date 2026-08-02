@@ -32,9 +32,9 @@ from yt_live_kit.models.upload import UploadOperation, UploadState
 from yt_live_kit.services.schedule import SchedulePolicy
 from yt_live_kit.services._paths import (
     PathConfinementError,
-    confined_path,
     confined_video_path,
     safe_identifier,
+    validate_confined_candidate,
 )
 
 _SCHEMA_VERSION = 1
@@ -93,7 +93,9 @@ def _safe_identifier(value: str, label: str) -> str:
 
 def _confined_output_path(output_path: Path, settings: Settings) -> Path:
     try:
-        return confined_path(settings.data_dir, output_path, label="ショート出力保存先")
+        return validate_confined_candidate(
+            settings.data_dir, output_path, label="ショート出力保存先"
+        )
     except PathConfinementError as exc:
         raise LineStateError(str(exc)) from exc
 

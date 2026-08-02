@@ -465,6 +465,8 @@ def test_new_manifest_persists_owner_and_fingerprints(tmp_path: Path) -> None:
     assert raw["items"][0]["input_fingerprint"]
     assert raw["items"][0]["output_fingerprint"]
     assert load_shorts_queue_result("video", "owner-job", settings).owner_job_id == "owner-job"
+    loaded = load_shorts_queue_result("video", "owner-job", settings)
+    assert can_reserve_shorts_queue_item(loaded, loaded.items[0], settings)
 
 
 def test_restart_before_first_item_becomes_interrupted_idempotently(tmp_path: Path) -> None:
@@ -763,6 +765,80 @@ def test_legacy_done_manifest_remains_readable_and_owner_is_derived(tmp_path: Pa
     assert loaded.status == "done"
     assert loaded.owner_job_id == "legacy"
     assert loaded.items[0].status == "succeeded"
+    assert can_reserve_shorts_queue_item(loaded, loaded.items[0], settings)
+
+
+def test_legacy_reservation_rejects_a_different_artifact_path(tmp_path: Path) -> None:
+    settings = Settings(data_dir=tmp_path)
+    spec = _specs(1)[0]
+    wrong_output = tmp_path / "video" / "shorts" / "output" / "short_other.mp4"
+    wrong_output.parent.mkdir(parents=True, exist_ok=True)
+    wrong_output.write_bytes(b"legacy complete")
+    item = ShortsQueueItemResult(
+        target_id=spec.target_id,
+        status="succeeded",
+        output_path=wrong_output,
+        log_path=None,
+        font_warning=None,
+        title_candidates=("タイトル",),
+        description="説明",
+        tags=("タグ",),
+        error=None,
+    )
+    result = ShortsQueueResult(
+        video_id="video",
+        job_id="legacy-mismatch",
+        status="done",
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+        clip_specs=(spec,),
+        items=(item,),
+        success_count=1,
+        failure_count=0,
+        manifest_path=tmp_path / "manifest.json",
+        schema_version=LEGACY_SCHEMA_VERSION,
+    )
+
+    assert not can_reserve_shorts_queue_item(result, item, settings)
+
+
+def test_legacy_reservation_rejects_a_symlink_alias(tmp_path: Path) -> None:
+    settings = Settings(data_dir=tmp_path)
+    spec = _specs(1)[0]
+    expected_output = tmp_path / "video" / "shorts" / "output" / spec.output_name
+    alias_output = expected_output.with_name("short_alias.mp4")
+    expected_output.parent.mkdir(parents=True, exist_ok=True)
+    expected_output.write_bytes(b"legacy complete")
+    try:
+        alias_output.symlink_to(expected_output)
+    except OSError as exc:  # pragma: no cover - platform capability
+        pytest.skip(f"symlink を作成できない環境: {exc}")
+    item = ShortsQueueItemResult(
+        target_id=spec.target_id,
+        status="succeeded",
+        output_path=alias_output,
+        log_path=None,
+        font_warning=None,
+        title_candidates=("タイトル",),
+        description="説明",
+        tags=("タグ",),
+        error=None,
+    )
+    result = ShortsQueueResult(
+        video_id="video",
+        job_id="legacy-alias",
+        status="done",
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+        clip_specs=(spec,),
+        items=(item,),
+        success_count=1,
+        failure_count=0,
+        manifest_path=tmp_path / "manifest.json",
+        schema_version=LEGACY_SCHEMA_VERSION,
+    )
+
+    assert not can_reserve_shorts_queue_item(result, item, settings)
 
 
 def test_loader_rejects_manifest_artifact_path_outside_data_root(tmp_path: Path) -> None:

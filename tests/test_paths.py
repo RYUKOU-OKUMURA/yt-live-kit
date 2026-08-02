@@ -17,6 +17,7 @@ from yt_live_kit.services._paths import (
     confined_video_path,
     confined_identifier_path,
     confined_path,
+    validate_confined_candidate,
 )
 from yt_live_kit.services.history import HistoryError, is_video_processed
 from yt_live_kit.services.jobs import create_job, update_job
@@ -63,6 +64,29 @@ def test_underscore_leading_youtube_id_remains_compatible(tmp_path: Path) -> Non
     path = confined_video_path(data_dir, UNDERSCORE_VIDEO_ID, "subtitles")
     assert path == data_dir / UNDERSCORE_VIDEO_ID / "subtitles"
     assert path.resolve().is_relative_to(data_dir.resolve())
+
+
+def test_candidate_validation_does_not_double_join_relative_data_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    data_dir = Path("data")
+    candidate = data_dir / UNDERSCORE_VIDEO_ID / "shorts" / "output" / "short.mp4"
+
+    assert validate_confined_candidate(data_dir, candidate) == candidate
+
+
+def test_candidate_validation_rejects_external_child_symlink_with_relative_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    data_dir = Path("data")
+    outside = tmp_path / "outside"
+    _symlink(data_dir, data_dir / "child", outside)
+
+    with pytest.raises(PathConfinementError, match="安全に扱えません"):
+        validate_confined_candidate(data_dir, data_dir / "child" / "new.json")
+    assert not (outside / "new.json").exists()
 
 
 @pytest.mark.parametrize("reserved_name", sorted(RESERVED_DATA_DIR_NAMES))
