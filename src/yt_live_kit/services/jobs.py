@@ -6,6 +6,7 @@ import inspect
 import fcntl
 import json
 import os
+import re
 import threading
 import traceback
 import uuid
@@ -59,6 +60,7 @@ _CURRENT_VALID = "valid"
 _CURRENT_CORRUPT = "corrupt"
 _CURRENT_TARGET_MISSING = "target_missing"
 _CurrentPointerStatus = Literal["missing", "valid", "corrupt", "target_missing"]
+_JOB_STATE_FILENAME = re.compile(r"^[A-Za-z0-9_-]+\.json$")
 
 _KNOWN_ERRORS = (
     AiPromptError,
@@ -427,7 +429,10 @@ def read_job(job_id: str, settings: Settings | None = None) -> JobState | None:
         data = json.loads(path.read_text(encoding="utf-8"))
         if not isinstance(data, dict):
             return None
-        return JobState.from_dict(data)
+        state = JobState.from_dict(data)
+        if state.job_id != path.stem:
+            return None
+        return state
     except (json.JSONDecodeError, KeyError, OSError, TypeError, UnicodeError, ValueError):
         return None
 
@@ -449,7 +454,7 @@ def _list_jobs_unlocked(settings: Settings) -> list[JobState]:
 
     jobs: list[JobState] = []
     for path in jobs_dir.glob("*.json"):
-        if path.name == "current.json":
+        if not _is_job_state_path(path):
             continue
         state = read_job(path.stem, settings)
         if state is not None:
@@ -457,6 +462,11 @@ def _list_jobs_unlocked(settings: Settings) -> list[JobState]:
 
     jobs.sort(key=lambda job: job.started_at, reverse=True)
     return jobs
+
+
+def _is_job_state_path(path: Path) -> bool:
+    """アプリが作る job state の filename だけを走査対象にする."""
+    return path.name != "current.json" and _JOB_STATE_FILENAME.fullmatch(path.name) is not None
 
 
 def _scan_running_jobs(settings: Settings) -> list[JobState]:
@@ -476,13 +486,15 @@ def _scan_running_jobs(settings: Settings) -> list[JobState]:
 
     jobs: list[JobState] = []
     for path in jobs_dir.glob("*.json"):
-        if path.name == "current.json":
+        if not _is_job_state_path(path):
             continue
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
             if not isinstance(data, dict):
                 raise ValueError("ジョブ JSON の形式が正しくありません")
             job = JobState.from_dict(data)
+            if job.job_id != path.stem:
+                raise ValueError("ジョブ ID とファイル名が一致しません")
         except (json.JSONDecodeError, KeyError, OSError, TypeError, UnicodeError, ValueError) as exc:
             raise JobBusyError(
                 "ジョブ状態を確認できないため、新しい処理を開始できません。"

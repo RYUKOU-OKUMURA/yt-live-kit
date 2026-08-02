@@ -792,6 +792,39 @@ def test_missing_pointer_with_corrupt_job_scan_stays_busy(tmp_path):
         start_job("single", lambda **_kwargs: None, settings=settings)
 
 
+def test_batch_summary_sidecar_is_ignored_by_job_store(tmp_path):
+    settings = Settings(data_dir=tmp_path)
+    jobs_dir = tmp_path / "_jobs"
+    jobs_dir.mkdir(parents=True)
+    (jobs_dir / "batch-1.batch_summary.json").write_text(
+        "{not a job state}", encoding="utf-8"
+    )
+
+    assert jobs_service.list_jobs(settings) == []
+    assert jobs_service.cleanup_finished(settings=settings) == 0
+    assert not is_busy(settings)
+
+
+def test_canonical_job_payload_filename_mismatch_fails_closed(tmp_path):
+    settings = Settings(data_dir=tmp_path)
+    jobs_dir = tmp_path / "_jobs"
+    jobs_dir.mkdir(parents=True)
+    payload = JobState(
+        job_id="payload-job",
+        kind="single",
+        status="running",
+    ).to_dict()
+    (jobs_dir / "filename-job.json").write_text(
+        json.dumps(payload), encoding="utf-8"
+    )
+
+    assert jobs_service.read_job("filename-job", settings) is None
+    assert jobs_service.list_jobs(settings) == []
+    assert is_busy(settings)
+    with pytest.raises(JobBusyError):
+        start_job("single", lambda **_kwargs: None, settings=settings)
+
+
 def test_close_orphans_does_not_close_live_worker(tmp_path):
     settings = Settings(data_dir=tmp_path)
     entered = threading.Event()
