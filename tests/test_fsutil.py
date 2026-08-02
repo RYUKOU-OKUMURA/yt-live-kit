@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 import pytest
 
-from yt_live_kit.services._fsutil import write_text_atomically
+from yt_live_kit.services._fsutil import advisory_lock, write_text_atomically
 
 
 def test_write_text_atomically_writes_content(tmp_path: Path):
@@ -36,3 +36,22 @@ def test_write_text_atomically_cleans_up_tmp_on_replace_failure(tmp_path: Path):
             write_text_atomically(target, "payload")
     assert not target.exists()
     assert list(tmp_path.glob(".*.tmp")) == []
+
+
+def test_write_text_atomically_applies_explicit_mode_and_fsyncs(
+    tmp_path: Path,
+) -> None:
+    target = tmp_path / "secret.json"
+    with patch("yt_live_kit.services._fsutil.os.fsync") as fsync:
+        write_text_atomically(target, "{}", mode=0o600)
+
+    assert target.stat().st_mode & 0o777 == 0o600
+    fsync.assert_called_once()
+
+
+def test_advisory_lock_uses_lock_file_in_parent_directory(tmp_path: Path) -> None:
+    lock_path = tmp_path / "nested" / ".settings.lock"
+
+    with advisory_lock(lock_path):
+        assert lock_path.is_file()
+        assert lock_path.stat().st_mode & 0o777 == 0o600

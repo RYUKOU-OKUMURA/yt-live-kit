@@ -25,6 +25,7 @@ from yt_live_kit.models.upload import (
     UploadResult,
     UploadStatusObservation,
 )
+from yt_live_kit.services._fsutil import advisory_lock, write_text_atomically
 from yt_live_kit.services.ffmpeg import FfmpegError, ffprobe_path_for, probe_duration
 
 SCOPES = ["https://www.googleapis.com/auth/youtube.force-ssl"]
@@ -56,10 +57,11 @@ def _token_path(settings: Settings) -> Path:
 def _save_token(token_path: Path, creds_json: str) -> None:
     """OAuth トークン JSON を保存し、ファイル・親ディレクトリの権限を制限する."""
     token_path.parent.mkdir(parents=True, exist_ok=True)
-    token_path.write_text(creds_json, encoding="utf-8")
-    os.chmod(token_path, 0o600)
-    # 既存ファイル（client_secret.json 等）のモードは変えず、ディレクトリの一覧権限のみ制限する。
-    os.chmod(token_path.parent, 0o700)
+    lock_path = token_path.with_name(f".{token_path.name}.lock")
+    with advisory_lock(lock_path):
+        # 既存ファイル（client_secret.json 等）のモードは変えず、ディレクトリの一覧権限のみ制限する。
+        os.chmod(token_path.parent, 0o700)
+        write_text_atomically(token_path, creds_json, mode=0o600)
 
 
 def _http_error_to_message(exc: Exception) -> str:

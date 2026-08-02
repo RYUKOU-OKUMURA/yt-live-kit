@@ -5,12 +5,35 @@ from __future__ import annotations
 import logging
 import os
 import tempfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
+
+import fcntl
 
 logger = logging.getLogger(__name__)
 
 
-def write_text_atomically(path: Path, text: str, *, encoding: str = "utf-8") -> None:
+@contextmanager
+def advisory_lock(path: Path, *, mode: int = 0o600) -> Iterator[None]:
+    """指定ファイルを使ってプロセス間の排他ロックを取得する."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a+b") as lock_file:
+        os.chmod(path, mode)
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
+
+def write_text_atomically(
+    path: Path,
+    text: str,
+    *,
+    encoding: str = "utf-8",
+    mode: int | None = None,
+) -> None:
     """同一ディレクトリの一時ファイル経由でテキストを原子的に書き込む."""
     temporary_path: Path | None = None
     try:
@@ -23,8 +46,12 @@ def write_text_atomically(path: Path, text: str, *, encoding: str = "utf-8") -> 
             suffix=".tmp",
             delete=False,
         ) as temporary:
-            temporary.write(text)
             temporary_path = Path(temporary.name)
+            if mode is not None:
+                os.chmod(temporary_path, mode)
+            temporary.write(text)
+            temporary.flush()
+            os.fsync(temporary.fileno())
         os.replace(temporary_path, path)
     finally:
         if temporary_path is not None:
