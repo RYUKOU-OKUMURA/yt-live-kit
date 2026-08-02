@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import fcntl
+import errno
+import hashlib
 import json
 import os
+import time
 import threading
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -35,6 +38,7 @@ from yt_live_kit.services.youtube_api import (
     build_upload_body,
     fetch_mine_channel,
     poll_processing_status,
+    poll_publication_status,
     upload_video_resumable,
     validate_snapshot_identity,
 )
@@ -44,6 +48,15 @@ _ATTEMPTS_VERSION = 1
 _PROCESS_LOCK = threading.RLock()
 _LOCK_STATE = threading.local()
 _LA = ZoneInfo("America/Los_Angeles")
+_PUBLICATION_POLL_KIND = "upload_publication"
+_PUBLICATION_POLL_TERMINAL = frozenset(
+    {
+        "published",
+        "suspected_private_lock",
+        "processing_failed",
+        "publication_timeout",
+    }
+)
 _ALLOWED_TRANSITIONS: dict[str, frozenset[str]] = {
     "reserved": frozenset({"uploading", "failed", "needs_reconciliation"}),
     "uploading": frozenset({"uploaded", "failed", "needs_reconciliation"}),
@@ -103,6 +116,38 @@ def _queue_path(settings: Settings) -> Path:
 
 def _attempts_path(settings: Settings) -> Path:
     return _schedule_dir(settings) / "upload_attempts.json"
+
+
+def _publication_lock_path(
+    settings: Settings, operation_id: str, *, purpose: str
+) -> Path:
+    """operation ID を path にせず、公開確認用 lock の場所を決める."""
+    digest = hashlib.sha256(operation_id.encode("utf-8")).hexdigest()
+    return _schedule_dir(settings) / f".publication_{purpose}_{digest}.lock"
+
+
+@contextmanager
+def _publication_file_lock(
+    settings: Settings, operation_id: str, *, purpose: str
+) -> Iterator[None]:
+    """公開確認の claim / poll を operation 単位で重複させない."""
+    path = _publication_lock_path(settings, operation_id, purpose=purpose)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a+b") as lock_file:
+        try:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as exc:
+            if exc.errno in {errno.EACCES, errno.EAGAIN}:
+                raise UploadQueueError(
+                    "同じ投稿 operation の公開状態確認が既に実行中です。"
+                ) from exc
+            raise UploadQueueError(
+                "公開状態確認の lock を取得できないため、投稿を停止しました。"
+            ) from exc
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
 
 @contextmanager
@@ -352,6 +397,149 @@ def append_poll_observation(
         operations[index] = replacement
         _write_operations_unlocked(settings, operations)
         return replacement
+
+
+def _publication_poll_marker(operation_id: str) -> str:
+    """job JSON の title に使う非秘密の operation marker."""
+    digest = hashlib.sha256(operation_id.encode("utf-8")).hexdigest()
+    return f"publication:{digest}"
+
+
+def _latest_publication_classification(
+    operation: UploadOperation,
+) -> str | None:
+    for observation in reversed(operation.poll_history):
+        if observation.phase == "publication":
+            return observation.classification
+    return None
+
+
+def _validate_publication_poll_start(
+    operation: UploadOperation, *, now: datetime
+) -> None:
+    if operation.state != "uploaded" or not operation.video_id:
+        raise UploadQueueError(
+            "アップロード済みの動画 ID がないため、公開状態を確認できません。"
+        )
+    latest = _latest_publication_classification(operation)
+    if latest in _PUBLICATION_POLL_TERMINAL:
+        raise UploadQueueError(
+            "この投稿 operation の公開状態確認は既に完了しています。"
+        )
+    if now < operation.content.publish_at:
+        raise UploadQueueError(
+            "公開予定時刻までは公開状態を確認できません。予約時刻後に実行してください。"
+        )
+
+
+def _has_running_publication_poll(
+    operation_id: str, settings: Settings
+) -> bool:
+    """永続 job JSON から同一 operation の実行中 poll を探す."""
+    from yt_live_kit.services.jobs import list_jobs
+
+    marker = _publication_poll_marker(operation_id)
+    return any(
+        job.kind == _PUBLICATION_POLL_KIND
+        and job.title == marker
+        and job.status == "running"
+        for job in list_jobs(settings)
+    )
+
+
+def start_publication_poll(
+    operation_id: str,
+    settings: Settings,
+    *,
+    now: datetime | None = None,
+) -> str:
+    """予約時刻後だけ bounded publication poll job を起動する.
+
+    upload job とは別の job を作るため、予約時刻まで upload worker を
+    占有しない。job の存在は jobs の永続 JSON で復元し、operation の状態と
+    poll history は queue.json を正本として扱う。
+    """
+    reference = _utc_timestamp(now, "公開状態確認日時")
+    operation = load_operation(operation_id, settings)
+    _validate_publication_poll_start(operation, now=reference)
+
+    # start_job() 自体の process 間排他は既存契約のままなので、CTA の
+    # claim だけを専用 lock で直列化し、同じ operation の二重 job 作成を防ぐ。
+    with _publication_file_lock(settings, operation_id, purpose="claim"):
+        operation = load_operation(operation_id, settings)
+        _validate_publication_poll_start(operation, now=reference)
+        if _has_running_publication_poll(operation_id, settings):
+            raise UploadQueueError(
+                "同じ投稿 operation の公開状態確認が既に実行中です。"
+            )
+        from yt_live_kit.services.jobs import JobBusyError, start_job
+
+        try:
+            return start_job(
+                _PUBLICATION_POLL_KIND,
+                publication_poll_job_target,
+                video_id=operation.video_id,
+                title=_publication_poll_marker(operation_id),
+                settings=settings,
+                operation_id=operation_id,
+            )
+        except JobBusyError as exc:
+            raise UploadQueueError(
+                "別の処理が実行中のため、公開状態確認を開始できません。"
+            ) from exc
+        except Exception as exc:
+            raise UploadQueueError(
+                "公開状態確認ジョブを開始できませんでした。"
+            ) from exc
+
+
+def publication_poll_job_target(
+    *,
+    report,
+    settings: Settings,
+    job_id: str,
+    operation_id: str,
+    service: Any | None = None,
+    sleep_fn: Callable[[float], None] = time.sleep,
+    clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
+) -> None:
+    """1 operation の公開状態を bounded poll し、同じ queue record に追記する."""
+    with _publication_file_lock(settings, operation_id, purpose="poll"):
+        operation = load_operation(operation_id, settings)
+        reference = _utc_timestamp(clock(), "公開状態確認日時")
+        _validate_publication_poll_start(operation, now=reference)
+
+        # follow-up job 自身の永続 result_ref を先に設定する。再起動後も
+        # status bar と jobs の復元経路から operation ID を失わない。
+        from yt_live_kit.services.jobs import update_job
+
+        update_job(job_id, settings=settings, result_ref=operation_id)
+        report(stage="publication", message="公開状態を確認しています")
+        processing_succeeded = any(
+            observation.phase == "processing"
+            and observation.classification == "processing_succeeded"
+            for observation in operation.poll_history
+        )
+
+        try:
+            poll_publication_status(
+                operation.video_id or "",
+                operation.content.publish_at,
+                settings,
+                processing_succeeded=processing_succeeded,
+                service=service,
+                sleep_fn=sleep_fn,
+                clock=clock,
+                on_observation=lambda item: append_poll_observation(
+                    operation_id, item, settings
+                ),
+            )
+        except YouTubeAPIError as exc:
+            raise UploadQueueError(
+                "アップロード済み動画の公開状態を確認できませんでした。"
+                "YouTube Studio で operation の動画 ID を手動確認してください。"
+            ) from exc
+        report(stage="publication", message="公開状態の確認が完了しました")
 
 
 def set_publication_eligibility(

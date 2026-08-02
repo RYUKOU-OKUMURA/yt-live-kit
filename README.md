@@ -219,6 +219,8 @@ https://www.youtube.com/@your-handle
 
 生成済みショートは、動画詳細画面の **「公開・投稿」** から次の空き枠へ予約できます。ショート生産ラインから進んだ場合は、最終確認済みの対象がそのまま引き継がれます。事前に設定画面で、毎日の投稿時刻、投稿間隔、IANA timezone（既定は `Asia/Tokyo`）を保存してください。OAuth のセットアップは上記「概要欄への反映」と共通です。
 
+アップロード worker は、アップロード後の YouTube 側の processing 確認までで終了し、予約時刻まで占有しません。予約時刻前は YouTube API を呼ばず、時刻到来後に operation カードの **「公開状態を確認」** を押すと、bounded な別 job が公開状態を確認します。確認結果は元の operation へ追記され、アプリ再起動後も同じ operation から再開できます。同じ operation の確認中に二重起動はできません。
+
 この機能は **`privacyStatus=private` と未来の `publishAt` を使う予約投稿専用**です。`notifySubscribers=false` も固定です。即時公開、`public` や `unlisted` を直接指定する投稿、`publishAt` のない投稿は対象外です。公開予定日時は IANA timezone を持つ日時として現在より 10 分以上先である必要があり、YouTube へ送信するときだけ UTC の RFC 3339 `Z` 形式へ変換されます。条件を満たさない日時を即時公開へ変更することはありません。
 
 ### 予約手順と確認内容

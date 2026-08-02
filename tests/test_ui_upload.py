@@ -876,6 +876,57 @@ def test_poll_classification_is_always_rendered_in_japanese(
     assert classification not in caption.call_args_list[-1].args[0]
 
 
+def test_uploaded_operation_starts_publication_poll_from_explicit_cta(
+    tmp_path: Path,
+) -> None:
+    base = _operation(tmp_path, state="uploaded")
+    content = base.content.model_copy(
+        update={"publish_at": NOW - timedelta(minutes=1)}
+    )
+    operation = base.model_copy(update={"content": content})
+    settings = Settings(data_dir=tmp_path)
+    with (
+        patch.object(upload, "datetime") as datetime_cls,
+        patch.object(upload.st, "container", side_effect=_container),
+        patch.object(upload.st, "markdown"),
+        patch.object(upload.st, "caption"),
+        patch.object(upload.st, "write"),
+        patch.object(upload.st, "button", return_value=True) as button,
+        patch.object(upload.st, "success"),
+        patch.object(upload.st, "rerun"),
+        patch.object(upload, "start_publication_poll", return_value="poll-job") as start,
+        patch.object(upload, "set_active_job_id") as set_job,
+    ):
+        datetime_cls.now.return_value = NOW
+        upload.render_upload_operation(operation, settings=settings)
+
+    start.assert_called_once_with(operation.operation_id, settings, now=NOW)
+    set_job.assert_called_once_with("poll-job")
+    button.assert_called_once()
+
+
+def test_uploaded_operation_does_not_offer_api_cta_before_publish_time(
+    tmp_path: Path,
+) -> None:
+    operation = _operation(tmp_path, state="uploaded")
+    settings = Settings(data_dir=tmp_path)
+    with (
+        patch.object(upload, "datetime") as datetime_cls,
+        patch.object(upload.st, "container", side_effect=_container),
+        patch.object(upload.st, "markdown"),
+        patch.object(upload.st, "caption") as caption,
+        patch.object(upload.st, "write"),
+        patch.object(upload.st, "button") as button,
+        patch.object(upload, "start_publication_poll") as start,
+    ):
+        datetime_cls.now.return_value = NOW
+        upload.render_upload_operation(operation, settings=settings)
+
+    button.assert_not_called()
+    start.assert_not_called()
+    assert any("公開予定時刻までは" in item.args[0] for item in caption.call_args_list)
+
+
 def test_operation_session_mapping_is_scoped_to_video_and_fallbacks_by_clip(tmp_path: Path) -> None:
     settings = Settings(data_dir=tmp_path)
     operation = _operation(tmp_path)

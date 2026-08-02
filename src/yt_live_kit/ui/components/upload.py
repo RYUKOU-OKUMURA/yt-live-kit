@@ -33,7 +33,11 @@ from yt_live_kit.services.shorts_queue import (
     load_latest_shorts_queue_result,
 )
 from yt_live_kit.services.shorts_line import LineReservationStartedError, LineStateError
-from yt_live_kit.services.upload_queue import UploadQueueError, load_operation
+from yt_live_kit.services.upload_queue import (
+    UploadQueueError,
+    load_operation,
+    start_publication_poll,
+)
 from yt_live_kit.ui.state import set_active_job_id
 
 _OPERATION_IDS_KEY = "upload_operation_ids"
@@ -63,6 +67,14 @@ _POLL_CLASSIFICATION_LABELS = {
     "published": "公開済み",
     "publication_timeout": "公開確認がタイムアウト",
 }
+_PUBLICATION_POLL_TERMINAL = frozenset(
+    {
+        "published",
+        "suspected_private_lock",
+        "processing_failed",
+        "publication_timeout",
+    }
+)
 
 
 def _safe_text(value: object) -> str:
@@ -114,7 +126,9 @@ def _resolve_operation(
     return latest_operation_for_source(video_id, clip_id, settings)
 
 
-def render_upload_operation(operation: UploadOperation) -> None:
+def render_upload_operation(
+    operation: UploadOperation, settings: Settings | None = None
+) -> None:
     """upload operation だけを pipeline result と混同せず表示する."""
     with st.container(border=True):
         st.markdown(f"**投稿状態: {_STATE_LABELS[operation.state]}**")
@@ -145,6 +159,41 @@ def render_upload_operation(operation: UploadOperation) -> None:
                 f"最終確認 {latest.polled_at.isoformat()} / "
                 f"{_POLL_CLASSIFICATION_LABELS[latest.classification]}"
             )
+        if settings is not None and operation.state == "uploaded" and operation.video_id:
+            latest_publication = next(
+                (
+                    observation.classification
+                    for observation in reversed(operation.poll_history)
+                    if observation.phase == "publication"
+                ),
+                None,
+            )
+            if latest_publication in _PUBLICATION_POLL_TERMINAL:
+                return
+            now = datetime.now(timezone.utc)
+            if now < operation.content.publish_at:
+                st.caption(
+                    "公開予定時刻までは公開状態を確認できません。"
+                    "予約時刻後にこの画面から確認してください。"
+                )
+                return
+            if st.button(
+                "公開状態を確認",
+                key=f"upload_publication_poll_{operation.operation_id}",
+                type="secondary",
+            ):
+                try:
+                    poll_job_id = start_publication_poll(
+                        operation.operation_id,
+                        settings,
+                        now=now,
+                    )
+                except UploadQueueError as exc:
+                    st.error(_safe_text(exc))
+                    return
+                set_active_job_id(poll_job_id)
+                st.success("公開状態の確認ジョブを開始しました。")
+                st.rerun()
 
 
 def _selection_from_label(value: str | None) -> bool | None:
@@ -512,7 +561,7 @@ def render_upload_section(
                 )
                 continue
             if operation is not None:
-                render_upload_operation(operation)
+                render_upload_operation(operation, settings=settings)
             start_ms = _clip_start_ms(result, item.target_id)
             try:
                 initial_description = build_shorts_description(

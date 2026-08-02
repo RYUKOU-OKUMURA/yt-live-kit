@@ -370,6 +370,8 @@ Streamlit は、エントリスクリプト（[`src/yt_live_kit/ui/app.py`](../s
 
 **R1 監査注記（2026-08-02）:** P3 の 1 本では公開前後の bounded poll を手動で本番 service へ接続し、上記の受け入れ証跡を得た。一方、通常の予約 operation は upload job 内の processing poll までしか自動接続されず、予約時刻後の publication poll を起動する運用導線がない。poll service と単体テストの存在だけでは通常運用の要件を満たさないため、H1-5 で upload job と分離した明示 CTA または follow-up job を実装するまで、この接続要件を未完了へ戻す。
 
+**H1-5 実装契約:** 通常の upload worker は processing 確認後に終了する。予約時刻後の operation カードに表示する明示 CTA は既存 job API で bounded な publication poll job を起動し、予約時刻前は YouTube API を呼ばない。poll job は operation 単位の private lock で二重起動を拒否し、同じ `operation_id` の `queue.json` へ各 observation を atomic 追記する。永続 job JSON と queue の poll history は再起動後の復元に利用する。
+
 ### FR-28: 投稿スケジュールポリシー
 
 | 項目 | 内容 |

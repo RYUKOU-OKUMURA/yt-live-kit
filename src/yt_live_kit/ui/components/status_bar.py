@@ -41,12 +41,14 @@ _KIND_LABELS: dict[str, str] = {
     "shorts_queue": "ショート量産",
     "short_cut": "ショート区間提案",
     "upload": "予約投稿",
+    "upload_publication": "公開状態確認",
     "cut_clip": "切り出し",
 }
 
 _PIPELINE_KINDS = frozenset({"single", "regenerate", "highlights", "shorts"})
+_UPLOAD_KINDS = frozenset({"upload", "upload_publication"})
 _KNOWN_NON_PIPELINE_KINDS = frozenset(
-    {"batch", "shorts_queue", "short_cut", "upload", "cut_clip"}
+    {"batch", "shorts_queue", "short_cut", "upload", "upload_publication", "cut_clip"}
 )
 
 _RESULT_LOAD_ERROR = (
@@ -191,14 +193,16 @@ def _handle_finished_job(job: JobState) -> None:
 
         elif job.kind in _PIPELINE_KINDS:
             set_job_error("完了ジョブに成果物の参照先がありません。ライブラリから確認してください。")
-        elif job.kind == "upload":
+        elif job.kind in _UPLOAD_KINDS:
             if not job.result_ref:
-                set_job_error("完了した予約投稿に operation ID がありません。手動で確認してください。")
+                set_job_error(
+                    "完了した投稿処理に operation ID がありません。手動で確認してください。"
+                )
             else:
                 try:
                     load_operation(job.result_ref, settings)
                 except UploadQueueError as exc:
-                    set_job_error(f"予約投稿の状態を読み込めませんでした。{exc}")
+                    set_job_error(f"投稿状態を読み込めませんでした。{exc}")
         elif job.kind == "shorts_queue":
             video_id = job.video_id or job.result_ref
             if not video_id:

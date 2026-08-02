@@ -26,9 +26,11 @@ from yt_live_kit.services.upload_queue import (
     create_reserved_operation,
     list_operations,
     list_upload_attempts,
+    publication_poll_job_target,
     record_upload_attempt,
     recover_upload_operations,
     set_publication_eligibility,
+    start_publication_poll,
     transition_operation,
     upload_job_target,
 )
@@ -79,6 +81,69 @@ def _reserved(
         settings=settings,
     )
     return settings, operation
+
+
+def _uploaded(
+    tmp_path: Path,
+    *,
+    publish_at: datetime,
+    operation_id: str = "op1",
+    job_id: str = "job1",
+):
+    settings, operation = _reserved(
+        tmp_path,
+        operation_id=operation_id,
+        job_id=job_id,
+        publish_at=publish_at,
+    )
+    transition_operation(
+        operation.operation_id,
+        "uploading",
+        settings,
+        now=datetime(2026, 8, 1, tzinfo=timezone.utc),
+    )
+    record_upload_attempt(
+        operation.operation_id,
+        operation.job_id,
+        settings,
+        now=datetime(2026, 8, 1, tzinfo=timezone.utc),
+    )
+    uploaded = transition_operation(
+        operation.operation_id,
+        "uploaded",
+        settings,
+        video_id="yt1",
+        now=datetime(2026, 8, 1, tzinfo=timezone.utc),
+    )
+    processing = UploadStatusObservation(
+        polled_at=datetime(2026, 8, 1, 0, 1, tzinfo=timezone.utc),
+        phase="processing",
+        status={"privacyStatus": "private"},
+        processing_details={"processingStatus": "succeeded"},
+        classification="processing_succeeded",
+        error=None,
+    )
+    return settings, append_poll_observation(operation.operation_id, processing, settings)
+
+
+class _StatusService:
+    def __init__(self, responses: list[dict]) -> None:
+        self.responses = iter(responses)
+        self.calls = 0
+
+    def videos(self):
+        service = self
+
+        class Videos:
+            def list(self, **_kwargs):
+                class Request:
+                    def execute(self):
+                        service.calls += 1
+                        return next(service.responses)
+
+                return Request()
+
+        return Videos()
 
 
 def test_operation_models_are_frozen_and_reject_unknown_fields(tmp_path: Path) -> None:
@@ -725,6 +790,294 @@ def test_poll_history_round_trips_without_losing_old_observations(tmp_path: Path
     restored = list_operations(settings)[0]
     assert restored.poll_history == (first, second)
     assert restored.latest_observation == second
+
+
+def test_publication_follow_up_appends_public_observation_to_same_operation(
+    tmp_path: Path,
+) -> None:
+    publish_at = datetime(2026, 8, 2, tzinfo=timezone.utc)
+    settings, operation = _uploaded(tmp_path, publish_at=publish_at)
+    service = _StatusService(
+        [
+            {
+                "items": [
+                    {
+                        "status": {"privacyStatus": "public"},
+                        "processingDetails": {"processingStatus": "succeeded"},
+                    }
+                ]
+            }
+        ]
+    )
+    with patch("yt_live_kit.services.jobs.update_job") as update_job:
+        publication_poll_job_target(
+            report=MagicMock(),
+            settings=settings,
+            job_id="publication-job",
+            operation_id=operation.operation_id,
+            service=service,
+            sleep_fn=lambda _seconds: None,
+            clock=lambda: datetime(2026, 8, 2, 0, 1, tzinfo=timezone.utc),
+        )
+
+    restored = list_operations(settings)[0]
+    assert restored.operation_id == operation.operation_id
+    assert restored.poll_history[-1].phase == "publication"
+    assert restored.poll_history[-1].classification == "published"
+    assert restored.poll_history[-1].status["privacyStatus"] == "public"
+    assert service.calls == 1
+    update_job.assert_called_once_with(
+        "publication-job", settings=settings, result_ref=operation.operation_id
+    )
+
+
+def test_publication_follow_up_rejects_before_schedule_without_api_call(
+    tmp_path: Path,
+) -> None:
+    publish_at = datetime(2026, 8, 2, tzinfo=timezone.utc)
+    settings, operation = _uploaded(tmp_path, publish_at=publish_at)
+    service = _StatusService([])
+    with (
+        patch("yt_live_kit.services.jobs.update_job") as update_job,
+        pytest.raises(UploadQueueError, match="公開予定時刻までは"),
+    ):
+        publication_poll_job_target(
+            report=MagicMock(),
+            settings=settings,
+            job_id="publication-job",
+            operation_id=operation.operation_id,
+            service=service,
+            clock=lambda: datetime(2026, 8, 1, 23, 59, tzinfo=timezone.utc),
+        )
+    assert service.calls == 0
+    update_job.assert_not_called()
+    assert list_operations(settings)[0].poll_history[-1].phase == "processing"
+
+
+def test_publication_follow_up_bounded_timeout_appends_all_observations(
+    tmp_path: Path,
+) -> None:
+    publish_at = datetime(2026, 8, 2, tzinfo=timezone.utc)
+    settings, operation = _uploaded(tmp_path, publish_at=publish_at)
+    response = {
+        "items": [
+            {
+                "status": {
+                    "privacyStatus": "private",
+                    "publishAt": "2026-08-02T00:00:00Z",
+                },
+                "processingDetails": {"processingStatus": "succeeded"},
+            }
+        ]
+    }
+    service = _StatusService([response] * 20)
+    with patch("yt_live_kit.services.jobs.update_job"):
+        publication_poll_job_target(
+            report=MagicMock(),
+            settings=settings,
+            job_id="publication-job",
+            operation_id=operation.operation_id,
+            service=service,
+            sleep_fn=lambda _seconds: None,
+            clock=lambda: datetime(2026, 8, 2, 0, 1, tzinfo=timezone.utc),
+        )
+
+    restored = list_operations(settings)[0]
+    publication = [
+        item for item in restored.poll_history if item.phase == "publication"
+    ]
+    assert len(publication) == 20
+    assert publication[-1].classification == "publication_timeout"
+    assert service.calls == 20
+
+
+def test_publication_follow_up_classifies_private_lock_without_success(
+    tmp_path: Path,
+) -> None:
+    publish_at = datetime(2026, 8, 2, tzinfo=timezone.utc)
+    settings, operation = _uploaded(tmp_path, publish_at=publish_at)
+    service = _StatusService(
+        [
+            {
+                "items": [
+                    {
+                        "status": {
+                            "privacyStatus": "private",
+                            "publishAt": "2026-08-02T00:00:00Z",
+                        },
+                        "processingDetails": {"processingStatus": "succeeded"},
+                    }
+                ]
+            }
+        ]
+    )
+    with patch("yt_live_kit.services.jobs.update_job"):
+        publication_poll_job_target(
+            report=MagicMock(),
+            settings=settings,
+            job_id="publication-job",
+            operation_id=operation.operation_id,
+            service=service,
+            sleep_fn=lambda _seconds: None,
+            clock=lambda: datetime(2026, 8, 2, 0, 6, tzinfo=timezone.utc),
+        )
+
+    latest = list_operations(settings)[0].latest_observation
+    assert latest is not None
+    assert latest.classification == "suspected_private_lock"
+    assert list_operations(settings)[0].publication_eligibility == "suspected_private_lock"
+
+
+def test_publication_follow_up_can_resume_after_interrupted_poll(
+    tmp_path: Path,
+) -> None:
+    publish_at = datetime(2026, 8, 2, tzinfo=timezone.utc)
+    settings, operation = _uploaded(tmp_path, publish_at=publish_at)
+    private_service = _StatusService(
+        [
+            {
+                "items": [
+                    {
+                        "status": {
+                            "privacyStatus": "private",
+                            "publishAt": "2026-08-02T00:00:00Z",
+                        },
+                        "processingDetails": {"processingStatus": "succeeded"},
+                    }
+                ]
+            }
+        ]
+    )
+
+    def crash_after_first_observation(_seconds: float) -> None:
+        raise RuntimeError("simulated restart")
+
+    with patch("yt_live_kit.services.jobs.update_job"):
+        with pytest.raises(RuntimeError, match="simulated restart"):
+            publication_poll_job_target(
+                report=MagicMock(),
+                settings=settings,
+                job_id="publication-job-1",
+                operation_id=operation.operation_id,
+                service=private_service,
+                sleep_fn=crash_after_first_observation,
+                clock=lambda: datetime(2026, 8, 2, 0, 1, tzinfo=timezone.utc),
+            )
+
+    assert list_operations(settings)[0].latest_observation.classification == "scheduled"
+
+    public_service = _StatusService(
+        [
+            {
+                "items": [
+                    {
+                        "status": {"privacyStatus": "public"},
+                        "processingDetails": {"processingStatus": "succeeded"},
+                    }
+                ]
+            }
+        ]
+    )
+    with patch("yt_live_kit.services.jobs.update_job"):
+        publication_poll_job_target(
+            report=MagicMock(),
+            settings=settings,
+            job_id="publication-job-2",
+            operation_id=operation.operation_id,
+            service=public_service,
+            clock=lambda: datetime(2026, 8, 2, 0, 2, tzinfo=timezone.utc),
+        )
+
+    restored = list_operations(settings)[0]
+    assert restored.latest_observation.classification == "published"
+    assert len([item for item in restored.poll_history if item.phase == "publication"]) == 2
+
+
+def test_publication_follow_up_rejects_duplicate_terminal_poll(
+    tmp_path: Path,
+) -> None:
+    publish_at = datetime(2026, 8, 2, tzinfo=timezone.utc)
+    settings, operation = _uploaded(tmp_path, publish_at=publish_at)
+    service = _StatusService(
+        [
+            {
+                "items": [
+                    {
+                        "status": {"privacyStatus": "public"},
+                        "processingDetails": {"processingStatus": "succeeded"},
+                    }
+                ]
+            }
+        ]
+    )
+    with patch("yt_live_kit.services.jobs.update_job"):
+        publication_poll_job_target(
+            report=MagicMock(),
+            settings=settings,
+            job_id="publication-job-1",
+            operation_id=operation.operation_id,
+            service=service,
+            clock=lambda: datetime(2026, 8, 2, 0, 1, tzinfo=timezone.utc),
+        )
+        with pytest.raises(UploadQueueError, match="既に完了"):
+            publication_poll_job_target(
+                report=MagicMock(),
+                settings=settings,
+                job_id="publication-job-2",
+                operation_id=operation.operation_id,
+                service=service,
+                clock=lambda: datetime(2026, 8, 2, 0, 2, tzinfo=timezone.utc),
+            )
+    assert service.calls == 1
+
+
+def test_start_publication_poll_rejects_duplicate_running_job_and_before_schedule(
+    tmp_path: Path,
+) -> None:
+    publish_at = datetime(2026, 8, 2, tzinfo=timezone.utc)
+    settings, operation = _uploaded(tmp_path, publish_at=publish_at)
+    with (
+        patch("yt_live_kit.services.upload_queue._has_running_publication_poll", return_value=True),
+        patch("yt_live_kit.services.jobs.start_job") as start_job,
+        pytest.raises(UploadQueueError, match="既に実行中"),
+    ):
+        start_publication_poll(
+            operation.operation_id,
+            settings,
+            now=datetime(2026, 8, 2, 0, 1, tzinfo=timezone.utc),
+        )
+    start_job.assert_not_called()
+    with (
+        patch("yt_live_kit.services.jobs.start_job") as start_job,
+        pytest.raises(UploadQueueError, match="公開予定時刻までは"),
+    ):
+        start_publication_poll(
+            operation.operation_id,
+            settings,
+            now=datetime(2026, 8, 1, 23, 59, tzinfo=timezone.utc),
+        )
+    start_job.assert_not_called()
+
+
+def test_publication_follow_up_private_lock_rejects_concurrent_poll(
+    tmp_path: Path,
+) -> None:
+    from yt_live_kit.services.upload_queue import _publication_file_lock
+
+    publish_at = datetime(2026, 8, 2, tzinfo=timezone.utc)
+    settings, operation = _uploaded(tmp_path, publish_at=publish_at)
+    service = _StatusService([])
+    with _publication_file_lock(settings, operation.operation_id, purpose="poll"):
+        with pytest.raises(UploadQueueError, match="既に実行中"):
+            publication_poll_job_target(
+                report=MagicMock(),
+                settings=settings,
+                job_id="publication-job",
+                operation_id=operation.operation_id,
+                service=service,
+                clock=lambda: datetime(2026, 8, 2, 0, 1, tzinfo=timezone.utc),
+            )
+    assert service.calls == 0
 
 
 def test_observation_is_deeply_immutable_and_json_round_trips() -> None:

@@ -248,6 +248,7 @@ def test_kind_label_returns_japanese_name() -> None:
     assert kind_label("single") == "単本処理"
     assert kind_label("batch") == "一括処理"
     assert kind_label("short_cut") == "ショート区間提案"
+    assert kind_label("upload_publication") == "公開状態確認"
     assert kind_label("unknown") == "unknown"
 
 
