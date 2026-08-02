@@ -7,11 +7,14 @@ import json
 import os
 import tempfile
 import uuid
+from contextlib import contextmanager
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Iterator, Literal
+
+import fcntl
 
 from yt_live_kit.config import Settings, get_settings
 from yt_live_kit.models.clips import ClipCandidate
@@ -433,6 +436,7 @@ class ShortsQueueResult:
     failure_count: int
     manifest_path: Path
     owner_job_id: str | None = None
+    schema_version: int = SCHEMA_VERSION
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -514,6 +518,7 @@ class ShortsQueueResult:
             success_count=success_count,
             failure_count=failure_count,
             manifest_path=Path(manifest_path),
+            schema_version=schema_version,
         )
 
 
@@ -872,31 +877,70 @@ def reusable_shorts_queue_items(
     }
 
 
+def can_reserve_shorts_queue_item(
+    result: ShortsQueueResult,
+    item: ShortsQueueItemResult,
+    settings: Settings | None = None,
+) -> bool:
+    """予約直前に成果物の存在と、現行 schema の証跡を再検証する.
+
+    schema 1 の正常 done manifest は読み込み互換を保つため、path の安全性と
+    非空ファイルだけを確認する。schema 2 以降は入力・出力 fingerprint まで
+    一致しない成功 item を予約対象にしない。
+    """
+    settings = settings or get_settings()
+    if item.status != "succeeded" or item.output_path is None:
+        return False
+    try:
+        confined_path(settings.data_dir, item.output_path, label="ショート量産成果物")
+        if not item.output_path.is_file() or item.output_path.stat().st_size <= 0:
+            return False
+    except (OSError, PathConfinementError):
+        return False
+    if result.schema_version == LEGACY_SCHEMA_VERSION:
+        return True
+    spec = next(
+        (value for value in result.clip_specs if value.target_id == item.target_id),
+        None,
+    )
+    return spec is not None and can_reuse_shorts_queue_item(
+        video_id=result.video_id,
+        spec=spec,
+        item=item,
+        settings=settings,
+    )
+
+
 def _queue_owner_is_live(result: ShortsQueueResult, settings: Settings) -> bool:
     """H1-1 の job owner が生きている間は queue を interrupted にしない."""
     try:
-        from yt_live_kit.services.jobs import read_job
+        from yt_live_kit.services.jobs import _owner_is_live, read_job
 
         job = read_job(result.owner_job_id or result.job_id, settings)
     except Exception:
         return False
     if job is None or job.job_id != result.owner_job_id or job.status != "running":
         return False
-    owner_pid = job.owner_pid
-    if not isinstance(owner_pid, int) or owner_pid <= 0:
-        return False
+    return _owner_is_live(job, settings)
+
+
+@contextmanager
+def _manifest_lock(path: Path) -> Iterator[None]:
+    """manifest の read-modify-write を process 境界で直列化する."""
+    lock_path = path.with_name(f".{path.name}.lock")
     try:
-        os.kill(owner_pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    except OSError:
-        return False
-    return True
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        with lock_path.open("a+", encoding="utf-8") as lock_file:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+    except OSError as exc:
+        raise ShortsQueueError("ショート量産 manifest の排他を取得できませんでした。") from exc
 
 
-def _write_manifest(result: ShortsQueueResult, settings: Settings) -> None:
+def _write_manifest_unlocked(result: ShortsQueueResult, settings: Settings) -> None:
     _validate_result_paths(result, settings)
     path = result.manifest_path
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -930,6 +974,11 @@ def _write_manifest(result: ShortsQueueResult, settings: Settings) -> None:
     finally:
         if temporary_path is not None and temporary_path.exists():
             temporary_path.unlink(missing_ok=True)
+
+
+def _write_manifest(result: ShortsQueueResult, settings: Settings) -> None:
+    with _manifest_lock(result.manifest_path):
+        _write_manifest_unlocked(result, settings)
 
 
 def run_shorts_queue(
@@ -1141,26 +1190,31 @@ def recover_shorts_queue_result(
     closed にする。
     """
     settings = settings or get_settings()
-    result = _read_shorts_queue_result(video_id, job_id, settings)
-    if result is None or result.status != "running":
-        return result
-    if _queue_owner_is_live(result, settings):
-        return result
-    recovered = ShortsQueueResult(
-        video_id=result.video_id,
-        job_id=result.job_id,
-        owner_job_id=result.owner_job_id,
-        status="interrupted",
-        created_at=result.created_at,
-        updated_at=datetime.now(timezone.utc),
-        clip_specs=result.clip_specs,
-        items=result.items,
-        success_count=result.success_count,
-        failure_count=result.failure_count,
-        manifest_path=result.manifest_path,
-    )
-    _write_manifest(recovered, settings)
-    return recovered
+    path = _manifest_path(video_id, job_id, settings)
+    if not path.is_file():
+        return None
+    with _manifest_lock(path):
+        result = _read_shorts_queue_result(video_id, job_id, settings)
+        if result is None or result.status != "running":
+            return result
+        if _queue_owner_is_live(result, settings):
+            return result
+        recovered = ShortsQueueResult(
+            video_id=result.video_id,
+            job_id=result.job_id,
+            owner_job_id=result.owner_job_id,
+            status="interrupted",
+            created_at=result.created_at,
+            updated_at=datetime.now(timezone.utc),
+            clip_specs=result.clip_specs,
+            items=result.items,
+            success_count=result.success_count,
+            failure_count=result.failure_count,
+            manifest_path=result.manifest_path,
+            schema_version=result.schema_version,
+        )
+        _write_manifest_unlocked(recovered, settings)
+        return recovered
 
 
 def load_shorts_queue_result(

@@ -30,6 +30,7 @@ from yt_live_kit.services.shorts_queue import (
     ShortsQueueError,
     ShortsQueueItemResult,
     ShortsQueueResult,
+    can_reserve_shorts_queue_item,
     load_latest_shorts_queue_result,
 )
 from yt_live_kit.services.shorts_line import LineReservationStartedError, LineStateError
@@ -582,6 +583,14 @@ def render_upload_section(
                         f"{output_warning} 予約投稿せず、ショート生成を再実行してください。"
                     )
                     continue
+                schema_version = getattr(result, "schema_version", None)
+                if isinstance(schema_version, int) and schema_version >= 2:
+                    if not can_reserve_shorts_queue_item(result, item, settings):
+                        st.warning(
+                            "生成成果物の入力または出力 fingerprint を確認できません。"
+                            "予約投稿せず、ショート生成を再実行してください。"
+                        )
+                        continue
             try:
                 operation = _resolve_operation(video_id, item.target_id, settings)
             except UploadQueueError:

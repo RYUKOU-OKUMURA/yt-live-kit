@@ -25,6 +25,7 @@ from yt_live_kit.services.shorts_queue import (
     ShortsQueueItemResult,
     ShortsQueueResult,
     build_shorts_queue_targets,
+    can_reserve_shorts_queue_item,
     can_reuse_shorts_queue_item,
     can_start_shorts_queue,
     load_latest_shorts_queue_result,
@@ -622,6 +623,19 @@ def test_output_fingerprint_mismatch_cannot_be_reused(tmp_path: Path) -> None:
     assert not can_reuse_shorts_queue_item(
         video_id="video", spec=spec, item=item, settings=settings
     )
+    result = ShortsQueueResult(
+        video_id="video",
+        job_id="done",
+        status="done",
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+        clip_specs=(spec,),
+        items=(item,),
+        success_count=1,
+        failure_count=0,
+        manifest_path=tmp_path / "manifest.json",
+    )
+    assert not can_reserve_shorts_queue_item(result, item, settings)
 
 
 def test_interrupted_rerun_reuses_only_proven_success_item(tmp_path: Path) -> None:
