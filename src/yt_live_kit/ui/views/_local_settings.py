@@ -87,6 +87,41 @@ def load_shorts_line_defaults(
     return ShortsLineDefaults(layout, preset, hook_preset)
 
 
+def save_shorts_line_defaults(
+    defaults: ShortsLineDefaults, settings: Settings | None = None
+) -> Path:
+    """ショート生産ラインの既定値を検証して原子的に保存する."""
+    if not isinstance(defaults, ShortsLineDefaults):
+        raise ValueError("ショート既定値の形式が不正です。")
+    if not isinstance(defaults.layout, str) or defaults.layout not in {
+        "blur",
+        "crop",
+    }:
+        raise ValueError("レイアウトは blur または crop を指定してください。")
+    if not isinstance(defaults.preset, str) or defaults.preset not in TELOP_PRESETS:
+        raise ValueError("通常テロッププリセットが不正です。")
+    if (
+        not isinstance(defaults.hook_preset, str)
+        or defaults.hook_preset not in TELOP_PRESETS
+    ):
+        raise ValueError("Hook テロッププリセットが不正です。")
+
+    settings = settings or get_settings()
+    path = _shorts_defaults_path(settings)
+    payload = json.dumps(
+        {
+            "layout": defaults.layout,
+            "preset": defaults.preset,
+            "hook_preset": defaults.hook_preset,
+        },
+        ensure_ascii=False,
+        indent=2,
+    ) + "\n"
+    with advisory_lock(_setting_lock_path(path)):
+        write_text_atomically(path, payload, mode=0o600)
+    return path
+
+
 def _snapshot_map() -> dict[Path, set[str]]:
     snapshots = getattr(_ID_SET_SNAPSHOTS, "values", None)
     if snapshots is None:
