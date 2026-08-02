@@ -466,7 +466,17 @@ def _start_line(
     settings: Settings,
 ) -> None:
     """区間確定を既存 queue snapshot と永続 line state へ移す."""
-    defaults = load_shorts_line_defaults(settings)
+    try:
+        defaults = load_shorts_line_defaults(settings)
+    except (OSError, TypeError, ValueError, RuntimeError):
+        st.error(
+            "ショート生産ラインの既定値を読み込めませんでした。"
+            "設定ファイルの保存先が安全なデータディレクトリ内にあるか、"
+            "読み込み権限と設定値の形式を確認してください。"
+            "設定ページでショート既定値を保存し直してから再試行してください。"
+            "ラインは開始していません。"
+        )
+        return
     try:
         target, queue_fingerprint = install_line_snapshot(
             video_id=video_id,

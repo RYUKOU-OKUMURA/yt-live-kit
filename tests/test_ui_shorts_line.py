@@ -883,6 +883,57 @@ def test_generation_preflight_failure_preserves_generation_stage_and_human_revie
     assert not (tmp_path / "video-1" / "shorts" / "queue").exists()
 
 
+def test_start_line_handles_external_defaults_symlink_without_starting_line(
+    tmp_path: Path,
+) -> None:
+    settings = Settings(data_dir=tmp_path)
+    outside = tmp_path.parent / "outside-shorts-defaults.json"
+    outside.write_text(
+        json.dumps({"layout": "crop", "preset": "boxed", "hook_preset": "hook"}),
+        encoding="utf-8",
+    )
+    config_dir = tmp_path / "_config"
+    config_dir.mkdir()
+    (config_dir / "shorts_defaults.json").symlink_to(outside)
+    candidate = ClipCandidate(
+        id="clip-source",
+        title="短い候補",
+        start="0:00:00",
+        end="0:00:20",
+        duration_sec=20,
+        reason="理由",
+    )
+    option = shorts_line.ParentOption("切り抜き", candidate)
+
+    with (
+        patch.object(shorts_line.st, "error") as error,
+        patch.object(shorts_line, "install_line_snapshot") as install_snapshot,
+        patch.object(shorts_line, "save_line_state") as save_state,
+        patch.object(shorts_line, "save_active_line") as save_active,
+        patch.object(shorts_line, "_generate_line_telop") as generate_telop,
+        patch.object(shorts_line.st, "rerun") as rerun,
+    ):
+        shorts_line._start_line(
+            video_id="video-1",
+            title="動画",
+            segments=(),
+            option=option,
+            settings=settings,
+        )
+
+    error.assert_called_once()
+    message = error.call_args.args[0]
+    assert "設定ページ" in message
+    assert "ラインは開始していません" in message
+    assert "outside-shorts-defaults.json" not in message
+    assert "<" not in message and ">" not in message
+    install_snapshot.assert_not_called()
+    save_state.assert_not_called()
+    save_active.assert_not_called()
+    generate_telop.assert_not_called()
+    rerun.assert_not_called()
+
+
 def _write_line_defaults(path: Path, defaults: dict[str, object]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(defaults), encoding="utf-8")
