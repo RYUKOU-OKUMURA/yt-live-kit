@@ -7,6 +7,24 @@ from datetime import datetime, timezone
 
 from yt_live_kit.config import Settings, get_settings
 from yt_live_kit.models.meta import VideoMeta
+from yt_live_kit.services._paths import PathConfinementError, confined_video_path
+
+
+class HistoryError(Exception):
+    """履歴の保存先を安全に扱えないエラー."""
+
+
+def _video_path(video_id: object, settings: Settings, *parts: str):
+    try:
+        return confined_video_path(
+            settings.data_dir, video_id, *parts, label="動画保存先"
+        )
+    except PathConfinementError as exc:
+        raise HistoryError(str(exc)) from exc
+
+
+def _video_dir(video_id: object, settings: Settings):
+    return _video_path(video_id, settings)
 
 
 @dataclass(frozen=True)
@@ -39,11 +57,12 @@ def list_processed_videos(settings: Settings | None = None) -> list[ProcessedVid
 
     results: list[ProcessedVideo] = []
     for entry in data_dir.iterdir():
-        if not entry.is_dir() or entry.name.startswith("_"):
+        if entry.name.startswith("_"):
             continue
 
-        meta_path = entry / "meta.json"
-        if not meta_path.is_file():
+        meta_path = _video_path(entry.name, settings, "meta.json")
+        video_dir = _video_dir(entry.name, settings)
+        if not video_dir.is_dir() or not meta_path.is_file():
             continue
 
         try:
@@ -56,9 +75,15 @@ def list_processed_videos(settings: Settings | None = None) -> list[ProcessedVid
                 video_id=meta.id,
                 title=meta.title,
                 fetched_at=_as_utc(meta.fetched_at),
-                has_chapters=(entry / "chapters" / "chapters.md").is_file(),
-                has_transcript=(entry / "transcript" / "full.txt").is_file(),
-                has_clips=(entry / "clips" / "candidates.json").is_file(),
+                has_chapters=_video_path(
+                    entry.name, settings, "chapters", "chapters.md"
+                ).is_file(),
+                has_transcript=_video_path(
+                    entry.name, settings, "transcript", "full.txt"
+                ).is_file(),
+                has_clips=_video_path(
+                    entry.name, settings, "clips", "candidates.json"
+                ).is_file(),
             )
         )
 
@@ -72,7 +97,7 @@ def list_processed_videos(settings: Settings | None = None) -> list[ProcessedVid
 def is_video_processed(video_id: str, settings: Settings | None = None) -> bool:
     """チャプターが保存済みなら処理済みとみなす."""
     settings = settings or get_settings()
-    chapters_path = settings.data_dir / video_id / "chapters" / "chapters.md"
+    chapters_path = _video_path(video_id, settings, "chapters", "chapters.md")
     return chapters_path.is_file()
 
 
@@ -85,15 +110,15 @@ def is_video_targets_complete(
 ) -> bool:
     """今回要求されている成果物がすべて揃っていれば True."""
     settings = settings or get_settings()
-    video_dir = settings.data_dir / video_id
+    video_dir = _video_dir(video_id, settings)
 
     if do_chapters:
-        chapters_path = video_dir / "chapters" / "chapters.md"
+        chapters_path = _video_path(video_id, settings, "chapters", "chapters.md")
         if not chapters_path.is_file():
             return False
 
     if do_clips:
-        clips_path = video_dir / "clips" / "candidates.json"
+        clips_path = _video_path(video_id, settings, "clips", "candidates.json")
         if not clips_path.is_file():
             return False
 

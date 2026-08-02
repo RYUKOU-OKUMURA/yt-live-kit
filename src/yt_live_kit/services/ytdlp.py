@@ -14,6 +14,12 @@ from pathlib import Path
 from yt_live_kit.config import Settings, get_settings
 from yt_live_kit.models.meta import VideoMeta
 from yt_live_kit.services._fsutil import write_text_atomically
+from yt_live_kit.services._paths import (
+    PathConfinementError,
+    confined_video_path,
+    confined_path,
+    safe_identifier,
+)
 
 _SUBTITLE_FETCH_ERROR = (
     "字幕が取得できませんでした。公開アーカイブか確認し、yt-dlp を最新にして再実行してください。"
@@ -105,8 +111,15 @@ def extract_video_id(url_or_id: str) -> str:
     for pattern in _VIDEO_ID_PATTERNS:
         match = pattern.search(text)
         if match:
-            return match.group(1)
-    raise YtdlpError(f"有効な YouTube URL または動画 ID ではありません: {url_or_id}")
+            return _safe_identifier(match.group(1), "動画 ID")
+    raise YtdlpError("有効な YouTube URL または動画 ID ではありません。")
+
+
+def _safe_identifier(value: object, label: str) -> str:
+    try:
+        return safe_identifier(value, label)
+    except PathConfinementError as exc:
+        raise YtdlpError(str(exc)) from exc
 
 
 def _run_ytdlp(
@@ -200,6 +213,7 @@ def _fetch_metadata(url: str, settings: Settings) -> dict:
 
 def _download_subtitles(url: str, output_dir: Path, settings: Settings) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
+    _validate_directory_entries(output_dir, settings, "字幕保存先")
     output_template = str(output_dir / "%(id)s")
     result = _run_ytdlp(
         [
@@ -220,10 +234,24 @@ def _download_subtitles(url: str, output_dir: Path, settings: Settings) -> None:
         raise SubtitleNotFoundError(
             _SUBTITLE_FETCH_ERROR if not stderr else f"{_SUBTITLE_FETCH_ERROR}\n（詳細: {stderr}）"
         )
+    _validate_directory_entries(output_dir, settings, "字幕保存先")
+
+
+def _validate_directory_entries(
+    directory: Path, settings: Settings, label: str
+) -> None:
+    try:
+        for entry in directory.iterdir():
+            confined_path(settings.data_dir, entry, label=label)
+    except PathConfinementError as exc:
+        raise YtdlpError(str(exc)) from exc
+    except (OSError, RuntimeError) as exc:
+        raise YtdlpError(f"{label}を安全に確認できませんでした。") from exc
 
 
 def _find_subtitle_file(subtitles_dir: Path, video_id: str) -> tuple[Path, str]:
     """優先順: ja-orig > ja."""
+    video_id = _safe_identifier(video_id, "動画 ID")
     candidates = [
         (subtitles_dir / f"{video_id}.ja-orig.vtt", "ja-orig"),
         (subtitles_dir / f"{video_id}.ja.vtt", "ja"),
@@ -254,7 +282,7 @@ def _normalize_subtitle_path(subtitles_dir: Path, source: Path, lang: str) -> Pa
 def fetch(url: str, settings: Settings | None = None) -> VideoMeta:
     """URL からメタデータと字幕 VTT を取得し data/{video_id}/ に保存する."""
     settings = settings or get_settings()
-    settings.ensure_data_dir()
+    requested_video_id = extract_video_id(url)
 
     if shutil.which(settings.ytdlp_path) is None:
         raise YtdlpError(
@@ -265,9 +293,17 @@ def fetch(url: str, settings: Settings | None = None) -> VideoMeta:
     ytdlp_version = get_ytdlp_version(settings)
     info = _fetch_metadata(url, settings)
 
-    video_id = info.get("id") or extract_video_id(url)
-    video_dir = settings.data_dir / video_id
-    subtitles_dir = video_dir / "subtitles"
+    video_id = _safe_identifier(info.get("id") or requested_video_id, "動画 ID")
+    try:
+        video_dir = confined_video_path(
+            settings.data_dir, video_id, label="動画保存先"
+        )
+        subtitles_dir = confined_path(
+            settings.data_dir, video_id, "subtitles", label="字幕保存先"
+        )
+    except PathConfinementError as exc:
+        raise YtdlpError(str(exc)) from exc
+    settings.ensure_data_dir()
     subtitles_dir.mkdir(parents=True, exist_ok=True)
 
     _download_subtitles(url, subtitles_dir, settings)
@@ -294,6 +330,11 @@ def fetch(url: str, settings: Settings | None = None) -> VideoMeta:
 def download_video(url: str, output_dir: Path, settings: Settings | None = None) -> Path:
     """切り出し用に動画を 1 本ダウンロードする."""
     settings = settings or get_settings()
+    extract_video_id(url)
+    try:
+        output_dir = confined_path(settings.data_dir, output_dir, label="動画保存先")
+    except PathConfinementError as exc:
+        raise YtdlpError(str(exc)) from exc
 
     if shutil.which(settings.ytdlp_path) is None:
         raise YtdlpError(
@@ -302,6 +343,7 @@ def download_video(url: str, output_dir: Path, settings: Settings | None = None)
         )
 
     output_dir.mkdir(parents=True, exist_ok=True)
+    _validate_directory_entries(output_dir, settings, "動画保存先")
     output_template = str(output_dir / "%(id)s.%(ext)s")
 
     result = _run_ytdlp(
@@ -325,9 +367,13 @@ def download_video(url: str, output_dir: Path, settings: Settings | None = None)
             + (f"\n（詳細: {stderr}）" if stderr else "")
         )
 
+    _validate_directory_entries(output_dir, settings, "動画保存先")
     mp4_files = sorted(output_dir.glob("*.mp4"))
     if mp4_files:
-        return mp4_files[0]
+        try:
+            return confined_path(settings.data_dir, mp4_files[0], label="動画保存先")
+        except PathConfinementError as exc:
+            raise YtdlpError(str(exc)) from exc
 
     video_files = sorted(
         f for f in output_dir.iterdir()
@@ -335,6 +381,9 @@ def download_video(url: str, output_dir: Path, settings: Settings | None = None)
     )
     if not video_files:
         raise YtdlpError(
-            f"ダウンロードした動画ファイルが見つかりません: {output_dir}"
+            "ダウンロードした動画ファイルが見つかりません。"
         )
-    return video_files[0]
+    try:
+        return confined_path(settings.data_dir, video_files[0], label="動画保存先")
+    except PathConfinementError as exc:
+        raise YtdlpError(str(exc)) from exc

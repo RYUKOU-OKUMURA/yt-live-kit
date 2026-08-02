@@ -53,7 +53,8 @@ def _settings(tmp_path: Path, *, limit: int = 100) -> Settings:
 
 
 def _video(tmp_path: Path, name: str = "short_a.mp4") -> Path:
-    path = (tmp_path / name).resolve()
+    path = (tmp_path / "data" / name).resolve()
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(b"video")
     return path
 

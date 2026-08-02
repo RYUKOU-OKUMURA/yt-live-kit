@@ -107,7 +107,8 @@ def _document(*, text: str = "確認する本文", emphasis: bool = False) -> Te
 
 
 def _output(tmp_path: Path, content: bytes = b"mp4-v1") -> Path:
-    path = (tmp_path / "short.mp4").resolve()
+    path = (tmp_path / "data" / "short.mp4").resolve()
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(content)
     return path
 
@@ -432,7 +433,7 @@ def test_reservation_transaction_rejects_stale_state_and_serializes_tabs(
 
     second_dir = tmp_path / "second"
     second_dir.mkdir()
-    second_settings = Settings(data_dir=tmp_path / "second-data")
+    second_settings = Settings(data_dir=second_dir / "data")
     state, output = _confirmed_state(second_dir)
     save_line_state(state, second_settings)
     operation = operation.model_copy(update={"video_path": output})

@@ -42,6 +42,12 @@ from yt_live_kit.services.youtube_api import (
     upload_video_resumable,
     validate_snapshot_identity,
 )
+from yt_live_kit.services._paths import (
+    PathConfinementError,
+    confined_path,
+    safe_identifier,
+    safe_video_identifier,
+)
 
 _QUEUE_VERSION = 1
 _ATTEMPTS_VERSION = 1
@@ -107,23 +113,82 @@ def _utc_timestamp(value: datetime | None, label: str) -> datetime:
 
 
 def _schedule_dir(settings: Settings) -> Path:
-    return settings.data_dir / "_schedule"
+    try:
+        return confined_path(settings.data_dir, "_schedule", label="投稿データ保存先")
+    except PathConfinementError as exc:
+        raise UploadQueueError(str(exc)) from exc
 
 
 def _queue_path(settings: Settings) -> Path:
-    return _schedule_dir(settings) / "queue.json"
+    try:
+        return confined_path(
+            settings.data_dir, "_schedule", "queue.json", label="投稿キュー保存先"
+        )
+    except PathConfinementError as exc:
+        raise UploadQueueError(str(exc)) from exc
 
 
 def _attempts_path(settings: Settings) -> Path:
-    return _schedule_dir(settings) / "upload_attempts.json"
+    try:
+        return confined_path(
+            settings.data_dir,
+            "_schedule",
+            "upload_attempts.json",
+            label="アップロード試行台帳保存先",
+        )
+    except PathConfinementError as exc:
+        raise UploadQueueError(str(exc)) from exc
 
 
 def _publication_lock_path(
     settings: Settings, operation_id: str, *, purpose: str
 ) -> Path:
     """operation ID を path にせず、公開確認用 lock の場所を決める."""
+    _safe_identifier(operation_id, "投稿 operation ID")
     digest = hashlib.sha256(operation_id.encode("utf-8")).hexdigest()
-    return _schedule_dir(settings) / f".publication_{purpose}_{digest}.lock"
+    try:
+        return confined_path(
+            settings.data_dir,
+            "_schedule",
+            f".publication_{purpose}_{digest}.lock",
+            label="公開状態確認ロック保存先",
+        )
+    except PathConfinementError as exc:
+        raise UploadQueueError(str(exc)) from exc
+
+
+def _safe_identifier(value: object, label: str) -> str:
+    try:
+        return safe_identifier(value, label)
+    except PathConfinementError as exc:
+        raise UploadQueueError(str(exc)) from exc
+
+
+def _safe_video_identifier(value: object, label: str = "動画 ID") -> str:
+    try:
+        return safe_video_identifier(value, label)
+    except PathConfinementError as exc:
+        raise UploadQueueError(str(exc)) from exc
+
+
+def _validate_operation_paths(operation: UploadOperation, settings: Settings) -> None:
+    for value, label in (
+        (operation.operation_id, "投稿 operation ID"),
+        (operation.job_id, "ジョブ ID"),
+        (operation.clip_id, "clip ID"),
+    ):
+        _safe_identifier(value, label)
+    _safe_video_identifier(operation.source_video_id)
+    if operation.video_id is not None:
+        _safe_video_identifier(operation.video_id)
+    for path, label in (
+        (operation.video_path, "投稿動画保存先"),
+        (operation.content.video_path, "投稿 snapshot 保存先"),
+    ):
+        try:
+            confined_path(settings.data_dir, path, label=label)
+        except PathConfinementError as exc:
+            raise UploadQueueError(str(exc)) from exc
 
 
 @contextmanager
@@ -154,8 +219,8 @@ def _publication_file_lock(
 def schedule_lock(settings: Settings) -> Iterator[None]:
     """process lock の後に advisory file lock を取る固定順序."""
     directory = _schedule_dir(settings)
+    lock_path = confined_path(settings.data_dir, "_schedule", ".schedule.lock", label="投稿キュー保存先")
     directory.mkdir(parents=True, exist_ok=True)
-    lock_path = directory / ".schedule.lock"
     with _PROCESS_LOCK:
         if getattr(_LOCK_STATE, "depth", 0):
             _LOCK_STATE.depth += 1
@@ -168,7 +233,7 @@ def schedule_lock(settings: Settings) -> Iterator[None]:
             try:
                 fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
             except OSError as exc:
-                raise UploadQueueError(f"投稿キューのロックを取得できませんでした: {exc}") from exc
+                raise UploadQueueError("投稿キューのロックを取得できませんでした。") from exc
             try:
                 _LOCK_STATE.depth = 1
                 yield
@@ -187,7 +252,7 @@ def _atomic_write(path: Path, payload: dict[str, Any]) -> None:
             os.fsync(handle.fileno())
         os.replace(temporary, path)
     except OSError as exc:
-        raise UploadQueueError(f"投稿データを安全に保存できませんでした: {exc}") from exc
+        raise UploadQueueError("投稿データを安全に保存できませんでした。") from exc
     finally:
         try:
             temporary.unlink(missing_ok=True)
@@ -222,6 +287,8 @@ def _read_operations_unlocked(settings: Settings) -> list[UploadOperation]:
         raise UploadQueueError("投稿キューの operation 一覧が正しくありません。")
     try:
         operations = [UploadOperation.model_validate(item) for item in raw]
+        for operation in operations:
+            _validate_operation_paths(operation, settings)
     except ValidationError as exc:
         raise UploadQueueError(f"投稿キューの内容が正しくありません: {exc}") from exc
     identifiers = [item.operation_id for item in operations]
@@ -253,6 +320,9 @@ def _read_attempts_unlocked(settings: Settings) -> list[UploadAttempt]:
         raise UploadQueueError("アップロード試行台帳の一覧が正しくありません。")
     try:
         attempts = [UploadAttempt.model_validate(item) for item in raw]
+        for attempt in attempts:
+            _safe_identifier(attempt.operation_id, "投稿 operation ID")
+            _safe_identifier(attempt.job_id, "ジョブ ID")
     except ValidationError as exc:
         raise UploadQueueError(f"アップロード試行台帳の内容が正しくありません: {exc}") from exc
     keys = [(item.operation_id, item.job_id) for item in attempts]
@@ -277,6 +347,7 @@ def list_operations(settings: Settings) -> tuple[UploadOperation, ...]:
 
 
 def load_operation(operation_id: str, settings: Settings) -> UploadOperation:
+    _safe_identifier(operation_id, "投稿 operation ID")
     with schedule_lock(settings):
         matches = [
             item for item in _read_operations_unlocked(settings)
@@ -291,6 +362,7 @@ def save_reserved_operation(operation: UploadOperation, settings: Settings) -> N
     """P2 confirm transaction 用。reserved record を重複なく保存する."""
     if operation.state != "reserved":
         raise UploadQueueError("新しい投稿 operation は予約済み状態で保存してください。")
+    _validate_operation_paths(operation, settings)
     with schedule_lock(settings):
         operations = _read_operations_unlocked(settings)
         if any(item.operation_id == operation.operation_id for item in operations):
@@ -304,6 +376,14 @@ def create_reserved_operation(
     source_kind: str, clip_id: str, content: UploadContentSnapshot,
     now: datetime | None = None, settings: Settings,
 ) -> UploadOperation:
+    _safe_identifier(operation_id, "投稿 operation ID")
+    _safe_identifier(job_id, "ジョブ ID")
+    _safe_video_identifier(source_video_id)
+    _safe_identifier(clip_id, "clip ID")
+    try:
+        confined_path(settings.data_dir, content.video_path, label="投稿動画保存先")
+    except PathConfinementError as exc:
+        raise UploadQueueError(str(exc)) from exc
     created = _utc_timestamp(now, "operation 作成日時")
     operation = UploadOperation(
         operation_id=operation_id, source_video_id=source_video_id,
@@ -333,6 +413,9 @@ def transition_operation(
     settings: Settings, *, video_id: str | None = None,
     error: str | None = None, now: datetime | None = None,
 ) -> UploadOperation:
+    _safe_identifier(operation_id, "投稿 operation ID")
+    if video_id is not None:
+        _safe_video_identifier(video_id)
     timestamp = _utc_timestamp(now, "operation 更新日時")
     with schedule_lock(settings):
         operations = _read_operations_unlocked(settings)
@@ -368,6 +451,7 @@ def transition_operation(
 def append_poll_observation(
     operation_id: str, observation: UploadStatusObservation, settings: Settings
 ) -> UploadOperation:
+    _safe_identifier(operation_id, "投稿 operation ID")
     with schedule_lock(settings):
         operations = _read_operations_unlocked(settings)
         matches = [item for item in operations if item.operation_id == operation_id]
@@ -401,6 +485,7 @@ def append_poll_observation(
 
 def _publication_poll_marker(operation_id: str) -> str:
     """job JSON の title に使う非秘密の operation marker."""
+    _safe_identifier(operation_id, "投稿 operation ID")
     digest = hashlib.sha256(operation_id.encode("utf-8")).hexdigest()
     return f"publication:{digest}"
 
@@ -459,6 +544,7 @@ def start_publication_poll(
     占有しない。job の存在は jobs の永続 JSON で復元し、operation の状態と
     poll history は queue.json を正本として扱う。
     """
+    _safe_identifier(operation_id, "投稿 operation ID")
     reference = _utc_timestamp(now, "公開状態確認日時")
     operation = load_operation(operation_id, settings)
     _validate_publication_poll_start(operation, now=reference)
@@ -504,6 +590,8 @@ def publication_poll_job_target(
     clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
 ) -> None:
     """1 operation の公開状態を bounded poll し、同じ queue record に追記する."""
+    _safe_identifier(job_id, "ジョブ ID")
+    _safe_identifier(operation_id, "投稿 operation ID")
     with _publication_file_lock(settings, operation_id, purpose="poll"):
         operation = load_operation(operation_id, settings)
         reference = _utc_timestamp(clock(), "公開状態確認日時")
@@ -550,6 +638,7 @@ def set_publication_eligibility(
     now: datetime | None = None,
 ) -> UploadOperation:
     """P0 の YouTube Studio 目視結果を upload 成否とは別に記録する."""
+    _safe_identifier(operation_id, "投稿 operation ID")
     timestamp = _utc_timestamp(now, "公開可否の確認日時")
     with schedule_lock(settings):
         operations = _read_operations_unlocked(settings)
@@ -579,6 +668,8 @@ def list_upload_attempts(settings: Settings) -> tuple[UploadAttempt, ...]:
 
 
 def has_upload_attempt(operation_id: str, job_id: str, settings: Settings) -> bool:
+    _safe_identifier(operation_id, "投稿 operation ID")
+    _safe_identifier(job_id, "ジョブ ID")
     with schedule_lock(settings):
         return any(
             item.operation_id == operation_id and item.job_id == job_id
@@ -602,6 +693,8 @@ def record_upload_attempt(
     operation_id: str, job_id: str, settings: Settings, *, now: datetime | None = None
 ) -> UploadAttempt:
     """API session 作成前に 1 回だけ attempt を原子的に記録する."""
+    _safe_identifier(operation_id, "投稿 operation ID")
+    _safe_identifier(job_id, "ジョブ ID")
     if not 1 <= settings.video_upload_daily_limit <= 100:
         raise UploadQueueError("アップロード試行上限は 1〜100 で設定してください。")
     attempted_at = _utc_timestamp(now, "upload 試行日時")
@@ -717,6 +810,8 @@ def upload_job_target(
     *, report, settings: Settings, job_id: str, operation_id: str
 ) -> None:
     """reserved operation を一度だけ安全に upload する jobs target."""
+    _safe_identifier(job_id, "ジョブ ID")
+    _safe_identifier(operation_id, "投稿 operation ID")
     operation = load_operation(operation_id, settings)
     if operation.job_id != job_id:
         raise UploadQueueError("投稿 operation とジョブ ID が一致しません。")

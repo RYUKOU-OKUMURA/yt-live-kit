@@ -21,6 +21,12 @@ from yt_live_kit.services.shorts import (
     ShortsError,
     build_short_from_segments,
 )
+from yt_live_kit.services._paths import (
+    PathConfinementError,
+    confined_video_path,
+    confined_path,
+    safe_identifier,
+)
 from yt_live_kit.services.subtitle_burn import SubtitleBurnError, get_telop_preset
 from yt_live_kit.services.telop import (
     TelopError,
@@ -469,6 +475,13 @@ def _optional_path(value: object, label: str) -> Path | None:
     return Path(_require_string(value, label))
 
 
+def _safe_path_identifier(value: object, label: str) -> str:
+    try:
+        return safe_identifier(value, label)
+    except PathConfinementError as exc:
+        raise ShortsQueueError(str(exc)) from exc
+
+
 def normalize_queue_candidates(
     candidates: Sequence[ClipCandidate | HighlightSegment],
     *,
@@ -638,14 +651,47 @@ def make_shorts_queue_clip_spec(
 
 
 def _manifest_path(video_id: str, job_id: str, settings: Settings) -> Path:
-    safe_video_id = _require_string(video_id, "動画 ID")
-    safe_job_id = _require_string(job_id, "ジョブ ID")
-    if any(separator in safe_video_id or separator in safe_job_id for separator in ("/", "\\")):
-        raise ShortsQueueError("動画 ID またはジョブ ID にパスは指定できません。")
-    return settings.data_dir / safe_video_id / "shorts" / "queue" / f"queue_{safe_job_id}.json"
+    safe_video_id = _safe_path_identifier(video_id, "動画 ID")
+    safe_job_id = _safe_path_identifier(job_id, "ジョブ ID")
+    try:
+        return confined_video_path(
+            settings.data_dir,
+            safe_video_id,
+            "shorts",
+            "queue",
+            f"queue_{safe_job_id}.json",
+            label="ショート量産保存先",
+        )
+    except PathConfinementError as exc:
+        raise ShortsQueueError(str(exc)) from exc
 
 
-def _write_manifest(result: ShortsQueueResult) -> None:
+def _queue_dir(video_id: str, settings: Settings) -> Path:
+    safe_video_id = _safe_path_identifier(video_id, "動画 ID")
+    try:
+        return confined_video_path(
+            settings.data_dir, safe_video_id, "shorts", "queue", label="ショート量産保存先"
+        )
+    except PathConfinementError as exc:
+        raise ShortsQueueError(str(exc)) from exc
+
+
+def _validate_result_paths(result: ShortsQueueResult, settings: Settings) -> None:
+    paths = [result.manifest_path]
+    for item in result.items:
+        if item.output_path is not None:
+            paths.append(item.output_path)
+        if item.log_path is not None:
+            paths.append(item.log_path)
+    try:
+        for path in paths:
+            confined_path(settings.data_dir, path, label="ショート量産成果物")
+    except PathConfinementError as exc:
+        raise ShortsQueueError(str(exc)) from exc
+
+
+def _write_manifest(result: ShortsQueueResult, settings: Settings) -> None:
+    _validate_result_paths(result, settings)
     path = result.manifest_path
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary_path: Path | None = None
@@ -663,7 +709,7 @@ def _write_manifest(result: ShortsQueueResult) -> None:
             temporary_path = Path(temporary.name)
         temporary_path.replace(path)
     except OSError as exc:
-        raise ShortsQueueError(f"ショート量産結果を保存できませんでした: {exc}") from exc
+        raise ShortsQueueError("ショート量産結果を保存できませんでした。") from exc
     finally:
         if temporary_path is not None and temporary_path.exists():
             temporary_path.unlink(missing_ok=True)
@@ -679,6 +725,7 @@ def run_shorts_queue(
 ) -> ShortsQueueResult:
     """確定済み target を順次生成し、唯一の writer として manifest を更新する."""
     settings = settings or get_settings()
+    path = _manifest_path(video_id, job_id, settings)
     if not clip_specs:
         raise ShortsQueueError("生成対象を 1 件以上指定してください。")
     validated_specs = tuple(
@@ -686,7 +733,6 @@ def run_shorts_queue(
     )
     if len({spec.output_name for spec in validated_specs}) != len(validated_specs):
         raise ShortsQueueError("同じ出力先になる生成対象があります。")
-    path = _manifest_path(video_id, job_id, settings)
     now = datetime.now(timezone.utc)
     result = ShortsQueueResult(
         video_id=video_id,
@@ -700,7 +746,7 @@ def run_shorts_queue(
         failure_count=0,
         manifest_path=path,
     )
-    _write_manifest(result)
+    _write_manifest(result, settings)
     items: list[ShortsQueueItemResult] = []
     total = len(validated_specs)
     for index, spec in enumerate(validated_specs, start=1):
@@ -765,7 +811,7 @@ def run_shorts_queue(
             failure_count=sum(value.status == "failed" for value in items),
             manifest_path=path,
         )
-        _write_manifest(result)
+        _write_manifest(result, settings)
     return result
 
 
@@ -804,11 +850,12 @@ def load_shorts_queue_result(
         return None
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise ShortsQueueError(f"ショート量産結果を読み込めませんでした: {exc}") from exc
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ShortsQueueError("ショート量産結果を読み込めませんでした。") from exc
     result = ShortsQueueResult.from_dict(raw, manifest_path=path)
     if result.video_id != video_id or result.job_id != job_id:
         raise ShortsQueueError("manifest の動画 ID またはジョブ ID が保存先と一致しません。")
+    _validate_result_paths(result, settings)
     return result
 
 
@@ -818,7 +865,7 @@ def load_latest_shorts_queue_result(
 ) -> ShortsQueueResult | None:
     """現在動画の検証済み manifest を作成日時・job ID の降順で返す."""
     settings = settings or get_settings()
-    queue_dir = settings.data_dir / video_id / "shorts" / "queue"
+    queue_dir = _queue_dir(video_id, settings)
     if not queue_dir.is_dir():
         return None
     results: list[ShortsQueueResult] = []

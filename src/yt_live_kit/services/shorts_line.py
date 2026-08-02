@@ -30,6 +30,12 @@ from yt_live_kit.config import Settings
 from yt_live_kit.models.telop import TelopScriptDocument
 from yt_live_kit.models.upload import UploadOperation, UploadState
 from yt_live_kit.services.schedule import SchedulePolicy
+from yt_live_kit.services._paths import (
+    PathConfinementError,
+    confined_path,
+    confined_video_path,
+    safe_identifier,
+)
 
 _SCHEMA_VERSION = 1
 _WRITE_LOCK = threading.RLock()
@@ -79,11 +85,17 @@ def _timestamp(value: datetime | None, label: str) -> datetime:
 
 
 def _safe_identifier(value: str, label: str) -> str:
-    if not isinstance(value, str) or not value or value in {".", ".."}:
-        raise LineStateError(f"{label}が正しくありません。")
-    if any(character in value for character in ("/", "\\", "\x00")):
-        raise LineStateError(f"{label}にパスは指定できません。")
-    return value
+    try:
+        return safe_identifier(value, label)
+    except PathConfinementError as exc:
+        raise LineStateError(str(exc)) from exc
+
+
+def _confined_output_path(output_path: Path, settings: Settings) -> Path:
+    try:
+        return confined_path(settings.data_dir, output_path, label="ショート出力保存先")
+    except PathConfinementError as exc:
+        raise LineStateError(str(exc)) from exc
 
 
 def _validate_digest(value: str | None, label: str, *, optional: bool = False) -> str | None:
@@ -789,6 +801,8 @@ def record_upload_operation(
         raise LineStateError("投稿 operation ID が正しくありません。")
     if output_path is None or state.review_fingerprint is None:
         raise LineStateError("予約直前に完成動画を再確認できませんでした。")
+    if settings is not None:
+        output_path = _confined_output_path(output_path, settings)
     timestamp = _state_timestamp(state, now, "予約更新日時")
     try:
         checked = reconcile_output(state, output_path, now=timestamp)
@@ -819,23 +833,34 @@ def record_upload_operation(
 
 
 def line_state_path(video_id: str, clip_id: str, settings: Settings) -> Path:
-    return (
-        settings.data_dir
-        / _safe_identifier(video_id, "動画 ID")
-        / "shorts"
-        / "line"
-        / f"line_{_safe_identifier(clip_id, 'clip ID')}.json"
-    )
+    safe_video_id = _safe_identifier(video_id, "動画 ID")
+    safe_clip_id = _safe_identifier(clip_id, "clip ID")
+    try:
+        return confined_video_path(
+            settings.data_dir,
+            safe_video_id,
+            "shorts",
+            "line",
+            f"line_{safe_clip_id}.json",
+            label="ショート生産ライン保存先",
+        )
+    except PathConfinementError as exc:
+        raise LineStateError(str(exc)) from exc
 
 
 def _active_line_path(video_id: str, settings: Settings) -> Path:
-    return (
-        settings.data_dir
-        / _safe_identifier(video_id, "動画 ID")
-        / "shorts"
-        / "line"
-        / "active_line.json"
-    )
+    safe_video_id = _safe_identifier(video_id, "動画 ID")
+    try:
+        return confined_video_path(
+            settings.data_dir,
+            safe_video_id,
+            "shorts",
+            "line",
+            "active_line.json",
+            label="ショート生産ライン保存先",
+        )
+    except PathConfinementError as exc:
+        raise LineStateError(str(exc)) from exc
 
 
 def _atomic_write(path: Path, payload: dict[str, object]) -> None:
@@ -970,9 +995,17 @@ def abandon_line_state(state: LineState, settings: Settings) -> Path:
         raise LineStateError("破棄するライン状態が正しくありません。")
     _ensure_not_reserved(state)
     path = line_state_path(state.video_id, state.clip_id, settings)
-    archive = path.with_name(
-        f"abandoned_{state.clip_id}_{uuid.uuid4().hex}.json"
-    )
+    try:
+        archive = confined_video_path(
+            settings.data_dir,
+            state.video_id,
+            "shorts",
+            "line",
+            f"abandoned_{state.clip_id}_{uuid.uuid4().hex}.json",
+            label="ショート生産ライン保存先",
+        )
+    except PathConfinementError as exc:
+        raise LineStateError(str(exc)) from exc
     with _line_lock(state.video_id, settings):
         persisted = load_line_state(state.video_id, state.clip_id, settings)
         if persisted != state:
@@ -1001,6 +1034,7 @@ def run_line_reservation_transaction(
     """exact line の検証から外部投稿開始・operation 記録までを同一 lock で囲む。"""
     video_id = _safe_identifier(video_id, "動画 ID")
     clip_id = _safe_identifier(clip_id, "clip ID")
+    output_path = _confined_output_path(output_path, settings)
     if not callable(start_upload):
         raise LineStateError("投稿開始 callback が正しくありません。")
     with _line_lock(video_id, settings):

@@ -427,3 +427,39 @@ def test_latest_uses_created_at_then_job_id_and_is_video_scoped(tmp_path: Path):
 
 def test_manifest_schema_version_is_fixed():
     assert SCHEMA_VERSION == 1
+
+
+def test_loader_rejects_manifest_artifact_path_outside_data_root(tmp_path: Path) -> None:
+    settings = Settings(data_dir=tmp_path / "data")
+    spec = _specs(1)[0]
+    now = datetime.now(timezone.utc)
+    manifest = settings.data_dir / "video" / "shorts" / "queue" / "queue_job.json"
+    result = ShortsQueueResult(
+        video_id="video",
+        job_id="job",
+        status="done",
+        created_at=now,
+        updated_at=now,
+        clip_specs=(spec,),
+        items=(
+            ShortsQueueItemResult(
+                target_id=spec.target_id,
+                status="succeeded",
+                output_path=tmp_path / "outside.mp4",
+                log_path=None,
+                font_warning=None,
+                title_candidates=("タイトル",),
+                description="説明",
+                tags=("タグ",),
+                error=None,
+            ),
+        ),
+        success_count=1,
+        failure_count=0,
+        manifest_path=manifest,
+    )
+    manifest.parent.mkdir(parents=True)
+    manifest.write_text(json.dumps(result.to_dict(), ensure_ascii=False), encoding="utf-8")
+
+    with pytest.raises(ShortsQueueError, match="安全に扱えません"):
+        load_shorts_queue_result("video", "job", settings)

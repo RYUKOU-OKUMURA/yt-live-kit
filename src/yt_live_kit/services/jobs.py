@@ -31,6 +31,12 @@ from yt_live_kit.services.transcript import TranscriptError
 from yt_live_kit.services.ytdlp import YtdlpError
 from yt_live_kit.services.youtube_api import YouTubeAPIError
 from yt_live_kit.services.upload_queue import UploadQueueError
+from yt_live_kit.services._paths import (
+    PathConfinementError,
+    confined_path,
+    safe_identifier,
+    safe_video_identifier,
+)
 
 JobKind = str  # pipeline / batch / shorts_queue / upload
 JobStatus = str  # "running" | "done" | "failed" | "interrupted"
@@ -128,6 +134,11 @@ class JobState:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> JobState:
+        job_id = data.get("job_id")
+        _validate_job_id(job_id)
+        video_id = data.get("video_id")
+        if video_id is not None:
+            _validate_video_id(video_id)
         owner_pid = data.get("owner_pid")
         if owner_pid is not None and (
             isinstance(owner_pid, bool)
@@ -141,10 +152,10 @@ class JobState:
         ):
             raise ValueError("owner_token の形式が正しくありません")
         return cls(
-            job_id=str(data["job_id"]),
+            job_id=job_id,
             kind=str(data["kind"]),
             status=str(data["status"]),
-            video_id=data.get("video_id"),
+            video_id=video_id,
             title=data.get("title"),
             stage=data.get("stage"),
             message=str(data.get("message", "")),
@@ -175,19 +186,27 @@ def _dt_from_iso(value: str) -> datetime:
 
 
 def _jobs_dir(settings: Settings) -> Path:
-    return settings.data_dir / "_jobs"
+    return confined_path(settings.data_dir, "_jobs", label="ジョブ保存先")
 
 
 def _job_path(settings: Settings, job_id: str) -> Path:
-    return _jobs_dir(settings) / f"{job_id}.json"
+    _validate_job_id(job_id)
+    return confined_path(
+        settings.data_dir, "_jobs", f"{job_id}.json", label="ジョブ保存先"
+    )
 
 
 def _job_log_path(settings: Settings, job_id: str) -> Path:
-    return _jobs_dir(settings) / f"{job_id}.log"
+    _validate_job_id(job_id)
+    return confined_path(
+        settings.data_dir, "_jobs", f"{job_id}.log", label="ジョブログ保存先"
+    )
 
 
 def _current_path(settings: Settings) -> Path:
-    return _jobs_dir(settings) / "current.json"
+    return confined_path(
+        settings.data_dir, "_jobs", "current.json", label="ジョブ保存先"
+    )
 
 
 @contextmanager
@@ -198,8 +217,9 @@ def _job_store_lock(settings: Settings) -> Iterator[None]:
     nested call は再取得しない。ファイル lock は process 終了時に OS が解放
     するため、stale lock file 自体を削除する必要がない。
     """
+    _jobs_dir(settings)
+    lock_path = confined_path(settings.data_dir, ".jobs.lock", label="ジョブ排他ロック")
     settings.ensure_data_dir()
-    lock_path = settings.data_dir / ".jobs.lock"
     with _JOB_PROCESS_LOCK:
         if getattr(_JOB_LOCK_STATE, "depth", 0):
             _JOB_LOCK_STATE.depth += 1
@@ -288,14 +308,19 @@ def _write_current(
 
 
 def _validate_job_id(job_id: str) -> None:
-    if not job_id or any(
-        character
-        not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-"
-        for character in job_id
-    ):
-        raise ValueError("ジョブ ID の形式が正しくありません。")
+    try:
+        safe_identifier(job_id, "ジョブ ID")
+    except PathConfinementError as exc:
+        raise ValueError(str(exc)) from exc
     if job_id == "current":
         raise ValueError("予約されたジョブ ID は使用できません。")
+
+
+def _validate_video_id(video_id: object) -> str:
+    try:
+        return safe_video_identifier(video_id)
+    except PathConfinementError as exc:
+        raise ValueError(str(exc)) from exc
 
 
 def _create_job_unlocked(
@@ -311,6 +336,8 @@ def _create_job_unlocked(
 ) -> JobState:
     job_id = requested_job_id or uuid.uuid4().hex
     _validate_job_id(job_id)
+    if video_id is not None:
+        _validate_video_id(video_id)
     if _job_path(settings, job_id).exists():
         raise ValueError("指定されたジョブ ID は既に存在します。")
     state = JobState(
@@ -345,6 +372,10 @@ def create_job(
 ) -> JobState:
     """新規ジョブを running で作成し、永続化する."""
     settings = settings or get_settings()
+    if requested_job_id is not None:
+        _validate_job_id(requested_job_id)
+    if video_id is not None:
+        _validate_video_id(video_id)
     with _job_store_lock(settings):
         return _create_job_unlocked(
             kind,
@@ -362,6 +393,8 @@ def _update_job_unlocked(
     settings: Settings,
     fields: dict[str, Any],
 ) -> JobState:
+    if "video_id" in fields and fields["video_id"] is not None:
+        _validate_video_id(fields["video_id"])
     state = read_job(job_id, settings)
     if state is None:
         raise KeyError(f"ジョブが見つかりません: {job_id}")
@@ -377,6 +410,9 @@ def _update_job_unlocked(
 def update_job(job_id: str, *, settings: Settings | None = None, **fields: Any) -> JobState:
     """ジョブ状態を部分更新する."""
     settings = settings or get_settings()
+    _validate_job_id(job_id)
+    if "video_id" in fields and fields["video_id"] is not None:
+        _validate_video_id(fields["video_id"])
     with _job_store_lock(settings):
         return _update_job_unlocked(job_id, settings=settings, fields=fields)
 
@@ -463,7 +499,7 @@ def _read_current_pointer(settings: Settings) -> _CurrentPointer:
         if not path.is_file():
             return _CurrentPointer(_CURRENT_MISSING)
         data = json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError, UnicodeError):
+    except (json.JSONDecodeError, OSError, UnicodeError, ValueError):
         return _CurrentPointer(_CURRENT_CORRUPT)
     if not isinstance(data, dict):
         return _CurrentPointer(_CURRENT_CORRUPT)
@@ -471,11 +507,13 @@ def _read_current_pointer(settings: Settings) -> _CurrentPointer:
     job_id = data.get("job_id")
     if not isinstance(job_id, str) or not job_id:
         return _CurrentPointer(_CURRENT_CORRUPT)
-    target_path = _job_path(settings, job_id)
     try:
+        target_path = _job_path(settings, job_id)
         if not target_path.is_file():
             return _CurrentPointer(_CURRENT_TARGET_MISSING)
     except OSError:
+        return _CurrentPointer(_CURRENT_CORRUPT)
+    except ValueError:
         return _CurrentPointer(_CURRENT_CORRUPT)
     job = read_job(job_id, settings)
     if job is None:
@@ -688,6 +726,10 @@ def start_job(
     を共有する複数 process でも勝者を 1 件にする。
     """
     settings = settings or get_settings()
+    if requested_job_id is not None:
+        _validate_job_id(requested_job_id)
+    if video_id is not None:
+        _validate_video_id(video_id)
     with _START_LOCK:
         with _job_store_lock(settings):
             if _is_busy_unlocked(settings):
