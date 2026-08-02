@@ -13,6 +13,8 @@ from yt_live_kit.config import Settings
 from yt_live_kit.models.upload import UploadChannel, UploadContentSnapshot
 from yt_live_kit.services._paths import (
     PathConfinementError,
+    RESERVED_DATA_DIR_NAMES,
+    confined_video_path,
     confined_identifier_path,
     confined_path,
 )
@@ -33,6 +35,7 @@ from yt_live_kit.services.ytdlp import YtdlpError, fetch
 
 
 VIDEO_ID = "dQw4w9WgXcQ"
+UNDERSCORE_VIDEO_ID = "_AbCdEf1234"
 NOW = datetime(2026, 8, 2, tzinfo=timezone.utc)
 
 
@@ -53,6 +56,21 @@ def test_normal_youtube_id_remains_compatible(tmp_path: Path) -> None:
     assert path == data_dir / VIDEO_ID / "subtitles"
     assert path.resolve().is_relative_to(data_dir.resolve())
     assert not data_dir.exists()
+
+
+def test_underscore_leading_youtube_id_remains_compatible(tmp_path: Path) -> None:
+    data_dir = tmp_path / "data"
+    path = confined_video_path(data_dir, UNDERSCORE_VIDEO_ID, "subtitles")
+    assert path == data_dir / UNDERSCORE_VIDEO_ID / "subtitles"
+    assert path.resolve().is_relative_to(data_dir.resolve())
+
+
+@pytest.mark.parametrize("reserved_name", sorted(RESERVED_DATA_DIR_NAMES))
+def test_exact_internal_names_remain_reserved_for_video_paths(
+    tmp_path: Path, reserved_name: str
+) -> None:
+    with pytest.raises(PathConfinementError):
+        confined_video_path(tmp_path / "data", reserved_name)
 
 
 @pytest.mark.parametrize(

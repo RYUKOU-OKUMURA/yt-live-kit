@@ -11,6 +11,9 @@ class PathConfinementError(ValueError):
 
 
 _SAFE_IDENTIFIER = re.compile(r"^[A-Za-z0-9_-]+$")
+RESERVED_DATA_DIR_NAMES = frozenset(
+    {"_jobs", "_schedule", "_config", "_channels", "_batch"}
+)
 
 
 def safe_identifier(value: object, label: str) -> str:
@@ -29,9 +32,9 @@ def safe_identifier(value: object, label: str) -> str:
 
 
 def safe_video_identifier(value: object, label: str = "動画 ID") -> str:
-    """動画 directory 用の識別子を返す（予約 namespace を除外）。"""
+    """動画 directory 用の識別子を返す（予約 namespace だけを除外）。"""
     safe = safe_identifier(value, label)
-    if safe.startswith("_"):
+    if safe in RESERVED_DATA_DIR_NAMES:
         raise PathConfinementError(f"{label}が正しくありません。")
     return safe
 
@@ -81,6 +84,6 @@ def confined_video_path(
     *parts: str | Path,
     label: str = "動画保存先",
 ) -> Path:
-    """予約 namespace を除外した動画 ID の data root 内 path を返す。"""
-    safe = safe_video_identifier(video_id)
+    """予約 namespace だけを除外した動画 ID の data root 内 path を返す。"""
+    safe = safe_video_identifier(video_id, "動画 ID")
     return confined_path(data_dir, safe, *parts, label=label)

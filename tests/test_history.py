@@ -4,7 +4,10 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
+import pytest
+
 from yt_live_kit.config import Settings
+from yt_live_kit.services._paths import RESERVED_DATA_DIR_NAMES
 from yt_live_kit.services.history import (
     is_video_processed,
     is_video_targets_complete,
@@ -51,6 +54,28 @@ def test_list_processed_videos(tmp_path: Path):
 
     videos = list_processed_videos(settings)
     assert len(videos) == 2
+
+
+def test_list_processed_videos_accepts_underscore_leading_youtube_id(
+    tmp_path: Path,
+) -> None:
+    settings = Settings(data_dir=tmp_path)
+    video_id = "_AbCdEf1234"
+    _write_meta(tmp_path / video_id, video_id, "アンダースコア動画")
+
+    videos = list_processed_videos(settings)
+
+    assert [video.video_id for video in videos] == [video_id]
+
+
+@pytest.mark.parametrize("reserved_name", sorted(RESERVED_DATA_DIR_NAMES))
+def test_list_processed_videos_skips_exact_internal_names(
+    tmp_path: Path, reserved_name: str
+) -> None:
+    settings = Settings(data_dir=tmp_path)
+    _write_meta(tmp_path / reserved_name, reserved_name, "内部データ")
+
+    assert list_processed_videos(settings) == []
 
 
 def test_list_processed_videos_normalizes_legacy_naive_datetime_to_utc(

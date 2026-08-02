@@ -7,7 +7,11 @@ from datetime import datetime, timezone
 
 from yt_live_kit.config import Settings, get_settings
 from yt_live_kit.models.meta import VideoMeta
-from yt_live_kit.services._paths import PathConfinementError, confined_video_path
+from yt_live_kit.services._paths import (
+    RESERVED_DATA_DIR_NAMES,
+    PathConfinementError,
+    confined_video_path,
+)
 
 
 class HistoryError(Exception):
@@ -57,7 +61,7 @@ def list_processed_videos(settings: Settings | None = None) -> list[ProcessedVid
 
     results: list[ProcessedVideo] = []
     for entry in data_dir.iterdir():
-        if entry.name.startswith("_"):
+        if entry.name in RESERVED_DATA_DIR_NAMES:
             continue
 
         meta_path = _video_path(entry.name, settings, "meta.json")
