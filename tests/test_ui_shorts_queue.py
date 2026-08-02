@@ -552,6 +552,37 @@ def test_all_failed_result_is_not_rendered_as_success(tmp_path: Path) -> None:
     assert any("subtitles フィルタを利用できません" in message for message in messages)
 
 
+def test_interrupted_result_is_not_rendered_as_done_and_has_recovery_action(
+    tmp_path: Path,
+) -> None:
+    result = replace(
+        _queue_result(tmp_path, (_failed_item(),)),
+        status="interrupted",
+        clip_specs=(_confirmed_spec(),),
+    )
+    settings = Settings(data_dir=tmp_path)
+    with (
+        patch("yt_live_kit.ui.components.shorts_queue.st.markdown"),
+        patch("yt_live_kit.ui.components.shorts_queue.st.caption"),
+        patch("yt_live_kit.ui.components.shorts_queue.st.error") as error,
+        patch("yt_live_kit.ui.components.shorts_queue.st.button", return_value=True),
+        patch(
+            "yt_live_kit.ui.components.shorts_queue._confirm_interrupted_queue_recovery_dialog"
+        ) as dialog,
+        patch("yt_live_kit.ui.components.shorts_queue.st.video") as video,
+    ):
+        _render_result(
+            result,
+            video_id="video-a",
+            title="元動画",
+            settings=settings,
+        )
+
+    assert any("中断" in call.args[0] and "完了扱い" in call.args[0] for call in error.call_args_list)
+    dialog.assert_called_once()
+    video.assert_not_called()
+
+
 def test_partial_result_shows_counts_and_individual_failure_reason(
     tmp_path: Path,
 ) -> None:

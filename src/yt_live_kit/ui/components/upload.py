@@ -521,6 +521,13 @@ def render_upload_section(
     if result is None:
         st.info("まとめて生成したショートがありません。先にショートを生成してください。")
         return
+    if result.status == "interrupted":
+        st.error(
+            "ショート生成は前回の処理中に中断されました。"
+            "途中の成果物は予約対象ではありません。"
+            "ショート生成画面で内容を確認し、明示的に再実行してください。"
+        )
+        return
     if result.status != "done":
         st.info(
             "ショート生成が完了していないため、まだ予約投稿できません。"

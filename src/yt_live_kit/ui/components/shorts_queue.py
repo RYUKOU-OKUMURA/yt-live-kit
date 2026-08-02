@@ -198,6 +198,7 @@ def _start_queue_job(
     title: str,
     specs: Sequence[ShortsQueueClipSpec],
     settings: Settings,
+    resume_job_id: str | None = None,
 ) -> None:
     """単一ジョブを開始し、返却 ID を現在動画へ紐付ける."""
     if is_busy(settings):
@@ -209,14 +210,19 @@ def _start_queue_job(
         st.error(_safe_text(exc))
         return
     try:
+        job_kwargs: dict[str, object] = {
+            "video_id": video_id,
+            "title": title,
+            "total": len(specs),
+            "settings": settings,
+            "clip_spec_dicts": [spec.to_dict() for spec in specs],
+        }
+        if resume_job_id is not None:
+            job_kwargs["resume_job_id"] = resume_job_id
         job_id = start_job(
             "shorts_queue",
             run_shorts_queue_job_target,
-            video_id=video_id,
-            title=title,
-            total=len(specs),
-            settings=settings,
-            clip_spec_dicts=[spec.to_dict() for spec in specs],
+            **job_kwargs,
         )
     except JobBusyError:
         st.error(_BUSY_MESSAGE)
@@ -376,6 +382,36 @@ def start_or_confirm_line_generation(
         specs=(spec,),
         settings=settings,
     )
+
+
+@st.dialog("中断したショート量産の再実行を確認")
+def _confirm_interrupted_queue_recovery_dialog(
+    *,
+    video_id: str,
+    title: str,
+    result: ShortsQueueResult,
+    settings: Settings,
+) -> None:
+    """途中結果を done に変えず、明示確認後に新しい job として再実行する."""
+    st.warning(
+        "前回のショート量産は処理中に中断されました。"
+        "途中結果を完了扱いにはせず、証明できる成功 item だけを再利用します。"
+    )
+    st.caption(f"再実行対象 {len(result.clip_specs)} 本 / 元ジョブ {_safe_text(result.job_id)}")
+    for spec in result.clip_specs:
+        st.write(_safe_text(spec.output_name))
+    if st.button(
+        "確認してショート量産を再実行",
+        key=f"shorts_queue_recovery_confirm_{video_id}_{result.job_id}",
+        type="primary",
+    ):
+        _start_queue_job(
+            video_id=video_id,
+            title=title,
+            specs=result.clip_specs,
+            settings=settings,
+            resume_job_id=result.job_id,
+        )
 
 
 def _render_snapshot_form(
@@ -625,12 +661,39 @@ def _is_nonempty_file(path: Path) -> tuple[bool, str | None]:
     return True, None
 
 
-def _render_result(result: ShortsQueueResult) -> None:
+def _render_result(
+    result: ShortsQueueResult,
+    *,
+    video_id: str | None = None,
+    title: str = "",
+    settings: Settings | None = None,
+) -> None:
     st.markdown("#### まとめて生成したショート")
     st.caption(
         f"成功 {result.success_count} 件 / 失敗 {result.failure_count} 件 / "
         f"ジョブ {_safe_text(result.job_id)}"
     )
+    if result.status == "interrupted":
+        st.error(
+            "ショート生成は前回の処理中に中断されました。"
+            "途中の成果物は完了扱いにしていません。"
+            "確認後に再実行すると、安全性を確認できた成功 item だけを再利用します。"
+        )
+        if video_id is not None and settings is not None and st.button(
+            "中断したキューを再実行する",
+            key=f"shorts_queue_recovery_{video_id}_{result.job_id}",
+            type="primary",
+        ):
+            _confirm_interrupted_queue_recovery_dialog(
+                video_id=video_id,
+                title=title,
+                result=result,
+                settings=settings,
+            )
+        return
+    if result.status == "running":
+        st.info("ショート量産を実行中です。完了するまで予約投稿できません。")
+        return
     if result.failure_count and result.success_count == 0:
         st.error(
             f"すべてのショート生成に失敗しました（失敗 {result.failure_count} 件）。"
@@ -699,7 +762,12 @@ def _render_result(result: ShortsQueueResult) -> None:
             )
 
 
-def _render_current_result(video_id: str, settings: Settings) -> None:
+def _render_current_result(
+    video_id: str,
+    settings: Settings,
+    *,
+    title: str = "",
+) -> None:
     job_id = _job_ids().get(video_id)
     try:
         if job_id is not None:
@@ -713,7 +781,7 @@ def _render_current_result(video_id: str, settings: Settings) -> None:
         st.error(_safe_text(exc))
         return
     if result is not None:
-        _render_result(result)
+        _render_result(result, video_id=video_id, title=title, settings=settings)
 
 
 def render_shorts_queue(
@@ -733,7 +801,7 @@ def render_shorts_queue(
             "現在の 1 本はショート生産ラインで管理されています。"
             "まとめて生成はライン完了後に利用してください。"
         )
-        _render_current_result(video_id, settings)
+        _render_current_result(video_id, settings, title=title)
         return
     available_sources: list[str] = []
     if clip_candidates:
@@ -742,7 +810,7 @@ def render_shorts_queue(
         available_sources.append("highlights")
     if not available_sources:
         st.info("まとめて生成できる候補がありません。")
-        _render_current_result(video_id, settings)
+        _render_current_result(video_id, settings, title=title)
         return
 
     source_key = _state_key(video_id, "source")
@@ -857,4 +925,4 @@ def render_shorts_queue(
                     settings=settings,
                 )
 
-    _render_current_result(video_id, settings)
+    _render_current_result(video_id, settings, title=title)

@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import tempfile
+import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -38,10 +40,21 @@ from yt_live_kit.services.telop import (
 QueueSource = Literal["clips", "highlights"]
 QueueMode = Literal["individual", "concat"]
 QueueItemStatus = Literal["succeeded", "failed"]
-QueueStatus = Literal["running", "done"]
+QueueStatus = Literal["running", "done", "interrupted"]
 ShortsQueueProgressCallback = Callable[[int, int, str], None] | None
 
-SCHEMA_VERSION = 1
+LEGACY_SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+RECOVERY_TABLE: Mapping[str, str] = {
+    "done": "完了 manifest は内容を保持し、検証済みの成功 item だけを表示・予約対象にする。",
+    "running_live": "owner job が実行中なら manifest を変更せず、予約は許可しない。",
+    "running_orphan": "owner job が見つからない、または終了済みなら interrupted へ atomic 遷移する。",
+    "interrupted": "terminal state として保持し、途中結果を done に昇格させない。明示的な再実行だけを許可する。",
+    "corrupted": "manifest を上書きせず、日本語エラーで fail closed にする。",
+    "owner_mismatch": "保存先の job ID と owner_job_id が一致しなければ読み込み・復旧を拒否する。",
+    "missing_output_or_fingerprint": "成功 item の自動再利用を拒否し、再生成を必要とする。",
+}
+
 _SPEC_KEYS = frozenset(
     {
         "target_id",
@@ -64,6 +77,21 @@ _ITEM_KEYS = frozenset(
         "description",
         "tags",
         "error",
+        "input_fingerprint",
+        "output_fingerprint",
+    }
+)
+_LEGACY_ITEM_KEYS = frozenset(
+    {
+        "target_id",
+        "status",
+        "output_path",
+        "log_path",
+        "font_warning",
+        "title_candidates",
+        "description",
+        "tags",
+        "error",
     }
 )
 _MANIFEST_KEYS = frozenset(
@@ -71,6 +99,7 @@ _MANIFEST_KEYS = frozenset(
         "schema_version",
         "video_id",
         "job_id",
+        "owner_job_id",
         "status",
         "created_at",
         "updated_at",
@@ -80,6 +109,7 @@ _MANIFEST_KEYS = frozenset(
         "failure_count",
     }
 )
+_LEGACY_MANIFEST_KEYS = frozenset(_MANIFEST_KEYS - {"owner_job_id"})
 
 
 class ShortsQueueError(ShortsError):
@@ -327,6 +357,8 @@ class ShortsQueueItemResult:
     description: str
     tags: tuple[str, ...]
     error: str | None
+    input_fingerprint: str | None = None
+    output_fingerprint: str | None = None
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -339,13 +371,20 @@ class ShortsQueueItemResult:
             "description": self.description,
             "tags": list(self.tags),
             "error": self.error,
+            "input_fingerprint": self.input_fingerprint,
+            "output_fingerprint": self.output_fingerprint,
         }
 
     @classmethod
-    def from_dict(cls, value: object) -> ShortsQueueItemResult:
+    def from_dict(
+        cls,
+        value: object,
+        *,
+        legacy: bool = False,
+    ) -> ShortsQueueItemResult:
         if not isinstance(value, Mapping):
             raise ShortsQueueError("生成結果はオブジェクトで指定してください。")
-        _require_exact_keys(value, _ITEM_KEYS)
+        _require_exact_keys(value, _LEGACY_ITEM_KEYS if legacy else _ITEM_KEYS)
         status = _require_string(value["status"], "生成結果の状態")
         if status not in {"succeeded", "failed"}:
             raise ShortsQueueError("生成結果の状態が正しくありません。")
@@ -354,6 +393,12 @@ class ShortsQueueItemResult:
         output_path = _optional_path(value["output_path"], "出力パス")
         log_path = _optional_path(value["log_path"], "ログパス")
         error = _require_optional_string(value["error"], "エラー")
+        input_fingerprint = _optional_fingerprint(
+            value.get("input_fingerprint"), "入力 fingerprint"
+        )
+        output_fingerprint = _optional_fingerprint(
+            value.get("output_fingerprint"), "出力 fingerprint"
+        )
         if status == "succeeded" and (output_path is None or error is not None):
             raise ShortsQueueError("成功結果の出力パスまたはエラー状態が正しくありません。")
         if status == "failed" and (output_path is not None or error is None):
@@ -368,6 +413,8 @@ class ShortsQueueItemResult:
             description=_require_string(value["description"], "説明文"),
             tags=tags,
             error=error,
+            input_fingerprint=input_fingerprint,
+            output_fingerprint=output_fingerprint,
         )
 
 
@@ -385,12 +432,14 @@ class ShortsQueueResult:
     success_count: int
     failure_count: int
     manifest_path: Path
+    owner_job_id: str | None = None
 
     def to_dict(self) -> dict[str, object]:
         return {
             "schema_version": SCHEMA_VERSION,
             "video_id": self.video_id,
             "job_id": self.job_id,
+            "owner_job_id": self.owner_job_id or self.job_id,
             "status": self.status,
             "created_at": self.created_at.astimezone(timezone.utc).isoformat(),
             "updated_at": self.updated_at.astimezone(timezone.utc).isoformat(),
@@ -409,11 +458,14 @@ class ShortsQueueResult:
     ) -> ShortsQueueResult:
         if not isinstance(value, Mapping):
             raise ShortsQueueError("ショート量産 manifest はオブジェクトで指定してください。")
-        _require_exact_keys(value, _MANIFEST_KEYS)
-        if _require_int(value["schema_version"], "schema version") != SCHEMA_VERSION:
+        schema_version = _require_int(value.get("schema_version"), "schema version")
+        legacy = schema_version == LEGACY_SCHEMA_VERSION
+        if schema_version not in {LEGACY_SCHEMA_VERSION, SCHEMA_VERSION}:
             raise ShortsQueueError("対応していないショート量産 manifest です。")
+        _require_exact_keys(value, _LEGACY_MANIFEST_KEYS if legacy else _MANIFEST_KEYS)
         status = _require_string(value["status"], "キュー状態")
-        if status not in {"running", "done"}:
+        allowed_statuses = {"running", "done"} | ({"interrupted"} if not legacy else set())
+        if status not in allowed_statuses:
             raise ShortsQueueError("キュー状態が正しくありません。")
         raw_specs = value["clip_specs"]
         raw_items = value["items"]
@@ -422,7 +474,9 @@ class ShortsQueueResult:
         if not isinstance(raw_items, list):
             raise ShortsQueueError("manifest の生成結果が正しくありません。")
         specs = tuple(ShortsQueueClipSpec.from_dict(item) for item in raw_specs)
-        items = tuple(ShortsQueueItemResult.from_dict(item) for item in raw_items)
+        items = tuple(
+            ShortsQueueItemResult.from_dict(item, legacy=legacy) for item in raw_items
+        )
         if len(items) > len(specs):
             raise ShortsQueueError("manifest の生成結果件数が対象件数を超えています。")
         expected_ids = tuple(spec.target_id for spec in specs[: len(items)])
@@ -440,9 +494,18 @@ class ShortsQueueResult:
         updated_at = _parse_utc_datetime(value["updated_at"], "更新日時")
         if updated_at < created_at:
             raise ShortsQueueError("manifest の更新日時が作成日時より前です。")
+        job_id = _safe_path_identifier(value["job_id"], "ジョブ ID")
+        owner_job_id = (
+            job_id
+            if legacy
+            else _safe_path_identifier(value["owner_job_id"], "owner job ID")
+        )
+        if owner_job_id != job_id:
+            raise ShortsQueueError("manifest の owner job ID がジョブ ID と一致しません。")
         return cls(
             video_id=_require_string(value["video_id"], "動画 ID"),
-            job_id=_require_string(value["job_id"], "ジョブ ID"),
+            job_id=job_id,
+            owner_job_id=owner_job_id,
             status=status,
             created_at=created_at,
             updated_at=updated_at,
@@ -467,6 +530,15 @@ def _string_tuple(value: object, label: str) -> tuple[str, ...]:
     if not isinstance(value, list) or not value:
         raise ShortsQueueError(f"{label}を 1 件以上指定してください。")
     return tuple(_require_string(item, f"{label} {index}") for index, item in enumerate(value, 1))
+
+
+def _optional_fingerprint(value: object, label: str) -> str | None:
+    if value is None:
+        return None
+    text = _require_string(value, label)
+    if len(text) != 64 or any(character not in "0123456789abcdef" for character in text):
+        raise ShortsQueueError(f"{label} の形式が正しくありません。")
+    return text
 
 
 def _optional_path(value: object, label: str) -> Path | None:
@@ -690,6 +762,137 @@ def _validate_result_paths(result: ShortsQueueResult, settings: Settings) -> Non
         raise ShortsQueueError(str(exc)) from exc
 
 
+def make_shorts_queue_input_fingerprint(
+    video_id: str,
+    spec: ShortsQueueClipSpec,
+) -> str:
+    """再実行時に同じ immutable input だったことを証明する fingerprint を返す."""
+    payload = {
+        "video_id": _require_string(video_id, "動画 ID"),
+        "clip_spec": spec.to_dict(),
+    }
+    return hashlib.sha256(_canonical_json(payload).encode("utf-8")).hexdigest()
+
+
+def make_shorts_queue_output_fingerprint(
+    path: Path,
+    settings: Settings | None = None,
+) -> str:
+    """安全な絶対 path・stat・内容から immutable output fingerprint を作る."""
+    settings = settings or get_settings()
+    try:
+        confined_path(settings.data_dir, path, label="ショート量産成果物")
+        resolved_root = settings.data_dir.resolve(strict=False)
+        resolved_path = path.resolve(strict=True)
+        resolved_path.relative_to(resolved_root)
+        stat = resolved_path.stat()
+        if not resolved_path.is_file() or stat.st_size <= 0:
+            raise OSError("empty output")
+        digest = hashlib.sha256()
+        with resolved_path.open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(chunk)
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise ShortsQueueError(
+            "ショート量産成果物を安全に確認できないため、再利用できません。"
+        ) from exc
+    payload = {
+        "path": str(resolved_path),
+        "size": stat.st_size,
+        "mtime_ns": stat.st_mtime_ns,
+        "sha256": digest.hexdigest(),
+    }
+    return hashlib.sha256(_canonical_json(payload).encode("utf-8")).hexdigest()
+
+
+# 短い別名は、H1-3 の pure validation API を呼ぶ既存・将来の UI/CLI が
+# output fingerprint の実装詳細に依存しないための互換入口である。
+make_queue_input_fingerprint = make_shorts_queue_input_fingerprint
+make_queue_output_fingerprint = make_shorts_queue_output_fingerprint
+
+
+def can_reuse_shorts_queue_item(
+    *,
+    video_id: str,
+    spec: ShortsQueueClipSpec,
+    item: ShortsQueueItemResult,
+    settings: Settings | None = None,
+) -> bool:
+    """成功 item を再利用できることを、入力・出力・安全な path で証明する.
+
+    fingerprint の無い legacy/current done item は表示・予約の後方互換を保つが、
+    interrupted queue の自動再利用には使わない。output が同名でも fingerprint が
+    欠ける、内容が変わる、または data root 外なら必ず再生成へ倒す。
+    """
+    settings = settings or get_settings()
+    if item.status != "succeeded" or item.output_path is None:
+        return False
+    expected_input = make_shorts_queue_input_fingerprint(video_id, spec)
+    if item.input_fingerprint != expected_input or not item.output_fingerprint:
+        return False
+    try:
+        expected_path = confined_video_path(
+            settings.data_dir,
+            _safe_path_identifier(video_id, "動画 ID"),
+            "shorts",
+            "output",
+            spec.output_name,
+            label="ショート量産成果物",
+        )
+        actual_path = item.output_path.resolve(strict=True)
+        if actual_path != expected_path.resolve(strict=True):
+            return False
+        return make_shorts_queue_output_fingerprint(actual_path, settings) == item.output_fingerprint
+    except (OSError, RuntimeError, ShortsQueueError, ValueError):
+        return False
+
+
+def reusable_shorts_queue_items(
+    result: ShortsQueueResult,
+    settings: Settings | None = None,
+) -> dict[str, ShortsQueueItemResult]:
+    """interrupted manifest から安全に再利用できる item だけを抽出する."""
+    if result.status != "interrupted":
+        return {}
+    settings = settings or get_settings()
+    specs = {spec.target_id: spec for spec in result.clip_specs}
+    return {
+        item.target_id: item
+        for item in result.items
+        if item.target_id in specs
+        and can_reuse_shorts_queue_item(
+            video_id=result.video_id,
+            spec=specs[item.target_id],
+            item=item,
+            settings=settings,
+        )
+    }
+
+
+def _queue_owner_is_live(result: ShortsQueueResult, settings: Settings) -> bool:
+    """H1-1 の job owner が生きている間は queue を interrupted にしない."""
+    try:
+        from yt_live_kit.services.jobs import read_job
+
+        job = read_job(result.owner_job_id or result.job_id, settings)
+    except Exception:
+        return False
+    if job is None or job.job_id != result.owner_job_id or job.status != "running":
+        return False
+    owner_pid = job.owner_pid
+    if not isinstance(owner_pid, int) or owner_pid <= 0:
+        return False
+    try:
+        os.kill(owner_pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return True
+
+
 def _write_manifest(result: ShortsQueueResult, settings: Settings) -> None:
     _validate_result_paths(result, settings)
     path = result.manifest_path
@@ -700,14 +903,25 @@ def _write_manifest(result: ShortsQueueResult, settings: Settings) -> None:
             mode="w",
             encoding="utf-8",
             dir=path.parent,
-            prefix=f".{path.name}.",
+            prefix=f".{path.name}.{uuid.uuid4().hex}.",
             suffix=".tmp",
             delete=False,
         ) as temporary:
             json.dump(result.to_dict(), temporary, ensure_ascii=False, indent=2)
             temporary.write("\n")
+            temporary.flush()
+            os.fsync(temporary.fileno())
             temporary_path = Path(temporary.name)
-        temporary_path.replace(path)
+        os.replace(temporary_path, path)
+        try:
+            directory_fd = os.open(path.parent, os.O_RDONLY)
+        except OSError:
+            directory_fd = None
+        if directory_fd is not None:
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
     except OSError as exc:
         raise ShortsQueueError("ショート量産結果を保存できませんでした。") from exc
     finally:
@@ -722,6 +936,7 @@ def run_shorts_queue(
     *,
     job_id: str,
     on_progress: ShortsQueueProgressCallback = None,
+    reuse_items: Mapping[str, ShortsQueueItemResult] | None = None,
 ) -> ShortsQueueResult:
     """確定済み target を順次生成し、唯一の writer として manifest を更新する."""
     settings = settings or get_settings()
@@ -737,6 +952,7 @@ def run_shorts_queue(
     result = ShortsQueueResult(
         video_id=video_id,
         job_id=job_id,
+        owner_job_id=job_id,
         status="running",
         created_at=now,
         updated_at=now,
@@ -750,6 +966,32 @@ def run_shorts_queue(
     items: list[ShortsQueueItemResult] = []
     total = len(validated_specs)
     for index, spec in enumerate(validated_specs, start=1):
+        reusable_item = reuse_items.get(spec.target_id) if reuse_items else None
+        if reusable_item is not None and can_reuse_shorts_queue_item(
+            video_id=video_id,
+            spec=spec,
+            item=reusable_item,
+            settings=settings,
+        ):
+            items.append(reusable_item)
+            if on_progress is not None:
+                on_progress(index, total, f"{spec.target_id}: 安全に再利用")
+            updated = datetime.now(timezone.utc)
+            result = ShortsQueueResult(
+                video_id=video_id,
+                job_id=job_id,
+                owner_job_id=job_id,
+                status="done" if index == total else "running",
+                created_at=now,
+                updated_at=updated,
+                clip_specs=validated_specs,
+                items=tuple(items),
+                success_count=sum(value.status == "succeeded" for value in items),
+                failure_count=sum(value.status == "failed" for value in items),
+                manifest_path=path,
+            )
+            _write_manifest(result, settings)
+            continue
         document = spec.telop_document
 
         def report_inner(_current: int, _total: int, message: str) -> None:
@@ -781,8 +1023,18 @@ def run_shorts_queue(
                 description=document.description,
                 tags=tuple(document.tags),
                 error=str(exc),
+                input_fingerprint=make_shorts_queue_input_fingerprint(video_id, spec),
             )
         else:
+            output_fingerprint: str | None = None
+            try:
+                output_fingerprint = make_shorts_queue_output_fingerprint(
+                    short.output_path, settings
+                )
+            except ShortsQueueError:
+                # fake / legacy builder が path だけ返す場合も結果自体は保持する。
+                # fingerprint が無い item は recovery 時に自動再利用しない。
+                output_fingerprint = None
             item = ShortsQueueItemResult(
                 target_id=spec.target_id,
                 status="succeeded",
@@ -793,6 +1045,8 @@ def run_shorts_queue(
                 description=document.description,
                 tags=tuple(document.tags),
                 error=None,
+                input_fingerprint=make_shorts_queue_input_fingerprint(video_id, spec),
+                output_fingerprint=output_fingerprint,
             )
         items.append(item)
         if on_progress is not None:
@@ -802,6 +1056,7 @@ def run_shorts_queue(
         result = ShortsQueueResult(
             video_id=video_id,
             job_id=job_id,
+            owner_job_id=job_id,
             status="done" if index == total else "running",
             created_at=now,
             updated_at=updated,
@@ -822,9 +1077,16 @@ def run_shorts_queue_job_target(
     job_id: str,
     video_id: str,
     clip_spec_dicts: list[dict[str, object]],
+    resume_job_id: str | None = None,
 ) -> None:
     """start_job 用 target。spec 再構築と進捗 bridge だけを担当する."""
     specs = tuple(ShortsQueueClipSpec.from_dict(item) for item in clip_spec_dicts)
+    reuse_items: dict[str, ShortsQueueItemResult] = {}
+    if resume_job_id is not None:
+        previous = load_shorts_queue_result(video_id, resume_job_id, settings)
+        if previous is None or previous.status != "interrupted":
+            raise ShortsQueueError("再実行元のショート量産結果が interrupted ではありません。")
+        reuse_items = reusable_shorts_queue_items(previous, settings)
 
     def on_progress(current: int, total: int, message: str) -> None:
         report(current=current, total=total, message=message)
@@ -835,7 +1097,67 @@ def run_shorts_queue_job_target(
         settings,
         job_id=job_id,
         on_progress=on_progress,
+        reuse_items=reuse_items,
     )
+
+
+def _read_shorts_queue_result(
+    video_id: str,
+    job_id: str,
+    settings: Settings,
+) -> ShortsQueueResult | None:
+    path = _manifest_path(video_id, job_id, settings)
+    if not path.is_file():
+        return None
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        result = ShortsQueueResult.from_dict(raw, manifest_path=path)
+        if result.video_id != video_id or result.job_id != job_id:
+            raise ShortsQueueError(
+                "manifest の動画 ID またはジョブ ID が保存先と一致しません。"
+            )
+        _validate_result_paths(result, settings)
+        return result
+    except ShortsQueueError:
+        raise
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ShortsQueueError("ショート量産結果を読み込めませんでした。") from exc
+
+
+def recover_shorts_queue_result(
+    video_id: str,
+    job_id: str,
+    settings: Settings | None = None,
+) -> ShortsQueueResult | None:
+    """再起動後の孤児 queue を idempotent に recovery する.
+
+    Recovery table は ``RECOVERY_TABLE`` が正本である。正常完了は不変、live
+    owner の running は不変、owner 不在の running だけを interrupted へ atomic
+    保存する。interrupted は terminal のため、途中 item を done に relabel
+    しない。manifest が壊れている場合は元ファイルへ書き戻さず例外で fail
+    closed にする。
+    """
+    settings = settings or get_settings()
+    result = _read_shorts_queue_result(video_id, job_id, settings)
+    if result is None or result.status != "running":
+        return result
+    if _queue_owner_is_live(result, settings):
+        return result
+    recovered = ShortsQueueResult(
+        video_id=result.video_id,
+        job_id=result.job_id,
+        owner_job_id=result.owner_job_id,
+        status="interrupted",
+        created_at=result.created_at,
+        updated_at=datetime.now(timezone.utc),
+        clip_specs=result.clip_specs,
+        items=result.items,
+        success_count=result.success_count,
+        failure_count=result.failure_count,
+        manifest_path=result.manifest_path,
+    )
+    _write_manifest(recovered, settings)
+    return recovered
 
 
 def load_shorts_queue_result(
@@ -845,17 +1167,7 @@ def load_shorts_queue_result(
 ) -> ShortsQueueResult | None:
     """指定 job ID の manifest を読み、読込元 path を結果へ注入する."""
     settings = settings or get_settings()
-    path = _manifest_path(video_id, job_id, settings)
-    if not path.is_file():
-        return None
-    try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
-        raise ShortsQueueError("ショート量産結果を読み込めませんでした。") from exc
-    result = ShortsQueueResult.from_dict(raw, manifest_path=path)
-    if result.video_id != video_id or result.job_id != job_id:
-        raise ShortsQueueError("manifest の動画 ID またはジョブ ID が保存先と一致しません。")
-    _validate_result_paths(result, settings)
+    result = recover_shorts_queue_result(video_id, job_id, settings)
     return result
 
 

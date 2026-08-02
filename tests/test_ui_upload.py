@@ -747,6 +747,31 @@ def test_upload_section_blocks_partial_running_manifest(tmp_path: Path) -> None:
     button.assert_not_called()
 
 
+def test_upload_section_blocks_interrupted_manifest_with_recovery_guidance(
+    tmp_path: Path,
+) -> None:
+    result = MagicMock(
+        status="interrupted",
+        items=(MagicMock(status="succeeded"),),
+        job_id="shorts-job",
+    )
+    with (
+        patch.object(upload, "load_latest_shorts_queue_result", return_value=result),
+        patch.object(upload, "get_next_upload_slot") as next_slot,
+        patch.object(upload.st, "caption"),
+        patch.object(upload.st, "error") as error,
+        patch.object(upload.st, "info") as info,
+        patch.object(upload.st, "button") as button,
+    ):
+        upload.render_upload_section("source-1", Settings(data_dir=tmp_path))
+
+    assert "中断" in error.call_args.args[0]
+    assert "予約対象ではありません" in error.call_args.args[0]
+    next_slot.assert_not_called()
+    info.assert_not_called()
+    button.assert_not_called()
+
+
 def test_invalid_schedule_or_unclicked_button_creates_no_preview_operation_or_job(
     tmp_path: Path,
 ) -> None:
