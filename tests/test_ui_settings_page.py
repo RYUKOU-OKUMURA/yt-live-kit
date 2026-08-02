@@ -313,7 +313,8 @@ def test_schedule_placeholder_is_visible(
 @patch.object(settings_page.st, "container")
 @patch.object(settings_page.st, "form")
 @patch.object(settings_page.st, "form_submit_button", return_value=False)
-@patch.object(settings_page.st, "text_input", side_effect=["09:00", "Asia/Tokyo"])
+@patch.object(settings_page.st, "text_input", return_value="Asia/Tokyo")
+@patch.object(settings_page.st, "text_area", return_value="09:00\n18:00")
 @patch.object(settings_page.st, "number_input", return_value=1)
 @patch.object(settings_page, "count_upload_attempts", return_value=3)
 @patch.object(settings_page, "load_schedule_policy", return_value=SchedulePolicy())
@@ -321,6 +322,7 @@ def test_schedule_form_does_not_save_before_submit(
     load: MagicMock,
     attempts: MagicMock,
     number: MagicMock,
+    text_area: MagicMock,
     text_input: MagicMock,
     submit: MagicMock,
     form: MagicMock,
@@ -332,6 +334,46 @@ def test_schedule_form_does_not_save_before_submit(
     container.return_value.__enter__.return_value = container.return_value
     settings_page._render_schedule_placeholder(_settings(tmp_path))
     save.assert_not_called()
+
+
+@patch.object(settings_page, "_save_schedule_policy")
+@patch.object(settings_page.st, "container")
+@patch.object(settings_page.st, "form")
+@patch.object(settings_page.st, "form_submit_button", return_value=True)
+@patch.object(settings_page.st, "text_input", return_value="Asia/Tokyo")
+@patch.object(settings_page.st, "text_area", return_value="18:00\n09:00\n12:30")
+@patch.object(settings_page.st, "number_input", return_value=2)
+@patch.object(settings_page, "count_upload_attempts", return_value=3)
+@patch.object(
+    settings_page,
+    "load_schedule_policy",
+    return_value=SchedulePolicy(daily_times=["18:00", "09:00"]),
+)
+def test_schedule_form_propagates_multiple_times_and_displays_sorted_values(
+    load: MagicMock,
+    attempts: MagicMock,
+    number: MagicMock,
+    text_area: MagicMock,
+    text_input: MagicMock,
+    submit: MagicMock,
+    form: MagicMock,
+    container: MagicMock,
+    save: MagicMock,
+    tmp_path: Path,
+) -> None:
+    form.return_value.__enter__.return_value = form.return_value
+    container.return_value.__enter__.return_value = container.return_value
+    settings = _settings(tmp_path)
+
+    settings_page._render_schedule_placeholder(settings)
+
+    assert text_area.call_args.kwargs["value"] == "09:00\n18:00"
+    save.assert_called_once_with(
+        ["18:00", "09:00", "12:30"],
+        2,
+        "Asia/Tokyo",
+        settings,
+    )
 
 
 @patch.object(settings_page.st, "success")
@@ -364,7 +406,148 @@ def test_save_schedule_policy_shows_japanese_validation_error(
     assert "validation error" not in message.lower()
 
 
+@pytest.mark.parametrize(
+    "daily_times",
+    [[], ["09:00", "09:00"], ["9:00"], ["09:00", ""]],
+)
+@patch.object(settings_page.st, "error")
+@patch.object(settings_page, "save_schedule_policy")
+def test_save_schedule_policy_rejects_empty_duplicate_and_invalid_times(
+    save: MagicMock,
+    error: MagicMock,
+    daily_times: list[str],
+    tmp_path: Path,
+) -> None:
+    settings_page._save_schedule_policy(
+        daily_times,
+        1,
+        "Asia/Tokyo",
+        _settings(tmp_path),
+    )
+
+    save.assert_not_called()
+    message = error.call_args.args[0]
+    assert "入力が正しくありません" in message
+    assert "errors.pydantic.dev" not in message
+    assert "validation error" not in message.lower()
+
+
+def test_save_schedule_policy_accepts_multiple_times(
+    tmp_path: Path,
+) -> None:
+    save = MagicMock()
+    with (
+        patch.object(settings_page, "save_schedule_policy", save),
+        patch.object(settings_page.st, "success"),
+    ):
+        settings_page._save_schedule_policy(
+            ["18:30", "09:00"],
+            2,
+            "Asia/Tokyo",
+            _settings(tmp_path),
+        )
+
+    policy = save.call_args.args[0]
+    assert policy.daily_times == ("09:00", "18:30")
+
+
+def test_shorts_line_defaults_form_does_not_save_before_submit(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    save = MagicMock()
+    monkeypatch.setattr(
+        settings_page._local_settings,
+        "save_shorts_line_defaults",
+        save,
+        raising=False,
+    )
+    with (
+        patch.object(
+            settings_page._local_settings,
+            "load_shorts_line_defaults",
+            return_value=settings_page._local_settings.ShortsLineDefaults(),
+        ),
+        patch.object(settings_page.st, "form") as form,
+        patch.object(
+            settings_page.st,
+            "selectbox",
+            side_effect=["crop", "boxed", "bold_outline"],
+        ),
+        patch.object(settings_page.st, "form_submit_button", return_value=False),
+    ):
+        form.return_value.__enter__.return_value = form.return_value
+        settings_page._render_shorts_line_settings(_settings(tmp_path))
+
+    save.assert_not_called()
+
+
+def test_shorts_line_defaults_form_saves_selected_values(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    save = MagicMock()
+    monkeypatch.setattr(
+        settings_page._local_settings,
+        "save_shorts_line_defaults",
+        save,
+        raising=False,
+    )
+    settings = _settings(tmp_path)
+    with (
+        patch.object(
+            settings_page._local_settings,
+            "load_shorts_line_defaults",
+            return_value=settings_page._local_settings.ShortsLineDefaults(),
+        ),
+        patch.object(settings_page.st, "form") as form,
+        patch.object(
+            settings_page.st,
+            "selectbox",
+            side_effect=["crop", "boxed", "bold_outline"],
+        ),
+        patch.object(settings_page.st, "form_submit_button", return_value=True),
+        patch.object(settings_page.st, "success"),
+    ):
+        form.return_value.__enter__.return_value = form.return_value
+        settings_page._render_shorts_line_settings(settings)
+
+    save.assert_called_once_with(
+        settings_page._local_settings.ShortsLineDefaults(
+            layout="crop",
+            preset="boxed",
+            hook_preset="bold_outline",
+        ),
+        settings,
+    )
+
+
+def test_shorts_line_defaults_shows_japanese_error_on_io_failure(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        settings_page._local_settings,
+        "save_shorts_line_defaults",
+        MagicMock(side_effect=OSError("permission denied")),
+        raising=False,
+    )
+    with patch.object(settings_page.st, "error") as error:
+        settings_page._save_shorts_line_defaults(
+            "blur",
+            "default",
+            "hook",
+            _settings(tmp_path),
+        )
+
+    message = error.call_args.args[0]
+    assert "保存できませんでした" in message
+    assert "権限" in message
+    assert "permission denied" not in message
+
+
 @patch.object(settings_page, "_render_schedule_placeholder")
+@patch.object(settings_page, "_render_shorts_line_settings")
 @patch.object(settings_page, "render_storage_manager")
 @patch.object(settings_page, "_render_codex_status")
 @patch.object(settings_page, "_render_environment_settings")
@@ -377,6 +560,7 @@ def test_settings_page_connects_storage_manager(
     codex: MagicMock,
     storage: MagicMock,
     schedule: MagicMock,
+    shorts: MagicMock,
     tmp_path: Path,
 ) -> None:
     settings = _settings(tmp_path)
@@ -386,3 +570,4 @@ def test_settings_page_connects_storage_manager(
 
     storage.assert_called_once_with(settings)
     schedule.assert_called_once_with(settings)
+    shorts.assert_called_once_with(settings)

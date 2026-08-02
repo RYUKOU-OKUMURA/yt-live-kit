@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 import streamlit as st
 
 from yt_live_kit.config import Settings, get_settings
@@ -13,12 +15,16 @@ from yt_live_kit.services.schedule import (
     make_schedule_policy,
     save_schedule_policy,
 )
+from yt_live_kit.services.subtitle_burn import TELOP_PRESETS
 from yt_live_kit.services.upload_queue import UploadQueueError, count_upload_attempts
 from yt_live_kit.ui.components.storage_manager import render_storage_manager
+from yt_live_kit.ui.views import _local_settings
 from yt_live_kit.ui.views._local_settings import (
     get_default_channel_handle,
     save_default_channel_handle,
 )
+
+_SHORTS_LAYOUT_OPTIONS = ("blur", "crop")
 
 
 def _save_channel_handle(raw_handle: str, settings: Settings) -> None:
@@ -132,14 +138,24 @@ def _render_codex_status() -> None:
 
 
 def _save_schedule_policy(
-    daily_time: str,
+    daily_times: Sequence[str] | str,
     interval_days: int,
     timezone_name: str,
     settings: Settings,
 ) -> None:
     try:
+        values = (
+            daily_times.splitlines()
+            if isinstance(daily_times, str)
+            else list(daily_times)
+        )
+    except TypeError:
+        st.error("投稿時刻を1行1件の一覧で入力してください。")
+        return
+
+    try:
         policy = make_schedule_policy(
-            daily_time=daily_time,
+            daily_times=values,
             interval_days=interval_days,
             timezone_name=timezone_name,
         )
@@ -148,6 +164,111 @@ def _save_schedule_policy(
         st.error(str(exc))
     else:
         st.success("投稿スケジュールを保存しました。")
+
+
+def _save_shorts_line_defaults(
+    layout: str,
+    preset: str,
+    hook_preset: str,
+    settings: Settings,
+) -> None:
+    """ショート生産ラインの既定値を検証して保存する."""
+    preset_options = tuple(TELOP_PRESETS)
+    if layout not in _SHORTS_LAYOUT_OPTIONS:
+        st.error("ショート生産ラインのレイアウトが不正です。blur または crop を選択してください。")
+        return
+    if preset not in preset_options or hook_preset not in preset_options:
+        st.error(
+            "テロッププリセットが不正です。画面に表示されたプリセットを選択してください。"
+        )
+        return
+
+    save_defaults = getattr(_local_settings, "save_shorts_line_defaults", None)
+    if not callable(save_defaults):
+        st.error(
+            "ショート生産ラインの保存機能を利用できません。アプリを更新してからお試しください。"
+        )
+        return
+
+    defaults = _local_settings.ShortsLineDefaults(
+        layout=layout,
+        preset=preset,
+        hook_preset=hook_preset,
+    )
+    try:
+        save_defaults(defaults, settings)
+    except ValueError:
+        st.error(
+            "ショート生産ラインの既定値が不正なため保存できませんでした。"
+            "レイアウトとプリセットを選び直してください。"
+        )
+    except (OSError, UnicodeError):
+        st.error(
+            "ショート生産ラインの既定値を保存できませんでした。"
+            "データ保存先の権限を確認して、もう一度お試しください。"
+        )
+    else:
+        st.success("ショート生産ラインの既定値を保存しました。")
+
+
+def _render_shorts_line_settings(settings: Settings) -> None:
+    """ショート生産ラインのレイアウト・プリセット既定値を編集する."""
+    st.subheader("ショート生産ライン")
+    st.caption("ショート作成時に毎回選ばず適用するレイアウトとテロッププリセットです。")
+
+    try:
+        defaults = _local_settings.load_shorts_line_defaults(settings)
+    except (OSError, UnicodeError, ValueError, TypeError):
+        st.error(
+            "ショート生産ラインの既定値を読み込めませんでした。"
+            "設定ファイルを確認して、もう一度お試しください。"
+        )
+        return
+
+    preset_options = tuple(TELOP_PRESETS)
+    if not preset_options:
+        st.error("利用可能なテロッププリセットがありません。アプリを更新してください。")
+        return
+    if (
+        defaults.layout not in _SHORTS_LAYOUT_OPTIONS
+        or defaults.preset not in preset_options
+        or defaults.hook_preset not in preset_options
+    ):
+        st.error(
+            "ショート生産ラインの既定値が不正です。設定ファイルを確認してください。"
+        )
+        return
+
+    with st.form("shorts_line_defaults_form"):
+        layout = st.selectbox(
+            "レイアウト",
+            options=_SHORTS_LAYOUT_OPTIONS,
+            index=_SHORTS_LAYOUT_OPTIONS.index(defaults.layout),
+            help="blur は背景ぼかし、crop は中央クロップで縦型に配置します。",
+        )
+        preset = st.selectbox(
+            "通常テロッププリセット",
+            options=preset_options,
+            index=preset_options.index(defaults.preset),
+        )
+        hook_preset = st.selectbox(
+            "Hook テロッププリセット",
+            options=preset_options,
+            index=preset_options.index(defaults.hook_preset),
+        )
+        submitted = st.form_submit_button(
+            "ショート生産ラインの既定値を保存",
+            type="primary",
+            icon=":material/save:",
+        )
+
+    if submitted:
+        _save_shorts_line_defaults(
+            layout or "",
+            preset or "",
+            hook_preset or "",
+            settings,
+        )
 
 
 def _render_schedule_placeholder(settings: Settings) -> None:
@@ -166,10 +287,10 @@ def _render_schedule_placeholder(settings: Settings) -> None:
         return
 
     with st.form("schedule_policy_form"):
-        daily_time = st.text_input(
-            "投稿時刻（HH:MM）",
-            value=policy.daily_time,
-            help="半角数字の24時間表記で入力してください。",
+        daily_times = st.text_area(
+            "投稿時刻（1行1件、HH:MM）",
+            value="\n".join(sorted(policy.daily_times)),
+            help="半角数字の24時間表記を1行に1件ずつ入力してください。",
         )
         interval_days = st.number_input(
             "投稿間隔（日）",
@@ -189,7 +310,7 @@ def _render_schedule_placeholder(settings: Settings) -> None:
         )
     if submitted:
         _save_schedule_policy(
-            daily_time or "",
+            (daily_times or "").splitlines(),
             int(interval_days),
             timezone_name or "",
             settings,
@@ -211,3 +332,4 @@ def render_settings_page() -> None:
     _render_codex_status()
     render_storage_manager(settings)
     _render_schedule_placeholder(settings)
+    _render_shorts_line_settings(settings)
