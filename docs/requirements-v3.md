@@ -368,6 +368,8 @@ Streamlit は、エントリスクリプト（[`src/yt_live_kit/ui/app.py`](../s
 - upload 完了後は `videos.list(part="status,processingDetails")` を bounded poll して processing 状態と公開前後の status を operation に記録する。processing は 10 秒間隔・最大 30 回で `succeeded` を成功、`failed/terminated` を失敗、上限到達を timeout とする。公開は予約時刻後に 30 秒間隔・最大 20 回で `privacyStatus=public` を成功、processing failure を失敗、private のまま上限到達を timeout とする。sleep / clock はテストで注入可能にする
 - private lock 判定は、予約時刻前の private + 期待 `publishAt` を正常 scheduled、processing 成功後の `publishAt` 欠落または予約時刻 + 5 分後も private を `suspected_private_lock`、public を `published` とする。API だけで確定せず P0 の YouTube Studio 確認で `confirmed_private_lock / no_private_lock` を記録し、`uploaded` と予約公開可否を分ける。結果不明時は operation ID / channel ID / file snapshot から手動照合できる案内を出す
 
+**R1 監査注記（2026-08-02）:** P3 の 1 本では公開前後の bounded poll を手動で本番 service へ接続し、上記の受け入れ証跡を得た。一方、通常の予約 operation は upload job 内の processing poll までしか自動接続されず、予約時刻後の publication poll を起動する運用導線がない。poll service と単体テストの存在だけでは通常運用の要件を満たさないため、H1-5 で upload job と分離した明示 CTA または follow-up job を実装するまで、この接続要件を未完了へ戻す。
+
 ### FR-28: 投稿スケジュールポリシー
 
 | 項目 | 内容 |
@@ -566,12 +568,13 @@ Streamlit は、エントリスクリプト（[`src/yt_live_kit/ui/app.py`](../s
 - [x] upload attempt は America/Los_Angeles の実試行日で resumable upload session 前に記録され、失敗も数え、`YTLK_VIDEO_UPLOAD_DAILY_LIMIT` の 1・上限・上限超過境界を超えない。read-only API と予約枠件数は別に扱われる
 - [x] upload job target が `job_id` を受け、`YouTubeAPIError` が jobs の既知例外として日本語表示され、status bar が upload / shorts queue 等の非 pipeline 完了結果を誤って pipeline として読まない
 - [x] `videos.list(part="status,processingDetails")` が processing 10 秒 × 30、公開 30 秒 × 20 の terminal / timeout 契約と fake clock でテストされ、判定表により private lock を予約投稿成功として扱わない
+- [ ] 通常の予約 operation が processing poll 後に終了しても、予約時刻後の publication poll を明示 CTA または bounded follow-up job から起動でき、再起動後も同じ operation へ結果を追記できる
 - [x] P0 のテストアップロードで非公開ロックの有無が確認され、記録されている
 - [x] P0 の専用承認に、private lock 非該当時は probe 動画が指定時刻に public となり得ることまで含まれている
 
 ### AC-28: v3 総合受け入れ
 
-- [x] AC-18〜AC-27 がすべて満たされている（未達は明示的に「次イテレーション」へ移す）
+- [ ] AC-18〜AC-27 がすべて満たされている（P3 の実公開受け入れは完了済み。R1 監査で判明した通常 operation の公開後 poll 接続は H1-5 へ移す）
 - [x] v1 / v2 の機能に回帰が無い（`uv run pytest` が全件通過する）
 - [x] 実配信 1 本から、チャプター生成 → ショート複数本の生成 → 予約投稿までを通しで実行できる
 - [x] 実 upload、審査フォーム提出、P3 の実予約公開について、各操作ごとの対象と内容を提示した別々の明示承認記録がある

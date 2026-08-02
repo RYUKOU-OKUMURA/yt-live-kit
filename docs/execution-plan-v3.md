@@ -1,7 +1,7 @@
 # yt-live-kit 実行計画書 v3
 
 **バージョン:** v3（ショート量産・投稿）
-**最終更新:** 2026-08-01
+**最終更新:** 2026-08-02
 **実装開始予定:** 2026-08-02
 **関連:** [要件定義書 v3](./requirements-v3.md) / [v2 実行計画](./execution-plan-v2.md) / [v3 エージェント指示](./v3-agent-prompts.md) / [AGENTS.md](../AGENTS.md)
 
@@ -35,11 +35,16 @@
 | S8 | 区間内容の可視化 + プレビュー幅修正（v3.2・最優先） | [x] 完了 |
 | U6 | ショート生産ライン UI（v3.2 改訂: 作業選択型 IA + 工程 UI） | [~] 進行中 |
 | P5 | 投稿枠の複数化 + ライン既定値の設定化（v3.2） | [~] 進行中 |
+| R1 | 全体リファクタリング・性能・長期運用監査 | [~] 進行中 |
+| H1 | 長期運用 hardening | [ ] 未着手 |
+| G1 | FFmpeg single-pass benchmark | [ ] 未着手 |
 | U7 | 概要欄反映の最新性判定（保留: 優先度③のため v4 送り。候補引き継ぎは U6 に統合） | [保留] |
 | U8 | エラー通知の構造化とページ先頭の整理 | [ ] 未着手 |
 | S9 | ローカル Whisper による字幕精度の底上げ（要件改訂が前提） | [ ] 未着手 |
 
 **状態の書き方:** `[ ] 未着手` / `[~] 進行中` / `[x] 完了`
+
+**P3 と H1-5 の区別:** P3 は承認済み 1 本で公開前後の bounded poll と実公開を確認した受け入れ履歴として完了を維持する。R1 で、通常予約 operation には同じ publication poll を起動する導線がないことが判明したため、反復可能な production 要件は H1-5 と AC-27 / AC-28 の未完了項目として追跡する。
 
 **マイルストーン:**
 
@@ -191,6 +196,9 @@ data/{video_id}/ ...
 | **S8** | 区間内容の可視化 + プレビュー幅修正 | 区間ごとの文字起こし表示（境界追従）、`st.video` 幅制限 4 箇所 | FR-34, AC-34 |
 | **U6** | ショート生産ライン UI | 3 ワークスペース + 左パネル + 6 工程 + 人確認ゲート + 永続ライン状態 | FR-17 v3.2, FR-31, FR-33, AC-31, AC-35 |
 | **P5** | 投稿枠の複数化 + ライン既定値の設定化 | `daily_times` リスト、設定ページの枠・既定値編集 | FR-28 v3.2, FR-20 v3.2, AC-36 |
+| **R1** | 全体リファクタリング・性能・長期運用監査 | 回帰基準、即時の fail-closed 修正、rerun 高速化、構造課題の優先順位 | 既存 FR / NFR / AC の非回帰 |
+| **H1** | 長期運用 hardening | jobs 排他、path confinement、queue crash recovery、atomic persistence、公開後 poll 接続 | FR-26, FR-27, NFR-13, AC-26〜28 |
+| **G1** | FFmpeg single-pass benchmark | 代表素材で現行 2 段 encode と single-pass 試作を比較し、採否を決める | FR-25 / AC-25 の変更前検証 |
 | **U7** | （保留）概要欄反映の最新性判定 | 優先度③（保守のみ）のため v4 送り。候補引き継ぎ部分は U6 の工程接続に統合済み | FR-21 v3.1, AC-32 |
 | **U8** | エラー通知の構造化とページ先頭の整理 | 動画 ID 別の構造化エラー、要約表示、技術ログの詳細領域集約 | FR-32, AC-33 |
 | **S9** | ローカル Whisper による字幕精度の底上げ | 方式選定（whisper.cpp 優先）、要件改訂、精度実測 | 要件改訂後に確定 |
@@ -936,6 +944,7 @@ data/{video_id}/ ...
 ### P3: フェーズ P 受け入れ（予約投稿が実際に公開される）
 
 **目的:** P0 の private lock / 審査結果を前提に、v3 の予約公開を 1 本だけ別承認で受け入れ、公開前後の API status まで証跡化する。
+**R1 監査注記（2026-08-02）:** 下記 P3 の単発受け入れと実公開証跡は完了事実として維持する。ただし通常の予約 operation は publication poll を自動起動する運用導線がなく、日常運用の FR-27 接続要件は未完了へ戻して H1-5 で修正する。P3 の履歴を消さず、受け入れ実験の完了と反復可能な production 導線の未完了を区別する。
 **変更ファイル範囲:**
 - `README.md`（安全な予約投稿、attempt / reconciliation、確認項目、private lock の説明）
 - `src/yt_live_kit/__init__.py`（版数を `0.3.0` に更新）
@@ -1323,7 +1332,7 @@ data/{video_id}/ ...
 
 **目的:** 「毎日 3 本」を予約側で受けられるようにする。スケジュールポリシーを 1 日 1 枠（`daily_time`）から複数枠（`daily_times` リスト）へ拡張し、ショート生産ラインの既定値（レイアウト・プリセット）と枠リストを設定ページで編集できるようにする（FR-28 v3.2 / FR-20 v3.2 / AC-36）。
 **フェーズ状態:** [~] 進行中
-**前提:** U6 完了（既定値の読み取り関数は U6 で先行実装済み。本タスクは編集 UI と枠拡張）。フェーズ P 系タスクのため `services/schedule.py` の変更を許可する。
+**前提:** U6-8 のコード実装完了（既定値の読み取り関数は U6 で先行実装済み。本タスクは編集 UI と枠拡張）。P5-3 は R1 完了後に着手でき、U6-9 と P5-4 の実機確認は設定 UI 完成後に同じライン 3 周でまとめて閉じる。フェーズ P 系タスクのため `services/schedule.py` の変更を許可する。
 
 **変更ファイル範囲:**
 - `src/yt_live_kit/services/schedule.py`（`SchedulePolicy` を `daily_times` リスト対応へ拡張。旧 `daily_time` 単一値の読み込み互換 = 要素 1 個のリスト。`assign_next_slot` は日内の枠を時刻順に埋めてから翌 `interval_days` 日へ進む。重複時刻・不正形式は日本語エラー）
@@ -1348,6 +1357,96 @@ data/{video_id}/ ...
 - [ ] タスク完了コミット済み
 
 **見積もり目安:** 1 日
+
+---
+
+### R1: 全体リファクタリング・性能・長期運用監査
+
+**目的:** U6 / P5 の途中で一度立ち止まり、既存挙動を変えずにコード全体の回帰基準、生成・画面応答のボトルネック、再起動や途中失敗を含む長期運用上の穴を確認する。即時に安全性と効果を証明できる小さな変更だけを実装し、生成方式・永続化境界・プロセス間排他に触れる構造変更は別タスクとして切り出す。
+**フェーズ状態:** [~] 進行中
+**前提:** U6-8 / P5-2 までのコードを freeze した独立タスクとして扱う。R1 はフェーズ U の追加実装ではないため、下記に限定した既存 service の保守変更を許可する。外部 API、実 upload、実 Codex 呼び出しは行わない。
+
+**変更ファイル範囲:**
+- `docs/refactor-review-2026-08-02.md`（実測、優先順位、保留理由、次タスク候補）
+- `docs/requirements-v3.md` / `docs/execution-plan-v3.md` / `docs/tech-stack.md` / `docs/v3-agent-prompts.md`（実装契約と現状のずれ、通常 operation の公開後 poll 未接続を記録）
+- `pyproject.toml` / `uv.lock`（stateful expander に必要な Streamlit 最低版と uv 設定形式の整合のみ。新規依存は禁止）
+- `src/yt_live_kit/services/ytdlp.py` / `src/yt_live_kit/ui/runtime_checks.py` / `src/yt_live_kit/ui/app.py`（binary identity の純粋 helper と、全 rerun で行っている read-only バージョン検査の表示用 bounded cache）
+- `src/yt_live_kit/services/history.py`（旧データを含む日時比較の UTC 正規化）
+- `src/yt_live_kit/services/shorts.py`（既存単体生成経路の完成 mp4 を atomic replace へ統一）
+- `src/yt_live_kit/ui/views/video_detail.py` / `src/yt_live_kit/ui/components/upload.py`（完了していない queue manifest を予約可能と扱わない fail-closed gate）
+- `tests/test_ytdlp.py` / `tests/test_ui_runtime_checks.py` / `tests/test_history.py` / `tests/test_shorts.py` / `tests/test_ui_video_detail_page.py` / `tests/test_ui_upload.py`（上記の局所テスト）
+
+**R1 限定の変更制約:** `build_short_from_segments()`、queue fingerprint、upload transaction、工程 6 の output fingerprint は変更しない。`services/shorts.py` は legacy `build_short()` の最終出力保護、`services/history.py` は sort 用日時正規化、`services/ytdlp.py` は副作用のない binary identity helper に限定する。
+
+**作業:**
+
+- [x] R1-1. 回帰基準と実測を採取する。Apple M2 / 16 GB / macOS 26.5.2 で `uv run pytest -q` は 1063 passed / 2 skipped、4.23〜4.91 秒。処理済み 48 本の warm 計測は履歴読込 30 回平均 2.65 ms、latest manifest 全件走査 30 回平均 4.19 ms、`yt-dlp --version` 10 回平均 237.28 ms、20,328,048 bytes mp4 の SHA-256 10 回平均 65.25 ms。60 秒ショートの最終 FFmpeg pass 約 48 秒は 1 回の運用観測であり、G1 の再現 benchmark 前は傾向としてだけ扱う
+- [ ] R1-2. 監査結果を `docs/refactor-review-2026-08-02.md` に記録し、今回修正・計測後に着手・保留を分ける。要件違反となる一括整形、無計測の大規模分割、生成方式の変更は行わない
+- [ ] R1-3. 実装契約のずれを直す。`st.expander` の `key` / `on_change` を導入した Streamlit 1.55 を最低版とし、現在 lock 済みの 1.60 は解決版として区別する。uv の deprecated 設定を現行形式へ移す。FFmpeg seek は現行実装・テストの `-ss` を `-i` より前に置く input seek を正本とし、長尺後半の decode を省きながら再 encode で 0 秒始まりの中間ファイルを作る契約へ文書だけを合わせる。R1 では seek 順を変更せず、既存 S5 の実機受け入れを根拠に維持し、G1 で input / output seek の境界 frame と速度も比較する
+- [ ] R1-4. 小さな fail-closed 修正を行う。未完了 queue manifest は予約対象にしない、旧 metadata の naive datetime は UTC として正規化して aware 値との混在で履歴一覧を落とさない、既存単体生成経路も失敗時に以前の完成 mp4 を保持する。`shorts_line` の途中結果表示は維持するが、upload と予約可能件数は manifest 全体が `done` になるまで 0 とする
+- [ ] R1-5. 安全な rerun 高速化を行う。service の純粋 helper が解決済みパス、device、inode、size、`mtime_ns` を binary identity として返し、UI はその identity、設定パス、timeout を key に TTL 600 秒・最大 4 件で `yt-dlp --version` の警告文字列だけを cache する。出力 mp4 の SHA-256 は工程 6 直前の内容再検証を維持し、stat だけを信頼する cache へ置き換えない
+- [ ] R1-6. 構造課題を実行可能な H1 と G1 に分け、各タスク ID、変更範囲、Done 条件、依存、見積もりを本計画へ追加する。P3 の単発公開受け入れ証跡は維持する一方、通常予約 operation の publication poll 未接続は現行 FR-27 / AC-28 の未完了項目として明示する
+- [ ] R1-7. 対象テストと `uv run pytest -q` を通し、実装者と別のサブエージェントが欠陥優先レビューを行う。指摘修正後に計測を再実行し、進捗更新・コミットする
+
+**Done 条件:**
+
+- [ ] 既存 1063 passed / 2 skipped から回帰が無く、新規テストを含む全件が通る
+- [ ] 外部 API、実 upload、実 Codex 呼び出し、新規 pip 依存、生成品質の変更が無い
+- [ ] 即時修正と構造課題が混ざらず、後者に再現条件・影響・推奨順が記録されている
+- [ ] rerun 高速化は実測で確認され、安全境界の再検証を弱めていない
+- [ ] `uv lock --check` と `uv sync --locked` が警告なく成功する
+- [ ] 独立レビューの指摘が解消され、タスク完了コミット済み
+
+**見積もり目安:** 0.5〜1 日
+
+---
+
+### H1: 長期運用 hardening
+
+**目的:** R1 で再現したプロセス間競合、root 外 path、途中クラッシュ、非 atomic 永続化、通常予約 operation の publication poll 未接続を、個別 commit と回帰テストで解消する。
+**フェーズ状態:** [ ] 未着手
+**前提:** R1 完了。各小タスクは `impl-sonnet` ワーカーが実装し、別サブエージェントが欠陥優先レビューを行う。H1-1〜H1-5 はタスク単位で commit し、順番に進める。
+
+**作業:**
+
+- [ ] H1-1. jobs のプロセス間排他と pointer fail-closed。`services/jobs.py` / `tests/test_jobs.py` を対象に、data root 単位の advisory lock、owner PID / token、UUID temp + flush + fsync + replace、壊れた `current.json` からの running job scan を実装する。2 process 同時開始の勝者が 1 件、live worker を orphan close しない、破損 pointer で busy を fail-open にしないテストを Done とする。見積もり 1〜1.5 日
+- [ ] H1-2. video ID の path confinement。`services/_paths.py` を新設し、`services/ytdlp.py` / `history.py` / `jobs.py` / `shorts_queue.py` / `shorts_line.py` / `upload_queue.py` と対応テストを段階移行する。通常の 11 文字 ID は互換、`.` / `..` / separator / root 外 symlink は副作用前に日本語で拒否し、解決後 path が `data_dir` 配下であることを Done とする。見積もり 1 日
+- [ ] H1-3. queue crash recovery。`services/shorts_queue.py` / `ui/components/shorts_queue.py` / `ui/components/upload.py` と対応テストを対象に、owner job ID、`interrupted` terminal state、再起動 recovery table、既存成功 item の再利用可否を schema で固定する。途中クラッシュ後に予約不可、状態と再実行方法が日本語表示され、正常 `done` manifest の互換があることを Done とする。見積もり 0.5〜1 日
+- [ ] H1-4. OAuth token とローカル設定の atomic persistence。`services/youtube_api.py`、`ui/views/_local_settings.py` と対応テストを対象に、権限 600 の同一 directory temp、flush + fsync + replace、advisory lock、lock 内再読込 + merge を共通化する。中断時に旧 JSON が残り、2 process 更新で ID 集合を失わないことを Done とする。見積もり 0.5〜1 日
+- [ ] H1-5. 通常予約 operation の公開後 poll 接続。`services/upload_queue.py` / `ui/components/upload.py` / `ui/components/status_bar.py` と対応テスト・README・requirements を対象に、upload worker を予約時刻まで占有しない明示 CTA または bounded follow-up job を実装する。同じ operation ID へ publication observation を atomic 追記し、二重 poll、再起動、時刻前、timeout、private lock、public の各境界を通す。FR-27 と AC-27 / AC-28 を再度 `[x]` にできることを Done とする。見積もり 1 日
+- [ ] H1-6. 全件テスト、実機を伴わない fault injection、独立レビューを通し、各 task commit とフェーズ完了 commit を行う
+
+**Done 条件:**
+
+- [ ] jobs の同時実行 1 件制約が process 境界でも成立し、壊れた pointer が fail-open にならない
+- [ ] data root 外への path 解決、途中 queue の予約、token / 設定の切断・lost update を自動テストで拒否できる
+- [ ] 通常予約 operation の公開後状態を再起動後も安全に観測でき、FR-27 / AC-27 / AC-28 が再び充足する
+- [ ] `uv run pytest -q` 全件通過、独立レビュー済み、フェーズ完了 commit 済み
+
+**見積もり目安:** 4〜5.5 日
+
+---
+
+### G1: FFmpeg single-pass benchmark
+
+**目的:** 生成時間の大半を占める複数 encode pass を変更する前に、速度差と品質差を再現可能な形で測り、production 実装へ進む価値があるか判断する。
+**フェーズ状態:** [ ] 未着手
+**前提:** R1 完了。production の `services/shorts.py` / `ffmpeg.py` は変更せず、benchmark 用試作だけを作る。ローカル素材以外の外部 API は使わない。
+**変更ファイル範囲:** `benchmarks/ffmpeg_single_pass.py`、`docs/benchmarks/ffmpeg-single-pass.md`、`docs/execution-plan-v3.md`。採用決定時の要件変更と production 実装は G2 として別計画にする。
+
+**作業:**
+
+- [ ] G1-1. 15 秒 / 60 秒 / 180 秒、単一区間 / 3 区間、字幕なし / 通常字幕 / Hook 付きの代表 fixture を 3 種以上固定し、現行 input seek、同じ encode 条件の output seek、single-pass filter graph 試作を同じ codec / CRF / preset で各 3 回計測する
+- [ ] G1-2. warm wall time の median / min / max、出力尺、先頭・末尾 frame、audio start / end PTS、区間接続、字幕 cue、解像度・pixel format、出力容量を比較し、実機目視結果を記録する
+- [ ] G1-3. 速度短縮が 25％未満、または 1 frame 超の境界差・音ズレ・字幕差がある場合は不採用とする。採用候補なら requirements-v3 の FR-25 / AC-25 改訂と G2 の変更範囲・rollback を先にレビューして commit する
+
+**Done 条件:**
+
+- [ ] 別環境で再実行できる command、fixture 条件、FFmpeg version、計測結果が残っている
+- [ ] production code と既存生成物を変更していない
+- [ ] 採否と根拠が独立レビューされ、計画更新を commit 済み
+
+**見積もり目安:** 0.5〜1 日
 
 ---
 
@@ -1485,7 +1584,10 @@ P3 完了（0.3.0）
  └─ S6 サブ区間提案（実装済み）
      └─ S8 区間内容の可視化 ★最優先。S6 の実機確認を吸収してクローズ
          └─ U6 ショート生産ライン UI（v3.2。3 ワークスペース骨格 + 工程 UI + 接続）
-             ├─ P5 投稿枠の複数化 + 既定値設定  → 実機ライン 3 周で M15 達成
+             ├─ R1 全体リファクタリング・性能・長期運用監査
+             │   ├─ H1 長期運用 hardening
+             │   │   └─ P5 投稿枠の複数化 + 既定値設定  → U6-9 と実機ライン 3 周で M15 達成
+             │   └─ G1 FFmpeg single-pass benchmark（production 変更なし）
              └─ U8 構造化エラー通知（P5 と独立・並行可）
 
 U7（概要欄 fingerprint 化）は保留 = v4 候補（優先度③: チャプターは保守のみ）
@@ -1503,6 +1605,9 @@ U7（概要欄 fingerprint 化）は保留 = v4 候補（優先度③: チャプ
 | S8 を最優先にする | ゲート①（区間の中身確認）の材料が無いと、工程 UI（U6）を作っても品質を担保できない。かつ S8 だけで「話が切れないショートを作れる」ようになり、今日の運用が先に改善する |
 | U6 を S8 完了後にする | 工程 UI はゲート①の確認材料（S8）を前提とする。また S6 / S7 と同じ UI ファイルを触るため、両者のクローズ後に大規模変更を行う |
 | P5 を U6 の後にする | 既定値の読み取りは U6 で先行し（ファイル未設定時は現行既定）、編集 UI と枠拡張を P5 でまとめる。U6 は既存 service を変更せず新規 `services/shorts_line.py` だけ、P5 は既存 `services/schedule.py` の変更ありと、レイヤ制約の異なる作業を別 diff に分ける |
+| R1 を P5 の途中で挟む | U6 の大規模 UI と P5 の service 拡張が同時に進行中のため、次の機能追加前に回帰基準と長期運用の安全境界を固定する。安全に証明できる局所修正だけを行い、構造変更は別タスクへ分離する |
+| H1 を実機ライン確認より先にする | process 間の二重 job、途中 queue の誤予約、公開後 poll 未接続は反復運用で顕在化する。実機 3 周を新しい運用基準にする前に fail-closed 境界を直す |
+| G1 を production 実装と分ける | FFmpeg pass 統合は最大の速度改善余地だが、frame 境界・音声同期・字幕時刻を変え得る。試作と比較証跡だけを先に作り、採用時は G2 として要件改訂する |
 | U7 を保留にする | 運用目標の優先度③（チャプターは保守のみ）。候補引き継ぎ部分は U6 の工程接続に統合済みで、独立タスクの意味が消えた |
 
 ---
@@ -1538,6 +1643,9 @@ U7（概要欄 fingerprint 化）は保留 = v4 候補（優先度③: チャプ
 | S7 FFmpeg 環境検査 | 0.5 日 |
 | S8 区間内容の可視化 + プレビュー幅修正 | 0.5〜1 日 |
 | U6 ショート生産ライン UI | 4〜5 日 |
+| R1 全体リファクタリング・性能・長期運用監査 | 0.5〜1 日 |
+| H1 長期運用 hardening | 4〜5.5 日 |
+| G1 FFmpeg single-pass benchmark | 0.5〜1 日 |
 | P5 投稿枠の複数化 + 既定値設定 | 1 日 |
 | U8 構造化エラー通知 | 1 日 |
 | U7 概要欄反映の最新性判定 | 保留（v4 候補） |
@@ -1550,7 +1658,7 @@ U7（概要欄 fingerprint 化）は保留 = v4 候補（優先度③: チャプ
 | **0.2.2** | + S1〜S5 | 13.5 日 | テロップ付きショートが量産できる |
 | **0.3.0** | + P1 → P2 → P0 → P3 | 20 日 | 安全契約・実機 probe・予約公開まで含む v3 完了 |
 | **0.3.1** | + P4・S6・S7・S8 | — | ショート導線の追加要件・ホットフィックス・区間内容の可視化 |
-| **0.4.0** | + S8 → U6 → P5（+ U8） | — | 毎日 3 本のショート生産ラインが確立する（v3.2） |
+| **0.4.0** | + S8 → U6 → R1 → H1 → P5（+ U8、G1） | — | 毎日 3 本のショート生産ラインが長期運用の安全境界を含めて確立する（v3.2） |
 
 ---
 
@@ -1602,6 +1710,10 @@ U7（概要欄 fingerprint 化）は保留 = v4 候補（優先度③: チャプ
 | 台本確認後の編集や再起動で、古い確認状態のまま生成できる | review fingerprint と確認 fingerprint の一致を生成条件にし、編集時は失効、生成直前は再検証する。ライン状態は atomic 保存し、壊れた状態・証明できない人確認は未確認へ倒す |
 | 「本日」の基準が YouTube クォータ日と混ざる | 生産ラインは `SchedulePolicy.timezone`、upload attempt 上限は America/Los_Angeles と用途を分離し、境界時刻のテストを固定する |
 | 180 秒を超える区間選択でユーザーが詰まる | S3 のエラーメッセージに具体的な対処を含め、S4 の UI で分割・短縮を誘導する |
+| 複数の Streamlit プロセスや壊れた `current.json` で同時実行制約が fail-open になる | R1 では再現条件と影響を記録する。プロセス間 advisory lock、所有 PID、pointer の atomic 保存・検証、running job scan を一体の hardening タスクとして実装する |
+| queue 生成中のクラッシュ後に部分成果物が予約対象になる | R1 で `status=done` の manifest だけを予約可能とする。running manifest の復旧・terminal 化は schema を含む別タスクで扱う |
+| 不正な動画 ID や symlink で `data_dir` の外へ書き込む | R1 で再現と影響を記録し、全 service 共通の path confinement helper と移行テストを別 hardening タスクとして実装する |
+| 生成高速化のために FFmpeg pass を安易に統合し、字幕・切り替え・frame accuracy が回帰する | 現行の区間 encode、concat、最終 pass は維持する。代表素材で出力品質と wall time を比較する benchmark タスクを先に行い、要件改訂後にだけ変更する |
 
 ---
 
@@ -1637,10 +1749,13 @@ U7（概要欄 fingerprint 化）は保留 = v4 候補（優先度③: チャプ
 
 1. ~~**P4 に着手する。**~~ 完了。~~**S7 を閉じる。**~~ 完了（`9ebf251`）
 2. ~~**S8 に着手する（最優先）。**~~ 完了。実機確認で S6-9 を吸収し、S6 / S8 をクローズ済み
-3. **U6 に着手する。** ショート生産ライン UI（FR-17 v3.2 + FR-31 + FR-33 / AC-31 + AC-35）。確定リファレンスと状態遷移表を正本として 4〜5 日で実装する
-4. U6 完了後、**P5**（投稿枠の複数化 + 既定値設定、AC-36）。実機でライン 3 周を確認し M15 を達成する
-5. **U8**（構造化エラー通知、AC-33）は U6 完了後いつでも着手可（P5 と独立）。**U7 は保留（v4 候補）**
-6. **S9**（ローカル Whisper）は U6 完了後にテロップ品質を実測してから、着手可否と方式を判断する。着手する場合は先に要件改訂（NFR-11 と §13 スコープ外の見直し）を行う
+3. ~~**U6 のコード実装を進める。**~~ U6-8 まで完了。実機確認の U6-9 は未完了
+4. **R1 を先に完了する。** 回帰基準、局所的な fail-closed 修正、rerun 高速化、H1 / G1 の実行計画を確定する
+5. R1 後は **H1-1 → H1-5 → H1-2 → H1-3 → H1-4** の順で hardening する。通常予約 operation の publication poll を再接続し、FR-27 / AC-27 / AC-28 を再度完了へ戻す
+6. H1 完了後に **P5-3** を実装し、**U6-9 + P5-4** を同じ実機ライン 3 周で確認して M15 を達成する
+7. **G1** は R1 後に production 非変更で実行できる。採用候補でも R1 / H1 / P5 に混ぜず、要件改訂済みの G2 を別途作る
+8. **U8**（構造化エラー通知、AC-33）は R1 完了後いつでも着手可（P5 と独立）。**U7 は保留（v4 候補）**
+9. **S9**（ローカル Whisper）は U6 完了後にテロップ品質を実測してから、着手可否と方式を判断する。着手する場合は先に要件改訂（NFR-11 と §13 スコープ外の見直し）を行う
 
 ---
 
@@ -1648,6 +1763,8 @@ U7（概要欄 fingerprint 化）は保留 = v4 候補（優先度③: チャプ
 
 | 日付 | 内容 |
 |------|------|
+| 2026-08-02 | **R1 計画の独立レビューを反映。** P3 の単発公開証跡と通常 operation の publication poll 未接続を区別し、後者を FR-27 / AC-28 の未完了へ戻した。構造課題を H1-1〜H1-6、生成速度検証を G1-1〜G1-3 として変更範囲・Done・依存・見積もり付きで正式化。Streamlit 最低版は stateful expander 導入版 1.55、FFmpeg seek は現行 input seek を正本とし G1 で境界比較する方針へ明確化した |
+| 2026-08-02 | **R1 全体リファクタリング・性能・長期運用監査を開始。** 1063 tests の回帰基準と実データの所要時間を採取し、即時の fail-closed 修正・安全な rerun 高速化・別タスクへ分ける構造課題を定義した。U6 / P5 の実機完了前に R1 を挟み、FFmpeg 生成方式の変更は benchmark と要件改訂を先行させる |
 | 2026-08-01 | **U6 確定仕様を計画化。** 3 ワークスペースと 6 工程の責務、左パネルの常設プレビュー、品質チェックの 4 分離、review fingerprint と編集時失効、atomic / fail closed な `services/shorts_line.py`、`SchedulePolicy.timezone` 基準の日次完了数を固定。U6 の見積もりを 4〜5 日へ改訂し、完成イメージを視覚リファレンスとして追加。あわせて S7 / S8 本文のフェーズ状態を進捗サマリーどおり完了へ整合 |
 | 2026-08-01 | **S6 / S8 クローズ。** S8 実装（`5bcad1c`）後の実機確認で AC-30 の残 4 項目と AC-34 の全項目を充足し、S6 / S8 を完了にした。実機で新たに判明した 2 件を U6-4b に追加（時刻入力のアシスト、rerun で expander が閉じて先頭へ飛ぶ問題 = stateful expander の `key=` で解消）。字幕精度の底上げ要求を **S9（ローカル Whisper）** として登録し、方式は whisper.cpp のサブプロセス呼び出しを第一候補（NFR-11 の pip 依存・従量課金の両制約を満たすため）、着手は U6 通過後の品質実測の後と定義した |
 | 2026-08-01 | **v3.2 生産ライン改訂。** 運用目標を「毎日 3 本のケイデンス×品質」（requirements-v3.md §1.3.1）に固定したことを受けて計画を再編。S8（区間内容の可視化・最優先。S6 実機確認を吸収）と P5（投稿枠の複数化 + 既定値設定）を新設し、U6 を「作業選択型 IA + FR-33 工程 UI」（量産主導線の撤回、刻む→テロップ→生成→予約の接続、既定値化、3 日）へ改訂。U7 は保留 = v4 候補（候補引き継ぎは U6 に統合）。M15 を「生産ライン確立」に再定義し、実装順を S8 → U6 → P5（U8 並行）とした |
