@@ -907,11 +907,11 @@ def _write_manifest(result: ShortsQueueResult, settings: Settings) -> None:
             suffix=".tmp",
             delete=False,
         ) as temporary:
+            temporary_path = Path(temporary.name)
             json.dump(result.to_dict(), temporary, ensure_ascii=False, indent=2)
             temporary.write("\n")
             temporary.flush()
             os.fsync(temporary.fileno())
-            temporary_path = Path(temporary.name)
         os.replace(temporary_path, path)
         try:
             directory_fd = os.open(path.parent, os.O_RDONLY)
