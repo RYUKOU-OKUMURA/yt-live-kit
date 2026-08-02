@@ -39,7 +39,7 @@
 | H1 | 長期運用 hardening | [x] 完了 |
 | G1 | FFmpeg single-pass benchmark | [x] 完了 |
 | U7 | 概要欄反映の最新性判定（保留: 優先度③のため v4 送り。候補引き継ぎは U6 に統合） | [保留] |
-| U8 | エラー通知の構造化とページ先頭の整理 | [ ] 未着手 |
+| U8 | エラー通知の構造化とページ先頭の整理 | [~] 進行中 |
 | S9 | ローカル Whisper による字幕精度の底上げ（要件改訂が前提） | [ ] 未着手 |
 
 **状態の書き方:** `[ ] 未着手` / `[~] 進行中` / `[x] 完了`
@@ -1300,7 +1300,7 @@ data/{video_id}/ ...
 ### U8: エラー通知の構造化とページ先頭の整理
 
 **目的:** ffmpeg 出力等の長い技術ログがページ先頭を占有する現状を廃止し、ジョブエラーを動画 ID 別の構造化通知として扱う（FR-32 / AC-33）。
-**フェーズ状態:** [ ] 未着手
+**フェーズ状態:** [~] 進行中
 **前提:** U6 完了（エラー詳細の表示先である詳細・再生成領域が U6 で作られるため）。U7 とは独立で、並行着手可。
 
 **変更ファイル範囲:**
@@ -1308,9 +1308,11 @@ data/{video_id}/ ...
 - `src/yt_live_kit/ui/app.py`（`st.error(job_error)` による生ログ全文表示を廃止し、1 行要約 + 対象動画への導線に変更）
 - `src/yt_live_kit/ui/components/status_bar.py`（長いエラーの要約表示と対象動画への導線）
 - `src/yt_live_kit/ui/views/video_detail.py`（詳細・再生成領域に現在動画のエラー詳細（直近 3 件）を表示）
+- `src/yt_live_kit/services/jobs.py`（既存の別ファイル技術ログを path confinement・サイズ上限付きで読み取る副作用なし helper の追加だけ。job 実行・保存・cleanup 契約は変更しない）
 - `tests/test_ui_state.py`（構造化通知、保持上限、他動画との分離）
 - `tests/test_ui_app.py` / `tests/test_ui_video_detail_page.py`（要約表示と詳細表示の期待値）
-- （`services/jobs.py` の変更は原則不要。既存のエラー情報から UI 層で構造化する。job 側の情報が不足する場合のみ、エラー payload への項目追加に限って最小変更を許可する）
+- `tests/test_jobs.py`（技術ログ helper の正常・欠損・上限・不正 job ID のテスト）
+- （`services/jobs.py` の変更は上記 read-only helper に限定する。JobState schema、worker、error 保存、cleanup の挙動は変更しない）
 
 **作業:**
 
