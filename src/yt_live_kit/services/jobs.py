@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-import inspect
+import errno
 import fcntl
+import inspect
 import json
 import os
 import re
@@ -633,6 +634,84 @@ def _unregister_worker(settings: Settings, owner_token: str) -> None:
         _ACTIVE_WORKERS.discard(_worker_key(settings, owner_token))
 
 
+def _owner_lease_path(settings: Settings, owner_token: str) -> Path:
+    """owner token に対応する advisory lease file の path を返す."""
+    try:
+        safe_token = safe_identifier(owner_token, "owner token")
+    except PathConfinementError as exc:
+        raise ValueError(str(exc)) from exc
+    return confined_path(
+        settings.data_dir,
+        "_jobs",
+        f".owner-{safe_token}.lease",
+        label="worker lease 保存先",
+    )
+
+
+class _OwnerLease:
+    """worker の実行期間だけ保持する process-safe advisory lease."""
+
+    def __init__(self, handle: Any) -> None:
+        self._handle = handle
+
+    @classmethod
+    def acquire(cls, settings: Settings, owner_token: str) -> _OwnerLease:
+        path = _owner_lease_path(settings, owner_token)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            handle = path.open("a+b")
+        except OSError as exc:
+            raise JobBusyError(
+                "worker lease を保存できないため、処理を開始できません。"
+            ) from exc
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as exc:
+            handle.close()
+            raise JobBusyError(
+                "worker lease を取得できないため、処理を開始できません。"
+            ) from exc
+        return cls(handle)
+
+    def release(self) -> None:
+        handle = self._handle
+        if handle is None:
+            return
+        self._handle = None
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        except OSError:
+            pass
+        finally:
+            handle.close()
+
+
+def _owner_lease_is_held(settings: Settings, owner_token: str) -> bool:
+    """lease を奪わず、独立 FD で保持中かどうかだけを検証する.
+
+    lease file の存在は証明にならない。既存 file を別 FD で non-blocking に
+    exclusive lock できなければ、別 worker が lease を保持している。
+    """
+    try:
+        path = _owner_lease_path(settings, owner_token)
+        handle = path.open("rb")
+    except (OSError, TypeError, ValueError):
+        return False
+
+    try:
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as exc:
+            return exc.errno in (errno.EACCES, errno.EAGAIN, errno.EWOULDBLOCK)
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        except OSError:
+            return False
+        return False
+    finally:
+        handle.close()
+
+
 def _pid_is_alive(pid: int) -> bool:
     try:
         os.kill(pid, 0)
@@ -648,10 +727,13 @@ def _pid_is_alive(pid: int) -> bool:
 def _owner_is_live(job: JobState, settings: Settings) -> bool:
     if job.owner_pid is None or not job.owner_token:
         return False
+    if not _pid_is_alive(job.owner_pid):
+        return False
     if job.owner_pid == os.getpid():
         with _ACTIVE_WORKERS_LOCK:
-            return _worker_key(settings, job.owner_token) in _ACTIVE_WORKERS
-    return _pid_is_alive(job.owner_pid)
+            if _worker_key(settings, job.owner_token) not in _ACTIVE_WORKERS:
+                return False
+    return _owner_lease_is_held(settings, job.owner_token)
 
 
 def close_orphans(settings: Settings | None = None) -> list[str]:
@@ -698,6 +780,32 @@ def _write_error_log(settings: Settings, job_id: str, exc: BaseException) -> Non
     log_path = _job_log_path(settings, job_id)
     log_path.parent.mkdir(parents=True, exist_ok=True)
     log_path.write_text(traceback.format_exc(), encoding="utf-8")
+
+
+def _mark_worker_failure(
+    settings: Settings,
+    job_id: str,
+    exc: BaseException,
+    *,
+    status: JobStatus,
+    message: str | None = None,
+) -> None:
+    user_message, needs_log = _error_message_for(exc)
+    if needs_log:
+        try:
+            _write_error_log(settings, job_id, exc)
+        except OSError:
+            # 詳細ログの失敗で running のまま残さず、状態更新を優先する。
+            pass
+    final_message = message or user_message
+    update_job(
+        job_id,
+        settings=settings,
+        status=status,
+        finished_at=datetime.now(timezone.utc),
+        error=final_message,
+        message=final_message,
+    )
 
 
 def _target_accepts_video_id(target_fn: Callable[..., Any]) -> bool:
@@ -792,18 +900,22 @@ def start_job(
                             **call_kwargs,
                         )
                     except Exception as exc:
-                        message, needs_log = _error_message_for(exc)
-                        if needs_log:
-                            _write_error_log(settings, job_id, exc)
-                        update_job(
+                        _mark_worker_failure(
+                            settings,
                             job_id,
-                            settings=settings,
+                            exc,
                             status="failed",
-                            finished_at=datetime.now(timezone.utc),
-                            error=message,
-                            message=message,
                         )
                         return
+                    except BaseException as exc:
+                        _mark_worker_failure(
+                            settings,
+                            job_id,
+                            exc,
+                            status="interrupted",
+                            message="処理が中断されました",
+                        )
+                        raise
 
                     result_ref = video_id
                     current = read_job(job_id, settings)
@@ -825,12 +937,18 @@ def start_job(
                     )
                 finally:
                     _unregister_worker(settings, owner_token)
+                    lease.release()
 
-            thread = threading.Thread(target=worker, daemon=True)
-            _register_worker(settings, owner_token)
+            lease = _OwnerLease.acquire(settings, owner_token)
             try:
-                thread.start()
+                thread = threading.Thread(target=worker, daemon=True)
+                _register_worker(settings, owner_token)
+                try:
+                    thread.start()
+                except BaseException:
+                    _unregister_worker(settings, owner_token)
+                    raise
             except BaseException:
-                _unregister_worker(settings, owner_token)
+                lease.release()
                 raise
     return job_id

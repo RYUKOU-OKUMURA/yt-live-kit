@@ -70,6 +70,27 @@ def _start_job_in_process(data_dir: str, barrier, result_queue) -> None:
         result_queue.put(("ok", job_id))
 
 
+def _hold_owner_lease_in_process(
+    data_dir: str,
+    ready,
+    release,
+    released,
+    crash: bool = False,
+) -> None:
+    """H1-1 用に別 process で lease を保持し、必要なら解放する."""
+    settings = Settings(data_dir=data_dir)
+    owner_token = f"lease-{os.getpid()}"
+    lease = jobs_service._OwnerLease.acquire(settings, owner_token)
+    ready.set()
+    if crash:
+        release.wait(timeout=10)
+        os._exit(0)
+    release.wait(timeout=10)
+    lease.release()
+    released.set()
+    time.sleep(0.5)
+
+
 def test_create_update_read_roundtrip(tmp_path):
     settings = Settings(data_dir=tmp_path)
 
@@ -188,6 +209,8 @@ def test_thread_start_failure_leaves_requested_job_json_for_recovery(tmp_path):
     state = read_job("job-saved-before-thread", settings)
     assert state is not None
     assert state.status == "running"
+    assert state.owner_token is not None
+    assert not jobs_service._owner_lease_is_held(settings, state.owner_token)
 
 
 def test_read_job_returns_none_for_broken_json(tmp_path):
@@ -257,6 +280,31 @@ def test_start_job_marks_failed_on_exception(tmp_path):
     assert state.status == "failed"
     assert state.error == "処理に失敗しました"
     assert state.finished_at is not None
+
+
+def test_start_job_marks_interrupted_and_releases_lease_on_system_exit(tmp_path):
+    settings = Settings(data_dir=tmp_path)
+
+    def target_fn(*, report, settings, **_kwargs):
+        raise SystemExit("worker stopped")
+
+    with patch("threading.excepthook") as excepthook:
+        with _patch_real_thread() as (_mock_thread, threads):
+            job_id = start_job("single", target_fn, settings=settings)
+            threads[-1].join(timeout=5)
+
+    state = read_job(job_id, settings)
+    assert state is not None
+    assert state.status == "interrupted"
+    assert state.error == "処理が中断されました"
+    assert state.message == "処理が中断されました"
+    assert state.finished_at is not None
+    assert state.owner_token is not None
+    assert not jobs_service._owner_lease_is_held(settings, state.owner_token)
+    assert (tmp_path / "_jobs" / f"{job_id}.log").is_file()
+    assert not is_busy(settings)
+    excepthook.assert_called_once()
+    assert isinstance(excepthook.call_args.args[0].exc_value, SystemExit)
 
 
 def test_start_job_preserves_japanese_youtube_api_error_without_log(tmp_path):
@@ -848,6 +896,107 @@ def test_close_orphans_does_not_close_live_worker(tmp_path):
     finished = read_job(job_id, settings)
     assert finished is not None
     assert finished.status == "done"
+
+
+@pytest.mark.skipif(
+    "fork" not in multiprocessing.get_all_start_methods(),
+    reason="fork が利用できない環境では process 境界テストを実行しない",
+)
+def test_held_owner_lease_is_live_across_processes(tmp_path):
+    context = multiprocessing.get_context("fork")
+    ready = context.Event()
+    release = context.Event()
+    released = context.Event()
+    process = context.Process(
+        target=_hold_owner_lease_in_process,
+        args=(str(tmp_path), ready, release, released),
+    )
+    process.start()
+    try:
+        assert ready.wait(timeout=10)
+        token = f"lease-{process.pid}"
+        job = JobState(
+            job_id="cross-process-job",
+            kind="single",
+            status="running",
+            owner_pid=process.pid,
+            owner_token=token,
+        )
+        assert jobs_service._owner_is_live(job, Settings(data_dir=tmp_path))
+    finally:
+        release.set()
+        process.join(timeout=10)
+    assert process.exitcode == 0
+    assert released.is_set()
+
+
+@pytest.mark.skipif(
+    "fork" not in multiprocessing.get_all_start_methods(),
+    reason="fork が利用できない環境では process 境界テストを実行しない",
+)
+def test_released_owner_lease_is_not_live_while_process_survives(tmp_path):
+    context = multiprocessing.get_context("fork")
+    ready = context.Event()
+    release = context.Event()
+    released = context.Event()
+    process = context.Process(
+        target=_hold_owner_lease_in_process,
+        args=(str(tmp_path), ready, release, released),
+    )
+    process.start()
+    try:
+        assert ready.wait(timeout=10)
+        token = f"lease-{process.pid}"
+        settings = Settings(data_dir=tmp_path)
+        job = JobState(
+            job_id="released-owner-job",
+            kind="single",
+            status="running",
+            owner_pid=process.pid,
+            owner_token=token,
+        )
+        assert jobs_service._owner_is_live(job, settings)
+        release.set()
+        assert released.wait(timeout=10)
+        assert process.is_alive()
+        assert not jobs_service._owner_is_live(job, settings)
+    finally:
+        release.set()
+        process.join(timeout=10)
+    assert process.exitcode == 0
+
+
+@pytest.mark.skipif(
+    "fork" not in multiprocessing.get_all_start_methods(),
+    reason="fork が利用できない環境では process 境界テストを実行しない",
+)
+def test_process_crash_releases_owner_lease_and_stale_file_is_not_live(tmp_path):
+    context = multiprocessing.get_context("fork")
+    ready = context.Event()
+    release = context.Event()
+    released = context.Event()
+    process = context.Process(
+        target=_hold_owner_lease_in_process,
+        args=(str(tmp_path), ready, release, released, True),
+    )
+    process.start()
+    assert ready.wait(timeout=10)
+    token = f"lease-{process.pid}"
+    settings = Settings(data_dir=tmp_path)
+    job = JobState(
+        job_id="crashed-owner-job",
+        kind="single",
+        status="running",
+        owner_pid=process.pid,
+        owner_token=token,
+    )
+    assert jobs_service._owner_is_live(job, settings)
+    release.set()
+    process.join(timeout=10)
+    assert process.exitcode == 0
+    lease_path = jobs_service._owner_lease_path(settings, token)
+    assert lease_path.is_file()
+    assert not jobs_service._owner_is_live(job, settings)
 
 
 def test_lock_failure_is_fail_closed_and_does_not_start_job(tmp_path):
