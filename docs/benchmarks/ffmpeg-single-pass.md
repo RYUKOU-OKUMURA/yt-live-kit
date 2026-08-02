@@ -79,7 +79,7 @@ wall time は FFmpeg command の開始から成功終了までで、終了後の
 
 ## 採用 gate
 
-single-pass の median を現行 input-seek の median と比較し、`1 - single / input` が 0.25 以上であることを速度条件とする。境界は fixture の色変化を用いて expected time の前後 3 秒から検出し、全 expected boundary が検出済みで、expected time との差と input-seek との差が 1 video frame 以下であることを条件にする。audio は stream 数、start PTS、expected duration からの end PTS、baseline との差を記録し、開始・終了の expected duration 誤差が 1 video frame を超える場合を回帰と扱う。字幕は stream 数の一致だけで合格にせず、下記の視覚確認を必須とする。
+single-pass の median を現行 input-seek の median と比較し、`1 - single / input` が 0.25 以上であることを速度条件とする。境界は fixture の色変化を用いて expected time の前後 3 秒から検出し、全 expected boundary が検出済みで、expected time との差と input-seek との差が 1 video frame 以下であることを条件にする。audio は stream 数、start PTS、expected duration からの end PTS、baseline との差を記録し、開始・終了の expected duration 誤差または baseline との差が 1 video frame を超える場合を回帰と扱う。字幕は stream 数の一致だけで合格にせず、下記の視覚確認を必須とする。
 
 この benchmark は採用 gate を自動的に満たしたとしても、production の seek 順、字幕時刻、atomic output、確認フローを変更しない。採用する場合は別 task G2 として requirements-v3 の FR-25 / AC-25、rollback 方針、production テストを先に更新する。
 
