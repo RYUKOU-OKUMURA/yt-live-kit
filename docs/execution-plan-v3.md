@@ -36,7 +36,7 @@
 | U6 | ショート生産ライン UI（v3.2 改訂: 作業選択型 IA + 工程 UI） | [~] 進行中 |
 | P5 | 投稿枠の複数化 + ライン既定値の設定化（v3.2） | [~] 進行中 |
 | R1 | 全体リファクタリング・性能・長期運用監査 | [x] 完了 |
-| H1 | 長期運用 hardening | [~] 進行中 |
+| H1 | 長期運用 hardening | [x] 完了 |
 | G1 | FFmpeg single-pass benchmark | [x] 完了 |
 | U7 | 概要欄反映の最新性判定（保留: 優先度③のため v4 送り。候補引き継ぎは U6 に統合） | [保留] |
 | U8 | エラー通知の構造化とページ先頭の整理 | [ ] 未着手 |
@@ -1298,7 +1298,7 @@ data/{video_id}/ ...
 ### U8: エラー通知の構造化とページ先頭の整理
 
 **目的:** ffmpeg 出力等の長い技術ログがページ先頭を占有する現状を廃止し、ジョブエラーを動画 ID 別の構造化通知として扱う（FR-32 / AC-33）。
-**フェーズ状態:** [ ] 未着手
+**フェーズ状態:** [x] 完了
 **前提:** U6 完了（エラー詳細の表示先である詳細・再生成領域が U6 で作られるため）。U7 とは独立で、並行着手可。
 
 **変更ファイル範囲:**
@@ -1414,14 +1414,14 @@ data/{video_id}/ ...
 - [x] H1-3. queue crash recovery。`services/shorts_queue.py` / `ui/components/shorts_queue.py` / `ui/components/upload.py` と対応テストを対象に、owner job ID、`interrupted` terminal state、再起動 recovery table、既存成功 item の再利用可否を schema で固定した。schema 2 と v1 done 移行、atomic manifest / recovery、H1-1 owner 判定、入力・出力 fingerprint 検証、欠損 output の予約拒否、クラッシュ境界テストを実装済み。focused 91 passed、全体 `1187 passed, 2 skipped`、独立 defect-first review は P0/P1 なし。タスク単位コミット済み（`1a9ac7b`, `88475f9`, `765c49a`, `3c62915`）。見積もり 0.5〜1 日
 - [x] H1-4. OAuth token とローカル設定の atomic persistence。`services/youtube_api.py`、`ui/views/_local_settings.py` と対応テストを対象に、権限 600 の同一 directory temp、flush + fsync + replace、advisory lock、lock 内再読込 + merge を共通化する。中断時に旧 JSON が残り、2 process 更新で ID 集合を失わないことを Done とする。見積もり 0.5〜1 日
 - [x] H1-5. 通常予約 operation の公開後 poll 接続。`services/upload_queue.py` / `ui/components/upload.py` / `ui/components/status_bar.py` と対応テスト・README・requirements を対象に、upload worker を予約時刻まで占有しない明示 CTA または bounded follow-up job を実装する。同じ operation ID へ publication observation を atomic 追記し、二重 poll、再起動、時刻前、timeout、private lock、public の各境界を通す。FR-27 と AC-27 / AC-28 を再度 `[x]` にできることを Done とする。見積もり 1 日
-- [ ] H1-6. 全件テスト、実機を伴わない fault injection、独立レビューを通し、各 task commit とフェーズ完了 commit を行う
+- [x] H1-6. 全件テスト、実機を伴わない fault injection、独立レビューを通した。統合 main で `1205 passed, 2 skipped`、`git diff --check fe4c7d7..HEAD` 通過。初回統合レビューの P1 4 件（相対 data root の symlink、`_config` symlink、worker lease、legacy v1 成果物取り違え）を修正し、同じ独立 reviewer の再レビューで P0/P1/P2 なし・APPROVE を確認した。各 task commit とフェーズ完了 commit を実施する
 
 **Done 条件:**
 
-- [ ] jobs の同時実行 1 件制約が process 境界でも成立し、壊れた pointer が fail-open にならない
-- [ ] data root 外への path 解決、途中 queue の予約、token / 設定の切断・lost update を自動テストで拒否できる
-- [ ] 通常予約 operation の公開後状態を再起動後も安全に観測でき、FR-27 / AC-27 / AC-28 が再び充足する
-- [ ] `uv run pytest -q` 全件通過、独立レビュー済み、フェーズ完了 commit 済み
+- [x] jobs の同時実行 1 件制約が process 境界でも成立し、壊れた pointer が fail-open にならない
+- [x] data root 外への path 解決、途中 queue の予約、token / 設定の切断・lost update を自動テストで拒否できる
+- [x] 通常予約 operation の公開後状態を再起動後も安全に観測でき、FR-27 / AC-27 / AC-28 が再び充足する
+- [x] `uv run pytest -q` 全件通過、独立レビュー済み、フェーズ完了 commit 済み
 
 **見積もり目安:** 4〜5.5 日
 
@@ -1751,8 +1751,8 @@ U7（概要欄 fingerprint 化）は保留 = v4 候補（優先度③: チャプ
 2. ~~**S8 に着手する（最優先）。**~~ 完了。実機確認で S6-9 を吸収し、S6 / S8 をクローズ済み
 3. ~~**U6 のコード実装を進める。**~~ U6-8 まで完了。実機確認の U6-9 は未完了
 4. ~~**R1 を先に完了する。**~~ 完了（`6632793` / `be83adb` / `a969681`）。回帰基準、局所的な fail-closed 修正、rerun 高速化、H1 / G1 の実行計画を確定済み
-5. 次は **H1-1 → H1-5 → H1-2 → H1-3 → H1-4** の順で hardening する。通常予約 operation の publication poll を再接続し、FR-27 / AC-27 / AC-28 を再度完了へ戻す
-6. H1 完了後に **P5-3** を実装し、**U6-9 + P5-4** を同じ実機ライン 3 周で確認して M15 を達成する
+5. ~~**H1-1 → H1-5 → H1-2 → H1-3 → H1-4 の順で hardening する。**~~ 完了。通常予約 operation の publication poll を再接続し、FR-27 / AC-27 / AC-28 を再度完了へ戻した
+6. 次は **P5-3** を実装し、**U6-9 + P5-4** を同じ実機ライン 3 周で確認して M15 を達成する
 7. **G1** は R1 後に production 非変更で実行できる。採用候補でも R1 / H1 / P5 に混ぜず、要件改訂済みの G2 を別途作る
 8. **U8**（構造化エラー通知、AC-33）は R1 完了後いつでも着手可（P5 と独立）。**U7 は保留（v4 候補）**
 9. **S9**（ローカル Whisper）は U6 完了後にテロップ品質を実測してから、着手可否と方式を判断する。着手する場合は先に要件改訂（NFR-11 と §13 スコープ外の見直し）を行う
@@ -1763,6 +1763,7 @@ U7（概要欄 fingerprint 化）は保留 = v4 候補（優先度③: チャプ
 
 | 日付 | 内容 |
 |------|------|
+| 2026-08-02 | **H1 完了。** jobs の process lock / owner lease、path confinement、queue crash recovery、OAuth token / local settings の atomic persistence、通常予約 operation の publication poll を統合した。初回独立レビューの P1 4 件を追加修正し、修正後再レビューは P0/P1/P2 なし・APPROVE。統合 main は `1205 passed, 2 skipped`、diff-check 通過。実データ・実 YouTube・外部 API は変更していない。残余リスクは symlink 検証後の敵対的 TOCTOU、atomic replace 後の親 directory fsync、process crash 時の stale lease file であり、stale file の存在だけでは live 判定しない。 |
 | 2026-08-02 | **G1 完了。** `f8c2034` で production 非変更の FFmpeg benchmark harness と測定記録を追加。独立再レビューは APPROVE、速度 gate は 15 秒 21.98％ / 60 秒 22.68％ / 180 秒 23.08％で全ケース不採用。境界差は最大 1 frame、audio expected duration 誤差は 0 秒、代表フレームで字幕 / Hook / layout / 接続を確認した。 |
 | 2026-08-02 | **H1-1 完了。** `jobs.py` に data root advisory lock、owner PID / token、UUID temp + flush / fsync / atomic replace、current pointer の状態区別、strict running scan、live worker 保護を実装。実 2 process 競合と fault injection を含む jobs テスト 42 件、全体 `1083 passed, 2 skipped` を確認した。H1-2〜H1-5 は未着手のまま維持する |
 | 2026-08-02 | **R1 完了。** 途中 queue の予約 fail-closed、旧 datetime の UTC 正規化、legacy `build_short()` の atomic 出力保護を `be83adb`、binary identity 付き `yt-dlp --version` warning cache・Streamlit 1.55 下限・uv 設定・seek 文書整合を `a969681` で実装。変更前 1063 から変更後 1074 passed / 2 skipped、cache miss 240.56 ms から hit 平均 0.215 ms、`uv lock --check` / `uv sync --locked` 成功、safety / performance の独立レビュー APPROVE を確認した |
