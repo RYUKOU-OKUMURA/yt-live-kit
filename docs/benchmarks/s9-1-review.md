@@ -31,7 +31,7 @@ fixture の `gold_audit_status` は `unverified_provisional` のまま保持し�
 - q5 の paired median CER相対改善は78.69％、turboは80.85％。既存numeric threshold、fixture、range、音声bytes / SHA、model SHA、runtime / decode設定は変更していない。
 - 両候補のnumeric gateとoperational transcript reference gateは通過。q5はlocal-only、worst-case wait、全体wait、memory、model bytes、case品質のlexicographic tie-breakで選択した。
 - tie-break metadataは `declared_before_audit_apply_rerun=true`、`prior_provisional_results_known=true`、`policy_basis=user_wait_time_and_local_constraints`。`declared_before_results` は存在せず、pass閾値は変更していない。
-- canonical report v6 は raw model / audio / baseline VTT / runtime / range / run-kind identity、production実体hash再照合、再現command、15 production files unchanged、S9-3の唯一のq5参照を記録する。runtime identity flagsはcanonical JSONでtrue。
+- canonical report v7 は raw model / audio / baseline VTT / runtime / range / run-kind identity、production実体hash再照合、再現command、15 production files unchanged、S9-3の唯一のq5参照を記録する。runtime identity flagsはcanonical JSONでtrue。
 
 ## 外部独立 review REQUEST_CHANGES と follow-up
 
@@ -41,14 +41,25 @@ fixture の `gold_audit_status` は `unverified_provisional` のまま保持し�
 - P1 VTT parity: parity artifact の schema、benchmark / fixture identity、固定4 case順、source VTT bytes / SHA-256、raw / dedup count、text sequence equalityをstrictに再計算し、空配列や `false` を effective Go にしない。parityをcanonical effective gateへ含める。
 - P2 production scope: artifact rootを自己申告値として信頼せず、fixture `source_files` 14件に保護対象 `LB4px1wRFnY/shorts/cutplan/cut_clip_003.json` 1件を加えた exact 15件を導出する。root mismatch、完全file set mismatch、traversal、absolute path、symlink escape、実体content変更をfail closedにする。
 
-この follow-up では上記を実装し、既存のfixture、gate閾値、16 runの測定値、human audit / base fixture fingerprintは変更していない。normalizationは比較manifestの `unicode` / `strip_whitespace` を benchmark の `unicode_form` / `remove_whitespace` へ明示変換し、cache外の最小 raw fixtureでも同じ検証を行う。canonical report v6 は raw metrics / argv / output identity、strict parity 4/4、production scope 15件 exact、両model全gateを true とし、q5採用を維持する。
+この follow-up では上記を実装し、既存のfixture、gate閾値、16 runの測定値、human audit / base fixture fingerprintは変更していない。normalizationは比較manifestの `unicode` / `strip_whitespace` を benchmark の `unicode_form` / `remove_whitespace` へ明示変換し、cache外の最小 raw fixtureでも同じ検証を行う。canonical report v7 は raw metrics / argv / output identity、strict parity 4/4、production scope 15件 exact、両model全gateを true とし、q5採用を維持する。
 
 最終 read-only re-review は reviewer `019fc73f-449f-77f0-8ae5-aa61cf5f5cdd` が現行最終 diffだけを確認し、`APPROVE / P0-P3 none`（P0なし、P1なし、P2なし、P3なし）と判定した。reviewerは変更・commitを行っていない。
 
+## 追加外部再review REQUEST_CHANGES と follow-up
+
+前回の3 commit後の外部再reviewは、次の2点を REQUEST_CHANGES とした。
+
+- P1 candidate output path: raw reportの `execution.output_paths[0]` を受け入れており、case / model / run-kindを跨ぐ別JSON差し替えをpath identityだけで防げない。canonical cache root、expected output path、resolve後のconfinement、symlink escape、output fingerprint対応を固定し、mutation testで拒否する必要がある。
+- P2 gate namespace: `evaluation_contract.gates.require_gold_audit=true` と `gold_audit.required_for_selected_mode=false` が汎用consumerに曖昧。fixture benchmark quality gateとeffective operational gateをnamespace・validator付きで分離し、fixture exact goldはbenchmark qualityには必要だがAのoperational Goには不要と機械判定できる必要がある。
+
+この follow-up では comparison report schema を v7へ更新し、candidate outputを `audio_cache_root/runs/{model_directory}/{run_kind_directory}/whisper/{case_id}/{run_kind}.json` に固定した。report path、output path、resolve、symlink、実体JSON再parse、実体SHA-256を照合し、case / warm / symlink / fingerprint mutationをfail closedにした。gateは `fixture_benchmark_quality` namespaceの `validate_fixture_benchmark_quality_gate_v1` と、`operational_transcript_reference` namespaceの `validate_effective_operational_gate_v1` に分離し、legacy `gates` と `require_gold_audit` のみではvalidatorが通らないことを固定した。fixture、gate閾値、音声・model hash、16 run測定値、audit fingerprint、q5選定、boundary No-Go、人確認必須、S9-2開始可は変更していない。
+
+追加修正後の最終 read-only reviewは reviewer `019fc753-24f8-71d2-a572-b62f41c8062e` が現行diffを確認し、`APPROVE / P0-P3 none`（P0なし、P1なし、P2なし、P3なし）と判定した。reviewerは変更・commitを行っていない。
+
 ## テスト
 
-- focused S9 suite (`test_s9_benchmark.py`, `test_s9_boundary_audit.py`, `test_s9_compare_operational.py`, `test_s9_human_audit.py`): 119 passed
-- full `uv run pytest`: 1465 passed, 2 skipped
+- focused S9 suite (`test_s9_benchmark.py`, `test_s9_boundary_audit.py`, `test_s9_compare_operational.py`, `test_s9_human_audit.py`): 123 passed
+- full `uv run pytest -q`: 1469 passed, 2 skipped
 - `uv lock --check`: PASS
 - `git diff --check`: PASS
 - human audit packet check: PASS

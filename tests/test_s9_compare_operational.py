@@ -7,13 +7,16 @@ from pathlib import Path
 import pytest
 
 from benchmarks.s9_compare import (
+    _canonical_run_root,
     _derive_production_scope,
+    _expected_candidate_output_path,
     _normalization_config,
     _parse_real_time_ms,
     _expected_runtime_identity,
     _expected_whisper_settings,
     _load_transcript_audit,
     _select_adopted_model,
+    _validate_evaluation_gate_contract,
     _validate_raw_case_evidence,
     _validate_production_hash_artifact,
     _validate_raw_report_identity,
@@ -92,6 +95,7 @@ def _local_raw_evidence_fixture(tmp_path: Path) -> tuple[dict, dict, dict]:
     manifest["whisper"]["timeout_sec"] = 180.0
     model_fixture = next(item for item in manifest["models"] if item["name"] == "ggml-large-v3-turbo-q5_0")
     model_fixture.update(file_fingerprint(model_path))
+    manifest["audio_cache_root"] = str(tmp_path / "cache")
     audio_root = tmp_path / "audio"
     audio_root.mkdir()
     expected_vtt = file_fingerprint(PARITY_FIXTURE_PATH)
@@ -121,7 +125,8 @@ def _local_raw_evidence_fixture(tmp_path: Path) -> tuple[dict, dict, dict]:
             {"anchor_id": f"anchor-{index}", "start_ms": values[0], "end_ms": values[1]}
             for index, values in enumerate(fixture_case["gold"]["cue_anchors_ms"], 1)
         ]
-        output_path = tmp_path / "outputs" / case_id / "cold.json"
+        output_root = _canonical_run_root(manifest, "ggml-large-v3-turbo-q5_0", "cold")
+        output_path = _expected_candidate_output_path(output_root, case_id, "cold")
         output_path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
             "systeminfo": "fixture",
@@ -223,6 +228,7 @@ def _local_raw_evidence_fixture(tmp_path: Path) -> tuple[dict, dict, dict]:
         "expected_inputs": expected_inputs,
         "expected_vtt": {case["id"]: expected_vtt for case in manifest["cases"]},
         "expected_runtime": runtime_identity,
+        "expected_run_root": _canonical_run_root(manifest, "ggml-large-v3-turbo-q5_0", "cold"),
     }
 
 
@@ -310,7 +316,7 @@ def test_transcript_audit_is_bound_to_base_and_boundary_fingerprints() -> None:
 
 def test_canonical_report_contains_sixteen_runs_and_separate_statuses() -> None:
     report = json.loads(REPORT_PATH.read_text(encoding="utf-8"))
-    assert report["schema"] == "s9-1-comparison-report-v6"
+    assert report["schema"] == "s9-1-comparison-report-v7"
     assert report["decision"]["go"] is True
     assert report["decision"]["s9_3_reference"] == "ggml-large-v3-turbo-q5_0"
     assert report["decision"]["boundary_automation"] == "not_adopted_human_review_required"
@@ -320,6 +326,23 @@ def test_canonical_report_contains_sixteen_runs_and_separate_statuses() -> None:
     assert report["transcript_reference_status"] == "accepted_operational_benchmark_reference"
     assert report["human_audit"]["review_policy"]["displayed_transcript_content"]["acceptance"] == "operational_benchmark_reference"
     assert report["evaluation_contract"]["raw_report_identity"]["all_models_share_runtime_identity"] is True
+    contract = report["evaluation_contract"]
+    assert contract["schema"] == "s9-1-evaluation-contract-v2"
+    assert "gates" not in contract
+    assert contract["benchmark_quality_gate"]["namespace"] == "fixture_benchmark_quality"
+    assert contract["benchmark_quality_gate"]["validator"] == "validate_fixture_benchmark_quality_gate_v1"
+    assert contract["benchmark_quality_gate"]["source"] == "docs/benchmarks/s9-1-cases.json:gates"
+    assert contract["benchmark_quality_gate"]["thresholds"]["paired_median_relative_cer_improvement"] == 0.1
+    assert contract["benchmark_quality_gate"]["fixture_exact_gold"]["required_for_benchmark_quality"] is True
+    assert contract["benchmark_quality_gate"]["passed"] is False
+    assert contract["effective_operational_gate"]["namespace"] == "operational_transcript_reference"
+    assert contract["effective_operational_gate"]["validator"] == "validate_effective_operational_gate_v1"
+    assert contract["effective_operational_gate"]["fixture_exact_gold"]["required_for_operational_go"] is False
+    assert contract["effective_operational_gate"]["passed"] is True
+    assert "require_gold_audit" not in json.dumps(contract, ensure_ascii=False)
+    assert contract["candidate_output_identity"]["validator"] == "validate_canonical_candidate_output_path_v1"
+    assert contract["candidate_output_identity"]["template"].endswith("{case_id}/{run_kind}.json")
+    assert _validate_evaluation_gate_contract(contract, expected_decision_go=True)["effective_operational_passed"] is True
     shared_runtime_identity = report["models"][0]["raw_identity"]["cold"]["runtime_identity"]
     assert all(
         model["raw_identity"]["cold"]["runtime_identity"] == shared_runtime_identity
@@ -345,8 +368,10 @@ def test_canonical_report_contains_sixteen_runs_and_separate_statuses() -> None:
         assert model["gates"]["technical_gates_passed"] is True
         assert model["gates"]["effective_gates_passed"] is True
         assert model["gates"]["transcript_operational_reference"]["passed"] is True
-        assert model["gates"]["gold_audit"]["passed"] is False
-        assert model["gates"]["gold_audit"]["required_for_selected_mode"] is False
+        assert model["gates"]["fixture_exact_gold"]["passed"] is False
+        assert model["gates"]["fixture_exact_gold"]["status"] == "unverified_provisional"
+        assert model["gates"]["fixture_exact_gold"]["required_for_benchmark_quality"] is True
+        assert model["gates"]["fixture_exact_gold"]["required_for_operational_go"] is False
         assert model["gates"]["vtt_progressive_parity"]["passed"] is True
         run_count += len(model["runs"]["cold"]["cases"])
         run_count += len(model["runs"]["warm"]["cases"])
@@ -355,6 +380,22 @@ def test_canonical_report_contains_sixteen_runs_and_separate_statuses() -> None:
     assert report["production_integrity"]["scope"]["expected_file_count"] == 15
     assert report["production_integrity"]["scope"]["fixture_source_file_count"] == 14
     assert report["production_integrity"]["scope"]["protected_file_count"] == 1
+    evidence = report["models"][0]["raw_identity"]["evidence"]["cold"][0]
+    assert evidence["output_path_identity_verified"] is True
+    assert evidence["output_fingerprint_verified"] is True
+
+
+@pytest.mark.parametrize("mutation", [
+    lambda contract: (contract.pop("benchmark_quality_gate"), contract.pop("effective_operational_gate"), contract.update(gates={"require_gold_audit": False})),
+    lambda contract: contract["effective_operational_gate"]["fixture_exact_gold"].update(required_for_operational_go=True),
+])
+def test_gate_validator_rejects_legacy_or_ambiguous_gold_contract(mutation) -> None:
+    report = json.loads(REPORT_PATH.read_text(encoding="utf-8"))
+    contract = deepcopy(report["evaluation_contract"])
+    mutation(contract)
+
+    with pytest.raises(ValueError):
+        _validate_evaluation_gate_contract(contract, expected_decision_go=True)
 
 
 def test_production_scope_is_fixture_14_plus_protected_1() -> None:
@@ -547,7 +588,8 @@ def test_vtt_parity_mutations_fail_closed(tmp_path: Path, mutation) -> None:
 
 def test_raw_evidence_rehashes_and_recomputes_metrics_without_external_cache(tmp_path: Path) -> None:
     manifest, raw, details = _local_raw_evidence_fixture(tmp_path)
-    raw_path = tmp_path / "raw.json"
+    raw_path = details["expected_run_root"] / "report.json"
+    raw_path.parent.mkdir(parents=True, exist_ok=True)
     raw_path.write_text(json.dumps(raw, ensure_ascii=False), encoding="utf-8")
     identity = _validate_raw_report_identity(
         raw_path,
@@ -576,6 +618,7 @@ def test_raw_evidence_rehashes_and_recomputes_metrics_without_external_cache(tmp
             expected_audio_path=audio_path,
             expected_vtt_path=PARITY_FIXTURE_PATH,
             expected_settings=details["expected_runtime"]["settings"],
+            expected_run_root=details["expected_run_root"],
         )
         assert evidence["metrics_verified"] is True
         assert evidence["output_schema_verified"] is True
@@ -610,6 +653,7 @@ def test_raw_evidence_metric_text_and_argv_mutations_fail_closed(tmp_path: Path,
             expected_audio_path=audio_path,
             expected_vtt_path=PARITY_FIXTURE_PATH,
             expected_settings=details["expected_runtime"]["settings"],
+            expected_run_root=details["expected_run_root"],
         )
 
 
@@ -636,6 +680,96 @@ def test_raw_evidence_output_artifact_mutation_fails_closed(tmp_path: Path) -> N
             expected_audio_path=audio_path,
             expected_vtt_path=PARITY_FIXTURE_PATH,
             expected_settings=details["expected_runtime"]["settings"],
+            expected_run_root=details["expected_run_root"],
+        )
+
+
+def test_candidate_output_case_run_and_symlink_swaps_fail_closed(tmp_path: Path) -> None:
+    manifest, raw, details = _local_raw_evidence_fixture(tmp_path)
+    changed = deepcopy(raw["cases"][0])
+    other_case_path = raw["cases"][1]["candidate_output_path"]
+    changed["candidate_output_path"] = other_case_path
+    changed["candidate"]["execution"]["output_paths"] = [other_case_path]
+    audio_path = next(
+        Path(item["path"])
+        for item in details["expected_inputs"]
+        if item["kind"] == "audio" and item["case_id"] == changed["case_id"]
+    )
+    with pytest.raises(ValueError, match="canonical case/model/run-kind"):
+        _validate_raw_case_evidence(
+            raw_case=changed,
+            fixture=manifest,
+            case_id=changed["case_id"],
+            expected_run_kind="cold",
+            expected_model_path=details["model_path"],
+            expected_audio_path=audio_path,
+            expected_vtt_path=PARITY_FIXTURE_PATH,
+            expected_settings=details["expected_runtime"]["settings"],
+            expected_run_root=details["expected_run_root"],
+        )
+
+    changed = deepcopy(raw["cases"][0])
+    warm_root = _canonical_run_root(manifest, "ggml-large-v3-turbo-q5_0", "warm")
+    warm_path = _expected_candidate_output_path(warm_root, changed["case_id"], "warm")
+    changed["candidate_output_path"] = str(warm_path)
+    changed["candidate"]["execution"]["output_paths"] = [str(warm_path)]
+    with pytest.raises(ValueError, match="canonical case/model/run-kind"):
+        _validate_raw_case_evidence(
+            raw_case=changed,
+            fixture=manifest,
+            case_id=changed["case_id"],
+            expected_run_kind="cold",
+            expected_model_path=details["model_path"],
+            expected_audio_path=audio_path,
+            expected_vtt_path=PARITY_FIXTURE_PATH,
+            expected_settings=details["expected_runtime"]["settings"],
+            expected_run_root=details["expected_run_root"],
+        )
+
+    expected_path = Path(raw["cases"][0]["candidate_output_path"])
+    original = expected_path.read_bytes()
+    outside = tmp_path / "outside-output.json"
+    outside.write_bytes(original)
+    expected_path.unlink()
+    expected_path.symlink_to(outside)
+    with pytest.raises(ValueError, match="symlink escape"):
+        _validate_raw_case_evidence(
+            raw_case=raw["cases"][0],
+            fixture=manifest,
+            case_id=raw["cases"][0]["case_id"],
+            expected_run_kind="cold",
+            expected_model_path=details["model_path"],
+            expected_audio_path=audio_path,
+            expected_vtt_path=PARITY_FIXTURE_PATH,
+            expected_settings=details["expected_runtime"]["settings"],
+            expected_run_root=details["expected_run_root"],
+        )
+
+
+def test_candidate_output_fingerprint_declaration_cannot_be_forged(tmp_path: Path) -> None:
+    manifest, raw, details = _local_raw_evidence_fixture(tmp_path)
+    changed = deepcopy(raw["cases"][0])
+    changed["candidate_output_fingerprint"] = {
+        "path": changed["candidate_output_path"],
+        "bytes": 0,
+        "sha256": "0" * 64,
+    }
+    audio_path = next(
+        Path(item["path"])
+        for item in details["expected_inputs"]
+        if item["kind"] == "audio" and item["case_id"] == changed["case_id"]
+    )
+    with pytest.raises(ValueError, match="output fingerprint"):
+        _validate_raw_case_evidence(
+            raw_case=changed,
+            fixture=manifest,
+            case_id=changed["case_id"],
+            expected_run_kind="cold",
+            expected_model_path=details["model_path"],
+            expected_audio_path=audio_path,
+            expected_vtt_path=PARITY_FIXTURE_PATH,
+            expected_settings=details["expected_runtime"]["settings"],
+            expected_run_root=details["expected_run_root"],
         )
 
 
@@ -662,6 +796,7 @@ def test_real_time_parser_and_q5_speedup_forgery_fail_closed(tmp_path: Path) -> 
             expected_audio_path=audio_path,
             expected_vtt_path=PARITY_FIXTURE_PATH,
             expected_settings=details["expected_runtime"]["settings"],
+            expected_run_root=details["expected_run_root"],
         )
 
 

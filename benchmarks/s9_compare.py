@@ -50,14 +50,23 @@ CASE_IDS = (
 )
 MODEL_NAMES = ("ggml-large-v3-turbo-q5_0", "ggml-large-v3-turbo")
 OPERATIONAL_REFERENCE_MODE = "operational_transcript_reference"
-COMPARISON_REPORT_SCHEMA = "s9-1-comparison-report-v6"
+COMPARISON_REPORT_SCHEMA = "s9-1-comparison-report-v7"
 RAW_REPORT_SCHEMA = "s9-1-benchmark-report-v1"
 PARITY_SCHEMA = "s9-1-vtt-progressive-parity-v2"
+EVALUATION_CONTRACT_SCHEMA = "s9-1-evaluation-contract-v2"
 EXPECTED_TIMEOUT_SEC = 180.0
 REAL_TIME_TOLERANCE_MS = 25
 PROTECTED_PRODUCTION_RELATIVE_PATHS = frozenset(
     {"LB4px1wRFnY/shorts/cutplan/cut_clip_003.json"}
 )
+CANONICAL_MODEL_RUN_DIRECTORIES = {
+    "ggml-large-v3-turbo-q5_0": "q5",
+    "ggml-large-v3-turbo": "turbo",
+}
+CANONICAL_RUN_KIND_DIRECTORIES = {
+    "cold": "cold-audit-apply",
+    "warm": "warm-audit-apply",
+}
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -285,6 +294,59 @@ def _expected_runtime_identity(fixture: Mapping[str, Any], binary_fingerprint: M
     }
 
 
+def _canonical_run_root(fixture: Mapping[str, Any], model_name: str, run_kind: str) -> Path:
+    model_directory = CANONICAL_MODEL_RUN_DIRECTORIES.get(model_name)
+    run_directory = CANONICAL_RUN_KIND_DIRECTORIES.get(run_kind)
+    if model_directory is None or run_directory is None:
+        raise ValueError(f"canonical benchmark run identity が不正です: {model_name} / {run_kind}")
+    cache_root = Path(str(fixture["audio_cache_root"]))
+    if not cache_root.is_absolute() or cache_root.is_symlink():
+        raise ValueError(f"canonical benchmark cache root が不正です: {cache_root}")
+    return cache_root / "runs" / model_directory / run_directory
+
+
+def _expected_candidate_output_path(run_root: Path, case_id: str, run_kind: str) -> Path:
+    if case_id not in CASE_IDS or run_kind not in CANONICAL_RUN_KIND_DIRECTORIES:
+        raise ValueError(f"canonical candidate output identity が不正です: {case_id} / {run_kind}")
+    return run_root / "whisper" / case_id / f"{run_kind}.json"
+
+
+def _validate_canonical_run_report_path(path: Path, *, expected_run_root: Path) -> None:
+    expected_report = expected_run_root / "report.json"
+    if str(path) != str(expected_report):
+        raise ValueError(f"raw report path が canonical run root と一致しません: {path}")
+    if _path_has_symlink(path, root=expected_run_root):
+        raise ValueError(f"raw report path の symlink escape を拒否しました: {path}")
+    try:
+        path.resolve(strict=True).relative_to(expected_run_root.resolve(strict=True))
+    except (FileNotFoundError, ValueError) as exc:
+        raise ValueError(f"raw report path が canonical run root 外です: {path}") from exc
+    if not path.is_file() or path.is_symlink():
+        raise ValueError(f"canonical raw report がありません: {path}")
+
+
+def _validate_canonical_output_path(
+    output_path_text: str,
+    *,
+    expected_output_path: Path,
+    expected_run_root: Path,
+) -> Path:
+    if output_path_text != str(expected_output_path):
+        raise ValueError(
+            f"candidate output path が canonical case/model/run-kind path と一致しません: {output_path_text}"
+        )
+    output_path = Path(output_path_text)
+    if _path_has_symlink(output_path, root=expected_run_root):
+        raise ValueError(f"candidate output path の symlink escape を拒否しました: {output_path}")
+    try:
+        output_path.resolve(strict=True).relative_to(expected_run_root.resolve(strict=True))
+    except (FileNotFoundError, ValueError) as exc:
+        raise ValueError(f"candidate output path が canonical run root 外です: {output_path}") from exc
+    if not output_path.is_file() or output_path.is_symlink():
+        raise ValueError(f"canonical candidate output artifact がありません: {output_path}")
+    return output_path
+
+
 def _normalization_config(fixture: Mapping[str, Any]) -> NormalizationConfig:
     value = fixture.get("normalization", {})
     if not isinstance(value, Mapping):
@@ -447,6 +509,7 @@ def _validate_raw_case_evidence(
     expected_audio_path: Path,
     expected_vtt_path: Path,
     expected_settings: Mapping[str, Any],
+    expected_run_root: Path,
 ) -> dict[str, Any]:
     """Reparse output artifacts and recompute all transcript-related metrics."""
 
@@ -466,12 +529,19 @@ def _validate_raw_case_evidence(
     output_paths = execution.get("output_paths")
     if not isinstance(output_paths, list) or len(output_paths) != 1 or not isinstance(output_paths[0], str):
         raise ValueError(f"raw report の output_paths が不正です: {case_id}")
-    output_path = Path(output_paths[0])
-    if raw_case.get("candidate_output_path") != str(output_path):
+    expected_output_path = _expected_candidate_output_path(expected_run_root, case_id, expected_run_kind)
+    output_path = _validate_canonical_output_path(
+        output_paths[0],
+        expected_output_path=expected_output_path,
+        expected_run_root=expected_run_root,
+    )
+    if raw_case.get("candidate_output_path") != str(expected_output_path):
         raise ValueError(f"raw report の candidate_output_path が execution と一致しません: {case_id}")
-    if not output_path.is_file() or output_path.is_symlink():
-        raise ValueError(f"raw report の candidate output artifact がありません: {output_path}")
     output_fingerprint = file_fingerprint(output_path)
+    declared_output_fingerprint = raw_case.get("candidate_output_fingerprint")
+    if declared_output_fingerprint is not None:
+        if not isinstance(declared_output_fingerprint, Mapping) or dict(declared_output_fingerprint) != output_fingerprint:
+            raise ValueError(f"raw report の candidate output fingerprint が実体と一致しません: {case_id}")
     output_payload = _read_json(output_path)
     params = output_payload.get("params")
     if not isinstance(params, Mapping) or params.get("model") != str(expected_model_path) or params.get("language") != fixture["whisper"]["language"]:
@@ -563,7 +633,10 @@ def _validate_raw_case_evidence(
         raise ValueError(f"raw report の candidate metrics がoutput artifactからの再計算値と一致しません: {case_id}")
     return {
         "case_id": case_id,
+        "expected_output_path": str(expected_output_path),
         "output_fingerprint": output_fingerprint,
+        "output_path_identity_verified": True,
+        "output_fingerprint_verified": True,
         "candidate_cue_fingerprint": _cue_sequence_fingerprint(actual_cue_dicts),
         "metrics_verified": True,
         "argv_verified": True,
@@ -762,6 +835,10 @@ def _model_report(
 ) -> dict[str, Any]:
     cold_report = _read_json(cold_path)
     warm_report = _read_json(warm_path)
+    expected_cold_run_root = _canonical_run_root(fixture, name, "cold")
+    expected_warm_run_root = _canonical_run_root(fixture, name, "warm")
+    _validate_canonical_run_report_path(cold_path, expected_run_root=expected_cold_run_root)
+    _validate_canonical_run_report_path(warm_path, expected_run_root=expected_warm_run_root)
     if shared_raw_identity is not None:
         if shared_raw_identity.get("inputs") != expected_inputs:
             raise ValueError("model間のraw input identityが実fixtureと一致しません")
@@ -800,6 +877,7 @@ def _model_report(
             expected_audio_path=Path(str(next(item for item in expected_inputs if item["kind"] == "audio" and item["case_id"] == case_id)["path"])),
             expected_vtt_path=expected_vtt_paths[case_id],
             expected_settings=expected_runtime_identity["settings"],
+            expected_run_root=expected_cold_run_root,
         )
         for case_id in CASE_IDS
     ]
@@ -813,6 +891,7 @@ def _model_report(
             expected_audio_path=Path(str(next(item for item in expected_inputs if item["kind"] == "audio" and item["case_id"] == case_id)["path"])),
             expected_vtt_path=expected_vtt_paths[case_id],
             expected_settings=expected_runtime_identity["settings"],
+            expected_run_root=expected_warm_run_root,
         )
         for case_id in CASE_IDS
     ]
@@ -912,7 +991,10 @@ def _model_report(
             "runtime_identity_equal": cold_identity["runtime_identity"] == warm_identity["runtime_identity"],
             "evidence": {"cold": cold_evidence, "warm": warm_evidence},
             "metrics_verified": evidence_passed,
-            "output_fingerprints_verified": all(item["output_fingerprint"] for item in cold_evidence + warm_evidence),
+            "output_fingerprints_verified": all(
+                item["output_fingerprint_verified"] and item["output_path_identity_verified"]
+                for item in cold_evidence + warm_evidence
+            ),
             "all_case_runs_ok": raw_runs_ok,
         },
         "gates": {
@@ -941,11 +1023,13 @@ def _model_report(
                 "case_count": parity_validation.get("case_count"),
                 "text_sequence_equal_verified": parity_validation.get("text_sequence_equal_verified") is True,
             },
-            "gold_audit": {
-                "status": "not_claimed",
+            "fixture_exact_gold": {
+                "namespace": "fixture_benchmark_quality",
+                "status": "unverified_provisional",
                 "passed": False,
-                "required_for_selected_mode": False,
-                "definition": "character and punctuation exactness, glossary exact approval, and cue anchor exact milliseconds are not claimed by the natural-language audit",
+                "required_for_benchmark_quality": True,
+                "required_for_operational_go": False,
+                "definition": "fixture exact gold is required for benchmark-quality certification but is not required for operational transcript reference Go",
             },
             "transcript_operational_reference": {
                 "status": "accepted_operational_benchmark_reference",
@@ -1107,6 +1191,120 @@ def _select_adopted_model(models: list[Mapping[str, Any]]) -> tuple[dict[str, An
     }
 
 
+def _build_evaluation_gate_contract(
+    *,
+    fixture_gold_status: str,
+    benchmark_thresholds: Mapping[str, Any],
+    models: list[Mapping[str, Any]],
+    adopted_model: Mapping[str, Any] | None,
+    operational_passed: bool,
+) -> dict[str, Any]:
+    technical_passed = all(model["gates"]["technical_gates_passed"] for model in models)
+    transcript_reference_passed = all(
+        model["gates"]["transcript_operational_reference"]["passed"] for model in models
+    )
+    benchmark_gate = {
+        "namespace": "fixture_benchmark_quality",
+        "validator": "validate_fixture_benchmark_quality_gate_v1",
+        "source": "docs/benchmarks/s9-1-cases.json:gates",
+        "thresholds": {
+            key: value for key, value in benchmark_thresholds.items() if key != "require_gold_audit"
+        },
+        "fixture_exact_gold": {
+            "namespace": "fixture_benchmark_quality",
+            "status": fixture_gold_status,
+            "required_for_benchmark_quality": True,
+            "passed": fixture_gold_status == "audited",
+        },
+        "numeric_and_artifact_gate_passed": technical_passed,
+        "passed": technical_passed and fixture_gold_status == "audited",
+        "definition": "fixture quality certification requires exact human-audited gold plus fixed numeric and artifact gates",
+    }
+    operational_gate = {
+        "namespace": OPERATIONAL_REFERENCE_MODE,
+        "validator": "validate_effective_operational_gate_v1",
+        "fixture_exact_gold": {
+            "namespace": "fixture_benchmark_quality",
+            "status": fixture_gold_status,
+            "required_for_benchmark_quality": True,
+            "required_for_operational_go": False,
+            "passed": fixture_gold_status == "audited",
+        },
+        "technical_gate_passed": technical_passed,
+        "transcript_reference_gate_passed": transcript_reference_passed,
+        "boundary_automation_adopted": False,
+        "human_review_required": True,
+        "selected_model": adopted_model["name"] if adopted_model else None,
+        "passed": operational_passed,
+        "definition": "operational transcript reference Go requires fixed technical gates and the four-case human operational reference, but not fixture exact gold",
+    }
+    return {
+        "schema": EVALUATION_CONTRACT_SCHEMA,
+        "benchmark_quality_gate": benchmark_gate,
+        "effective_operational_gate": operational_gate,
+    }
+
+
+def _validate_evaluation_gate_contract(
+    contract: Mapping[str, Any],
+    *,
+    expected_decision_go: bool | None = None,
+) -> dict[str, Any]:
+    """Validate explicit benchmark/effective gate namespaces; reject legacy ambiguity."""
+
+    if contract.get("schema") != EVALUATION_CONTRACT_SCHEMA:
+        raise ValueError("evaluation contract schema が固定値と異なります")
+    if "gates" in contract or "require_gold_audit" in json.dumps(contract, ensure_ascii=False):
+        raise ValueError("legacy evaluation gate key は許可されません")
+    benchmark = contract.get("benchmark_quality_gate")
+    operational = contract.get("effective_operational_gate")
+    if not isinstance(benchmark, Mapping) or not isinstance(operational, Mapping):
+        raise ValueError("benchmark/effective gate namespace が不足しています")
+    if benchmark.get("namespace") != "fixture_benchmark_quality":
+        raise ValueError("benchmark quality gate namespace が不正です")
+    if benchmark.get("validator") != "validate_fixture_benchmark_quality_gate_v1":
+        raise ValueError("benchmark quality gate validator が不正です")
+    if benchmark.get("source") != "docs/benchmarks/s9-1-cases.json:gates" or not isinstance(benchmark.get("thresholds"), Mapping):
+        raise ValueError("benchmark quality gate の source/thresholds が不正です")
+    benchmark_gold = benchmark.get("fixture_exact_gold")
+    if not isinstance(benchmark_gold, Mapping):
+        raise ValueError("benchmark quality gate の fixture_exact_gold がありません")
+    if benchmark_gold.get("namespace") != "fixture_benchmark_quality" or benchmark_gold.get("required_for_benchmark_quality") is not True:
+        raise ValueError("fixture exact gold の benchmark requirement が不正です")
+    expected_benchmark = (
+        benchmark.get("numeric_and_artifact_gate_passed") is True and benchmark_gold.get("passed") is True
+    )
+    if not isinstance(benchmark.get("passed"), bool) or benchmark.get("passed") != expected_benchmark:
+        raise ValueError("benchmark quality gate の passed が構成要素と一致しません")
+    if operational.get("namespace") != OPERATIONAL_REFERENCE_MODE:
+        raise ValueError("effective operational gate namespace が不正です")
+    if operational.get("validator") != "validate_effective_operational_gate_v1":
+        raise ValueError("effective operational gate validator が不正です")
+    operational_gold = operational.get("fixture_exact_gold")
+    if not isinstance(operational_gold, Mapping):
+        raise ValueError("effective operational gate の fixture_exact_gold がありません")
+    if operational_gold.get("namespace") != "fixture_benchmark_quality":
+        raise ValueError("effective operational gate の gold namespace が不正です")
+    if operational_gold.get("required_for_benchmark_quality") is not True:
+        raise ValueError("effective operational gate が benchmark gold requirement を失っています")
+    if operational_gold.get("required_for_operational_go") is not False:
+        raise ValueError("fixture exact gold を operational Go の必須条件へ昇格できません")
+    expected_operational = (
+        operational.get("technical_gate_passed") is True
+        and operational.get("transcript_reference_gate_passed") is True
+        and operational.get("boundary_automation_adopted") is False
+        and operational.get("human_review_required") is True
+    )
+    if not isinstance(operational.get("passed"), bool) or operational.get("passed") != expected_operational:
+        raise ValueError("effective operational gate の passed が構成要素と一致しません")
+    if expected_decision_go is not None and operational.get("passed") != expected_decision_go:
+        raise ValueError("effective operational gate と decision.go が一致しません")
+    return {
+        "benchmark_quality_passed": benchmark["passed"],
+        "effective_operational_passed": operational["passed"],
+    }
+
+
 def build_comparison(
     *,
     manifest_path: Path,
@@ -1176,6 +1374,13 @@ def build_comparison(
     evaluation = fixture["gates"]
     adopted_model, model_selection = _select_adopted_model(models)
     all_effective_gates_passed = adopted_model is not None
+    evaluation_gate_contract = _build_evaluation_gate_contract(
+        fixture_gold_status="unverified_provisional",
+        benchmark_thresholds=evaluation,
+        models=models,
+        adopted_model=adopted_model,
+        operational_passed=all_effective_gates_passed,
+    )
     decision_reason = (
         "ユーザーの自然文監査「4本とも文字起こしは概ね問題なし」を、4 case の displayed transcript content に限る operational benchmark reference として採用した。"
         if all_effective_gates_passed
@@ -1255,10 +1460,17 @@ def build_comparison(
             "fallback_only": "runtime、cache、artifact、または人確認が失敗した場合は既存 YouTube VTT を明示的に fallback とする。",
         },
         "evaluation_contract": {
+            **evaluation_gate_contract,
+            "candidate_output_identity": {
+                "validator": "validate_canonical_candidate_output_path_v1",
+                "cache_root": str(Path(str(fixture["audio_cache_root"]))),
+                "model_directories": dict(CANONICAL_MODEL_RUN_DIRECTORIES),
+                "run_kind_directories": dict(CANONICAL_RUN_KIND_DIRECTORIES),
+                "template": "runs/{model_directory}/{run_kind_directory}/whisper/{case_id}/{run_kind}.json",
+            },
             "candidate_cues": "raw; progressive VTT dedupe is baseline-only",
             "normalization": fixture["normalization"],
             "cue_rule": fixture["cue_rule"],
-            "gates": evaluation,
             "decision_mode": OPERATIONAL_REFERENCE_MODE,
             "human_audit_dimensions": {
                 "displayed_transcript_content": "human_reviewed_no_material_issue_reported / accepted_operational_benchmark_reference",
@@ -1404,6 +1616,10 @@ def build_comparison(
         "residual_risks": residual_risks,
     }
     report["boundary_audit"] = boundary_audit
+    _validate_evaluation_gate_contract(
+        report["evaluation_contract"],
+        expected_decision_go=report["decision"]["go"],
+    )
     return report
 
 
@@ -1499,6 +1715,8 @@ def markdown_report(report: Mapping[str, Any]) -> str:
         "- model cache: `/Users/ryukouokumura/Library/Caches/whisper.cpp/models/`",
         "- audio cache: `/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/`",
         "- baseline: production progressive dedupe parity 4/4。candidate: raw cue のまま評価",
+        "- gate namespaces: `benchmark_quality_gate` は fixture exact gold を品質認定の必須条件として未達、`effective_operational_gate` は numeric / artifact gate と4 case operational transcript referenceでGo。fixture exact goldは operational Goの必須条件ではなく、boundary automationは不採用、人確認を必須とする。",
+        "- candidate output identity: canonical cache root、model / run-kind directory、case、full JSON output path、path confinement、symlink拒否、実体 fingerprintを `validate_canonical_candidate_output_path_v1` で検証。",
         "- production hash scope: fixture source_files 14件 + protected cut_clip_003 1件 = exact 15件。root、relative path、完全な file set、path traversal、symlink escape、実ファイル bytes / SHA-256 を before / after とも fail-closed に再検証し、既存 `ja.vtt` と mp4 は非変更。",
         f"- raw evidence: model / audio / baseline VTT / whisper-cli の実体 bytes / SHA-256、full JSON の再parse、CER / glossary / cue 指標の再計算、argv / range / run-kind / output schema / candidate text / output fingerprint、stderr の real time / peak RSS を再検証。case runs は {report['reproduction']['successful_case_runs']} / {report['reproduction']['run_count']} 成功。",
         "- cold / warm output SHA equality は全 case で確認済み。warm は別 process invocation の再利用観測で、永続 artifact cache hit は計測・主張していない。",

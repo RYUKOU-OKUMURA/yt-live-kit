@@ -81,6 +81,8 @@ S9-4 / S9-6 はこの evidence を親候補の固定 span の品質承認へ昇�
 
 既存の numeric gate（CER 10％、glossary 非悪化、cue baseline +5 percentage points、wall time、peak memory）は変更しない。旧 protocol の「full exact gold が無ければ必ず No-Go」という条件は、ユーザーの自然文を exact approval に偽装しないために、A の decision mode では「exact gold は未主張のまま、displayed transcript content の operational reference gate を別に評価する」契約へ明示的に分離した。これにより `s9-1-cases.json` の provisional status を audited へ書き換えず、NFR-11 のローカル運用、FR-36 の選択区間と人確認、AC-37 の閾値を弱めない。
 
+canonical report v7 はこの分離を `fixture_benchmark_quality` namespace の `validate_fixture_benchmark_quality_gate_v1` と、`operational_transcript_reference` namespace の `validate_effective_operational_gate_v1` として機械検証する。fixture exact gold は前者の benchmark quality certification には必要だが、A の effective operational Go には不要である。legacy の `gates.require_gold_audit` や `gold_audit.required_for_selected_mode` だけではGoにしない。
+
 全 numeric gate と operational transcript reference gate が通過した場合だけ、S9-3 が参照するモデルを決める。文字・句読点 exactness、glossary 個別 exact approval、cue anchor exact milliseconds は adopted model の根拠ではなく、report では `not_claimed` / `not_explicitly_audited` / `unapproved` と固定する。No-Go の場合は後続 S9 実装を高精度経路として進めず、既存 YouTube VTT を明示的な fallback とする。
 
 canonical report の status は次の意味に分ける。`gold_audit_status` は fixture の `unverified_provisional` を維持し、`transcript_reference_status` だけを `accepted_operational_benchmark_reference` とする。`decision.go` は operational transcript reference の採否範囲に限る。`decision.boundary_decision.status` は `no_go`、`automation_adopted` は false、human review は required のままであり、`decision.s9_2_start_allowed` は TranscriptArtifact / resolver の着手を表すだけで境界自動化を解禁しない。

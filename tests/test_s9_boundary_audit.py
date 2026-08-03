@@ -160,7 +160,7 @@ def test_boundary_audit_benchmark_id_is_checked_by_packet_and_compare_loaders() 
 def test_canonical_report_keeps_boundary_audit_separate_from_quality_gate() -> None:
     report = json.loads(REPORT_PATH.read_text(encoding="utf-8"))
 
-    assert report["schema"] == "s9-1-comparison-report-v6"
+    assert report["schema"] == "s9-1-comparison-report-v7"
     assert report["fixture_fingerprint"] == "6dae657f2b803c54c6af1afe4ed54ad4f447324c32802e1943dc5711a9bf1718"
     assert report["boundary_audit"]["fingerprint"] == "0af9f5ce7888eabcc67fbe767db25c2e4da97c823ea76781eb9aeb25991fd9a1"
     assert report["human_audit"]["source"]["exact_quote"] == "4本とも文字起こしは概ね問題なし"

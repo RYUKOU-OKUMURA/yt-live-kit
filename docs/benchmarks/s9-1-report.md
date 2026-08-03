@@ -70,6 +70,8 @@ S9-1 はこの部分監査を境界自動化の採用根拠にはしない。S9-
 - model cache: `/Users/ryukouokumura/Library/Caches/whisper.cpp/models/`
 - audio cache: `/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/`
 - baseline: production progressive dedupe parity 4/4。candidate: raw cue のまま評価
+- gate namespaces: `benchmark_quality_gate` は fixture exact gold を品質認定の必須条件として未達、`effective_operational_gate` は numeric / artifact gate と4 case operational transcript referenceでGo。fixture exact goldは operational Goの必須条件ではなく、boundary automationは不採用、人確認を必須とする。
+- candidate output identity: canonical cache root、model / run-kind directory、case、full JSON output path、path confinement、symlink拒否、実体 fingerprintを `validate_canonical_candidate_output_path_v1` で検証。
 - production hash scope: fixture source_files 14件 + protected cut_clip_003 1件 = exact 15件。root、relative path、完全な file set、path traversal、symlink escape、実ファイル bytes / SHA-256 を before / after とも fail-closed に再検証し、既存 `ja.vtt` と mp4 は非変更。
 - raw evidence: model / audio / baseline VTT / whisper-cli の実体 bytes / SHA-256、full JSON の再parse、CER / glossary / cue 指標の再計算、argv / range / run-kind / output schema / candidate text / output fingerprint、stderr の real time / peak RSS を再検証。case runs は 16 / 16 成功。
 - cold / warm output SHA equality は全 case で確認済み。warm は別 process invocation の再利用観測で、永続 artifact cache hit は計測・主張していない。
