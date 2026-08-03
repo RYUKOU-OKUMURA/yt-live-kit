@@ -1,20 +1,53 @@
 """yt-dlp ラッパーのユニットテスト."""
 
+import hashlib
+import os
 import subprocess
 from unittest.mock import patch
 
 import pytest
 
 from yt_live_kit.config import Settings
+from yt_live_kit.models.subtitle import SubtitleSourceMetadata
 from yt_live_kit.services.ytdlp import (
     MISSING_YTDLP_BINARY_IDENTITY,
     YtdlpError,
+    _download_subtitles,
     _find_subtitle_file,
     _run_ytdlp,
     extract_video_id,
     fetch,
     get_ytdlp_binary_identity,
+    make_subtitle_source_fingerprint,
 )
+
+
+VIDEO_ID = "IJvd6k6ZmUo"
+URL = f"https://www.youtube.com/watch?v={VIDEO_ID}"
+VTT_ONE = """WEBVTT
+
+1
+00:00:01.000 --> 00:00:04.000
+最初の字幕
+"""
+VTT_TWO = """WEBVTT
+
+1
+00:00:01.000 --> 00:00:04.000
+再取得した字幕
+"""
+
+
+def _mock_fetch_dependencies(monkeypatch, metadata: dict) -> None:
+    monkeypatch.setattr(
+        "yt_live_kit.services.ytdlp.shutil.which", lambda _: "/usr/bin/yt-dlp"
+    )
+    monkeypatch.setattr(
+        "yt_live_kit.services.ytdlp.get_ytdlp_version", lambda _: "2026.07.04"
+    )
+    monkeypatch.setattr(
+        "yt_live_kit.services.ytdlp._fetch_metadata", lambda _url, _settings: metadata
+    )
 
 
 def test_get_ytdlp_binary_identity_returns_resolved_stat_values(tmp_path):
@@ -107,42 +140,291 @@ def test_run_ytdlp_download_uses_download_timeout(mock_run):
     assert mock_run.call_args.kwargs["timeout"] == 7200
 
 
+def test_download_subtitles_passes_stable_incoming_fd_to_process(tmp_path, monkeypatch):
+    settings = Settings(data_dir=tmp_path)
+    output_dir = tmp_path / VIDEO_ID / "subtitles" / ".incoming-test"
+    output_dir.mkdir(parents=True)
+
+    def fake_run(args, _settings, **kwargs):
+        assert kwargs["pass_fds"]
+        descriptor = kwargs["pass_fds"][0]
+        assert kwargs["cwd_fd"] == descriptor
+        (output_dir / f"{VIDEO_ID}.ja.vtt").write_text(VTT_ONE, encoding="utf-8")
+        return subprocess.CompletedProcess(args=args, returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr("yt_live_kit.services.ytdlp._run_ytdlp", fake_run)
+
+    _download_subtitles(URL, output_dir, settings)
+
+    assert (output_dir / f"{VIDEO_ID}.ja.vtt").read_text(encoding="utf-8") == VTT_ONE
+
+
 @patch("yt_live_kit.services.ytdlp.write_text_atomically")
-@patch("yt_live_kit.services.ytdlp.get_ytdlp_version", return_value="2026.07.04")
-@patch("yt_live_kit.services.ytdlp._normalize_subtitle_path")
-@patch("yt_live_kit.services.ytdlp._find_subtitle_file")
-@patch("yt_live_kit.services.ytdlp._download_subtitles")
-@patch("yt_live_kit.services.ytdlp._fetch_metadata")
-@patch("yt_live_kit.services.ytdlp.shutil.which", return_value="/usr/bin/yt-dlp")
-def test_fetch_saves_meta_json_atomically(
-    mock_which,
-    mock_fetch_metadata,
-    mock_download_subtitles,
-    mock_find_subtitle,
-    mock_normalize,
-    mock_version,
-    mock_write_atomic,
-    tmp_path,
-):
-    video_id = "IJvd6k6ZmUo"
-    mock_fetch_metadata.return_value = {
-        "id": video_id,
-        "title": "テスト動画",
-        "upload_date": "20260101",
-        "duration": 3600,
-    }
-    subtitles_dir = tmp_path / video_id / "subtitles"
-    subtitles_dir.mkdir(parents=True)
-    vtt_path = subtitles_dir / f"{video_id}.ja.vtt"
-    vtt_path.write_text("WEBVTT\n\n", encoding="utf-8")
-    mock_find_subtitle.return_value = (vtt_path, "ja")
-    mock_normalize.return_value = subtitles_dir / "ja.vtt"
+def test_fetch_saves_meta_json_atomically(mock_write_atomic, tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "yt_live_kit.services.ytdlp.shutil.which", lambda _: "/usr/bin/yt-dlp"
+    )
+    monkeypatch.setattr(
+        "yt_live_kit.services.ytdlp.get_ytdlp_version", lambda _: "2026.07.04"
+    )
+    monkeypatch.setattr(
+        "yt_live_kit.services.ytdlp._fetch_metadata",
+        lambda _url, _settings: {
+            "id": VIDEO_ID,
+            "title": "テスト動画",
+            "upload_date": "20260101",
+            "duration": 3600,
+        },
+    )
+
+    def fake_download(_url: str, output_dir, _settings: Settings) -> None:
+        (output_dir / f"{VIDEO_ID}.ja.vtt").write_text(VTT_ONE, encoding="utf-8")
+
+    monkeypatch.setattr("yt_live_kit.services.ytdlp._download_subtitles", fake_download)
 
     settings = Settings(data_dir=tmp_path)
-    meta = fetch(f"https://www.youtube.com/watch?v={video_id}", settings)
+    meta = fetch(URL, settings)
 
-    assert meta.id == video_id
+    assert meta.id == VIDEO_ID
     mock_write_atomic.assert_called_once()
     path, text = mock_write_atomic.call_args.args
     assert path.name == "meta.json"
-    assert video_id in text
+    assert VIDEO_ID in text
+
+
+def test_fetch_bootstraps_canonical_and_source_metadata(tmp_path, monkeypatch):
+    _mock_fetch_dependencies(
+        monkeypatch,
+        {"id": VIDEO_ID, "title": "テスト動画"},
+    )
+
+    def fake_download(_url: str, output_dir, _settings: Settings) -> None:
+        (output_dir / f"{VIDEO_ID}.ja-orig.vtt").write_text(VTT_ONE, encoding="utf-8")
+
+    monkeypatch.setattr("yt_live_kit.services.ytdlp._download_subtitles", fake_download)
+
+    settings = Settings(data_dir=tmp_path)
+    fetch(URL, settings)
+
+    subtitles_dir = tmp_path / VIDEO_ID / "subtitles"
+    canonical = subtitles_dir / "ja.vtt"
+    assert canonical.read_text(encoding="utf-8") == VTT_ONE
+    source_files = sorted((subtitles_dir / "sources").glob("*.vtt"))
+    metadata_files = sorted((subtitles_dir / "sources").glob("*.json"))
+    assert len(source_files) == 1
+    assert len(metadata_files) == 1
+    assert source_files[0].read_text(encoding="utf-8") == VTT_ONE
+    metadata = SubtitleSourceMetadata.model_validate_json(
+        metadata_files[0].read_bytes()
+    )
+    expected_fingerprint, expected_content_hash = make_subtitle_source_fingerprint(
+        VTT_ONE.encode("utf-8"),
+        video_id=VIDEO_ID,
+        language="ja-orig",
+        source_url=URL,
+        ytdlp_version="2026.07.04",
+    )
+    assert metadata.source_fingerprint == expected_fingerprint
+    assert metadata.content_sha256 == expected_content_hash
+    assert metadata.language == "ja-orig"
+    assert metadata.source_path == (
+        f"subtitles/sources/{expected_fingerprint}.vtt"
+    )
+    assert metadata.canonical_path == "subtitles/ja.vtt"
+    assert metadata.canonical_content_sha256 == expected_content_hash
+    assert metadata.canonical_compatible is True
+    assert not list(subtitles_dir.glob(".incoming-*"))
+
+
+def test_fetch_does_not_overwrite_existing_canonical_on_retrieve(
+    tmp_path, monkeypatch
+):
+    _mock_fetch_dependencies(monkeypatch, {"id": VIDEO_ID, "title": "テスト動画"})
+    incoming = {"content": VTT_ONE}
+
+    def fake_download(_url: str, output_dir, _settings: Settings) -> None:
+        (output_dir / f"{VIDEO_ID}.ja.vtt").write_text(
+            incoming["content"], encoding="utf-8"
+        )
+
+    monkeypatch.setattr("yt_live_kit.services.ytdlp._download_subtitles", fake_download)
+    settings = Settings(data_dir=tmp_path)
+    fetch(URL, settings)
+
+    canonical = tmp_path / VIDEO_ID / "subtitles" / "ja.vtt"
+    before_bytes = canonical.read_bytes()
+    before_hash = hashlib.sha256(before_bytes).hexdigest()
+    before_stat = canonical.stat()
+
+    incoming["content"] = VTT_TWO
+    fetch(URL, settings)
+
+    assert canonical.read_bytes() == before_bytes
+    assert hashlib.sha256(canonical.read_bytes()).hexdigest() == before_hash
+    after_stat = canonical.stat()
+    assert after_stat.st_mtime_ns == before_stat.st_mtime_ns
+    source_files = sorted((canonical.parent / "sources").glob("*.vtt"))
+    assert len(source_files) == 2
+    assert {path.read_text(encoding="utf-8") for path in source_files} == {
+        VTT_ONE,
+        VTT_TWO,
+    }
+    source_metadata = [
+        SubtitleSourceMetadata.model_validate_json(path.read_bytes())
+        for path in sorted((canonical.parent / "sources").glob("*.json"))
+    ]
+    assert any(item.canonical_compatible is False for item in source_metadata)
+
+
+@pytest.mark.parametrize(
+    ("filename", "content", "error_match"),
+    [
+        (f"{VIDEO_ID}.ja.vtt", "WEBVTT\n\n", "有効なキュー"),
+        (f"{VIDEO_ID}.ja.vtt", "not vtt", "WebVTT 形式"),
+        (
+            f"{VIDEO_ID}.ja.vtt",
+            "WEBVTT\n\n1\n00:60:00.000 --> 00:61:00.000\n不正な時刻\n",
+            "時刻",
+        ),
+        (f"{VIDEO_ID}.en.vtt", VTT_ONE, "日本語字幕"),
+    ],
+)
+def test_fetch_rejects_invalid_incoming_without_touching_existing_outputs(
+    tmp_path, monkeypatch, filename, content, error_match
+):
+    _mock_fetch_dependencies(monkeypatch, {"id": VIDEO_ID, "title": "テスト動画"})
+    video_dir = tmp_path / VIDEO_ID
+    subtitles_dir = video_dir / "subtitles"
+    subtitles_dir.mkdir(parents=True)
+    canonical = subtitles_dir / "ja.vtt"
+    canonical.write_text(VTT_ONE, encoding="utf-8")
+    transcript_path = video_dir / "transcript" / "full.txt"
+    transcript_path.parent.mkdir()
+    transcript_path.write_text("既存 downstream\n", encoding="utf-8")
+    before_canonical = canonical.read_bytes()
+    before_transcript = transcript_path.read_bytes()
+
+    def fake_download(_url: str, output_dir, _settings: Settings) -> None:
+        (output_dir / filename).write_text(content, encoding="utf-8")
+
+    monkeypatch.setattr("yt_live_kit.services.ytdlp._download_subtitles", fake_download)
+
+    with pytest.raises(YtdlpError, match=error_match):
+        fetch(URL, Settings(data_dir=tmp_path))
+
+    assert canonical.read_bytes() == before_canonical
+    assert transcript_path.read_bytes() == before_transcript
+    assert not list(subtitles_dir.glob(".incoming-*"))
+    assert not (subtitles_dir / "sources").exists()
+
+
+def test_fetch_download_failure_cleans_incoming_and_preserves_existing(
+    tmp_path, monkeypatch
+):
+    _mock_fetch_dependencies(monkeypatch, {"id": VIDEO_ID, "title": "テスト動画"})
+    subtitles_dir = tmp_path / VIDEO_ID / "subtitles"
+    subtitles_dir.mkdir(parents=True)
+    canonical = subtitles_dir / "ja.vtt"
+    canonical.write_text(VTT_ONE, encoding="utf-8")
+
+    def failed_download(_url: str, output_dir, _settings: Settings) -> None:
+        (output_dir / f"{VIDEO_ID}.ja.vtt.part").write_bytes(b"partial")
+        raise RuntimeError("simulated process failure")
+
+    monkeypatch.setattr(
+        "yt_live_kit.services.ytdlp._download_subtitles", failed_download
+    )
+
+    with pytest.raises(YtdlpError, match="予期せず中断"):
+        fetch(URL, Settings(data_dir=tmp_path))
+
+    assert canonical.read_text(encoding="utf-8") == VTT_ONE
+    assert not list(subtitles_dir.glob(".incoming-*"))
+
+
+def test_fetch_atomic_source_failure_keeps_existing_canonical(
+    tmp_path, monkeypatch
+):
+    _mock_fetch_dependencies(monkeypatch, {"id": VIDEO_ID, "title": "テスト動画"})
+    subtitles_dir = tmp_path / VIDEO_ID / "subtitles"
+    subtitles_dir.mkdir(parents=True)
+    canonical = subtitles_dir / "ja.vtt"
+    canonical.write_text(VTT_ONE, encoding="utf-8")
+    before = canonical.read_bytes()
+
+    def fake_download(_url: str, output_dir, _settings: Settings) -> None:
+        (output_dir / f"{VIDEO_ID}.ja.vtt").write_text(VTT_TWO, encoding="utf-8")
+
+    monkeypatch.setattr("yt_live_kit.services.ytdlp._download_subtitles", fake_download)
+    monkeypatch.setattr(
+        "yt_live_kit.services.ytdlp.os.link",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("atomic failure")),
+    )
+
+    with pytest.raises(YtdlpError, match="原子的に保存"):
+        fetch(URL, Settings(data_dir=tmp_path))
+
+    assert canonical.read_bytes() == before
+
+
+def test_fetch_metadata_atomic_failure_does_not_leave_unpaired_source(
+    tmp_path, monkeypatch
+):
+    _mock_fetch_dependencies(monkeypatch, {"id": VIDEO_ID, "title": "テスト動画"})
+    subtitles_dir = tmp_path / VIDEO_ID / "subtitles"
+    subtitles_dir.mkdir(parents=True)
+    canonical = subtitles_dir / "ja.vtt"
+    canonical.write_text(VTT_ONE, encoding="utf-8")
+
+    def fake_download(_url: str, output_dir, _settings: Settings) -> None:
+        (output_dir / f"{VIDEO_ID}.ja.vtt").write_text(VTT_TWO, encoding="utf-8")
+
+    monkeypatch.setattr("yt_live_kit.services.ytdlp._download_subtitles", fake_download)
+    real_link = os.link
+    calls = 0
+
+    def fail_on_metadata(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise OSError("metadata atomic failure")
+        return real_link(*args, **kwargs)
+
+    monkeypatch.setattr("yt_live_kit.services.ytdlp.os.link", fail_on_metadata)
+
+    with pytest.raises(YtdlpError, match="原子的に保存"):
+        fetch(URL, Settings(data_dir=tmp_path))
+
+    sources_dir = subtitles_dir / "sources"
+    assert not list(sources_dir.glob("*.vtt"))
+    assert not list(sources_dir.glob("*.json"))
+    assert not list(sources_dir.glob("*.pending"))
+    assert canonical.read_text(encoding="utf-8") == VTT_ONE
+
+
+def test_source_fingerprint_changes_with_content_and_provenance():
+    first = make_subtitle_source_fingerprint(
+        b"same",
+        video_id=VIDEO_ID,
+        language="ja",
+        source_url=URL,
+        ytdlp_version="2026.07.04",
+    )
+    changed_content = make_subtitle_source_fingerprint(
+        b"changed",
+        video_id=VIDEO_ID,
+        language="ja",
+        source_url=URL,
+        ytdlp_version="2026.07.04",
+    )
+    changed_provenance = make_subtitle_source_fingerprint(
+        b"same",
+        video_id=VIDEO_ID,
+        language="ja-orig",
+        source_url=URL,
+        ytdlp_version="2026.07.04",
+    )
+
+    assert first[0] != changed_content[0]
+    assert first[0] != changed_provenance[0]
+    assert first[1] == hashlib.sha256(b"same").hexdigest()

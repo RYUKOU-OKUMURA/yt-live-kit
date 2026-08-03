@@ -45,3 +45,23 @@ def test_build_transcripts_raises_on_empty_vtt(tmp_path):
     transcript_dir = video_dir / "transcript"
     assert not (transcript_dir / "full.txt").exists()
     assert not (transcript_dir / "compressed.txt").exists()
+
+
+def test_build_transcripts_keeps_reading_canonical_vtt_with_source_artifacts(
+    tmp_path,
+):
+    video_id = "testvideo01"
+    video_dir = tmp_path / video_id
+    subtitles_dir = video_dir / "subtitles"
+    sources_dir = subtitles_dir / "sources"
+    sources_dir.mkdir(parents=True)
+    (subtitles_dir / "ja.vtt").write_text(SAMPLE_VTT, encoding="utf-8")
+    (sources_dir / "new-source.vtt").write_text(
+        "WEBVTT\n\n1\n00:00:01.000 --> 00:00:04.000\n別の source\n",
+        encoding="utf-8",
+    )
+
+    full_path, _ = build_transcripts(video_id, Settings(data_dir=tmp_path))
+
+    assert "テスト字幕" in full_path.read_text(encoding="utf-8")
+    assert "別の source" not in full_path.read_text(encoding="utf-8")

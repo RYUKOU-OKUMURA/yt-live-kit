@@ -41,14 +41,14 @@
 | U7 | 概要欄反映の最新性判定（保留: 優先度③のため v4 送り。候補引き継ぎは U6 に統合） | [保留] |
 | U8 | エラー通知の構造化とページ先頭の整理 | [x] 完了 |
 | S9-PLAN | S9 要件・依存順計画の確定（docs-only） | [x] 完了 |
-| S9-0 | 既存 VTT 互換・非上書き保存契約 | [ ] 未着手 |
+| S9-0 | 既存 VTT 互換・非上書き保存契約 | [x] 完了 |
 | S9-1 | 代表素材 benchmark・モデル決定 | [ ] 未着手 |
 | S9-2 | TranscriptArtifact / resolver / fingerprint / persistent cache | [ ] 未着手 |
 | S9-3 | whisper.cpp runtime・capability・音声区間準備 | [ ] 未着手 |
 | S9-4 | 親候補区間 Whisper 精査 → short_cut / telop / line 再利用 | [ ] 未着手 |
 | S9-5 | UI 設定・進捗・エラー・失効表示 | [ ] 未着手 |
 | S9-6 | A/B 受け入れ・回帰・フェーズ判定 | [ ] 未着手 |
-| S9 | 選択親候補区間のローカル Whisper 精査（実装） | [ ] 未着手 |
+| S9 | 選択親候補区間のローカル Whisper 精査（実装） | [~] 進行中 |
 
 **状態の書き方:** `[ ] 未着手` / `[~] 進行中` / `[x] 完了`
 
@@ -1509,18 +1509,18 @@ data/{video_id}/ ...
 
 **作業:**
 
-- [ ] S9-0-1. 新しく取得した VTT を video data path の隔離した incoming temporary file へ保存し、検証完了前に canonical `ja.vtt` を触らない atomic 境界を作る
-- [ ] S9-0-2. `ja.vtt` が存在しない初回だけ検証済み incoming を bootstrap し、既存なら bytes・mtime の意味を保ったまま変更せず、`subtitles/sources/{source_fingerprint}.vtt` と source metadata へ保存する
-- [ ] S9-0-3. download / parse / rename の失敗、空 VTT、未知言語、partial file、process crash では既存 `ja.vtt` と既存 downstream を変更せず、incoming の cleanup と日本語診断を行う
-- [ ] S9-0-4. source fingerprint と既存 `ja.vtt` の compatibility を S9-2 の `TranscriptArtifact` / resolver が参照できる形にし、S9-0 後のタスクで `ytdlp.py` の非上書き契約を再変更しない
+- [x] S9-0-1. 新しく取得した VTT を video data path の隔離した incoming temporary file へ保存し、検証完了前に canonical `ja.vtt` を触らない atomic 境界を作る
+- [x] S9-0-2. `ja.vtt` が存在しない初回だけ検証済み incoming を bootstrap し、既存なら bytes・mtime の意味を保ったまま変更せず、`subtitles/sources/{source_fingerprint}.vtt` と source metadata へ保存する
+- [x] S9-0-3. download / parse / rename の失敗、空 VTT、未知言語、partial file、process crash では既存 `ja.vtt` と既存 downstream を変更せず、incoming の cleanup と日本語診断を行う
+- [x] S9-0-4. source fingerprint と既存 `ja.vtt` の compatibility を S9-2 の `TranscriptArtifact` / resolver が参照できる形にし、S9-0 後のタスクで `ytdlp.py` の非上書き契約を再変更しない
 
 **テスト:** 既存 `ja.vtt` の hash / bytes が再取得前後で不変、初回 bootstrap、`ja-orig` / `ja.vtt` の各命名、source VTT の immutable 保存、失敗時の既存成果物保持、partial / empty / malformed input、atomic replace failure、incoming cleanup、path confinement、既存 transcript / candidate 読み込みの回帰。
 
 **Done 条件:**
 
-- [ ] 既存 `ja.vtt` がある動画を再取得しても bytes が変わらず、新しい VTT は source artifact として別保存される
-- [ ] 取得失敗・parse 失敗・プロセス中断のどの境界でも既存 VTT / downstream が壊れず、再試行可能な日本語エラーになる
-- [ ] S9-2〜S9-6 がこの保存契約を前提にでき、`ja.vtt` の上書き・改名・自動置換を追加しないことを独立レビューできる
+- [x] 既存 `ja.vtt` がある動画を再取得しても bytes が変わらず、新しい VTT は source artifact として別保存される
+- [x] 取得失敗・parse 失敗・プロセス中断のどの境界でも既存 VTT / downstream が壊れず、再試行可能な日本語エラーになる
+- [x] S9-2〜S9-6 がこの保存契約を前提にでき、`ja.vtt` の上書き・改名・自動置換を追加しないことを独立レビューできる
 
 **コミット境界:** `ytdlp.py`、字幕 source metadata、関連 tests の互換性修正だけを `S9-0` としてコミットする。メッセージに `S9-0` を含め、S9-1 benchmark や resolver schema を混ぜない。
 
