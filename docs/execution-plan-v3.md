@@ -43,7 +43,7 @@
 | S9-PLAN | S9 要件・依存順計画の確定（docs-only） | [x] 完了 |
 | S9-0 | 既存 VTT 互換・非上書き保存契約 | [x] 完了 |
 | S9-1 | 代表素材 benchmark・モデル決定 | [x] 完了 |
-| S9-2 | TranscriptArtifact / resolver / fingerprint / persistent cache | [ ] 未着手 |
+| S9-2 | TranscriptArtifact / resolver / fingerprint / persistent cache | [x] 完了 |
 | S9-3 | whisper.cpp runtime・capability・音声区間準備 | [ ] 未着手 |
 | S9-4 | 親候補区間 Whisper 精査 → short_cut / telop / line 再利用 | [ ] 未着手 |
 | S9-5 | UI 設定・進捗・エラー・失効表示 | [ ] 未着手 |
@@ -1586,20 +1586,22 @@ data/{video_id}/ ...
 
 **作業:**
 
-- [ ] S9-2-1. `TranscriptArtifact` と cue の strict schema（schema version、`extra=forbid` 相当、`source_kind` enum、既存 `video_id`、source ref、range start / end、absolute cue、language、model / runtime / settings、audio input fingerprint、cue digest、artifact fingerprint、created_at、status）を定義する。status は `success` / `fallback` / `failed` / `partial` を区間単位と artifact 単位で扱う
-- [ ] S9-2-2. cache identity と artifact fingerprint を分離する。前者は実音声 bytes と sample rate / channel / codec / ffmpeg 設定 / source、model / runtime / decode / initial prompt / padding / VAD、入力 range 列から計算し、後者は成功 cue digest と schema を加える。path / mtime だけの再利用、float の暗黙丸め、相対時刻だけの digest、表示順の sort を許さない
-- [ ] S9-2-3. cue digest は cue の絶対 start / end、本文、順序を canonical JSON 化して計算し、`used_range_cue_digest` は normalized range、padding、cue inclusion rule を含める。source / input / model / settings / range / cue digest を artifact provenance として検証する
-- [ ] S9-2-4. `resolver` に `coarse_search` と `selected_range` の用途を分ける。前者は S9-0 の有効な YouTube VTT、後者は一致する Whisper artifact を優先し、schema / path / input / model / cue digest の不一致は高精度扱いから除外する。partial artifact は返さない
-- [ ] S9-2-5. `data/{video_id}/transcripts/artifacts/{artifact_fingerprint}.json` と lock 付き atomic な `index.json` を保存し、正常終了後の再構築、crash recovery、cache corruption、部分 JSON、偽の fingerprint、未知 field、範囲外 cue は fail closed にする
-- [ ] S9-2-6. coarse 候補 document に YouTube VTT artifact fingerprint、全 cue digest、親候補内容・表示順から計算した candidate fingerprint を保存する。候補 fingerprint を FR-31 の引き継ぎと FR-30 の cutplan lineage へ渡し、候補探索を Whisper に置き換えない
+- [x] S9-2-1. `TranscriptArtifact` と cue の strict schema（schema version、`extra=forbid` 相当、`source_kind` enum、既存 `video_id`、source ref、range start / end、absolute cue、language、model / runtime / settings、audio input fingerprint、cue digest、artifact fingerprint、created_at、status）を定義する。status は `success` / `fallback` / `failed` / `partial` を区間単位と artifact 単位で扱う
+- [x] S9-2-2. cache identity と artifact fingerprint を分離する。前者は実音声 bytes と sample rate / channel / codec / ffmpeg 設定 / source、model / runtime / decode / initial prompt / padding / VAD、入力 range 列から計算し、後者は成功 cue digest と schema を加える。path / mtime だけの再利用、float の暗黙丸め、相対時刻だけの digest、表示順の sort を許さない
+- [x] S9-2-3. cue digest は cue の絶対 start / end、本文、順序を canonical JSON 化して計算し、`used_range_cue_digest` は normalized range、padding、cue inclusion rule を含める。source / input / model / settings / range / cue digest を artifact provenance として検証する
+- [x] S9-2-4. `resolver` に `coarse_search` と `selected_range` の用途を分ける。前者は S9-0 の有効な YouTube VTT、後者は一致する Whisper artifact を優先し、schema / path / input / model / cue digest の不一致は高精度扱いから除外する。partial artifact は返さない
+- [x] S9-2-5. `data/{video_id}/transcripts/artifacts/{artifact_fingerprint}.json` と lock 付き atomic な `index.json` を保存し、正常終了後の再構築、crash recovery、cache corruption、部分 JSON、偽の fingerprint、未知 field、範囲外 cue は fail closed にする
+- [x] S9-2-6. coarse 候補 document に YouTube VTT artifact fingerprint、全 cue digest、親候補内容・表示順から計算した candidate fingerprint を保存する。候補 fingerprint を FR-31 の引き継ぎと FR-30 の cutplan lineage へ渡し、候補探索を Whisper に置き換えない
 
 **テスト:** strict schema round-trip / unknown field、status と整数ミリ秒、canonical digest の順序 / 時刻境界 / padding / inclusion rule、同一 input の cache hit、実音声 bytes / codec / ffmpeg 設定 / model build / settings / range / source / cue 変更の cache miss、artifact / index の lock・crash recovery・破損 / 部分 / symlink / path confinement、使用範囲内変更だけの失効、使用範囲外変更の非失効、coarse candidate の lineage / fingerprint round-trip、atomic replace failure。
 
+**S9-2 実装・検証実績（2026-08-03）:** strict model と canonical digest、用途別 resolver、lock 付き artifact/index cache、crash orphan recovery、fail-closed 検証、VTT candidate lineage を実装した。focused tests は 30 passed、全体は 1,482 passed / 2 skipped。`uv lock --check` と `git diff --check` も通過し、既存 `ja.vtt` と production data は変更していない。S9-0 の非上書き、S9-1 の q5 / operational transcript、exact transcript 未承認、boundary automation No-Go・人確認必須を維持する。
+
 **Done 条件:**
-- [ ] resolver が用途別に deterministic な artifact を返し、既存 VTT が untouched のまま、cache hit / miss と失効理由を検査可能である
-- [ ] coarse candidate が VTT provenance と candidate fingerprint を保持し、既存 clips の候補探索・表示順・FR-31 引き継ぎを壊さない
-- [ ] artifact と index の crash / corruption / lock 競合が高精度結果を返さず、cache identity と artifact fingerprint の差を検査できる
-- [ ] S9-3 と S9-4 がこの型と digest だけを使える
+- [x] resolver が用途別に deterministic な artifact を返し、既存 VTT が untouched のまま、cache hit / miss と失効理由を検査可能である
+- [x] coarse candidate が VTT provenance と candidate fingerprint を保持し、既存 clips の候補探索・表示順・FR-31 引き継ぎを壊さない
+- [x] artifact と index の crash / corruption / lock 競合が高精度結果を返さず、cache identity と artifact fingerprint の差を検査できる
+- [x] S9-3 と S9-4 がこの型と digest だけを使える
 
 **コミット境界:** transcript / clips model、resolver / cache service、candidate lineage、unit test を `S9-2` 単位でコミットする。S9-2 では whisper subprocess、UI、cutplan / telop の実処理を変更しない。
 

@@ -10,13 +10,18 @@ from unittest.mock import patch
 import pytest
 
 from yt_live_kit.config import Settings
+from yt_live_kit.models.clips import ClipCandidatesLineage
+from yt_live_kit.services.transcript_artifact import build_transcript_artifact
 from yt_live_kit.services.clips import (
+    ClipsError,
     ClipValidationError,
     build_clips_prompt,
     cut_clip_job_target,
     cut_result_from_ref,
     cut_result_to_ref,
     find_project_root,
+    make_candidate_fingerprint,
+    load_candidates_file,
     save_candidates_file,
     suggest_clips,
     validate_clip_candidates,
@@ -259,3 +264,59 @@ def test_start_job_reports_ffmpeg_error_for_cut_clip(mock_cut, tmp_path: Path) -
     assert state is not None
     assert state.status == "failed"
     assert state.error == "ffmpeg の切り出しに失敗しました。"
+
+
+def test_coarse_candidate_lineage_round_trips_without_changing_display_order(tmp_path: Path):
+    video_id = "test_lineage"
+    video_dir = tmp_path / video_id
+    video_dir.mkdir()
+    settings = Settings(data_dir=tmp_path)
+    artifact = build_transcript_artifact(
+        video_id=video_id,
+        source_kind="youtube_vtt",
+        source_ref="subtitles/ja.vtt",
+        language="ja",
+        ranges=[{"start_ms": 0, "end_ms": 3_000_000}],
+        cues=[{"start_ms": 222_000, "end_ms": 223_000, "text": "候補"}],
+        source_bytes=b"WEBVTT\n",
+    )
+    # build の VTT artifact は source bytes と cue 内容が一致する必要はなく、
+    # 候補 lineage は artifact の検証済み digest だけを参照する。
+    path, document = save_candidates_file(
+        video_id,
+        _sample_candidates_json(),
+        settings,
+        coarse_artifact=artifact,
+    )
+
+    assert document.lineage is not None
+    assert document.lineage.coarse_vtt_artifact_fingerprint == artifact.artifact_fingerprint
+    assert [item.id for item in document.candidates] == ["clip_001", "clip_002"]
+    loaded = load_candidates_file(video_id, settings)
+    assert loaded is not None
+    assert loaded.lineage == document.lineage
+    assert [item.id for item in loaded.candidates] == ["clip_001", "clip_002"]
+    assert path.read_text(encoding="utf-8").find("lineage") >= 0
+
+
+def test_candidate_fingerprint_keeps_order_and_rejects_tampered_lineage(tmp_path: Path):
+    candidates = list(validate_clip_candidates(json.loads(_sample_candidates_json()))[0].candidates)
+    first = make_candidate_fingerprint("clips", candidates)
+    second = make_candidate_fingerprint("clips", list(reversed(candidates)))
+    assert first != second
+
+    video_id = "test_lineage_tamper"
+    (tmp_path / video_id).mkdir()
+    settings = Settings(data_dir=tmp_path)
+    lineage = ClipCandidatesLineage(
+        coarse_vtt_artifact_fingerprint="a" * 64,
+        coarse_full_cue_digest="b" * 64,
+        candidate_fingerprint="c" * 64,
+    )
+    with pytest.raises(ClipsError):
+        save_candidates_file(
+            video_id,
+            _sample_candidates_json(),
+            settings,
+            lineage=lineage,
+        )

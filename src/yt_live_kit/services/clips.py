@@ -3,13 +3,19 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import logging
 import re
 from dataclasses import dataclass
 from pathlib import Path
 
 from yt_live_kit.config import Settings, get_settings
-from yt_live_kit.models.clips import ClipCandidate, ClipCandidatesDocument
+from yt_live_kit.models.clips import (
+    ClipCandidate,
+    ClipCandidatesDocument,
+    ClipCandidatesLineage,
+)
+from yt_live_kit.models.transcript import TranscriptArtifact, TranscriptSourceKind
 from yt_live_kit.services._fsutil import write_text_atomically
 from yt_live_kit.services.ai_prompt import (
     AiPromptError,
@@ -19,6 +25,11 @@ from yt_live_kit.services.ai_prompt import (
 )
 from yt_live_kit.services.chapter_validator import parse_timestamp_to_seconds
 from yt_live_kit.services.ffmpeg import CutResult, cut_clip
+from yt_live_kit.services.transcript_artifact import (
+    canonical_json,
+    TranscriptArtifactError,
+    TranscriptArtifactStore,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +79,112 @@ class ClipSuggestResult:
     candidates_path: Path | None
     used_codex: bool
     candidates: tuple[ClipCandidate, ...]
+
+
+def make_candidate_fingerprint(
+    source: str,
+    candidates: list[ClipCandidate] | tuple[ClipCandidate, ...],
+    *,
+    coarse_vtt_artifact_fingerprint: str | None = None,
+    coarse_full_cue_digest: str | None = None,
+) -> str:
+    """候補内容と表示順から deterministic fingerprint を作る。
+
+    lineage を省略した場合は v3.2 の既存 UI helper と同じ payload を使う。
+    S9-2 の provenance がある場合だけ、候補の親 VTT digest を root snapshot
+    に加える。候補配列は表示順のまま扱い、sort / dedupe はしない。
+    """
+
+    payload: dict[str, object] = {
+        "source": source,
+        "candidates": [candidate.model_dump(mode="json") for candidate in candidates],
+    }
+    if coarse_vtt_artifact_fingerprint is not None or coarse_full_cue_digest is not None:
+        if not isinstance(coarse_vtt_artifact_fingerprint, str) or not re.fullmatch(
+            r"[0-9a-f]{64}", coarse_vtt_artifact_fingerprint
+        ):
+            raise ClipsError("coarse VTT artifact fingerprint が正しくありません。")
+        if not isinstance(coarse_full_cue_digest, str) or not re.fullmatch(
+            r"[0-9a-f]{64}", coarse_full_cue_digest
+        ):
+            raise ClipsError("coarse VTT の全 cue digest が正しくありません。")
+        payload["coarse_lineage"] = {
+            "source_kind": TranscriptSourceKind.YOUTUBE_VTT.value,
+            "artifact_fingerprint": coarse_vtt_artifact_fingerprint,
+            "full_cue_digest": coarse_full_cue_digest,
+        }
+    return hashlib.sha256(canonical_json(payload).encode("utf-8")).hexdigest()
+
+
+compute_candidate_fingerprint = make_candidate_fingerprint
+
+
+def make_coarse_candidate_lineage(
+    candidates: list[ClipCandidate] | tuple[ClipCandidate, ...],
+    artifact: TranscriptArtifact,
+    *,
+    source: str = "clips",
+) -> ClipCandidatesLineage:
+    """有効な YouTube VTT artifact と候補表示順を root lineage に凍結する。"""
+
+    if not isinstance(artifact, TranscriptArtifact):
+        raise ClipsError("候補 lineage には TranscriptArtifact が必要です。")
+    if (
+        artifact.source_kind != TranscriptSourceKind.YOUTUBE_VTT
+        or artifact.status.value != "success"
+        or any(item.status.value != "success" for item in artifact.ranges)
+    ):
+        raise ClipsError("候補探索の lineage には有効な YouTube VTT artifact が必要です。")
+    candidate_fp = make_candidate_fingerprint(
+        source,
+        candidates,
+        coarse_vtt_artifact_fingerprint=artifact.artifact_fingerprint,
+        coarse_full_cue_digest=artifact.cue_digest,
+    )
+    return ClipCandidatesLineage(
+        source_kind="youtube_vtt",
+        coarse_vtt_artifact_fingerprint=artifact.artifact_fingerprint,
+        coarse_full_cue_digest=artifact.cue_digest,
+        candidate_fingerprint=candidate_fp,
+    )
+
+
+def _validate_candidate_lineage(
+    document: ClipCandidatesDocument,
+    *,
+    source: str = "clips",
+) -> ClipCandidatesDocument:
+    lineage = document.lineage
+    if lineage is None:
+        return document
+    expected = make_candidate_fingerprint(
+        source,
+        document.candidates,
+        coarse_vtt_artifact_fingerprint=lineage.coarse_vtt_artifact_fingerprint,
+        coarse_full_cue_digest=lineage.coarse_full_cue_digest,
+    )
+    if expected != lineage.candidate_fingerprint:
+        raise ClipsError("候補 lineage の fingerprint が候補内容または表示順と一致しません。")
+    return document
+
+
+def _load_coarse_vtt_artifact(
+    video_id: str,
+    settings: Settings,
+) -> TranscriptArtifact | None:
+    """既存候補探索の前に VTT provenance を読み取る（Whisper は呼ばない）。"""
+
+    vtt_path = settings.data_dir / video_id / "subtitles" / "ja.vtt"
+    if not vtt_path.is_file():
+        return None
+    try:
+        artifact, _cache_hit = TranscriptArtifactStore(video_id, settings).save_vtt(
+            vtt_path=vtt_path
+        )
+        return artifact
+    except TranscriptArtifactError as exc:
+        logger.warning("候補探索用の VTT provenance を保存できませんでした: %s", exc)
+        return None
 
 
 def find_project_root() -> Path:
@@ -187,6 +304,11 @@ def validate_clip_candidates(
             "必須項目の不足か、値の型が誤っています。",
         )
 
+    try:
+        _validate_candidate_lineage(doc)
+    except ClipsError as exc:
+        errors.append(str(exc))
+
     if len(doc.candidates) < MIN_CANDIDATES:
         errors.append(
             f"切り抜き候補は {MIN_CANDIDATES} 件以上必要です（現在 {len(doc.candidates)} 件）。"
@@ -254,9 +376,11 @@ def validate_clip_candidates(
                 )
 
     if errors:
-        return ClipCandidatesDocument(candidates=tuple(normalized)), tuple(errors)
+        return ClipCandidatesDocument(
+            candidates=tuple(normalized), lineage=doc.lineage
+        ), tuple(errors)
 
-    return ClipCandidatesDocument(candidates=normalized), ()
+    return ClipCandidatesDocument(candidates=normalized, lineage=doc.lineage), ()
 
 
 def _load_video_duration(video_id: str, settings: Settings) -> int | None:
@@ -275,9 +399,14 @@ def save_candidates_file(
     video_id: str,
     raw_json_text: str,
     settings: Settings,
+    *,
+    coarse_artifact: TranscriptArtifact | None = None,
+    lineage: ClipCandidatesLineage | None = None,
 ) -> tuple[Path, ClipCandidatesDocument]:
     """バリデーション通過後に clips/candidates.json に保存する."""
     data = _extract_json_object(raw_json_text)
+    if coarse_artifact is not None and lineage is not None:
+        raise ClipsError("候補 lineage は artifact または lineage のどちらか一方で指定してください。")
     video_duration = _load_video_duration(video_id, settings)
     doc, errors = validate_clip_candidates(data, video_duration_sec=video_duration)
     if errors:
@@ -286,6 +415,16 @@ def save_candidates_file(
             f"切り抜き候補の形式が正しくありません:\n{detail}",
             errors,
         )
+
+    if coarse_artifact is not None:
+        doc = ClipCandidatesDocument(
+            candidates=doc.candidates,
+            lineage=make_coarse_candidate_lineage(doc.candidates, coarse_artifact),
+        )
+    elif lineage is not None:
+        candidate_doc = ClipCandidatesDocument(candidates=doc.candidates, lineage=lineage)
+        _validate_candidate_lineage(candidate_doc)
+        doc = candidate_doc
 
     video_dir = settings.data_dir / video_id
     clips_dir = video_dir / "clips"
@@ -300,7 +439,13 @@ def load_candidates_file(video_id: str, settings: Settings) -> ClipCandidatesDoc
     path = settings.data_dir / video_id / "clips" / "candidates.json"
     if not path.is_file():
         return None
-    return ClipCandidatesDocument.model_validate_json(path.read_text(encoding="utf-8"))
+    try:
+        document = ClipCandidatesDocument.model_validate_json(
+            path.read_text(encoding="utf-8")
+        )
+        return _validate_candidate_lineage(document)
+    except (OSError, ValueError) as exc:
+        raise ClipsError("切り抜き候補の lineage が壊れているため安全に読み込めません。") from exc
 
 
 def suggest_clips(
@@ -340,7 +485,13 @@ def suggest_clips(
         raise CodexNotFoundError(hint)
 
     raw_output = invoke_codex(prompt, codex_path=codex_path)
-    candidates_path, doc = save_candidates_file(video_id, raw_output, settings)
+    coarse_artifact = _load_coarse_vtt_artifact(video_id, settings)
+    candidates_path, doc = save_candidates_file(
+        video_id,
+        raw_output,
+        settings,
+        coarse_artifact=coarse_artifact,
+    )
 
     return ClipSuggestResult(
         video_id=video_id,
