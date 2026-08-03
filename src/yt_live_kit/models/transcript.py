@@ -286,6 +286,20 @@ class TranscriptArtifact(_StrictFrozenModel):
         if len(self.used_range_cue_digests) not in {0, len(self.ranges)}:
             raise ValueError("used_range_cue_digest の個数が対象区間と一致しません。")
 
+        # Whisper の success は、後続 resolver が「精査済み」と判断するための
+        # provenance を必ず伴う。VTT / fallback は従来どおり metadata namespace
+        # を要求しない。partial / failed は failure 診断を保存できるよう型として
+        # 作成できるが、is_high_precision は常に false になる。
+        if self.source_kind == TranscriptSourceKind.WHISPER_CPP and self.status == TranscriptArtifactStatus.SUCCESS:
+            if not self.model:
+                raise ValueError("Whisper success artifact には model provenance が必要です。")
+            if not self.runtime:
+                raise ValueError("Whisper success artifact には runtime provenance が必要です。")
+            if not self.settings:
+                raise ValueError("Whisper success artifact には settings provenance が必要です。")
+            if not self.audio_input_fingerprint:
+                raise ValueError("Whisper success artifact には audio input fingerprint が必要です。")
+
         if self.status == TranscriptArtifactStatus.SUCCESS and any(
             item.status != TranscriptArtifactStatus.SUCCESS for item in self.ranges
         ):
@@ -314,6 +328,10 @@ class TranscriptArtifact(_StrictFrozenModel):
             self.source_kind == TranscriptSourceKind.WHISPER_CPP
             and self.status == TranscriptArtifactStatus.SUCCESS
             and all(item.status == TranscriptArtifactStatus.SUCCESS for item in self.ranges)
+            and bool(self.model)
+            and bool(self.runtime)
+            and bool(self.settings)
+            and bool(self.audio_input_fingerprint)
         )
 
     def canonical_dict(self) -> dict[str, Any]:

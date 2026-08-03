@@ -592,6 +592,8 @@ def parse_vtt_cues(content: str | bytes) -> tuple[TranscriptCue, ...]:
             index += 1
         match = _VTT_TIMING_RE.fullmatch(line)
         if match is None:
+            if "-->" in line:
+                raise TranscriptArtifactError("VTT に malformed timing block があります。")
             continue
         start_ms = _parse_vtt_timestamp_ms(match.group("start"))
         end_ms = _parse_vtt_timestamp_ms(match.group("end"))
@@ -602,8 +604,10 @@ def parse_vtt_cues(content: str | bytes) -> tuple[TranscriptCue, ...]:
         text = " ".join(text_lines).strip()
         # 既存 parser と同じく VTT inline tag を除去するが、cue 時刻は変更しない。
         text = re.sub(r"<[^>]+>", "", text)
-        if not text or end_ms <= start_ms:
-            continue
+        if end_ms <= start_ms:
+            raise TranscriptArtifactError("VTT timing block の終了時刻が開始時刻以前です。")
+        if not text:
+            raise TranscriptArtifactError("VTT timing block の本文が空です。")
         cues.append(TranscriptCue(start_ms=start_ms, end_ms=end_ms, text=text))
     if not cues:
         raise TranscriptArtifactError("VTT に有効な cue がありません。")
@@ -1445,13 +1449,28 @@ class TranscriptArtifactStore:
             raise TranscriptCacheError(str(exc)) from exc
         selected_path = Path(os.path.abspath(selected_path))
         _check_no_symlink_path(self.data_dir, selected_path, "字幕 source")
+        if content is not None and not isinstance(content, bytes):
+            raise TranscriptCacheError("字幕 source content は bytes で指定してください。")
+        # 明示 path と content の二重入力では、path の実体を必ず再読込して
+        # 完全一致を確認する。canonical path がまだ無い content-only fallback
+        # は後方互換のため許可するが、既存 path がある場合は同じ検証を行う。
+        should_compare_content = content is not None and (
+            vtt_path is not None or selected_path.exists()
+        )
+        if should_compare_content:
+            try:
+                resolved_content = selected_path.read_bytes()
+            except OSError as exc:
+                raise TranscriptCacheError("字幕 source path を読み込めません。") from exc
+            if resolved_content != content:
+                raise TranscriptCacheError(
+                    "字幕 source path の実体 bytes と content が一致しません。"
+                )
         if content is None:
             try:
                 content = selected_path.read_bytes()
             except OSError as exc:
                 raise TranscriptCacheError("字幕 source を読み込めません。") from exc
-        if not isinstance(content, bytes):
-            raise TranscriptCacheError("字幕 source content は bytes で指定してください。")
         cues = parse_vtt_cues(content)
         end_ms = max(cue.end_ms for cue in cues)
         ranges = (TranscriptRange(start_ms=0, end_ms=max(end_ms, 1)),)
@@ -1553,6 +1572,7 @@ class TranscriptResolver:
         model: Mapping[str, Any] | None = None,
         runtime: Mapping[str, Any] | None = None,
         settings: Mapping[str, Any] | None = None,
+        expected_settings: Mapping[str, Any] | None = None,
         audio_input_fingerprint: str | None = None,
         vtt_path: Path | None = None,
         vtt_content: bytes | None = None,
@@ -1561,6 +1581,12 @@ class TranscriptResolver:
         source_metadata: Mapping[str, Any] | None = None,
     ) -> TranscriptResolution:
         normalized_ranges = normalize_ranges(ranges)
+        if expected_settings is not None:
+            if settings is not None:
+                raise TranscriptResolutionError(
+                    "selected_range の expected settings が重複指定されています。"
+                )
+            settings = expected_settings
         expected_cache = (
             None
             if cache_identity_value is None
@@ -1570,6 +1596,30 @@ class TranscriptResolver:
             None
             if used_range_cue_digests is None
             else tuple(_require_digest(value, "used_range_cue_digest") for value in used_range_cue_digests)
+        )
+        try:
+            expected_model = _identity_metadata(model) if isinstance(model, Mapping) else {}
+            expected_runtime = _identity_metadata(runtime) if isinstance(runtime, Mapping) else {}
+            expected_settings = _identity_metadata(settings) if isinstance(settings, Mapping) else {}
+        except TranscriptArtifactError:
+            expected_model = {}
+            expected_runtime = {}
+            expected_settings = {}
+        try:
+            expected_audio = (
+                _require_digest(audio_input_fingerprint, "audio input fingerprint")
+                if isinstance(audio_input_fingerprint, str)
+                else None
+            )
+        except TranscriptArtifactError:
+            expected_audio = None
+        provenance_ready = bool(language) and all(
+            (
+                bool(expected_model),
+                bool(expected_runtime),
+                bool(expected_settings),
+                expected_audio is not None,
+            )
         )
         considered: list[str] = []
         valid: list[TranscriptArtifact] = []
@@ -1604,22 +1654,24 @@ class TranscriptResolver:
             if not artifact.is_high_precision:
                 invalidated = True
                 continue
+            if not provenance_ready or artifact.language != language:
+                continue
             if expected_cache is not None and artifact.cache_identity != expected_cache:
                 invalidated = True
                 continue
             if expected_used is not None and tuple(artifact.used_range_cue_digests) != expected_used:
                 invalidated = True
                 continue
-            if model is not None and canonical_json(_identity_metadata(artifact.model)) != canonical_json(_identity_metadata(model)):
+            if canonical_json(_identity_metadata(artifact.model)) != canonical_json(expected_model):
                 invalidated = True
                 continue
-            if runtime is not None and canonical_json(_identity_metadata(artifact.runtime)) != canonical_json(_identity_metadata(runtime)):
+            if canonical_json(_identity_metadata(artifact.runtime)) != canonical_json(expected_runtime):
                 invalidated = True
                 continue
-            if settings is not None and canonical_json(_identity_metadata(artifact.settings)) != canonical_json(_identity_metadata(settings)):
+            if canonical_json(_identity_metadata(artifact.settings)) != canonical_json(expected_settings):
                 invalidated = True
                 continue
-            if audio_input_fingerprint is not None and artifact.audio_input_fingerprint != _require_digest(audio_input_fingerprint, "audio input fingerprint"):
+            if artifact.audio_input_fingerprint != expected_audio:
                 invalidated = True
                 continue
             valid.append(artifact)
@@ -1640,7 +1692,12 @@ class TranscriptResolver:
             source_url=source_url,
             source_metadata=source_metadata,
         )
-        reason = "要求された全区間が success の Whisper artifact と一致しません。"
+        reason = (
+            "selected_range の高精度解決には language、model、runtime、settings、"
+            "audio input fingerprint の expected provenance が必要です。"
+            if not provenance_ready
+            else "要求された全区間が success の Whisper artifact と一致しません。"
+        )
         if coarse.artifact is None:
             reason += f" {coarse.fallback_reason or '粗い字幕 fallback も利用できません。'}"
         return TranscriptResolution(
@@ -1715,9 +1772,17 @@ def resolve_transcript(
     purpose: TranscriptResolverUse | str,
     *,
     ranges: Iterable[TranscriptRange | Mapping[str, Any] | Sequence[Any]] | None = None,
+    expected_settings: Mapping[str, Any] | None = None,
     **kwargs: Any,
 ) -> TranscriptResolution:
     """用途別 resolver の公開関数。"""
+
+    if expected_settings is not None:
+        if "settings" in kwargs:
+            raise TranscriptResolutionError(
+                "selected_range の expected settings が重複指定されています。"
+            )
+        kwargs["settings"] = expected_settings
 
     return TranscriptResolver(video_id, settings).resolve(
         purpose,
@@ -1738,6 +1803,8 @@ def resolve_selected_range(
     video_id: str,
     settings: Settings | Path,
     ranges: Iterable[TranscriptRange | Mapping[str, Any] | Sequence[Any]],
+    *,
+    expected_settings: Mapping[str, Any] | None = None,
     **kwargs: Any,
 ) -> TranscriptResolution:
     return resolve_transcript(
@@ -1745,6 +1812,7 @@ def resolve_selected_range(
         settings,
         ResolverUse.SELECTED_RANGE,
         ranges=ranges,
+        expected_settings=expected_settings,
         **kwargs,
     )
 

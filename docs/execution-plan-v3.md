@@ -1597,6 +1597,8 @@ data/{video_id}/ ...
 
 **S9-2 実装・検証実績（2026-08-03）:** strict model と canonical digest、用途別 resolver、lock 付き artifact/index cache、crash orphan recovery、fail-closed 検証、VTT candidate lineage を実装した。focused tests は 30 passed、全体は 1,482 passed / 2 skipped。`uv lock --check` と `git diff --check` も通過し、既存 `ja.vtt` と production data は変更していない。S9-0 の非上書き、S9-1 の q5 / operational transcript、exact transcript 未承認、boundary automation No-Go・人確認必須を維持する。
 
+**S9-2 follow-up（2026-08-03）:** Whisper success artifact の model / runtime / settings / audio input fingerprint を必須化し、`selected_range` は language と expected provenance が揃わない場合に高精度扱いせず明示 fallback とした。VTT の path + content は実体 bytes を比較し、malformed timing block は拒否する。focused tests は 38 passed、全体は 1,490 passed / 2 skipped。
+
 **Done 条件:**
 - [x] resolver が用途別に deterministic な artifact を返し、既存 VTT が untouched のまま、cache hit / miss と失効理由を検査可能である
 - [x] coarse candidate が VTT provenance と candidate fingerprint を保持し、既存 clips の候補探索・表示順・FR-31 引き継ぎを壊さない

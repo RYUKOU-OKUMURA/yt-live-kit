@@ -20,6 +20,7 @@ from yt_live_kit.services.transcript_artifact import (
     absolute_cue_digest,
     build_transcript_artifact,
     make_cache_identity,
+    parse_vtt_cues,
     resolve_selected_range,
     used_range_cue_digest,
     used_range_invalidated,
@@ -133,6 +134,51 @@ def test_transcript_artifact_round_trip_is_strict_and_keeps_integer_ms():
             ranges=[{"start_ms": 1_000.5, "end_ms": 3_000}],
             cues=[],
             audio_bytes=b"audio",
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("model", {}),
+        ("runtime", {}),
+        ("settings", {}),
+        ("audio_input_fingerprint", None),
+    ),
+)
+def test_whisper_success_requires_provenance(field, value):
+    artifact = _whisper_artifact()
+    payload = artifact.model_dump(mode="json")
+    payload[field] = value
+
+    with pytest.raises(ValueError, match="provenance|fingerprint"):
+        TranscriptArtifact.model_validate(payload)
+
+
+def test_whisper_success_builder_fails_closed_without_provenance():
+    with pytest.raises(TranscriptArtifactError, match="schema"):
+        build_transcript_artifact(
+            video_id="vid1234567",
+            source_kind="whisper_cpp",
+            source_ref="transcripts/audio/range-1.wav",
+            language="ja",
+            ranges=[{"start_ms": 1_000, "end_ms": 3_000}],
+            cues=[],
+        )
+
+
+def test_malformed_vtt_timing_block_is_not_silently_ignored():
+    malformed = (
+        b"WEBVTT\n\n"
+        b"00:00:00.000 --> 00:00:01.000\nvalid\n\n"
+        b"00:00:02.000 --> malformed\nignored\n"
+    )
+
+    with pytest.raises(TranscriptArtifactError, match="malformed timing"):
+        parse_vtt_cues(malformed)
+    with pytest.raises(TranscriptArtifactError, match="終了時刻"):
+        parse_vtt_cues(
+            b"WEBVTT\n\n00:00:02.000 --> 00:00:01.000\nreverse\n"
         )
 
 
@@ -290,6 +336,9 @@ def test_atomic_index_replace_failure_keeps_previous_index(tmp_path):
         ranges=[{"start_ms": 4_000, "end_ms": 6_000}],
         cues=[{"start_ms": 4_100, "end_ms": 4_800, "text": "次"}],
         audio_bytes=b"audio-range-2",
+        model={"name": "ggml-large-v3-turbo-q5_0"},
+        runtime={"version": "1.9.1", "build": "metal"},
+        settings={"language": "ja"},
     )
     real_replace = __import__("os").replace
 
@@ -342,10 +391,78 @@ def test_selected_range_resolver_prefers_whisper_and_coarse_keeps_vtt(tmp_path):
         settings,
         [{"start_ms": 1_000, "end_ms": 3_000, "padding_ms": 200}],
         vtt_content=vtt,
+        language=whisper.language,
+        model=whisper.model,
+        runtime=whisper.runtime,
+        expected_settings=whisper.settings,
+        audio_input_fingerprint=whisper.audio_input_fingerprint,
     )
     assert selected.is_fallback is False
     assert selected.artifact is not None
     assert selected.artifact.source_kind.value == "whisper_cpp"
+
+
+def test_selected_range_requires_language_and_expected_whisper_provenance(tmp_path):
+    settings = Settings(data_dir=tmp_path)
+    whisper = _whisper_artifact()
+    TranscriptArtifactStore("vid1234567", settings).save(whisper)
+    vtt = b"WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nVTT fallback\n"
+    ranges = [{"start_ms": 1_000, "end_ms": 3_000, "padding_ms": 200}]
+
+    missing = resolve_selected_range(
+        "vid1234567", settings, ranges, vtt_content=vtt
+    )
+    assert missing.is_fallback is True
+    assert "expected provenance" in (missing.fallback_reason or "")
+
+    wrong_language = resolve_selected_range(
+        "vid1234567",
+        settings,
+        ranges,
+        vtt_content=vtt,
+        language="en",
+        model=whisper.model,
+        runtime=whisper.runtime,
+        expected_settings=whisper.settings,
+        audio_input_fingerprint=whisper.audio_input_fingerprint,
+    )
+    assert wrong_language.is_fallback is True
+    assert wrong_language.artifact is not None
+    assert wrong_language.artifact.source_kind.value == "youtube_vtt"
+
+    wrong_model = resolve_selected_range(
+        "vid1234567",
+        settings,
+        ranges,
+        vtt_content=vtt,
+        language=whisper.language,
+        model={"name": "different-model"},
+        runtime=whisper.runtime,
+        expected_settings=whisper.settings,
+        audio_input_fingerprint=whisper.audio_input_fingerprint,
+    )
+    assert wrong_model.is_fallback is True
+    assert wrong_model.artifact is not None
+    assert wrong_model.artifact.source_kind.value == "youtube_vtt"
+
+
+def test_vtt_path_and_content_must_match_when_both_are_provided(tmp_path):
+    settings = Settings(data_dir=tmp_path)
+    source_path = tmp_path / "vid1234567" / "subtitles" / "incoming.vtt"
+    source_path.parent.mkdir(parents=True)
+    source = b"WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nsource\n"
+    source_path.write_bytes(source)
+    store = TranscriptArtifactStore("vid1234567", settings)
+
+    store.save_vtt(vtt_path=source_path, content=source)
+    with pytest.raises(TranscriptCacheError, match="bytes"):
+        store.save_vtt(vtt_path=source_path, content=source.replace(b"source", b"other"))
+
+    with pytest.raises(TranscriptCacheError, match="読み込めません"):
+        store.save_vtt(
+            vtt_path=tmp_path / "vid1234567" / "subtitles" / "missing.vtt",
+            content=source,
+        )
 
 
 def test_selected_range_never_returns_partial_whisper_as_high_precision(tmp_path):
