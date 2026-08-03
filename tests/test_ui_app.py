@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+import streamlit as st
 
 from yt_live_kit.services.jobs import JobState
 from yt_live_kit.services.pipeline import (
@@ -23,8 +24,64 @@ from yt_live_kit.ui.components.status_bar import (
     kind_label,
     should_show_running_bar,
 )
+from yt_live_kit.ui.state import (
+    SESSION_GLOBAL_JOB_ERRORS,
+    SESSION_JOB_ERROR_HISTORY,
+    SESSION_UNREAD_JOB_ERRORS,
+    consume_unread_job_error_notifications,
+    format_job_error_summary_for_display,
+    get_global_job_error_notifications,
+    get_job_error_history,
+    get_unread_job_error_notifications,
+    record_job_error,
+    set_selected_video_id,
+)
 
 _STAGE_ORDER = [STAGE_FETCH, STAGE_TRANSCRIPT, STAGE_CHAPTERS, STAGE_CLIPS_SUGGEST]
+
+
+def _clear_job_error_notifications() -> None:
+    for key in (
+        SESSION_JOB_ERROR_HISTORY,
+        SESSION_GLOBAL_JOB_ERRORS,
+        SESSION_UNREAD_JOB_ERRORS,
+    ):
+        st.session_state.pop(key, None)
+
+
+def _load_unread_renderer(
+    fake_st,
+    *,
+    selected_video_id=set_selected_video_id,
+    consume=consume_unread_job_error_notifications,
+):
+    """app.pyの通知描画関数だけを、実APIと画面モックで実行する。"""
+    app_path = Path(__file__).parents[1] / "src/yt_live_kit/ui/app.py"
+    tree = ast.parse(app_path.read_text(encoding="utf-8"))
+    functions = [
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef)
+        and node.name in {"_top_summary", "_render_unread_job_errors"}
+    ]
+    namespace = {
+        "st": fake_st,
+        "_TOP_SUMMARY_MAX_CHARS": 180,
+        "format_job_error_summary_for_display": format_job_error_summary_for_display,
+        "get_unread_job_error_notifications": get_unread_job_error_notifications,
+        "consume_unread_job_error_notifications": consume,
+        "set_selected_video_id": selected_video_id,
+    }
+    exec(compile(ast.Module(body=functions, type_ignores=[]), str(app_path), "exec"), namespace)
+    return namespace["_render_unread_job_errors"]
+
+
+class _PageSwitch(Exception):
+    pass
+
+
+class _AppRerun(Exception):
+    pass
 
 
 def test_app_registers_japanese_navigation_after_page_config() -> None:
@@ -210,6 +267,129 @@ def test_running_status_is_rendered_inside_sidebar() -> None:
         and isinstance(node.value.func, ast.Name)
         and node.value.func.id == "render_status_bar"
         for node in tree.body
+    )
+
+
+def test_app_defines_navigation_before_rendering_unread_job_errors() -> None:
+    app_path = Path(__file__).parents[1] / "src/yt_live_kit/ui/app.py"
+    source = app_path.read_text(encoding="utf-8")
+
+    assert source.index("page = st.navigation") < source.rindex(
+        "_render_unread_job_errors(detail_page)"
+    )
+    assert "st.error(job_error)" not in source
+    assert "clear_job_error" not in source
+
+
+def test_app_target_video_link_sets_selection_before_hidden_detail_switch() -> None:
+    app_path = Path(__file__).parents[1] / "src/yt_live_kit/ui/app.py"
+    source = app_path.read_text(encoding="utf-8")
+
+    selected = source.index("set_selected_video_id(notice.video_id)")
+    switched = source.index("st.switch_page(detail_page)")
+    assert selected < switched
+    assert "if notice.video_id:" in source
+
+
+def test_unread_notice_initial_render_is_read_only_and_has_both_actions() -> None:
+    _clear_job_error_notifications()
+    set_selected_video_id(None)
+    record_job_error("video-a", "job-a", "single", "処理に失敗しました。", "detail")
+
+    fake_st = MagicMock()
+    fake_st.button.return_value = False
+    renderer = _load_unread_renderer(fake_st)
+    renderer(object())
+
+    assert len(get_unread_job_error_notifications()) == 1
+    assert get_job_error_history("video-a")[0].detail == "detail"
+    labels = [call.args[0] for call in fake_st.button.call_args_list]
+    assert labels == ["対象動画を開く", "通知を閉じる"]
+    _clear_job_error_notifications()
+
+
+def test_video_notice_click_orders_selection_consume_switch_and_keeps_history() -> None:
+    _clear_job_error_notifications()
+    set_selected_video_id(None)
+    record_job_error("video-a", "job-a", "single", "処理に失敗しました。", "detail")
+    events: list[tuple[str, object]] = []
+
+    fake_st = MagicMock()
+    fake_st.button.side_effect = lambda label, key: label == "対象動画を開く"
+    fake_st.switch_page.side_effect = lambda page: (
+        events.append(("switch", page)),
+        (_ for _ in ()).throw(_PageSwitch()),
+    )[1]
+
+    def select(video_id):
+        events.append(("select", video_id))
+        set_selected_video_id(video_id)
+
+    def consume():
+        events.append(("consume", None))
+        return consume_unread_job_error_notifications()
+
+    renderer = _load_unread_renderer(
+        fake_st,
+        selected_video_id=select,
+        consume=consume,
+    )
+    detail_page = object()
+    with pytest.raises(_PageSwitch):
+        renderer(detail_page)
+
+    assert events == [("select", "video-a"), ("consume", None), ("switch", detail_page)]
+    assert get_unread_job_error_notifications() == []
+    assert get_job_error_history("video-a")[0].detail == "detail"
+    assert st.session_state.get("selected_video_id") == "video-a"
+    _clear_job_error_notifications()
+
+
+def test_global_notice_dismiss_consumes_only_unread_and_keeps_global_summary() -> None:
+    _clear_job_error_notifications()
+    record_job_error(None, "global-job", "batch", "一括処理に失敗しました。", "secret")
+    events: list[str] = []
+
+    fake_st = MagicMock()
+    fake_st.button.side_effect = lambda label, key: label == "通知を閉じる"
+    fake_st.rerun.side_effect = lambda **kwargs: (
+        events.append(f"rerun:{kwargs['scope']}"),
+        (_ for _ in ()).throw(_AppRerun()),
+    )[1]
+    renderer = _load_unread_renderer(
+        fake_st,
+        consume=lambda: (events.append("consume"), consume_unread_job_error_notifications())[1],
+    )
+
+    with pytest.raises(_AppRerun):
+        renderer(object())
+
+    assert events == ["consume", "rerun:app"]
+    assert get_unread_job_error_notifications() == []
+    global_errors = get_global_job_error_notifications()
+    assert len(global_errors) == 1
+    assert global_errors[0].detail is None
+    _clear_job_error_notifications()
+
+
+def test_status_summary_is_one_line_safe_and_bounded() -> None:
+    from yt_live_kit.ui.components import status_bar
+
+    summary = status_bar._format_error_summary(
+        "処理に失敗しました <raw>\n" + "詳細" * 300,
+        fallback="処理に失敗しました。",
+    )
+
+    assert "<" not in summary and ">" not in summary
+    assert "\n" not in summary
+    assert len(summary) == status_bar._ERROR_SUMMARY_MAX_CHARS
+
+
+def test_empty_status_summary_uses_japanese_fallback() -> None:
+    from yt_live_kit.ui.components import status_bar
+
+    assert status_bar._format_error_summary("\n", fallback="処理に失敗しました。") == (
+        "処理に失敗しました。"
     )
 
 
@@ -419,38 +599,42 @@ def test_finished_short_cut_is_known_and_reloads_screen_without_error() -> None:
         patch("yt_live_kit.ui.components.status_bar.is_job_handled", return_value=False),
         patch("yt_live_kit.ui.components.status_bar.mark_job_handled"),
         patch("yt_live_kit.ui.components.status_bar.load_result_from_disk") as loader,
-        patch("yt_live_kit.ui.components.status_bar.set_job_error") as set_error,
+        patch("yt_live_kit.ui.components.status_bar.record_job_error") as record_error,
         patch("yt_live_kit.ui.components.status_bar.clear_active_job_id"),
         patch("yt_live_kit.ui.components.status_bar.st.rerun") as rerun,
     ):
         status_bar._handle_finished_job(job)
 
     loader.assert_not_called()
-    set_error.assert_not_called()
+    record_error.assert_not_called()
     rerun.assert_called_once_with(scope="app")
 
 
-def test_failed_short_cut_keeps_original_japanese_error() -> None:
+def test_failed_short_cut_records_structured_error_detail() -> None:
     from yt_live_kit.ui.components import status_bar
 
     job = JobState(
         job_id="failed-short-cut",
         kind="short_cut",
         status="failed",
+        video_id="video-short-cut",
         error="サブ区間の提案に失敗しました。字幕を確認してください。",
     )
     with (
         patch("yt_live_kit.ui.components.status_bar.is_job_handled", return_value=False),
         patch("yt_live_kit.ui.components.status_bar.mark_job_handled"),
-        patch("yt_live_kit.ui.components.status_bar.set_job_error") as set_error,
+        patch("yt_live_kit.ui.components.status_bar.read_job_error_log", return_value=None),
+        patch("yt_live_kit.ui.components.status_bar.record_job_error") as record_error,
         patch("yt_live_kit.ui.components.status_bar.clear_active_job_id"),
         patch("yt_live_kit.ui.components.status_bar.st.rerun"),
     ):
         status_bar._handle_finished_job(job)
 
-    set_error.assert_called_once_with(
-        "サブ区間の提案に失敗しました。字幕を確認してください。"
-    )
+    record_error.assert_called_once()
+    args = record_error.call_args.args
+    assert args[:3] == ("video-short-cut", "failed-short-cut", "short_cut")
+    assert "ショート区間提案に失敗しました" in args[3]
+    assert "サブ区間の提案に失敗しました" in args[4]
 
 
 def test_finished_all_failed_shorts_queue_reads_manifest_and_reports_failure() -> None:
@@ -476,18 +660,19 @@ def test_finished_all_failed_shorts_queue_reads_manifest_and_reports_failure() -
             "yt_live_kit.ui.components.status_bar.load_shorts_queue_result",
             return_value=result,
         ) as load_result,
-        patch("yt_live_kit.ui.components.status_bar.set_job_error") as set_error,
+        patch("yt_live_kit.ui.components.status_bar.record_job_error") as record_error,
         patch("yt_live_kit.ui.components.status_bar.clear_active_job_id"),
         patch("yt_live_kit.ui.components.status_bar.st.rerun"),
     ):
         status_bar._handle_finished_job(job)
 
     load_result.assert_called_once_with("video-1", "done-queue", status_bar.get_settings())
-    set_error.assert_called_once()
-    message = set_error.call_args.args[0]
-    assert "すべて失敗" in message
-    assert "clip〈1〉: subtitles 〈filter〉 がありません。" in message
-    assert "<" not in message and ">" not in message
+    record_error.assert_called_once()
+    summary, detail = record_error.call_args.args[3:5]
+    assert "全件失敗" in summary
+    assert "clip<1>: subtitles <filter> がありません。" in detail
+    assert "<" not in summary and ">" not in summary
+    assert "\n" not in summary
 
 
 def test_finished_partially_failed_shorts_queue_reports_each_safe_reason() -> None:
@@ -523,19 +708,19 @@ def test_finished_partially_failed_shorts_queue_reports_each_safe_reason() -> No
             "yt_live_kit.ui.components.status_bar.load_shorts_queue_result",
             return_value=result,
         ),
-        patch("yt_live_kit.ui.components.status_bar.set_job_error") as set_error,
+        patch("yt_live_kit.ui.components.status_bar.record_job_error") as record_error,
         patch("yt_live_kit.ui.components.status_bar.clear_active_job_id"),
         patch("yt_live_kit.ui.components.status_bar.st.rerun"),
     ):
         status_bar._handle_finished_job(job)
 
-    set_error.assert_called_once()
-    message = set_error.call_args.args[0]
-    assert "成功 1 件 / 失敗 2 件" in message
-    assert "clip〈1〉: 字幕〈filter〉がありません。" in message
-    assert "clip-2: 動画を生成できませんでした。" in message
-    assert message.index("clip〈1〉") < message.index("clip-2")
-    assert "<" not in message and ">" not in message
+    record_error.assert_called_once()
+    summary, detail = record_error.call_args.args[3:5]
+    assert "成功 1 件、失敗 2 件" in summary
+    assert "clip<1>: 字幕<filter>がありません。" in detail
+    assert "clip-2: 動画を生成できませんでした。" in detail
+    assert "<" not in summary and ">" not in summary
+    assert "\n" not in summary
 
 
 def test_unknown_finished_job_reports_japanese_error_without_pipeline_load() -> None:
@@ -546,13 +731,14 @@ def test_unknown_finished_job_reports_japanese_error_without_pipeline_load() -> 
         patch("yt_live_kit.ui.components.status_bar.is_job_handled", return_value=False),
         patch("yt_live_kit.ui.components.status_bar.mark_job_handled"),
         patch("yt_live_kit.ui.components.status_bar.load_result_from_disk") as loader,
-        patch("yt_live_kit.ui.components.status_bar.set_job_error") as set_error,
+        patch("yt_live_kit.ui.components.status_bar.record_job_error") as record_error,
         patch("yt_live_kit.ui.components.status_bar.clear_active_job_id"),
         patch("yt_live_kit.ui.components.status_bar.st.rerun"),
     ):
         status_bar._handle_finished_job(job)
     loader.assert_not_called()
-    assert "未対応" in set_error.call_args.args[0]
+    assert "未対応" in record_error.call_args.args[3]
+    assert "<" not in record_error.call_args.args[3]
 
 
 def test_handle_finished_job_shows_error_on_failed() -> None:
@@ -562,6 +748,7 @@ def test_handle_finished_job_shows_error_on_failed() -> None:
         job_id="fail123",
         kind="single",
         status="failed",
+        video_id="video-failed",
         error="字幕が見つかりません",
     )
 
@@ -569,12 +756,17 @@ def test_handle_finished_job_shows_error_on_failed() -> None:
         patch("yt_live_kit.ui.components.status_bar.is_job_handled", return_value=False),
         patch("yt_live_kit.ui.components.status_bar.mark_job_handled") as mark_handled,
         patch("yt_live_kit.ui.components.status_bar.clear_active_job_id") as clear_active,
-        patch("yt_live_kit.ui.components.status_bar.set_job_error") as set_error,
+        patch("yt_live_kit.ui.components.status_bar.read_job_error_log", return_value=None),
+        patch("yt_live_kit.ui.components.status_bar.record_job_error") as record_error,
         patch("yt_live_kit.ui.components.status_bar.st.rerun") as rerun,
     ):
         status_bar._handle_finished_job(job)
 
-    set_error.assert_called_once_with("字幕が見つかりません")
+    record_error.assert_called_once()
+    args = record_error.call_args.args
+    assert args[:3] == ("video-failed", "fail123", "single")
+    assert "字幕が見つかりません" in args[4]
+    assert "単本処理に失敗しました" in args[3]
     clear_active.assert_called_once()
     mark_handled.assert_called_once_with("fail123")
     rerun.assert_called_once_with(scope="app")
@@ -596,18 +788,199 @@ def test_handle_finished_job_shows_error_when_result_missing() -> None:
         patch("yt_live_kit.ui.components.status_bar.load_result_from_disk", return_value=None),
         patch("yt_live_kit.ui.components.status_bar.set_result") as set_result,
         patch("yt_live_kit.ui.components.status_bar.clear_active_job_id") as clear_active,
-        patch("yt_live_kit.ui.components.status_bar.set_job_error") as set_error,
+        patch("yt_live_kit.ui.components.status_bar.record_job_error") as record_error,
         patch("yt_live_kit.ui.components.status_bar.st.rerun") as rerun,
     ):
         status_bar._handle_finished_job(job)
 
-    set_error.assert_called_once_with(
-        "成果物を読み込めませんでした。ライブラリから開き直してください。"
-    )
+    record_error.assert_called_once()
+    summary, detail = record_error.call_args.args[3:5]
+    assert "成果物を読み込めませんでした" in summary
+    assert "meta.json" in detail
+    assert "<" not in summary and ">" not in summary
     set_result.assert_not_called()
     clear_active.assert_called_once()
     mark_handled.assert_called_once_with("done-missing")
     rerun.assert_called_once_with(scope="app")
+
+
+def test_finished_upload_without_operation_id_records_video_scoped_error() -> None:
+    from yt_live_kit.ui.components import status_bar
+
+    job = JobState(
+        job_id="upload-missing-operation",
+        kind="upload",
+        status="done",
+        video_id="video-upload",
+    )
+    with (
+        patch("yt_live_kit.ui.components.status_bar.is_job_handled", return_value=False),
+        patch("yt_live_kit.ui.components.status_bar.mark_job_handled"),
+        patch("yt_live_kit.ui.components.status_bar.record_job_error") as record_error,
+        patch("yt_live_kit.ui.components.status_bar.clear_active_job_id"),
+        patch("yt_live_kit.ui.components.status_bar.st.rerun"),
+    ):
+        status_bar._handle_finished_job(job)
+
+    record_error.assert_called_once()
+    args = record_error.call_args.args
+    assert args[:3] == ("video-upload", "upload-missing-operation", "upload")
+    assert "operation ID" in args[3]
+    assert "result_ref" in args[4]
+
+
+def test_finished_upload_operation_load_error_keeps_queue_detail() -> None:
+    from yt_live_kit.services.upload_queue import UploadQueueError
+    from yt_live_kit.ui.components import status_bar
+
+    job = JobState(
+        job_id="upload-corrupt-operation",
+        kind="upload_publication",
+        status="done",
+        video_id="video-upload",
+        result_ref="operation-1",
+    )
+    with (
+        patch("yt_live_kit.ui.components.status_bar.is_job_handled", return_value=False),
+        patch("yt_live_kit.ui.components.status_bar.mark_job_handled"),
+        patch(
+            "yt_live_kit.ui.components.status_bar.load_operation",
+            side_effect=UploadQueueError("operationが壊れています。"),
+        ),
+        patch("yt_live_kit.ui.components.status_bar.record_job_error") as record_error,
+        patch("yt_live_kit.ui.components.status_bar.clear_active_job_id"),
+        patch("yt_live_kit.ui.components.status_bar.st.rerun"),
+    ):
+        status_bar._handle_finished_job(job)
+
+    record_error.assert_called_once()
+    args = record_error.call_args.args
+    assert args[0] == "video-upload"
+    assert "投稿状態を読み込めませんでした" in args[3]
+    assert "operationが壊れています" in args[4]
+
+
+def test_finished_cut_without_ref_records_video_scoped_error() -> None:
+    from yt_live_kit.ui.components import status_bar
+
+    job = JobState(
+        job_id="cut-missing-ref",
+        kind="cut_clip",
+        status="done",
+        video_id="video-cut",
+    )
+    with (
+        patch("yt_live_kit.ui.components.status_bar.is_job_handled", return_value=False),
+        patch("yt_live_kit.ui.components.status_bar.mark_job_handled"),
+        patch("yt_live_kit.ui.components.status_bar.record_job_error") as record_error,
+        patch("yt_live_kit.ui.components.status_bar.clear_active_job_id"),
+        patch("yt_live_kit.ui.components.status_bar.st.rerun"),
+    ):
+        status_bar._handle_finished_job(job)
+
+    record_error.assert_called_once()
+    args = record_error.call_args.args
+    assert args[:3] == ("video-cut", "cut-missing-ref", "cut_clip")
+    assert "参照先" in args[3]
+
+
+def test_finished_cut_with_invalid_ref_records_restore_error() -> None:
+    from yt_live_kit.ui.components import status_bar
+
+    job = JobState(
+        job_id="cut-invalid-ref",
+        kind="cut_clip",
+        status="done",
+        video_id="video-cut",
+        result_ref="not-json",
+    )
+    with (
+        patch("yt_live_kit.ui.components.status_bar.is_job_handled", return_value=False),
+        patch("yt_live_kit.ui.components.status_bar.mark_job_handled"),
+        patch("yt_live_kit.ui.components.status_bar.record_job_error") as record_error,
+        patch("yt_live_kit.ui.components.status_bar.clear_active_job_id"),
+        patch("yt_live_kit.ui.components.status_bar.st.rerun"),
+    ):
+        status_bar._handle_finished_job(job)
+
+    record_error.assert_called_once()
+    assert "切り出し結果を読み込めません" in record_error.call_args.args[3]
+
+
+def test_pipeline_loader_exception_records_bounded_detail() -> None:
+    from yt_live_kit.ui.components import status_bar
+
+    job = JobState(
+        job_id="pipeline-loader-error",
+        kind="single",
+        status="done",
+        video_id="video-pipeline",
+        result_ref="video-pipeline",
+    )
+    with (
+        patch("yt_live_kit.ui.components.status_bar.is_job_handled", return_value=False),
+        patch("yt_live_kit.ui.components.status_bar.mark_job_handled"),
+        patch(
+            "yt_live_kit.ui.components.status_bar.load_result_from_disk",
+            side_effect=ValueError("meta <broken>\ntrace"),
+        ),
+        patch("yt_live_kit.ui.components.status_bar.record_job_error") as record_error,
+        patch("yt_live_kit.ui.components.status_bar.clear_active_job_id"),
+        patch("yt_live_kit.ui.components.status_bar.st.rerun"),
+    ):
+        status_bar._handle_finished_job(job)
+
+    record_error.assert_called_once()
+    summary, detail = record_error.call_args.args[3:5]
+    assert "成果物を読み込めませんでした" in summary
+    assert "<broken>" in detail
+    assert "<" not in summary and ">" not in summary
+
+
+def test_interrupted_job_reads_log_and_records_before_handled() -> None:
+    from yt_live_kit.ui.components import status_bar
+
+    events: list[str] = []
+    finished_at = datetime(2026, 8, 3, 1, 2, tzinfo=timezone.utc)
+    job = JobState(
+        job_id="interrupted-job",
+        kind="shorts_queue",
+        status="interrupted",
+        video_id="video-interrupted",
+        error="前回の処理が中断されました。",
+        finished_at=finished_at,
+    )
+    with (
+        patch("yt_live_kit.ui.components.status_bar.is_job_handled", return_value=False),
+        patch(
+            "yt_live_kit.ui.components.status_bar.read_job_error_log",
+            return_value="traceback <raw>\nline",
+        ),
+        patch(
+            "yt_live_kit.ui.components.status_bar.record_job_error",
+            side_effect=lambda *args: events.append("record"),
+        ) as record_error,
+        patch(
+            "yt_live_kit.ui.components.status_bar.mark_job_handled",
+            side_effect=lambda *_args: events.append("handled"),
+        ),
+        patch("yt_live_kit.ui.components.status_bar.clear_active_job_id"),
+        patch("yt_live_kit.ui.components.status_bar.st.rerun"),
+    ):
+        status_bar._handle_finished_job(job)
+
+    assert events == ["record", "handled"]
+    args = record_error.call_args.args
+    assert args[:3] == ("video-interrupted", "interrupted-job", "shorts_queue")
+    assert args[5] == finished_at
+    assert "traceback <raw>" in args[4]
+
+
+def test_running_fragment_does_not_clear_structured_job_history() -> None:
+    from yt_live_kit.ui.components import status_bar
+
+    source = Path(status_bar.__file__).read_text(encoding="utf-8")
+    assert "clear_job_error" not in source
 
 
 def test_handle_finished_job_loads_batch_summary_on_done_without_result_ref() -> None:
