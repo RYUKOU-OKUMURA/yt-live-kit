@@ -112,25 +112,133 @@
     "status": "pass"
   },
   "comparison": {
-    "model_selection": "none; No-Go",
+    "model_selection": "ggml-large-v3-turbo-q5_0",
+    "model_selection_contract": {
+      "ranking": [
+        {
+          "eligible": true,
+          "key": [
+            0,
+            5176.0,
+            3619.0,
+            5183.0,
+            933560320,
+            574041195,
+            -0.36771300448430494,
+            -0.7869427067818489,
+            "ggml-large-v3-turbo-q5_0"
+          ],
+          "name": "ggml-large-v3-turbo-q5_0"
+        },
+        {
+          "eligible": true,
+          "key": [
+            0,
+            5633.0,
+            3597.5,
+            5650.0,
+            2017837056,
+            1624555275,
+            -0.2376681614349776,
+            -0.8084599344652964,
+            "ggml-large-v3-turbo"
+          ],
+          "name": "ggml-large-v3-turbo"
+        }
+      ],
+      "rule": {
+        "declared_before_audit_apply_rerun": true,
+        "eligibility": "all fixed numeric gates and operational transcript reference gate must pass; candidates must use local absolute model and whisper-cli paths",
+        "mode": "lexicographic",
+        "not_a_threshold_change": true,
+        "ordered_keys": [
+          "local_absolute_runtime_and_model",
+          "max_case_median_wall_time_ms",
+          "median_wall_time_ms_all_cold_warm_runs",
+          "max_wall_time_ms_all_cold_warm_runs",
+          "max_peak_memory_bytes_all_cold_warm_runs",
+          "model_bytes",
+          "worst_case_relative_cer_improvement_descending",
+          "paired_median_relative_cer_improvement_descending",
+          "model_name_ascending"
+        ],
+        "policy_basis": "user_wait_time_and_local_constraints",
+        "prior_provisional_results_known": true
+      },
+      "selected_model": "ggml-large-v3-turbo-q5_0"
+    },
     "paired_median_relative_cer_improvement": {
       "ggml-large-v3-turbo": 0.8084599344652964,
       "ggml-large-v3-turbo-q5_0": 0.7869427067818489
     },
-    "provisional_observation": "turbo と q5 は provisional 指標上の差を示すが、gold 未監査のため採用決定ではない。"
+    "reference_interpretation": "CER、glossary、cue は固定 fixture reference に対する指標。human verified exact transcript とは記録しない。"
   },
   "decision": {
-    "adopted_model": null,
-    "fallback_only": "既存 YouTube VTT baseline を fallback-only とし、S9-3 の高精度モデル採用へ進めない。",
-    "go": false,
-    "no_go_reasons": [
-      "gold_not_audited",
-      "cue_proxy_blind_spot",
-      "boundary_audit_is_partial"
-    ],
-    "reason": "gold transcript は音声の独立人手監査前で、品質数値を採用モデル決定の根拠へ昇格できない。 境界・発話連続性の所見は部分監査であり、既存 cue proxy の盲点も判明したため、境界監査だけでは No-Go を解除しない。",
-    "s9_2_ready": false,
-    "status": "no_go"
+    "adopted_model": {
+      "model_fingerprint": {
+        "bytes": 574041195,
+        "path": "/Users/ryukouokumura/Library/Caches/whisper.cpp/models/ggml-large-v3-turbo-q5_0.bin",
+        "sha256": "394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2"
+      },
+      "name": "ggml-large-v3-turbo-q5_0",
+      "settings_contract": {
+        "binary_fingerprint": {
+          "bytes": 658608,
+          "path": "/opt/homebrew/bin/whisper-cli",
+          "sha256": "1fbabb51a45906bd36684695de9025eab63618a6eedc26971c47fa5affc5fe49"
+        },
+        "binary_path": "/opt/homebrew/bin/whisper-cli",
+        "output_schema": "whisper-cli-json-full-v1",
+        "settings": {
+          "decode": {
+            "beam_size": 5,
+            "best_of": 5,
+            "no_fallback": false,
+            "processors": 1,
+            "temperature": 0.0,
+            "threads": 8,
+            "vad": false
+          },
+          "initial_prompt": "日本語のライブ配信。固有名詞は Claude、Codex、Whisper、Ollama、Together AI、DirectX、Microsoft、Windows、Steam、DX12、iMac、Apple II、HHKB、macOS を含む。",
+          "language": "ja",
+          "output_schema": "whisper-cli-json-full-v1",
+          "padding_ms": 0
+        },
+        "timeout_sec": 180.0,
+        "version": "1.9.1"
+      }
+    },
+    "boundary_automation": "not_adopted_human_review_required",
+    "boundary_decision": {
+      "automation_adopted": false,
+      "human_review_required": true,
+      "partial_audit_fingerprint": "0af9f5ce7888eabcc67fbe767db25c2e4da97c823ea76781eb9aeb25991fd9a1",
+      "reason": "existing partial boundary / speech continuity audit is preserved; it does not authorize automatic boundaries",
+      "status": "no_go"
+    },
+    "decision_scope": "operational_transcript_reference_only",
+    "exact_transcript_decision": {
+      "character_punctuation_exactness": "not_claimed",
+      "cue_anchor_exact_ms": "unapproved",
+      "glossary": "not_explicitly_audited",
+      "status": "not_approved"
+    },
+    "fallback_only": "runtime、cache、artifact、または人確認が失敗した場合は既存 YouTube VTT を明示的に fallback とする。",
+    "go": true,
+    "no_go_reasons": [],
+    "operational_transcript_decision": {
+      "accepted_as": "operational_benchmark_reference",
+      "audit_fingerprint": "9c1fdca9e1c5b70bd40d84a219a81dedca976e70447d42e2523e2fc4b16cc263",
+      "reference_model": "ggml-large-v3-turbo-q5_0",
+      "status": "go"
+    },
+    "reason": "ユーザーの自然文監査「4本とも文字起こしは概ね問題なし」を、4 case の displayed transcript content に限る operational benchmark reference として採用した。 文字・句読点 exactness、glossary 個別 exact approval、cue anchor の正確なミリ秒は主張しない。境界・発話連続性は部分監査のまま維持し、自動境界採用はせず人確認を必須にする。",
+    "reference_mode": "operational_transcript_reference",
+    "s9_2_ready": true,
+    "s9_2_start_allowed": true,
+    "s9_2_start_scope": "TranscriptArtifact / resolver work may start; boundary automation remains prohibited and human review remains required.",
+    "s9_3_reference": "ggml-large-v3-turbo-q5_0",
+    "status": "go_operational_transcript_reference"
   },
   "evaluation_contract": {
     "boundary_policy": {
@@ -157,6 +265,13 @@
       "overlap": "cue.end_ms が range.start_ms より大きく、cue.start_ms が range.end_ms より小さい",
       "viewer_greeting_policy": "not_auto_excluded_without_human_annotation"
     },
+    "decision_mode": "operational_transcript_reference",
+    "exact_gold_policy": {
+      "cer_definition": "fixed-reference metric; not a claim of character-level human truth",
+      "exact_gold_gate": "not_claimed_and_not_required_for_operational_reference_mode",
+      "fixture_gold_status": "unverified_provisional",
+      "numeric_thresholds_changed": false
+    },
     "gates": {
       "cold_wall_time_seconds": 180,
       "cue_error_rate_delta_points": 5.0,
@@ -165,6 +280,13 @@
       "peak_memory_bytes": 8589934592,
       "require_gold_audit": true,
       "warm_wall_time_seconds": 120
+    },
+    "human_audit_dimensions": {
+      "boundary_editorial_outcomes": "preserved_partial_boundary_audit",
+      "character_punctuation_exactness": "not_claimed",
+      "cue_anchor_exact_ms": "unapproved",
+      "displayed_transcript_content": "human_reviewed_no_material_issue_reported / accepted_operational_benchmark_reference",
+      "glossary": "not_explicitly_audited"
     },
     "normalization": {
       "exclude_text_tokens": [
@@ -178,33 +300,241 @@
       "strip_vtt_html_tags": true,
       "strip_whitespace": true,
       "unicode": "NFKC"
+    },
+    "raw_report_identity": {
+      "all_models_share_input_fingerprints": true,
+      "all_models_share_runtime_identity": true,
+      "all_ranges_match_fixture": true,
+      "case_run_count": 16,
+      "run_manifest_fingerprints": {
+        "ggml-large-v3-turbo": "9e8e71a6f02f57572ef65c127cf2fa5dfcaa6a7c55c7acf6791ea93d7d3c5ee6",
+        "ggml-large-v3-turbo-q5_0": "a25d0fbc8233a1db7f0c2ecbb332781b19e5fd5b31260a5b0b2d03be7270de5e"
+      },
+      "source_fixture_fingerprint": "6dae657f2b803c54c6af1afe4ed54ad4f447324c32802e1943dc5711a9bf1718"
     }
   },
   "fixture_fingerprint": "6dae657f2b803c54c6af1afe4ed54ad4f447324c32802e1943dc5711a9bf1718",
-  "gold_audit_status": "provisional",
+  "gold_audit_status": "unverified_provisional",
+  "human_audit": {
+    "artifact": "docs/benchmarks/s9-1-human-audit-v2.json",
+    "audit_date": "2026-08-03",
+    "audit_fingerprint": "9c1fdca9e1c5b70bd40d84a219a81dedca976e70447d42e2523e2fc4b16cc263",
+    "auditor": "user",
+    "base_fixture_fingerprint": "6dae657f2b803c54c6af1afe4ed54ad4f447324c32802e1943dc5711a9bf1718",
+    "benchmark_id": "s9-1-20260803",
+    "boundary_audit_fingerprint": "0af9f5ce7888eabcc67fbe767db25c2e4da97c823ea76781eb9aeb25991fd9a1",
+    "cases": [
+      {
+        "boundary_editorial": {
+          "status": "preserved_partial_boundary_audit"
+        },
+        "case_id": "lb4-clip002-short-proper-nouns",
+        "character_punctuation_exactness": {
+          "status": "not_claimed"
+        },
+        "cue_anchor_exact_ms": {
+          "status": "unapproved"
+        },
+        "display_order": 1,
+        "displayed_transcript_content": {
+          "acceptance": "operational_benchmark_reference",
+          "status": "human_reviewed_no_material_issue_reported"
+        },
+        "glossary": {
+          "status": "not_explicitly_audited"
+        },
+        "statement_scope": "all_four_cases_same_user_statement"
+      },
+      {
+        "boundary_editorial": {
+          "status": "preserved_partial_boundary_audit"
+        },
+        "case_id": "hpe-audio-variation",
+        "character_punctuation_exactness": {
+          "status": "not_claimed"
+        },
+        "cue_anchor_exact_ms": {
+          "status": "unapproved"
+        },
+        "display_order": 2,
+        "displayed_transcript_content": {
+          "acceptance": "operational_benchmark_reference",
+          "status": "human_reviewed_no_material_issue_reported"
+        },
+        "glossary": {
+          "status": "not_explicitly_audited"
+        },
+        "statement_scope": "all_four_cases_same_user_statement"
+      },
+      {
+        "boundary_editorial": {
+          "status": "preserved_partial_boundary_audit"
+        },
+        "case_id": "cgal-proper-nouns",
+        "character_punctuation_exactness": {
+          "status": "not_claimed"
+        },
+        "cue_anchor_exact_ms": {
+          "status": "unapproved"
+        },
+        "display_order": 3,
+        "displayed_transcript_content": {
+          "acceptance": "operational_benchmark_reference",
+          "status": "human_reviewed_no_material_issue_reported"
+        },
+        "glossary": {
+          "status": "not_explicitly_audited"
+        },
+        "statement_scope": "all_four_cases_same_user_statement"
+      },
+      {
+        "boundary_editorial": {
+          "status": "preserved_partial_boundary_audit"
+        },
+        "case_id": "mkw-long-local-asr",
+        "character_punctuation_exactness": {
+          "status": "not_claimed"
+        },
+        "cue_anchor_exact_ms": {
+          "status": "unapproved"
+        },
+        "display_order": 4,
+        "displayed_transcript_content": {
+          "acceptance": "operational_benchmark_reference",
+          "status": "human_reviewed_no_material_issue_reported"
+        },
+        "glossary": {
+          "status": "not_explicitly_audited"
+        },
+        "statement_scope": "all_four_cases_same_user_statement"
+      }
+    ],
+    "previous_display_order": [
+      {
+        "case_id": "lb4-clip002-short-proper-nouns",
+        "display_order": 1
+      },
+      {
+        "case_id": "hpe-audio-variation",
+        "display_order": 2
+      },
+      {
+        "case_id": "cgal-proper-nouns",
+        "display_order": 3
+      },
+      {
+        "case_id": "mkw-long-local-asr",
+        "display_order": 4
+      }
+    ],
+    "review_policy": {
+      "boundary_auto_adoption": "prohibited",
+      "boundary_editorial": {
+        "status": "preserved_partial_boundary_audit"
+      },
+      "character_punctuation_exactness": {
+        "status": "not_claimed"
+      },
+      "cue_anchor_exact_ms": {
+        "status": "unapproved"
+      },
+      "displayed_transcript_content": {
+        "acceptance": "operational_benchmark_reference",
+        "status": "human_reviewed_no_material_issue_reported"
+      },
+      "glossary": {
+        "status": "not_explicitly_audited"
+      },
+      "human_boundary_review": "required",
+      "mode": "operational_transcript_reference"
+    },
+    "schema": "s9-1-human-audit-v2",
+    "source": {
+      "exact_quote": "4本とも文字起こしは概ね問題なし",
+      "kind": "user_natural_language",
+      "review_context": "2026-08-03に4本のProvisional gold transcriptを開いて確認した後のユーザー所見。"
+    }
+  },
   "measurement_date": "2026-08-03",
-  "metrics_status": "provisional",
+  "metrics_status": "fixed_reference_operational_not_exact_gold",
+  "model_selection": {
+    "ranking": [
+      {
+        "eligible": true,
+        "key": [
+          0,
+          5176.0,
+          3619.0,
+          5183.0,
+          933560320,
+          574041195,
+          -0.36771300448430494,
+          -0.7869427067818489,
+          "ggml-large-v3-turbo-q5_0"
+        ],
+        "name": "ggml-large-v3-turbo-q5_0"
+      },
+      {
+        "eligible": true,
+        "key": [
+          0,
+          5633.0,
+          3597.5,
+          5650.0,
+          2017837056,
+          1624555275,
+          -0.2376681614349776,
+          -0.8084599344652964,
+          "ggml-large-v3-turbo"
+        ],
+        "name": "ggml-large-v3-turbo"
+      }
+    ],
+    "rule": {
+      "declared_before_audit_apply_rerun": true,
+      "eligibility": "all fixed numeric gates and operational transcript reference gate must pass; candidates must use local absolute model and whisper-cli paths",
+      "mode": "lexicographic",
+      "not_a_threshold_change": true,
+      "ordered_keys": [
+        "local_absolute_runtime_and_model",
+        "max_case_median_wall_time_ms",
+        "median_wall_time_ms_all_cold_warm_runs",
+        "max_wall_time_ms_all_cold_warm_runs",
+        "max_peak_memory_bytes_all_cold_warm_runs",
+        "model_bytes",
+        "worst_case_relative_cer_improvement_descending",
+        "paired_median_relative_cer_improvement_descending",
+        "model_name_ascending"
+      ],
+      "policy_basis": "user_wait_time_and_local_constraints",
+      "prior_provisional_results_known": true
+    },
+    "selected_model": "ggml-large-v3-turbo-q5_0"
+  },
   "models": [
     {
       "distribution_url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin?download=true",
       "gates": {
-        "go": false,
+        "effective_gates_passed": true,
+        "go": true,
         "gold_audit": {
+          "definition": "character and punctuation exactness, glossary exact approval, and cue anchor exact milliseconds are not claimed by the natural-language audit",
           "passed": false,
-          "status": "provisional"
+          "required_for_selected_mode": false,
+          "status": "not_claimed"
         },
         "peak_memory": {
           "budget_bytes": 8589934592,
           "passed": true,
           "values_bytes": [
-            903921664,
-            926728192,
-            919830528,
-            920928256,
-            903118848,
-            932773888,
-            918978560,
-            915062784
+            908165120,
+            930381824,
+            923729920,
+            916389888,
+            902742016,
+            933560320,
+            923303936,
+            915439616
           ]
         },
         "quality": {
@@ -220,12 +550,14 @@
             "value": 0.7869427067818489
           }
         },
-        "reasons": [
-          {
-            "code": "gold_not_audited",
-            "message": "gold は音声の独立人手監査前であり、fail closed です。"
-          }
-        ],
+        "reasons": [],
+        "reproducibility": {
+          "cold_warm_output_sha_equal": true,
+          "definition": "raw case runs must succeed and cold/warm JSON output SHA-256 must match; this is an integrity check, not a numeric threshold",
+          "numeric_threshold_changed": false,
+          "passed": true,
+          "raw_case_runs_ok": true
+        },
         "source_gate_report": {
           "reasons": [
             {
@@ -235,8 +567,14 @@
           ],
           "status": "no_go"
         },
-        "status": "no_go",
+        "status": "go",
         "technical_gates_passed": true,
+        "transcript_operational_reference": {
+          "audit_fingerprint": "9c1fdca9e1c5b70bd40d84a219a81dedca976e70447d42e2523e2fc4b16cc263",
+          "definition": "all four displayed provisional transcripts were human reviewed with no material issue reported; this is operational evidence, not exact gold",
+          "passed": true,
+          "status": "accepted_operational_benchmark_reference"
+        },
         "wall_time": {
           "checks": [
             {
@@ -244,56 +582,56 @@
               "case_id": "lb4-clip002-short-proper-nouns",
               "passed": true,
               "run_kind": "cold",
-              "value_ms": 2149
+              "value_ms": 2263
             },
             {
               "budget_ms": 120000,
               "case_id": "lb4-clip002-short-proper-nouns",
               "passed": true,
               "run_kind": "warm",
-              "value_ms": 2149
+              "value_ms": 2165
             },
             {
               "budget_ms": 180000,
               "case_id": "mkw-long-local-asr",
               "passed": true,
               "run_kind": "cold",
-              "value_ms": 5170
+              "value_ms": 5169
             },
             {
               "budget_ms": 120000,
               "case_id": "mkw-long-local-asr",
               "passed": true,
               "run_kind": "warm",
-              "value_ms": 5171
+              "value_ms": 5183
             },
             {
               "budget_ms": 180000,
               "case_id": "cgal-proper-nouns",
               "passed": true,
               "run_kind": "cold",
-              "value_ms": 4300
+              "value_ms": 4310
             },
             {
               "budget_ms": 120000,
               "case_id": "cgal-proper-nouns",
               "passed": true,
               "run_kind": "warm",
-              "value_ms": 4307
+              "value_ms": 4334
             },
             {
               "budget_ms": 180000,
               "case_id": "hpe-audio-variation",
               "passed": true,
               "run_kind": "cold",
-              "value_ms": 2914
+              "value_ms": 2921
             },
             {
               "budget_ms": 120000,
               "case_id": "hpe-audio-variation",
               "passed": true,
               "run_kind": "warm",
-              "value_ms": 2915
+              "value_ms": 2928
             }
           ],
           "passed": true
@@ -309,7 +647,6 @@
         "cases": [
           {
             "baseline": {
-              "cache_hit": null,
               "cer": 1.0161290322580645,
               "cue": {
                 "assigned_anchor_ids": [
@@ -328,6 +665,7 @@
                 "output_cue_count": 36,
                 "rule": "overlap_half_open"
               },
+              "declared_cache_hit": null,
               "glossary": {
                 "exact_match_terms": 3,
                 "expected": 3,
@@ -382,7 +720,6 @@
             },
             "case_id": "lb4-clip002-short-proper-nouns",
             "cold": {
-              "cache_hit": false,
               "cer": 0.13870967741935483,
               "cue": {
                 "assigned_anchor_ids": [
@@ -402,6 +739,7 @@
                 "output_cue_count": 7,
                 "rule": "overlap_half_open"
               },
+              "declared_cache_hit": false,
               "glossary": {
                 "exact_match_terms": 2,
                 "expected": 3,
@@ -449,20 +787,19 @@
                 "term_count": 3
               },
               "levenshtein": 43,
-              "peak_memory_bytes": 903921664,
+              "peak_memory_bytes": 908165120,
               "run_kind": "cold",
               "status": "ok",
-              "wall_time_ms": 2149
+              "wall_time_ms": 2263
             },
             "cold_output": {
               "bytes": 59029,
-              "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/cold-final3/whisper/lb4-clip002-short-proper-nouns/cold.json",
+              "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/cold-audit-apply/whisper/lb4-clip002-short-proper-nouns/cold.json",
               "sha256": "c81341873032e831e19d78831dcdefa6f207a7e792b386f057e1e92d0081a62d"
             },
             "cold_warm_output_sha_equal": true,
             "relative_cer_improvement": 0.8634920634920635,
             "warm": {
-              "cache_hit": true,
               "cer": 0.13870967741935483,
               "cue": {
                 "assigned_anchor_ids": [
@@ -482,6 +819,7 @@
                 "output_cue_count": 7,
                 "rule": "overlap_half_open"
               },
+              "declared_cache_hit": true,
               "glossary": {
                 "exact_match_terms": 2,
                 "expected": 3,
@@ -529,20 +867,19 @@
                 "term_count": 3
               },
               "levenshtein": 43,
-              "peak_memory_bytes": 903118848,
+              "peak_memory_bytes": 902742016,
               "run_kind": "warm",
               "status": "ok",
-              "wall_time_ms": 2149
+              "wall_time_ms": 2165
             },
             "warm_output": {
               "bytes": 59029,
-              "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/warm-final3/whisper/lb4-clip002-short-proper-nouns/warm.json",
+              "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/warm-audit-apply/whisper/lb4-clip002-short-proper-nouns/warm.json",
               "sha256": "c81341873032e831e19d78831dcdefa6f207a7e792b386f057e1e92d0081a62d"
             }
           },
           {
             "baseline": {
-              "cache_hit": null,
               "cer": 0.6160220994475138,
               "cue": {
                 "assigned_anchor_ids": [
@@ -562,6 +899,7 @@
                 "output_cue_count": 41,
                 "rule": "overlap_half_open"
               },
+              "declared_cache_hit": null,
               "glossary": {
                 "exact_match_terms": 1,
                 "expected": 5,
@@ -640,7 +978,6 @@
             },
             "case_id": "mkw-long-local-asr",
             "cold": {
-              "cache_hit": false,
               "cer": 0.38950276243093923,
               "cue": {
                 "assigned_anchor_ids": [
@@ -660,6 +997,7 @@
                 "output_cue_count": 33,
                 "rule": "overlap_half_open"
               },
+              "declared_cache_hit": false,
               "glossary": {
                 "exact_match_terms": 1,
                 "expected": 5,
@@ -731,20 +1069,19 @@
                 "term_count": 5
               },
               "levenshtein": 141,
-              "peak_memory_bytes": 926728192,
+              "peak_memory_bytes": 930381824,
               "run_kind": "cold",
               "status": "ok",
-              "wall_time_ms": 5170
+              "wall_time_ms": 5169
             },
             "cold_output": {
               "bytes": 90420,
-              "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/cold-final3/whisper/mkw-long-local-asr/cold.json",
+              "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/cold-audit-apply/whisper/mkw-long-local-asr/cold.json",
               "sha256": "ac420f3efa30a4446de6e36c99ec86230b40a3a63a38f80a0e2d5429963a44b0"
             },
             "cold_warm_output_sha_equal": true,
             "relative_cer_improvement": 0.36771300448430494,
             "warm": {
-              "cache_hit": true,
               "cer": 0.38950276243093923,
               "cue": {
                 "assigned_anchor_ids": [
@@ -764,6 +1101,7 @@
                 "output_cue_count": 33,
                 "rule": "overlap_half_open"
               },
+              "declared_cache_hit": true,
               "glossary": {
                 "exact_match_terms": 1,
                 "expected": 5,
@@ -835,20 +1173,19 @@
                 "term_count": 5
               },
               "levenshtein": 141,
-              "peak_memory_bytes": 932773888,
+              "peak_memory_bytes": 933560320,
               "run_kind": "warm",
               "status": "ok",
-              "wall_time_ms": 5171
+              "wall_time_ms": 5183
             },
             "warm_output": {
               "bytes": 90420,
-              "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/warm-final3/whisper/mkw-long-local-asr/warm.json",
+              "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/warm-audit-apply/whisper/mkw-long-local-asr/warm.json",
               "sha256": "ac420f3efa30a4446de6e36c99ec86230b40a3a63a38f80a0e2d5429963a44b0"
             }
           },
           {
             "baseline": {
-              "cache_hit": null,
               "cer": 0.7970085470085471,
               "cue": {
                 "assigned_anchor_ids": [
@@ -867,6 +1204,7 @@
                 "output_cue_count": 57,
                 "rule": "overlap_half_open"
               },
+              "declared_cache_hit": null,
               "glossary": {
                 "exact_match_terms": 3,
                 "expected": 7,
@@ -969,7 +1307,6 @@
             },
             "case_id": "cgal-proper-nouns",
             "cold": {
-              "cache_hit": false,
               "cer": 0.1388888888888889,
               "cue": {
                 "assigned_anchor_ids": [
@@ -988,6 +1325,7 @@
                 "output_cue_count": 18,
                 "rule": "overlap_half_open"
               },
+              "declared_cache_hit": false,
               "glossary": {
                 "exact_match_terms": 6,
                 "expected": 7,
@@ -1083,20 +1421,19 @@
                 "term_count": 7
               },
               "levenshtein": 65,
-              "peak_memory_bytes": 919830528,
+              "peak_memory_bytes": 923729920,
               "run_kind": "cold",
               "status": "ok",
-              "wall_time_ms": 4300
+              "wall_time_ms": 4310
             },
             "cold_output": {
               "bytes": 97304,
-              "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/cold-final3/whisper/cgal-proper-nouns/cold.json",
+              "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/cold-audit-apply/whisper/cgal-proper-nouns/cold.json",
               "sha256": "de267dee31466642360c4072cb7227b578f6fbb41353547862d3391239294e5b"
             },
             "cold_warm_output_sha_equal": true,
             "relative_cer_improvement": 0.8257372654155497,
             "warm": {
-              "cache_hit": true,
               "cer": 0.1388888888888889,
               "cue": {
                 "assigned_anchor_ids": [
@@ -1115,6 +1452,7 @@
                 "output_cue_count": 18,
                 "rule": "overlap_half_open"
               },
+              "declared_cache_hit": true,
               "glossary": {
                 "exact_match_terms": 6,
                 "expected": 7,
@@ -1210,20 +1548,19 @@
                 "term_count": 7
               },
               "levenshtein": 65,
-              "peak_memory_bytes": 918978560,
+              "peak_memory_bytes": 923303936,
               "run_kind": "warm",
               "status": "ok",
-              "wall_time_ms": 4307
+              "wall_time_ms": 4334
             },
             "warm_output": {
               "bytes": 97304,
-              "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/warm-final3/whisper/cgal-proper-nouns/warm.json",
+              "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/warm-audit-apply/whisper/cgal-proper-nouns/warm.json",
               "sha256": "de267dee31466642360c4072cb7227b578f6fbb41353547862d3391239294e5b"
             }
           },
           {
             "baseline": {
-              "cache_hit": null,
               "cer": 0.75,
               "cue": {
                 "assigned_anchor_ids": [
@@ -1241,6 +1578,7 @@
                 "output_cue_count": 25,
                 "rule": "overlap_half_open"
               },
+              "declared_cache_hit": null,
               "glossary": {
                 "exact_match_terms": 3,
                 "expected": 4,
@@ -1307,7 +1645,6 @@
             },
             "case_id": "hpe-audio-variation",
             "cold": {
-              "cache_hit": false,
               "cer": 0.18888888888888888,
               "cue": {
                 "assigned_anchor_ids": [
@@ -1325,6 +1662,7 @@
                 "output_cue_count": 7,
                 "rule": "overlap_half_open"
               },
+              "declared_cache_hit": false,
               "glossary": {
                 "exact_match_terms": 4,
                 "expected": 4,
@@ -1384,20 +1722,19 @@
                 "term_count": 4
               },
               "levenshtein": 34,
-              "peak_memory_bytes": 920928256,
+              "peak_memory_bytes": 916389888,
               "run_kind": "cold",
               "status": "ok",
-              "wall_time_ms": 2914
+              "wall_time_ms": 2921
             },
             "cold_output": {
               "bytes": 44577,
-              "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/cold-final3/whisper/hpe-audio-variation/cold.json",
+              "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/cold-audit-apply/whisper/hpe-audio-variation/cold.json",
               "sha256": "168e3a22ec89d5e3e8e0e9039c3f5a99c3a5f6d6939c96f76c238ea3a8394562"
             },
             "cold_warm_output_sha_equal": true,
             "relative_cer_improvement": 0.7481481481481481,
             "warm": {
-              "cache_hit": true,
               "cer": 0.18888888888888888,
               "cue": {
                 "assigned_anchor_ids": [
@@ -1415,6 +1752,7 @@
                 "output_cue_count": 7,
                 "rule": "overlap_half_open"
               },
+              "declared_cache_hit": true,
               "glossary": {
                 "exact_match_terms": 4,
                 "expected": 4,
@@ -1474,14 +1812,14 @@
                 "term_count": 4
               },
               "levenshtein": 34,
-              "peak_memory_bytes": 915062784,
+              "peak_memory_bytes": 915439616,
               "run_kind": "warm",
               "status": "ok",
-              "wall_time_ms": 2915
+              "wall_time_ms": 2928
             },
             "warm_output": {
               "bytes": 44577,
-              "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/warm-final3/whisper/hpe-audio-variation/warm.json",
+              "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/warm-audit-apply/whisper/hpe-audio-variation/warm.json",
               "sha256": "168e3a22ec89d5e3e8e0e9039c3f5a99c3a5f6d6939c96f76c238ea3a8394562"
             }
           }
@@ -1528,12 +1866,259 @@
         "output_stable_cold_warm": true,
         "paired_median_relative_cer_improvement": 0.7869427067818489
       },
+      "raw_identity": {
+        "all_case_runs_ok": true,
+        "cold": {
+          "all_case_runs_ok": true,
+          "benchmark_id": "s9-1-20260803",
+          "case_count": 4,
+          "inputs": [
+            {
+              "bytes": 353340,
+              "case_id": "lb4-clip002-short-proper-nouns",
+              "kind": "baseline_vtt",
+              "path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/LB4px1wRFnY/subtitles/ja.vtt",
+              "sha256": "cc6d7fe8f89ffe3ae22f411ece80dcba7c9ab48f96b90b13fa21e7b4216c3fb2"
+            },
+            {
+              "bytes": 1818958,
+              "case_id": "lb4-clip002-short-proper-nouns",
+              "kind": "audio",
+              "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/LB4px1wRFnY-2853160-2910000.wav",
+              "sha256": "da80cdd933fb8738dc6ee7aa980b8ca64a4f8143d5fcbf7a971b058adb5c4687"
+            },
+            {
+              "bytes": 334317,
+              "case_id": "mkw-long-local-asr",
+              "kind": "baseline_vtt",
+              "path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/mKwn-93gg90/subtitles/ja.vtt",
+              "sha256": "402f98815be4a087802b3a6314c19a37660392a63cc1611ab0f2eb71e953971c"
+            },
+            {
+              "bytes": 5760114,
+              "case_id": "mkw-long-local-asr",
+              "kind": "audio",
+              "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/mKwn-93gg90-1120-1300.16k.wav",
+              "sha256": "aa8cd9dd543a3e6b84c25319aeed2c8fdc7bf1761aa45dcade65db179977d4ba"
+            },
+            {
+              "bytes": 586766,
+              "case_id": "cgal-proper-nouns",
+              "kind": "baseline_vtt",
+              "path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/CGalA8SISPE/subtitles/ja.vtt",
+              "sha256": "0d5a200a43a5325dc4799a45f4c23fc6580a140e5d56f2f188e542f72b269676"
+            },
+            {
+              "bytes": 3840102,
+              "case_id": "cgal-proper-nouns",
+              "kind": "audio",
+              "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/CGalA8SISPE-4220-4340.16k.wav",
+              "sha256": "b3341ee5bbe1288e9919eacb3b94c4aa7fb49001dfd9d5ee8f39a48736e427ba"
+            },
+            {
+              "bytes": 852527,
+              "case_id": "hpe-audio-variation",
+              "kind": "baseline_vtt",
+              "path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/hPeRSA9YVIM/subtitles/ja.vtt",
+              "sha256": "d9baff5fff1d4851584d5c2526a85efc6a35e2ac8a5639f5e897028aab45b7fd"
+            },
+            {
+              "bytes": 2880078,
+              "case_id": "hpe-audio-variation",
+              "kind": "audio",
+              "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/hPeRSA9YVIM-8640-8730.16k.wav",
+              "sha256": "1eb008e4a05f87877304474f9d65c4b22658a384ea84e6bff2165ff2b9f5d18e"
+            }
+          ],
+          "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/cold-audit-apply/report.json",
+          "run_kind": "cold",
+          "run_manifest_fingerprint": "a25d0fbc8233a1db7f0c2ecbb332781b19e5fd5b31260a5b0b2d03be7270de5e",
+          "runtime_identity": {
+            "binary_fingerprint": {
+              "bytes": 658608,
+              "path": "/opt/homebrew/bin/whisper-cli",
+              "sha256": "1fbabb51a45906bd36684695de9025eab63618a6eedc26971c47fa5affc5fe49"
+            },
+            "binary_path": "/opt/homebrew/bin/whisper-cli",
+            "output_schema": "whisper-cli-json-full-v1",
+            "settings": {
+              "decode": {
+                "beam_size": 5,
+                "best_of": 5,
+                "no_fallback": false,
+                "processors": 1,
+                "temperature": 0.0,
+                "threads": 8,
+                "vad": false
+              },
+              "initial_prompt": "日本語のライブ配信。固有名詞は Claude、Codex、Whisper、Ollama、Together AI、DirectX、Microsoft、Windows、Steam、DX12、iMac、Apple II、HHKB、macOS を含む。",
+              "language": "ja",
+              "output_schema": "whisper-cli-json-full-v1",
+              "padding_ms": 0
+            },
+            "timeout_sec": 180.0,
+            "version": "1.9.1"
+          },
+          "runtime_report": {
+            "binary_fingerprint": {
+              "bytes": 658608,
+              "path": "/opt/homebrew/bin/whisper-cli",
+              "sha256": "1fbabb51a45906bd36684695de9025eab63618a6eedc26971c47fa5affc5fe49"
+            },
+            "binary_path": "/opt/homebrew/bin/whisper-cli",
+            "build": "unknown",
+            "capabilities": [],
+            "output_schema": "whisper-cli-json-full-v1",
+            "settings": {
+              "decode": {
+                "beam_size": 5,
+                "best_of": 5,
+                "no_fallback": false,
+                "processors": 1,
+                "temperature": 0.0,
+                "threads": 8,
+                "vad": false
+              },
+              "initial_prompt": "日本語のライブ配信。固有名詞は Claude、Codex、Whisper、Ollama、Together AI、DirectX、Microsoft、Windows、Steam、DX12、iMac、Apple II、HHKB、macOS を含む。",
+              "language": "ja",
+              "output_schema": "whisper-cli-json-full-v1",
+              "padding_ms": 0
+            },
+            "timeout_sec": 180.0,
+            "version": "1.9.1"
+          },
+          "schema": "s9-1-benchmark-report-v1"
+        },
+        "input_fingerprints_equal": true,
+        "run_manifest_fingerprint_equal": true,
+        "runtime_identity_equal": true,
+        "warm": {
+          "all_case_runs_ok": true,
+          "benchmark_id": "s9-1-20260803",
+          "case_count": 4,
+          "inputs": [
+            {
+              "bytes": 353340,
+              "case_id": "lb4-clip002-short-proper-nouns",
+              "kind": "baseline_vtt",
+              "path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/LB4px1wRFnY/subtitles/ja.vtt",
+              "sha256": "cc6d7fe8f89ffe3ae22f411ece80dcba7c9ab48f96b90b13fa21e7b4216c3fb2"
+            },
+            {
+              "bytes": 1818958,
+              "case_id": "lb4-clip002-short-proper-nouns",
+              "kind": "audio",
+              "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/LB4px1wRFnY-2853160-2910000.wav",
+              "sha256": "da80cdd933fb8738dc6ee7aa980b8ca64a4f8143d5fcbf7a971b058adb5c4687"
+            },
+            {
+              "bytes": 334317,
+              "case_id": "mkw-long-local-asr",
+              "kind": "baseline_vtt",
+              "path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/mKwn-93gg90/subtitles/ja.vtt",
+              "sha256": "402f98815be4a087802b3a6314c19a37660392a63cc1611ab0f2eb71e953971c"
+            },
+            {
+              "bytes": 5760114,
+              "case_id": "mkw-long-local-asr",
+              "kind": "audio",
+              "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/mKwn-93gg90-1120-1300.16k.wav",
+              "sha256": "aa8cd9dd543a3e6b84c25319aeed2c8fdc7bf1761aa45dcade65db179977d4ba"
+            },
+            {
+              "bytes": 586766,
+              "case_id": "cgal-proper-nouns",
+              "kind": "baseline_vtt",
+              "path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/CGalA8SISPE/subtitles/ja.vtt",
+              "sha256": "0d5a200a43a5325dc4799a45f4c23fc6580a140e5d56f2f188e542f72b269676"
+            },
+            {
+              "bytes": 3840102,
+              "case_id": "cgal-proper-nouns",
+              "kind": "audio",
+              "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/CGalA8SISPE-4220-4340.16k.wav",
+              "sha256": "b3341ee5bbe1288e9919eacb3b94c4aa7fb49001dfd9d5ee8f39a48736e427ba"
+            },
+            {
+              "bytes": 852527,
+              "case_id": "hpe-audio-variation",
+              "kind": "baseline_vtt",
+              "path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/hPeRSA9YVIM/subtitles/ja.vtt",
+              "sha256": "d9baff5fff1d4851584d5c2526a85efc6a35e2ac8a5639f5e897028aab45b7fd"
+            },
+            {
+              "bytes": 2880078,
+              "case_id": "hpe-audio-variation",
+              "kind": "audio",
+              "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/hPeRSA9YVIM-8640-8730.16k.wav",
+              "sha256": "1eb008e4a05f87877304474f9d65c4b22658a384ea84e6bff2165ff2b9f5d18e"
+            }
+          ],
+          "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/warm-audit-apply/report.json",
+          "run_kind": "warm",
+          "run_manifest_fingerprint": "a25d0fbc8233a1db7f0c2ecbb332781b19e5fd5b31260a5b0b2d03be7270de5e",
+          "runtime_identity": {
+            "binary_fingerprint": {
+              "bytes": 658608,
+              "path": "/opt/homebrew/bin/whisper-cli",
+              "sha256": "1fbabb51a45906bd36684695de9025eab63618a6eedc26971c47fa5affc5fe49"
+            },
+            "binary_path": "/opt/homebrew/bin/whisper-cli",
+            "output_schema": "whisper-cli-json-full-v1",
+            "settings": {
+              "decode": {
+                "beam_size": 5,
+                "best_of": 5,
+                "no_fallback": false,
+                "processors": 1,
+                "temperature": 0.0,
+                "threads": 8,
+                "vad": false
+              },
+              "initial_prompt": "日本語のライブ配信。固有名詞は Claude、Codex、Whisper、Ollama、Together AI、DirectX、Microsoft、Windows、Steam、DX12、iMac、Apple II、HHKB、macOS を含む。",
+              "language": "ja",
+              "output_schema": "whisper-cli-json-full-v1",
+              "padding_ms": 0
+            },
+            "timeout_sec": 180.0,
+            "version": "1.9.1"
+          },
+          "runtime_report": {
+            "binary_fingerprint": {
+              "bytes": 658608,
+              "path": "/opt/homebrew/bin/whisper-cli",
+              "sha256": "1fbabb51a45906bd36684695de9025eab63618a6eedc26971c47fa5affc5fe49"
+            },
+            "binary_path": "/opt/homebrew/bin/whisper-cli",
+            "build": "unknown",
+            "capabilities": [],
+            "output_schema": "whisper-cli-json-full-v1",
+            "settings": {
+              "decode": {
+                "beam_size": 5,
+                "best_of": 5,
+                "no_fallback": false,
+                "processors": 1,
+                "temperature": 0.0,
+                "threads": 8,
+                "vad": false
+              },
+              "initial_prompt": "日本語のライブ配信。固有名詞は Claude、Codex、Whisper、Ollama、Together AI、DirectX、Microsoft、Windows、Steam、DX12、iMac、Apple II、HHKB、macOS を含む。",
+              "language": "ja",
+              "output_schema": "whisper-cli-json-full-v1",
+              "padding_ms": 0
+            },
+            "timeout_sec": 180.0,
+            "version": "1.9.1"
+          },
+          "schema": "s9-1-benchmark-report-v1"
+        }
+      },
       "run_manifest_fingerprint": "a25d0fbc8233a1db7f0c2ecbb332781b19e5fd5b31260a5b0b2d03be7270de5e",
       "runs": {
         "cold": {
           "cases": [
             {
-              "cache_hit": false,
               "cer": 0.13870967741935483,
               "cue": {
                 "assigned_anchor_ids": [
@@ -1553,6 +2138,7 @@
                 "output_cue_count": 7,
                 "rule": "overlap_half_open"
               },
+              "declared_cache_hit": false,
               "glossary": {
                 "exact_match_terms": 2,
                 "expected": 3,
@@ -1600,13 +2186,12 @@
                 "term_count": 3
               },
               "levenshtein": 43,
-              "peak_memory_bytes": 903921664,
+              "peak_memory_bytes": 908165120,
               "run_kind": "cold",
               "status": "ok",
-              "wall_time_ms": 2149
+              "wall_time_ms": 2263
             },
             {
-              "cache_hit": false,
               "cer": 0.38950276243093923,
               "cue": {
                 "assigned_anchor_ids": [
@@ -1626,6 +2211,7 @@
                 "output_cue_count": 33,
                 "rule": "overlap_half_open"
               },
+              "declared_cache_hit": false,
               "glossary": {
                 "exact_match_terms": 1,
                 "expected": 5,
@@ -1697,13 +2283,12 @@
                 "term_count": 5
               },
               "levenshtein": 141,
-              "peak_memory_bytes": 926728192,
+              "peak_memory_bytes": 930381824,
               "run_kind": "cold",
               "status": "ok",
-              "wall_time_ms": 5170
+              "wall_time_ms": 5169
             },
             {
-              "cache_hit": false,
               "cer": 0.1388888888888889,
               "cue": {
                 "assigned_anchor_ids": [
@@ -1722,6 +2307,7 @@
                 "output_cue_count": 18,
                 "rule": "overlap_half_open"
               },
+              "declared_cache_hit": false,
               "glossary": {
                 "exact_match_terms": 6,
                 "expected": 7,
@@ -1817,13 +2403,12 @@
                 "term_count": 7
               },
               "levenshtein": 65,
-              "peak_memory_bytes": 919830528,
+              "peak_memory_bytes": 923729920,
               "run_kind": "cold",
               "status": "ok",
-              "wall_time_ms": 4300
+              "wall_time_ms": 4310
             },
             {
-              "cache_hit": false,
               "cer": 0.18888888888888888,
               "cue": {
                 "assigned_anchor_ids": [
@@ -1841,6 +2426,7 @@
                 "output_cue_count": 7,
                 "rule": "overlap_half_open"
               },
+              "declared_cache_hit": false,
               "glossary": {
                 "exact_match_terms": 4,
                 "expected": 4,
@@ -1900,18 +2486,17 @@
                 "term_count": 4
               },
               "levenshtein": 34,
-              "peak_memory_bytes": 920928256,
+              "peak_memory_bytes": 916389888,
               "run_kind": "cold",
               "status": "ok",
-              "wall_time_ms": 2914
+              "wall_time_ms": 2921
             }
           ],
-          "report_path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/cold-final3/report.json"
+          "report_path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/cold-audit-apply/report.json"
         },
         "warm": {
           "cases": [
             {
-              "cache_hit": true,
               "cer": 0.13870967741935483,
               "cue": {
                 "assigned_anchor_ids": [
@@ -1931,6 +2516,7 @@
                 "output_cue_count": 7,
                 "rule": "overlap_half_open"
               },
+              "declared_cache_hit": true,
               "glossary": {
                 "exact_match_terms": 2,
                 "expected": 3,
@@ -1978,13 +2564,12 @@
                 "term_count": 3
               },
               "levenshtein": 43,
-              "peak_memory_bytes": 903118848,
+              "peak_memory_bytes": 902742016,
               "run_kind": "warm",
               "status": "ok",
-              "wall_time_ms": 2149
+              "wall_time_ms": 2165
             },
             {
-              "cache_hit": true,
               "cer": 0.38950276243093923,
               "cue": {
                 "assigned_anchor_ids": [
@@ -2004,6 +2589,7 @@
                 "output_cue_count": 33,
                 "rule": "overlap_half_open"
               },
+              "declared_cache_hit": true,
               "glossary": {
                 "exact_match_terms": 1,
                 "expected": 5,
@@ -2075,13 +2661,12 @@
                 "term_count": 5
               },
               "levenshtein": 141,
-              "peak_memory_bytes": 932773888,
+              "peak_memory_bytes": 933560320,
               "run_kind": "warm",
               "status": "ok",
-              "wall_time_ms": 5171
+              "wall_time_ms": 5183
             },
             {
-              "cache_hit": true,
               "cer": 0.1388888888888889,
               "cue": {
                 "assigned_anchor_ids": [
@@ -2100,6 +2685,7 @@
                 "output_cue_count": 18,
                 "rule": "overlap_half_open"
               },
+              "declared_cache_hit": true,
               "glossary": {
                 "exact_match_terms": 6,
                 "expected": 7,
@@ -2195,13 +2781,12 @@
                 "term_count": 7
               },
               "levenshtein": 65,
-              "peak_memory_bytes": 918978560,
+              "peak_memory_bytes": 923303936,
               "run_kind": "warm",
               "status": "ok",
-              "wall_time_ms": 4307
+              "wall_time_ms": 4334
             },
             {
-              "cache_hit": true,
               "cer": 0.18888888888888888,
               "cue": {
                 "assigned_anchor_ids": [
@@ -2219,6 +2804,7 @@
                 "output_cue_count": 7,
                 "rule": "overlap_half_open"
               },
+              "declared_cache_hit": true,
               "glossary": {
                 "exact_match_terms": 4,
                 "expected": 4,
@@ -2278,13 +2864,13 @@
                 "term_count": 4
               },
               "levenshtein": 34,
-              "peak_memory_bytes": 915062784,
+              "peak_memory_bytes": 915439616,
               "run_kind": "warm",
               "status": "ok",
-              "wall_time_ms": 2915
+              "wall_time_ms": 2928
             }
           ],
-          "report_path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/warm-final3/report.json"
+          "report_path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/warm-audit-apply/report.json"
         }
       },
       "settings_contract": {
@@ -2317,23 +2903,26 @@
     {
       "distribution_url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin?download=true",
       "gates": {
-        "go": false,
+        "effective_gates_passed": true,
+        "go": true,
         "gold_audit": {
+          "definition": "character and punctuation exactness, glossary exact approval, and cue anchor exact milliseconds are not claimed by the natural-language audit",
           "passed": false,
-          "status": "provisional"
+          "required_for_selected_mode": false,
+          "status": "not_claimed"
         },
         "peak_memory": {
           "budget_bytes": 8589934592,
           "passed": true,
           "values_bytes": [
-            2002157568,
-            2017689600,
-            2006564864,
-            2005254144,
-            2000257024,
-            2012233728,
-            2007891968,
-            2009677824
+            2001256448,
+            2017837056,
+            2009055232,
+            2003910656,
+            2000175104,
+            2011807744,
+            2003746816,
+            2003730432
           ]
         },
         "quality": {
@@ -2349,12 +2938,14 @@
             "value": 0.8084599344652964
           }
         },
-        "reasons": [
-          {
-            "code": "gold_not_audited",
-            "message": "gold は音声の独立人手監査前であり、fail closed です。"
-          }
-        ],
+        "reasons": [],
+        "reproducibility": {
+          "cold_warm_output_sha_equal": true,
+          "definition": "raw case runs must succeed and cold/warm JSON output SHA-256 must match; this is an integrity check, not a numeric threshold",
+          "numeric_threshold_changed": false,
+          "passed": true,
+          "raw_case_runs_ok": true
+        },
         "source_gate_report": {
           "reasons": [
             {
@@ -2364,8 +2955,14 @@
           ],
           "status": "no_go"
         },
-        "status": "no_go",
+        "status": "go",
         "technical_gates_passed": true,
+        "transcript_operational_reference": {
+          "audit_fingerprint": "9c1fdca9e1c5b70bd40d84a219a81dedca976e70447d42e2523e2fc4b16cc263",
+          "definition": "all four displayed provisional transcripts were human reviewed with no material issue reported; this is operational evidence, not exact gold",
+          "passed": true,
+          "status": "accepted_operational_benchmark_reference"
+        },
         "wall_time": {
           "checks": [
             {
@@ -2373,56 +2970,56 @@
               "case_id": "lb4-clip002-short-proper-nouns",
               "passed": true,
               "run_kind": "cold",
-              "value_ms": 2268
+              "value_ms": 2238
             },
             {
               "budget_ms": 120000,
               "case_id": "lb4-clip002-short-proper-nouns",
               "passed": true,
               "run_kind": "warm",
-              "value_ms": 2259
+              "value_ms": 2229
             },
             {
               "budget_ms": 180000,
               "case_id": "mkw-long-local-asr",
               "passed": true,
               "run_kind": "cold",
-              "value_ms": 5622
+              "value_ms": 5616
             },
             {
               "budget_ms": 120000,
               "case_id": "mkw-long-local-asr",
               "passed": true,
               "run_kind": "warm",
-              "value_ms": 5629
+              "value_ms": 5650
             },
             {
               "budget_ms": 180000,
               "case_id": "cgal-proper-nouns",
               "passed": true,
               "run_kind": "cold",
-              "value_ms": 4234
+              "value_ms": 4221
             },
             {
               "budget_ms": 120000,
               "case_id": "cgal-proper-nouns",
               "passed": true,
               "run_kind": "warm",
-              "value_ms": 4239
+              "value_ms": 4217
             },
             {
               "budget_ms": 180000,
               "case_id": "hpe-audio-variation",
               "passed": true,
               "run_kind": "cold",
-              "value_ms": 2965
+              "value_ms": 2939
             },
             {
               "budget_ms": 120000,
               "case_id": "hpe-audio-variation",
               "passed": true,
               "run_kind": "warm",
-              "value_ms": 2965
+              "value_ms": 2978
             }
           ],
           "passed": true
@@ -2438,7 +3035,6 @@
         "cases": [
           {
             "baseline": {
-              "cache_hit": null,
               "cer": 1.0161290322580645,
               "cue": {
                 "assigned_anchor_ids": [
@@ -2457,6 +3053,7 @@
                 "output_cue_count": 36,
                 "rule": "overlap_half_open"
               },
+              "declared_cache_hit": null,
               "glossary": {
                 "exact_match_terms": 3,
                 "expected": 3,
@@ -2511,7 +3108,6 @@
             },
             "case_id": "lb4-clip002-short-proper-nouns",
             "cold": {
-              "cache_hit": false,
               "cer": 0.1,
               "cue": {
                 "assigned_anchor_ids": [
@@ -2531,6 +3127,7 @@
                 "output_cue_count": 6,
                 "rule": "overlap_half_open"
               },
+              "declared_cache_hit": false,
               "glossary": {
                 "exact_match_terms": 2,
                 "expected": 3,
@@ -2578,20 +3175,19 @@
                 "term_count": 3
               },
               "levenshtein": 31,
-              "peak_memory_bytes": 2002157568,
+              "peak_memory_bytes": 2001256448,
               "run_kind": "cold",
               "status": "ok",
-              "wall_time_ms": 2268
+              "wall_time_ms": 2238
             },
             "cold_output": {
               "bytes": 57432,
-              "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/turbo/cold-final3/whisper/lb4-clip002-short-proper-nouns/cold.json",
+              "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/turbo/cold-audit-apply/whisper/lb4-clip002-short-proper-nouns/cold.json",
               "sha256": "0413a091d3ba834d89834ffdbb0b64d0707ced9f27a2fef9f99d86e273d24a7f"
             },
             "cold_warm_output_sha_equal": true,
             "relative_cer_improvement": 0.9015873015873016,
             "warm": {
-              "cache_hit": true,
               "cer": 0.1,
               "cue": {
                 "assigned_anchor_ids": [
@@ -2611,6 +3207,7 @@
                 "output_cue_count": 6,
                 "rule": "overlap_half_open"
               },
+              "declared_cache_hit": true,
               "glossary": {
                 "exact_match_terms": 2,
                 "expected": 3,
@@ -2658,20 +3255,19 @@
                 "term_count": 3
               },
               "levenshtein": 31,
-              "peak_memory_bytes": 2000257024,
+              "peak_memory_bytes": 2000175104,
               "run_kind": "warm",
               "status": "ok",
-              "wall_time_ms": 2259
+              "wall_time_ms": 2229
             },
             "warm_output": {
               "bytes": 57432,
-              "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/turbo/warm-final3/whisper/lb4-clip002-short-proper-nouns/warm.json",
+              "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/turbo/warm-audit-apply/whisper/lb4-clip002-short-proper-nouns/warm.json",
               "sha256": "0413a091d3ba834d89834ffdbb0b64d0707ced9f27a2fef9f99d86e273d24a7f"
             }
           },
           {
             "baseline": {
-              "cache_hit": null,
               "cer": 0.6160220994475138,
               "cue": {
                 "assigned_anchor_ids": [
@@ -2691,6 +3287,7 @@
                 "output_cue_count": 41,
                 "rule": "overlap_half_open"
               },
+              "declared_cache_hit": null,
               "glossary": {
                 "exact_match_terms": 1,
                 "expected": 5,
@@ -2769,7 +3366,6 @@
             },
             "case_id": "mkw-long-local-asr",
             "cold": {
-              "cache_hit": false,
               "cer": 0.4696132596685083,
               "cue": {
                 "assigned_anchor_ids": [
@@ -2789,6 +3385,7 @@
                 "output_cue_count": 31,
                 "rule": "overlap_half_open"
               },
+              "declared_cache_hit": false,
               "glossary": {
                 "exact_match_terms": 1,
                 "expected": 5,
@@ -2860,20 +3457,19 @@
                 "term_count": 5
               },
               "levenshtein": 170,
-              "peak_memory_bytes": 2017689600,
+              "peak_memory_bytes": 2017837056,
               "run_kind": "cold",
               "status": "ok",
-              "wall_time_ms": 5622
+              "wall_time_ms": 5616
             },
             "cold_output": {
               "bytes": 94909,
-              "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/turbo/cold-final3/whisper/mkw-long-local-asr/cold.json",
+              "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/turbo/cold-audit-apply/whisper/mkw-long-local-asr/cold.json",
               "sha256": "f7deda132b560285c965edb2c21433c7aa7f8deca2b0163b8b75e5c5e19dfe52"
             },
             "cold_warm_output_sha_equal": true,
             "relative_cer_improvement": 0.2376681614349776,
             "warm": {
-              "cache_hit": true,
               "cer": 0.4696132596685083,
               "cue": {
                 "assigned_anchor_ids": [
@@ -2893,6 +3489,7 @@
                 "output_cue_count": 31,
                 "rule": "overlap_half_open"
               },
+              "declared_cache_hit": true,
               "glossary": {
                 "exact_match_terms": 1,
                 "expected": 5,
@@ -2964,20 +3561,19 @@
                 "term_count": 5
               },
               "levenshtein": 170,
-              "peak_memory_bytes": 2012233728,
+              "peak_memory_bytes": 2011807744,
               "run_kind": "warm",
               "status": "ok",
-              "wall_time_ms": 5629
+              "wall_time_ms": 5650
             },
             "warm_output": {
               "bytes": 94909,
-              "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/turbo/warm-final3/whisper/mkw-long-local-asr/warm.json",
+              "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/turbo/warm-audit-apply/whisper/mkw-long-local-asr/warm.json",
               "sha256": "f7deda132b560285c965edb2c21433c7aa7f8deca2b0163b8b75e5c5e19dfe52"
             }
           },
           {
             "baseline": {
-              "cache_hit": null,
               "cer": 0.7970085470085471,
               "cue": {
                 "assigned_anchor_ids": [
@@ -2996,6 +3592,7 @@
                 "output_cue_count": 57,
                 "rule": "overlap_half_open"
               },
+              "declared_cache_hit": null,
               "glossary": {
                 "exact_match_terms": 3,
                 "expected": 7,
@@ -3098,7 +3695,6 @@
             },
             "case_id": "cgal-proper-nouns",
             "cold": {
-              "cache_hit": false,
               "cer": 0.1282051282051282,
               "cue": {
                 "assigned_anchor_ids": [
@@ -3117,6 +3713,7 @@
                 "output_cue_count": 18,
                 "rule": "overlap_half_open"
               },
+              "declared_cache_hit": false,
               "glossary": {
                 "exact_match_terms": 6,
                 "expected": 7,
@@ -3212,20 +3809,19 @@
                 "term_count": 7
               },
               "levenshtein": 60,
-              "peak_memory_bytes": 2006564864,
+              "peak_memory_bytes": 2009055232,
               "run_kind": "cold",
               "status": "ok",
-              "wall_time_ms": 4234
+              "wall_time_ms": 4221
             },
             "cold_output": {
               "bytes": 95849,
-              "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/turbo/cold-final3/whisper/cgal-proper-nouns/cold.json",
+              "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/turbo/cold-audit-apply/whisper/cgal-proper-nouns/cold.json",
               "sha256": "cb986db8877001cece2a179d988e763057a47eeac2061a44d369ed497d38a17b"
             },
             "cold_warm_output_sha_equal": true,
             "relative_cer_improvement": 0.839142091152815,
             "warm": {
-              "cache_hit": true,
               "cer": 0.1282051282051282,
               "cue": {
                 "assigned_anchor_ids": [
@@ -3244,6 +3840,7 @@
                 "output_cue_count": 18,
                 "rule": "overlap_half_open"
               },
+              "declared_cache_hit": true,
               "glossary": {
                 "exact_match_terms": 6,
                 "expected": 7,
@@ -3339,20 +3936,19 @@
                 "term_count": 7
               },
               "levenshtein": 60,
-              "peak_memory_bytes": 2007891968,
+              "peak_memory_bytes": 2003746816,
               "run_kind": "warm",
               "status": "ok",
-              "wall_time_ms": 4239
+              "wall_time_ms": 4217
             },
             "warm_output": {
               "bytes": 95849,
-              "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/turbo/warm-final3/whisper/cgal-proper-nouns/warm.json",
+              "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/turbo/warm-audit-apply/whisper/cgal-proper-nouns/warm.json",
               "sha256": "cb986db8877001cece2a179d988e763057a47eeac2061a44d369ed497d38a17b"
             }
           },
           {
             "baseline": {
-              "cache_hit": null,
               "cer": 0.75,
               "cue": {
                 "assigned_anchor_ids": [
@@ -3370,6 +3966,7 @@
                 "output_cue_count": 25,
                 "rule": "overlap_half_open"
               },
+              "declared_cache_hit": null,
               "glossary": {
                 "exact_match_terms": 3,
                 "expected": 4,
@@ -3436,7 +4033,6 @@
             },
             "case_id": "hpe-audio-variation",
             "cold": {
-              "cache_hit": false,
               "cer": 0.16666666666666666,
               "cue": {
                 "assigned_anchor_ids": [
@@ -3454,6 +4050,7 @@
                 "output_cue_count": 7,
                 "rule": "overlap_half_open"
               },
+              "declared_cache_hit": false,
               "glossary": {
                 "exact_match_terms": 4,
                 "expected": 4,
@@ -3513,20 +4110,19 @@
                 "term_count": 4
               },
               "levenshtein": 30,
-              "peak_memory_bytes": 2005254144,
+              "peak_memory_bytes": 2003910656,
               "run_kind": "cold",
               "status": "ok",
-              "wall_time_ms": 2965
+              "wall_time_ms": 2939
             },
             "cold_output": {
               "bytes": 43815,
-              "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/turbo/cold-final3/whisper/hpe-audio-variation/cold.json",
+              "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/turbo/cold-audit-apply/whisper/hpe-audio-variation/cold.json",
               "sha256": "09daf1eda5997b1f9c1ba42fcb4cc00a5d0708ee44b236824c0bdf54663b26b1"
             },
             "cold_warm_output_sha_equal": true,
             "relative_cer_improvement": 0.7777777777777778,
             "warm": {
-              "cache_hit": true,
               "cer": 0.16666666666666666,
               "cue": {
                 "assigned_anchor_ids": [
@@ -3544,6 +4140,7 @@
                 "output_cue_count": 7,
                 "rule": "overlap_half_open"
               },
+              "declared_cache_hit": true,
               "glossary": {
                 "exact_match_terms": 4,
                 "expected": 4,
@@ -3603,14 +4200,14 @@
                 "term_count": 4
               },
               "levenshtein": 30,
-              "peak_memory_bytes": 2009677824,
+              "peak_memory_bytes": 2003730432,
               "run_kind": "warm",
               "status": "ok",
-              "wall_time_ms": 2965
+              "wall_time_ms": 2978
             },
             "warm_output": {
               "bytes": 43815,
-              "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/turbo/warm-final3/whisper/hpe-audio-variation/warm.json",
+              "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/turbo/warm-audit-apply/whisper/hpe-audio-variation/warm.json",
               "sha256": "09daf1eda5997b1f9c1ba42fcb4cc00a5d0708ee44b236824c0bdf54663b26b1"
             }
           }
@@ -3657,12 +4254,259 @@
         "output_stable_cold_warm": true,
         "paired_median_relative_cer_improvement": 0.8084599344652964
       },
+      "raw_identity": {
+        "all_case_runs_ok": true,
+        "cold": {
+          "all_case_runs_ok": true,
+          "benchmark_id": "s9-1-20260803",
+          "case_count": 4,
+          "inputs": [
+            {
+              "bytes": 353340,
+              "case_id": "lb4-clip002-short-proper-nouns",
+              "kind": "baseline_vtt",
+              "path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/LB4px1wRFnY/subtitles/ja.vtt",
+              "sha256": "cc6d7fe8f89ffe3ae22f411ece80dcba7c9ab48f96b90b13fa21e7b4216c3fb2"
+            },
+            {
+              "bytes": 1818958,
+              "case_id": "lb4-clip002-short-proper-nouns",
+              "kind": "audio",
+              "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/LB4px1wRFnY-2853160-2910000.wav",
+              "sha256": "da80cdd933fb8738dc6ee7aa980b8ca64a4f8143d5fcbf7a971b058adb5c4687"
+            },
+            {
+              "bytes": 334317,
+              "case_id": "mkw-long-local-asr",
+              "kind": "baseline_vtt",
+              "path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/mKwn-93gg90/subtitles/ja.vtt",
+              "sha256": "402f98815be4a087802b3a6314c19a37660392a63cc1611ab0f2eb71e953971c"
+            },
+            {
+              "bytes": 5760114,
+              "case_id": "mkw-long-local-asr",
+              "kind": "audio",
+              "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/mKwn-93gg90-1120-1300.16k.wav",
+              "sha256": "aa8cd9dd543a3e6b84c25319aeed2c8fdc7bf1761aa45dcade65db179977d4ba"
+            },
+            {
+              "bytes": 586766,
+              "case_id": "cgal-proper-nouns",
+              "kind": "baseline_vtt",
+              "path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/CGalA8SISPE/subtitles/ja.vtt",
+              "sha256": "0d5a200a43a5325dc4799a45f4c23fc6580a140e5d56f2f188e542f72b269676"
+            },
+            {
+              "bytes": 3840102,
+              "case_id": "cgal-proper-nouns",
+              "kind": "audio",
+              "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/CGalA8SISPE-4220-4340.16k.wav",
+              "sha256": "b3341ee5bbe1288e9919eacb3b94c4aa7fb49001dfd9d5ee8f39a48736e427ba"
+            },
+            {
+              "bytes": 852527,
+              "case_id": "hpe-audio-variation",
+              "kind": "baseline_vtt",
+              "path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/hPeRSA9YVIM/subtitles/ja.vtt",
+              "sha256": "d9baff5fff1d4851584d5c2526a85efc6a35e2ac8a5639f5e897028aab45b7fd"
+            },
+            {
+              "bytes": 2880078,
+              "case_id": "hpe-audio-variation",
+              "kind": "audio",
+              "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/hPeRSA9YVIM-8640-8730.16k.wav",
+              "sha256": "1eb008e4a05f87877304474f9d65c4b22658a384ea84e6bff2165ff2b9f5d18e"
+            }
+          ],
+          "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/turbo/cold-audit-apply/report.json",
+          "run_kind": "cold",
+          "run_manifest_fingerprint": "9e8e71a6f02f57572ef65c127cf2fa5dfcaa6a7c55c7acf6791ea93d7d3c5ee6",
+          "runtime_identity": {
+            "binary_fingerprint": {
+              "bytes": 658608,
+              "path": "/opt/homebrew/bin/whisper-cli",
+              "sha256": "1fbabb51a45906bd36684695de9025eab63618a6eedc26971c47fa5affc5fe49"
+            },
+            "binary_path": "/opt/homebrew/bin/whisper-cli",
+            "output_schema": "whisper-cli-json-full-v1",
+            "settings": {
+              "decode": {
+                "beam_size": 5,
+                "best_of": 5,
+                "no_fallback": false,
+                "processors": 1,
+                "temperature": 0.0,
+                "threads": 8,
+                "vad": false
+              },
+              "initial_prompt": "日本語のライブ配信。固有名詞は Claude、Codex、Whisper、Ollama、Together AI、DirectX、Microsoft、Windows、Steam、DX12、iMac、Apple II、HHKB、macOS を含む。",
+              "language": "ja",
+              "output_schema": "whisper-cli-json-full-v1",
+              "padding_ms": 0
+            },
+            "timeout_sec": 180.0,
+            "version": "1.9.1"
+          },
+          "runtime_report": {
+            "binary_fingerprint": {
+              "bytes": 658608,
+              "path": "/opt/homebrew/bin/whisper-cli",
+              "sha256": "1fbabb51a45906bd36684695de9025eab63618a6eedc26971c47fa5affc5fe49"
+            },
+            "binary_path": "/opt/homebrew/bin/whisper-cli",
+            "build": "unknown",
+            "capabilities": [],
+            "output_schema": "whisper-cli-json-full-v1",
+            "settings": {
+              "decode": {
+                "beam_size": 5,
+                "best_of": 5,
+                "no_fallback": false,
+                "processors": 1,
+                "temperature": 0.0,
+                "threads": 8,
+                "vad": false
+              },
+              "initial_prompt": "日本語のライブ配信。固有名詞は Claude、Codex、Whisper、Ollama、Together AI、DirectX、Microsoft、Windows、Steam、DX12、iMac、Apple II、HHKB、macOS を含む。",
+              "language": "ja",
+              "output_schema": "whisper-cli-json-full-v1",
+              "padding_ms": 0
+            },
+            "timeout_sec": 180.0,
+            "version": "1.9.1"
+          },
+          "schema": "s9-1-benchmark-report-v1"
+        },
+        "input_fingerprints_equal": true,
+        "run_manifest_fingerprint_equal": true,
+        "runtime_identity_equal": true,
+        "warm": {
+          "all_case_runs_ok": true,
+          "benchmark_id": "s9-1-20260803",
+          "case_count": 4,
+          "inputs": [
+            {
+              "bytes": 353340,
+              "case_id": "lb4-clip002-short-proper-nouns",
+              "kind": "baseline_vtt",
+              "path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/LB4px1wRFnY/subtitles/ja.vtt",
+              "sha256": "cc6d7fe8f89ffe3ae22f411ece80dcba7c9ab48f96b90b13fa21e7b4216c3fb2"
+            },
+            {
+              "bytes": 1818958,
+              "case_id": "lb4-clip002-short-proper-nouns",
+              "kind": "audio",
+              "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/LB4px1wRFnY-2853160-2910000.wav",
+              "sha256": "da80cdd933fb8738dc6ee7aa980b8ca64a4f8143d5fcbf7a971b058adb5c4687"
+            },
+            {
+              "bytes": 334317,
+              "case_id": "mkw-long-local-asr",
+              "kind": "baseline_vtt",
+              "path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/mKwn-93gg90/subtitles/ja.vtt",
+              "sha256": "402f98815be4a087802b3a6314c19a37660392a63cc1611ab0f2eb71e953971c"
+            },
+            {
+              "bytes": 5760114,
+              "case_id": "mkw-long-local-asr",
+              "kind": "audio",
+              "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/mKwn-93gg90-1120-1300.16k.wav",
+              "sha256": "aa8cd9dd543a3e6b84c25319aeed2c8fdc7bf1761aa45dcade65db179977d4ba"
+            },
+            {
+              "bytes": 586766,
+              "case_id": "cgal-proper-nouns",
+              "kind": "baseline_vtt",
+              "path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/CGalA8SISPE/subtitles/ja.vtt",
+              "sha256": "0d5a200a43a5325dc4799a45f4c23fc6580a140e5d56f2f188e542f72b269676"
+            },
+            {
+              "bytes": 3840102,
+              "case_id": "cgal-proper-nouns",
+              "kind": "audio",
+              "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/CGalA8SISPE-4220-4340.16k.wav",
+              "sha256": "b3341ee5bbe1288e9919eacb3b94c4aa7fb49001dfd9d5ee8f39a48736e427ba"
+            },
+            {
+              "bytes": 852527,
+              "case_id": "hpe-audio-variation",
+              "kind": "baseline_vtt",
+              "path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/hPeRSA9YVIM/subtitles/ja.vtt",
+              "sha256": "d9baff5fff1d4851584d5c2526a85efc6a35e2ac8a5639f5e897028aab45b7fd"
+            },
+            {
+              "bytes": 2880078,
+              "case_id": "hpe-audio-variation",
+              "kind": "audio",
+              "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/hPeRSA9YVIM-8640-8730.16k.wav",
+              "sha256": "1eb008e4a05f87877304474f9d65c4b22658a384ea84e6bff2165ff2b9f5d18e"
+            }
+          ],
+          "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/turbo/warm-audit-apply/report.json",
+          "run_kind": "warm",
+          "run_manifest_fingerprint": "9e8e71a6f02f57572ef65c127cf2fa5dfcaa6a7c55c7acf6791ea93d7d3c5ee6",
+          "runtime_identity": {
+            "binary_fingerprint": {
+              "bytes": 658608,
+              "path": "/opt/homebrew/bin/whisper-cli",
+              "sha256": "1fbabb51a45906bd36684695de9025eab63618a6eedc26971c47fa5affc5fe49"
+            },
+            "binary_path": "/opt/homebrew/bin/whisper-cli",
+            "output_schema": "whisper-cli-json-full-v1",
+            "settings": {
+              "decode": {
+                "beam_size": 5,
+                "best_of": 5,
+                "no_fallback": false,
+                "processors": 1,
+                "temperature": 0.0,
+                "threads": 8,
+                "vad": false
+              },
+              "initial_prompt": "日本語のライブ配信。固有名詞は Claude、Codex、Whisper、Ollama、Together AI、DirectX、Microsoft、Windows、Steam、DX12、iMac、Apple II、HHKB、macOS を含む。",
+              "language": "ja",
+              "output_schema": "whisper-cli-json-full-v1",
+              "padding_ms": 0
+            },
+            "timeout_sec": 180.0,
+            "version": "1.9.1"
+          },
+          "runtime_report": {
+            "binary_fingerprint": {
+              "bytes": 658608,
+              "path": "/opt/homebrew/bin/whisper-cli",
+              "sha256": "1fbabb51a45906bd36684695de9025eab63618a6eedc26971c47fa5affc5fe49"
+            },
+            "binary_path": "/opt/homebrew/bin/whisper-cli",
+            "build": "unknown",
+            "capabilities": [],
+            "output_schema": "whisper-cli-json-full-v1",
+            "settings": {
+              "decode": {
+                "beam_size": 5,
+                "best_of": 5,
+                "no_fallback": false,
+                "processors": 1,
+                "temperature": 0.0,
+                "threads": 8,
+                "vad": false
+              },
+              "initial_prompt": "日本語のライブ配信。固有名詞は Claude、Codex、Whisper、Ollama、Together AI、DirectX、Microsoft、Windows、Steam、DX12、iMac、Apple II、HHKB、macOS を含む。",
+              "language": "ja",
+              "output_schema": "whisper-cli-json-full-v1",
+              "padding_ms": 0
+            },
+            "timeout_sec": 180.0,
+            "version": "1.9.1"
+          },
+          "schema": "s9-1-benchmark-report-v1"
+        }
+      },
       "run_manifest_fingerprint": "9e8e71a6f02f57572ef65c127cf2fa5dfcaa6a7c55c7acf6791ea93d7d3c5ee6",
       "runs": {
         "cold": {
           "cases": [
             {
-              "cache_hit": false,
               "cer": 0.1,
               "cue": {
                 "assigned_anchor_ids": [
@@ -3682,6 +4526,7 @@
                 "output_cue_count": 6,
                 "rule": "overlap_half_open"
               },
+              "declared_cache_hit": false,
               "glossary": {
                 "exact_match_terms": 2,
                 "expected": 3,
@@ -3729,13 +4574,12 @@
                 "term_count": 3
               },
               "levenshtein": 31,
-              "peak_memory_bytes": 2002157568,
+              "peak_memory_bytes": 2001256448,
               "run_kind": "cold",
               "status": "ok",
-              "wall_time_ms": 2268
+              "wall_time_ms": 2238
             },
             {
-              "cache_hit": false,
               "cer": 0.4696132596685083,
               "cue": {
                 "assigned_anchor_ids": [
@@ -3755,6 +4599,7 @@
                 "output_cue_count": 31,
                 "rule": "overlap_half_open"
               },
+              "declared_cache_hit": false,
               "glossary": {
                 "exact_match_terms": 1,
                 "expected": 5,
@@ -3826,13 +4671,12 @@
                 "term_count": 5
               },
               "levenshtein": 170,
-              "peak_memory_bytes": 2017689600,
+              "peak_memory_bytes": 2017837056,
               "run_kind": "cold",
               "status": "ok",
-              "wall_time_ms": 5622
+              "wall_time_ms": 5616
             },
             {
-              "cache_hit": false,
               "cer": 0.1282051282051282,
               "cue": {
                 "assigned_anchor_ids": [
@@ -3851,6 +4695,7 @@
                 "output_cue_count": 18,
                 "rule": "overlap_half_open"
               },
+              "declared_cache_hit": false,
               "glossary": {
                 "exact_match_terms": 6,
                 "expected": 7,
@@ -3946,13 +4791,12 @@
                 "term_count": 7
               },
               "levenshtein": 60,
-              "peak_memory_bytes": 2006564864,
+              "peak_memory_bytes": 2009055232,
               "run_kind": "cold",
               "status": "ok",
-              "wall_time_ms": 4234
+              "wall_time_ms": 4221
             },
             {
-              "cache_hit": false,
               "cer": 0.16666666666666666,
               "cue": {
                 "assigned_anchor_ids": [
@@ -3970,6 +4814,7 @@
                 "output_cue_count": 7,
                 "rule": "overlap_half_open"
               },
+              "declared_cache_hit": false,
               "glossary": {
                 "exact_match_terms": 4,
                 "expected": 4,
@@ -4029,18 +4874,17 @@
                 "term_count": 4
               },
               "levenshtein": 30,
-              "peak_memory_bytes": 2005254144,
+              "peak_memory_bytes": 2003910656,
               "run_kind": "cold",
               "status": "ok",
-              "wall_time_ms": 2965
+              "wall_time_ms": 2939
             }
           ],
-          "report_path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/turbo/cold-final3/report.json"
+          "report_path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/turbo/cold-audit-apply/report.json"
         },
         "warm": {
           "cases": [
             {
-              "cache_hit": true,
               "cer": 0.1,
               "cue": {
                 "assigned_anchor_ids": [
@@ -4060,6 +4904,7 @@
                 "output_cue_count": 6,
                 "rule": "overlap_half_open"
               },
+              "declared_cache_hit": true,
               "glossary": {
                 "exact_match_terms": 2,
                 "expected": 3,
@@ -4107,13 +4952,12 @@
                 "term_count": 3
               },
               "levenshtein": 31,
-              "peak_memory_bytes": 2000257024,
+              "peak_memory_bytes": 2000175104,
               "run_kind": "warm",
               "status": "ok",
-              "wall_time_ms": 2259
+              "wall_time_ms": 2229
             },
             {
-              "cache_hit": true,
               "cer": 0.4696132596685083,
               "cue": {
                 "assigned_anchor_ids": [
@@ -4133,6 +4977,7 @@
                 "output_cue_count": 31,
                 "rule": "overlap_half_open"
               },
+              "declared_cache_hit": true,
               "glossary": {
                 "exact_match_terms": 1,
                 "expected": 5,
@@ -4204,13 +5049,12 @@
                 "term_count": 5
               },
               "levenshtein": 170,
-              "peak_memory_bytes": 2012233728,
+              "peak_memory_bytes": 2011807744,
               "run_kind": "warm",
               "status": "ok",
-              "wall_time_ms": 5629
+              "wall_time_ms": 5650
             },
             {
-              "cache_hit": true,
               "cer": 0.1282051282051282,
               "cue": {
                 "assigned_anchor_ids": [
@@ -4229,6 +5073,7 @@
                 "output_cue_count": 18,
                 "rule": "overlap_half_open"
               },
+              "declared_cache_hit": true,
               "glossary": {
                 "exact_match_terms": 6,
                 "expected": 7,
@@ -4324,13 +5169,12 @@
                 "term_count": 7
               },
               "levenshtein": 60,
-              "peak_memory_bytes": 2007891968,
+              "peak_memory_bytes": 2003746816,
               "run_kind": "warm",
               "status": "ok",
-              "wall_time_ms": 4239
+              "wall_time_ms": 4217
             },
             {
-              "cache_hit": true,
               "cer": 0.16666666666666666,
               "cue": {
                 "assigned_anchor_ids": [
@@ -4348,6 +5192,7 @@
                 "output_cue_count": 7,
                 "rule": "overlap_half_open"
               },
+              "declared_cache_hit": true,
               "glossary": {
                 "exact_match_terms": 4,
                 "expected": 4,
@@ -4407,13 +5252,13 @@
                 "term_count": 4
               },
               "levenshtein": 30,
-              "peak_memory_bytes": 2009677824,
+              "peak_memory_bytes": 2003730432,
               "run_kind": "warm",
               "status": "ok",
-              "wall_time_ms": 2965
+              "wall_time_ms": 2978
             }
           ],
-          "report_path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/turbo/warm-final3/report.json"
+          "report_path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/turbo/warm-audit-apply/report.json"
         }
       },
       "settings_contract": {
@@ -4445,6 +5290,7 @@
     }
   ],
   "production_integrity": {
+    "actual_recheck": true,
     "after_report": "docs/benchmarks/s9-1-production-hash-after.json",
     "before_report": "docs/benchmarks/s9-1-production-hash-before.json",
     "checked_file_count": 15,
@@ -4512,14 +5358,25 @@
     },
     "unchanged": true
   },
+  "raw_report_identity": {
+    "all_case_runs_ok": true,
+    "case_run_count": 16,
+    "input_fingerprints_verified": true,
+    "run_manifest_fingerprints": {
+      "ggml-large-v3-turbo": "9e8e71a6f02f57572ef65c127cf2fa5dfcaa6a7c55c7acf6791ea93d7d3c5ee6",
+      "ggml-large-v3-turbo-q5_0": "a25d0fbc8233a1db7f0c2ecbb332781b19e5fd5b31260a5b0b2d03be7270de5e"
+    },
+    "runtime_identity_verified": true,
+    "source_fixture_fingerprint": "6dae657f2b803c54c6af1afe4ed54ad4f447324c32802e1943dc5711a9bf1718"
+  },
   "raw_reports": {
     "ggml-large-v3-turbo": {
-      "cold": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/turbo/cold-final3/report.json",
-      "warm": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/turbo/warm-final3/report.json"
+      "cold": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/turbo/cold-audit-apply/report.json",
+      "warm": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/turbo/warm-audit-apply/report.json"
     },
     "ggml-large-v3-turbo-q5_0": {
-      "cold": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/cold-final3/report.json",
-      "warm": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/warm-final3/report.json"
+      "cold": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/cold-audit-apply/report.json",
+      "warm": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/warm-audit-apply/report.json"
     }
   },
   "representative_cases": [
@@ -4718,14 +5575,17 @@
   "reproduction": {
     "cache_root": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark",
     "commands": [
-      "uv run python benchmarks/s9_benchmark.py run --manifest docs/benchmarks/s9-1-cases.json --model-name ggml-large-v3-turbo-q5_0 --output-dir /Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/cold-final3 --report /Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/cold-final3/report.json --execute-whisper --run-kind cold",
-      "uv run python benchmarks/s9_benchmark.py run --manifest docs/benchmarks/s9-1-cases.json --model-name ggml-large-v3-turbo --output-dir /Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/turbo/cold-final3 --report /Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/turbo/cold-final3/report.json --execute-whisper --run-kind cold",
-      "uv run python benchmarks/s9_benchmark.py run --manifest docs/benchmarks/s9-1-cases.json --model-name ggml-large-v3-turbo-q5_0 --output-dir /Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/warm-final3 --report /Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/warm-final3/report.json --execute-whisper --run-kind warm",
-      "uv run python benchmarks/s9_benchmark.py run --manifest docs/benchmarks/s9-1-cases.json --model-name ggml-large-v3-turbo --output-dir /Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/turbo/warm-final3 --report /Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/turbo/warm-final3/report.json --execute-whisper --run-kind warm",
-      "uv run python benchmarks/s9_compare.py --manifest docs/benchmarks/s9-1-cases.json --q5-cold /Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/cold-final3/report.json --q5-warm /Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/warm-final3/report.json --turbo-cold /Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/turbo/cold-final3/report.json --turbo-warm /Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/turbo/warm-final3/report.json --production-before docs/benchmarks/s9-1-production-hash-before.json --production-after docs/benchmarks/s9-1-production-hash-after.json --parity docs/benchmarks/s9-1-vtt-progressive-parity.json --boundary-audit docs/benchmarks/s9-1-boundary-audit.json --output-json docs/benchmarks/s9-1-report.json --output-md docs/benchmarks/s9-1-report.md"
+      "uv run python benchmarks/s9_benchmark.py run --manifest docs/benchmarks/s9-1-cases.json --model-name ggml-large-v3-turbo-q5_0 --output-dir /Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/cold-audit-apply --report /Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/cold-audit-apply/report.json --execute-whisper --run-kind cold",
+      "uv run python benchmarks/s9_benchmark.py run --manifest docs/benchmarks/s9-1-cases.json --model-name ggml-large-v3-turbo --output-dir /Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/turbo/cold-audit-apply --report /Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/turbo/cold-audit-apply/report.json --execute-whisper --run-kind cold",
+      "uv run python benchmarks/s9_benchmark.py run --manifest docs/benchmarks/s9-1-cases.json --model-name ggml-large-v3-turbo-q5_0 --output-dir /Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/warm-audit-apply --report /Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/warm-audit-apply/report.json --execute-whisper --run-kind warm",
+      "uv run python benchmarks/s9_benchmark.py run --manifest docs/benchmarks/s9-1-cases.json --model-name ggml-large-v3-turbo --output-dir /Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/turbo/warm-audit-apply --report /Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/turbo/warm-audit-apply/report.json --execute-whisper --run-kind warm",
+      "uv run python benchmarks/s9_compare.py --manifest docs/benchmarks/s9-1-cases.json --q5-cold /Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/cold-audit-apply/report.json --q5-warm /Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/warm-audit-apply/report.json --turbo-cold /Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/turbo/cold-audit-apply/report.json --turbo-warm /Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/turbo/warm-audit-apply/report.json --production-before docs/benchmarks/s9-1-production-hash-before.json --production-after docs/benchmarks/s9-1-production-hash-after.json --parity docs/benchmarks/s9-1-vtt-progressive-parity.json --boundary-audit docs/benchmarks/s9-1-boundary-audit.json --transcript-audit docs/benchmarks/s9-1-human-audit-v2.json --output-json docs/benchmarks/s9-1-report.json --output-md docs/benchmarks/s9-1-report.md"
     ],
     "model_cache_root": "/Users/ryukouokumura/Library/Caches/whisper.cpp/models",
-    "shell": false
+    "run_count": 16,
+    "shell": false,
+    "successful_case_runs": 16,
+    "warm_interpretation": "second process invocation with the same audio/model/settings; persistent artifact cache hit is not measured or claimed"
   },
   "residual_risks": [
     "gold は既存 VTT / transcript / ASS / cutplan を文脈利用した仮作成で、音声の独立人手監査をしていない。",
@@ -4733,6 +5593,8 @@
     "mKwn / CGal / hPe は公開 YouTube の audio-only span 取得で、client / network 条件差が残る。",
     "candidate cue は raw のまま評価し、rolling VTT dedupe を候補へ適用していない。",
     "モデルは Git 管理外の手動 cache にあり、production 自動 download は実装していない。",
+    "自然文の「概ね問題なし」は transcript content の operational reference であり、character / punctuation exactness への昇格ではない。",
+    "glossary は個別表記の明示監査ではなく、cue anchor exact milliseconds も未承認である。",
     "境界監査は transcript / glossary / cue anchor exact times の承認ではなく、4 case の部分的な人手所見である。",
     "case 1 の pass は今回確認した境界・発話連続性で追加処置なしという意味だけで、全文品質や最終 short の品質承認ではない。",
     "case 2・3 の約6秒、case 4 の約2〜26秒は今回の観察メモであり、production の普遍的な秒数閾値ではない。",
@@ -4781,7 +5643,7 @@
       "version": "2026.07.04"
     }
   },
-  "schema": "s9-1-comparison-report-v3",
+  "schema": "s9-1-comparison-report-v5",
   "source_fingerprints": [
     {
       "bytes": 353340,
@@ -4840,6 +5702,7 @@
       "sha256": "1eb008e4a05f87877304474f9d65c4b22658a384ea84e6bff2165ff2b9f5d18e"
     }
   ],
+  "transcript_reference_status": "accepted_operational_benchmark_reference",
   "vtt_progressive_parity": {
     "all_text_sequence_equal": true,
     "artifact": "docs/benchmarks/s9-1-vtt-progressive-parity.json",

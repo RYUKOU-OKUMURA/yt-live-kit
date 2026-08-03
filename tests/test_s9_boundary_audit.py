@@ -160,12 +160,20 @@ def test_boundary_audit_benchmark_id_is_checked_by_packet_and_compare_loaders() 
 def test_canonical_report_keeps_boundary_audit_separate_from_quality_gate() -> None:
     report = json.loads(REPORT_PATH.read_text(encoding="utf-8"))
 
-    assert report["schema"] == "s9-1-comparison-report-v3"
+    assert report["schema"] == "s9-1-comparison-report-v5"
     assert report["fixture_fingerprint"] == "6dae657f2b803c54c6af1afe4ed54ad4f447324c32802e1943dc5711a9bf1718"
     assert report["boundary_audit"]["fingerprint"] == "0af9f5ce7888eabcc67fbe767db25c2e4da97c823ea76781eb9aeb25991fd9a1"
-    assert report["decision"]["go"] is False
-    assert report["decision"]["s9_2_ready"] is False
-    assert report["gold_audit_status"] == "provisional"
+    assert report["human_audit"]["source"]["exact_quote"] == "4本とも文字起こしは概ね問題なし"
+    assert report["human_audit"]["review_policy"]["character_punctuation_exactness"]["status"] == "not_claimed"
+    assert report["human_audit"]["review_policy"]["cue_anchor_exact_ms"]["status"] == "unapproved"
+    assert report["decision"]["go"] is True
+    assert report["decision"]["s9_2_ready"] is True
+    assert report["decision"]["s9_3_reference"] == "ggml-large-v3-turbo-q5_0"
+    assert report["decision"]["boundary_automation"] == "not_adopted_human_review_required"
+    assert report["gold_audit_status"] == "unverified_provisional"
+    assert report["transcript_reference_status"] == "accepted_operational_benchmark_reference"
+    assert report["decision"]["boundary_decision"]["status"] == "no_go"
+    assert report["comparison"]["model_selection_contract"]["rule"]["not_a_threshold_change"] is True
 
 
 def test_canonical_builders_require_boundary_audit() -> None:

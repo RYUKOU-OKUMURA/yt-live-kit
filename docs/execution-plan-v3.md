@@ -42,7 +42,7 @@
 | U8 | エラー通知の構造化とページ先頭の整理 | [x] 完了 |
 | S9-PLAN | S9 要件・依存順計画の確定（docs-only） | [x] 完了 |
 | S9-0 | 既存 VTT 互換・非上書き保存契約 | [x] 完了 |
-| S9-1 | 代表素材 benchmark・モデル決定 | [~] 進行中 |
+| S9-1 | 代表素材 benchmark・モデル決定 | [x] 完了 |
 | S9-2 | TranscriptArtifact / resolver / fingerprint / persistent cache | [ ] 未着手 |
 | S9-3 | whisper.cpp runtime・capability・音声区間準備 | [ ] 未着手 |
 | S9-4 | 親候補区間 Whisper 精査 → short_cut / telop / line 再利用 | [ ] 未着手 |
@@ -1554,23 +1554,24 @@ data/{video_id}/ ...
 - [x] S9-1-1. `whisper-cli` 1.9.1 の実体、build capability、モデル file fingerprint、ffmpeg / yt-dlp の実体を記録する
 - [x] S9-1-2. 同じ音声 span、言語 ja、padding、出力 schema で候補モデルを実行し、YouTube VTT を baseline として比較する
 - [x] S9-1-3. gold transcript に対する日本語 CER、glossary の exact match / 誤り件数、cue の欠落・重複、候補区間の境界確認に必要な情報、wall time、CPU / memory、cache 前提を記録する
-- [x] S9-1-4. Go の場合の採用モデル・設定、または No-Go の未採用理由、再現 command、fixture fingerprint、測定日、Go / No-Go を `docs/benchmarks/` に固定する。今回の No-Go では S9 高精度実装を fallback-only として止める
-- [x] S9-1-BND-AUDIT. ユーザーの前回表示順と case ID を固定対応し、開始境界・発話連続性だけの partial audit、expected editorial outcome、strict schema、boundary artifact の fingerprint を記録した。full transcript / glossary / cue anchor gold は未監査のままにし、S9-1 No-Go と S9-2 以降停止を維持する
+- [x] S9-1-4. Go の場合の採用モデル・設定、または No-Go の未採用理由、再現 command、fixture fingerprint、測定日、Go / No-Go を `docs/benchmarks/` に固定する。A の operational transcript reference を採用する場合も exact gold とは記録しない
+- [x] S9-1-BND-AUDIT. ユーザーの前回表示順と case ID を固定対応し、開始境界・発話連続性だけの partial audit、expected editorial outcome、strict schema、boundary artifact の fingerprint を記録した。full transcript / glossary / cue anchor exact は未承認のままにし、境界自動化を採用しない
+- [x] S9-1-AUDIT-APPLY. ユーザー原文「4本とも文字起こしは概ね問題なし」を改変せず strict artifact へ4 case対応付けし、displayed transcript content の operational reference、glossary、character / punctuation exactness、cue anchor exact milliseconds、boundary/editorial の状態を分離した。固定4 case・同じ gate・q5 / turbo の cold / warm 16 run を再評価し、A の decision mode、q5 の採用設定、tie-break、S9-3 参照値、再現 command、残余リスクを canonical report へ固定した
 
-**テスト:** benchmark harness の deterministic fixture、gold transcript / glossary の固定値検証、paired VTT / Whisper 比較、事前宣言 gate の判定、未知出力 schema の拒否、途中終了 / timeout、再実行時の同一入力比較、wall time / peak memory budget の記録、`git diff --check`。実ネットワーク・従量課金 API・実 YouTube 書き込みは使わない。
+**テスト:** benchmark harness の deterministic fixture、自然文 audit artifact の原文 / 4 case mapping / unknown / missing / cross-case / exact 昇格拒否、transcript operational status と cue exact status の分離、boundary findings 維持、audit / fixture fingerprint、deterministic model selection / tie-break、canonical report / packet、q5 / turbo cold / warm 16 run、production hash unchanged、`uv run pytest`、`uv lock --check`、`git diff --check`。実ネットワーク・従量課金 API・実 YouTube 書き込みは使わない。
 
 **Done 条件:**
-- [ ] 代表素材の A/B 表、採用モデルと設定、処理時間、精度指標、再現 command、未採用理由、Go / No-Go 判定が docs に残り、S9-3 が参照する唯一のモデル設定が決まっている
-- [ ] gold transcript、固有名詞 glossary、選択 span、CER / exact match / cue 欠落・重複 / wall time / peak memory の測定値と判定閾値が同じ fixture fingerprint に結び付き、基準未達は No-Go として記録される
-- [ ] 速度や精度に根拠が無い場合は「実装を進める」判定にせず、fallback-only の根拠を残す
+- [x] 代表素材の A/B 表、採用モデルと設定、処理時間、精度指標、再現 command、未採用理由、Go / No-Go 判定が docs に残り、S9-3 が参照する唯一のモデル設定が決まっている
+- [x] gold transcript、固有名詞 glossary、選択 span、CER / exact match / cue 欠落・重複 / wall time / peak memory の測定値と判定閾値が同じ fixture fingerprint に結び付き、A では numeric gate と operational transcript reference gate、exact dimension の未承認状態を分離して記録する
+- [x] 速度や精度に根拠が無い場合は「実装を進める」判定にせず、fallback-only の根拠を残す。今回は両候補の固定 numeric gate と operational reference gate が通過したため、失敗時 fallback を残した上で q5 を採用した
 
-**S9-1 実測証跡（2026-08-03、正式 Done 未達）:** 4 case（`LB4px1wRFnY` 2853160–2910000、`mKwn-93gg90` 1120000–1300000、`CGalA8SISPE` 4220000–4340000、`hPeRSA9YVIM` 8640000–8730000）を固定し、fixture fingerprint `6dae657f2b803c54c6af1afe4ed54ad4f447324c32802e1943dc5711a9bf1718` に結び付けた。q5 は paired median 78.69％、turbo は 80.85％。技術 gate は両候補で通過したが、全 gold が `unverified_provisional` のため No-Go、正式な採用モデルなし、既存 VTT fallback-only とした。モデル SHA、設定、cold / warm、full JSON、baseline parity、production hash unchanged、raw report は [`docs/benchmarks/s9-1-report.md`](./benchmarks/s9-1-report.md) と [`docs/benchmarks/s9-1-report.json`](./benchmarks/s9-1-report.json) に固定した。独立 review と修正後 re-review は [`docs/benchmarks/s9-1-review.md`](./benchmarks/s9-1-review.md) に記録する。正式 Done 条件は未達のまま維持する。
+**S9-1 実測証跡（2026-08-03、A / Done）:** 4 case（`LB4px1wRFnY` 2853160–2910000、`mKwn-93gg90` 1120000–1300000、`CGalA8SISPE` 4220000–4340000、`hPeRSA9YVIM` 8640000–8730000）を固定し、fixture fingerprint `6dae657f2b803c54c6af1afe4ed54ad4f447324c32802e1943dc5711a9bf1718` に結び付けた。q5 は paired median CER 相対改善 78.69％、turbo は 80.85％。CER、glossary、cue、wall time、peak memory の numeric gate と operational transcript reference gate は両候補で通過した。ユーザー原文は audit fingerprint `9c1fdca9e1c5b70bd40d84a219a81dedca976e70447d42e2523e2fc4b16cc263` の strict artifact へ固定し、exact gold とは記録していない。worst-case case wait を先に見る deterministic tie-break で q5（`ggml-large-v3-turbo-q5_0`）を採用し、S9-3 が参照する model SHA、設定、cold / warm、full JSON、baseline parity、production hash unchanged、16 run raw report、canonical report を [`docs/benchmarks/s9-1-report.md`](./benchmarks/s9-1-report.md) と [`docs/benchmarks/s9-1-report.json`](./benchmarks/s9-1-report.json) に固定した。canonical report v5 は fixture gold を `unverified_provisional` のまま保持し、transcript reference の採用と boundary automation の不採用を別 decision namespace にした。raw の model / input / runtime / range / run-kind identity、全16 case run成功、cold / warm output SHA equalityを確認し、boundary automation は採用せず、人確認必須のままにする。
 
-**S9-1-AUDIT-PACK 準備済み（2026-08-03、監査前）:** 4 case の固定 range、16,000 Hz mono WAV の絶対 path・bytes・SHA-256、provisional gold transcript 全文、glossary、cue anchor、最小返答形式を [`docs/benchmarks/s9-1-human-audit.md`](./benchmarks/s9-1-human-audit.md) にまとめた。`uv run python benchmarks/s9_audit_packet.py check --manifest docs/benchmarks/s9-1-cases.json --boundary-audit docs/benchmarks/s9-1-boundary-audit.json --document docs/benchmarks/s9-1-human-audit.md` は `s9-1-cases.json` と音声 cache の実体を読み取り、文書の転記一致を再検査して PASS する。ユーザーの音声確認前のため、S9-1 の進捗、Done 条件、gold audit status、採用モデル判定は変更していない。
+**S9-1-AUDIT-PACK 更新（2026-08-03、自然文監査反映）:** 4 case の固定 range、16,000 Hz mono WAV の絶対 path・bytes・SHA-256、表示 transcript 全文、glossary、cue anchor、自然文監査の次元分離を [`docs/benchmarks/s9-1-human-audit.md`](./benchmarks/s9-1-human-audit.md) と [`docs/benchmarks/s9-1-human-audit-v2.json`](./benchmarks/s9-1-human-audit-v2.json) に固定した。`uv run python benchmarks/s9_audit_packet.py check --manifest docs/benchmarks/s9-1-cases.json --boundary-audit docs/benchmarks/s9-1-boundary-audit.json --transcript-audit docs/benchmarks/s9-1-human-audit-v2.json --document docs/benchmarks/s9-1-human-audit.md` は manifest、strict audit、boundary artifact、音声 cache の実体を再検査して PASS する。追加の定型フォーマット入力は要求しない。
 
-**S9-1-BND-AUDIT 完了記録（2026-08-03、partial boundary audit）:** ユーザーが確認した前回表示順 1〜4 を `lb4-clip002-short-proper-nouns`、`hpe-audio-variation`、`cgal-proper-nouns`、`mkw-long-local-asr` に対応付け、strict artifact [`s9-1-boundary-audit.json`](./benchmarks/s9-1-boundary-audit.json) として自然文所見を保存した。機械検証する outcome は順に `pass`、`opening_trim_or_review_required`、`opening_trim_or_review_required`、`internal_gap_removal_or_review_required`。case 1 の `pass` は今回確認した境界・発話連続性で追加処置なしという意味だけで、全文品質や最終 short の品質承認ではない。transcript / glossary / cue anchor exact times は `unverified_provisional` のまま、S9-1 は No-Go、S9-2 以降は未着手のまま維持する。base fixture fingerprint は `6dae657f2b803c54c6af1afe4ed54ad4f447324c32802e1943dc5711a9bf1718` のまま変更せず、boundary audit は独立 fingerprint `0af9f5ce7888eabcc67fbe767db25c2e4da97c823ea76781eb9aeb25991fd9a1` で追跡する。
+**S9-1-BND-AUDIT 完了記録（2026-08-03、partial boundary audit）:** ユーザーが確認した前回表示順 1〜4 を `lb4-clip002-short-proper-nouns`、`hpe-audio-variation`、`cgal-proper-nouns`、`mkw-long-local-asr` に対応付け、strict artifact [`s9-1-boundary-audit.json`](./benchmarks/s9-1-boundary-audit.json) として自然文所見を保存した。機械検証する outcome は順に `pass`、`opening_trim_or_review_required`、`opening_trim_or_review_required`、`internal_gap_removal_or_review_required`。case 1 の `pass` は今回確認した境界・発話連続性で追加処置なしという意味だけで、全文品質や最終 short の品質承認ではない。transcript content の operational reference 採用後も、glossary 個別 exact、character / punctuation exact、cue anchor exact times は未承認のままにし、boundary automation は採用しない。base fixture fingerprint は `6dae657f2b803c54c6af1afe4ed54ad4f447324c32802e1943dc5711a9bf1718` のまま変更せず、boundary audit は独立 fingerprint `0af9f5ce7888eabcc67fbe767db25c2e4da97c823ea76781eb9aeb25991fd9a1` で追跡する。
 
-**次アクション:** この部分監査だけでは S9-1 の gold audit gate を満たさず、S9-2 以降を開始可能にしない。transcript / glossary / cue anchor の独立音声監査を完了した後、同じ固定 fixture・boundary artifact・評価 gate で再判定するか、fallback-only を維持する。
+**次アクション:** S9-1 は A / Done とし、S9-3 は固定した q5 の model identity・runtime・decode 設定を唯一の参照値にする。S9-2 以降は開始できるが、artifact / cutplan / preview の境界は人確認必須であり、runtime・cache・人確認の失敗時は既存 VTT fallback を明示する。
 
 **コミット境界:** `docs/benchmarks/` と harness / fixture の production 非変更コミット。メッセージに `S9-1` を含める。S9-1 の計測証跡だけで S9 フェーズ完了にはしない。
 
@@ -2154,7 +2155,7 @@ U7（概要欄 fingerprint 化）は保留 = v4 候補（優先度③: チャプ
 - 動画を実際に生成・アップロードするテストは CI 必須にしない（手動・任意）
 - **v1 / v2 の既存テストを 1 件も壊さないこと。** 壊れた場合は後方互換の設計ミスとして扱う
 - S9 の実機 benchmark は production data を上書きせず、音声のみの一時 span と `docs/benchmarks/` の計測記録を使う。whisper-cli / yt-dlp / ffmpeg の実体は受け入れ時だけ使い、通常の unit / CI では subprocess をモックする
-- S9 の A/B は精度だけでなく処理時間、cache hit、境界を人が確認できること、artifact provenance、使用範囲だけの失効を同じ fixture で記録する。S9-1 の No-Go は未完了のまま残す
+- S9 の A/B は精度だけでなく処理時間、cache hit、境界を人が確認できること、artifact provenance、使用範囲だけの失効を同じ fixture で記録する。S9-1 の numeric gate / operational reference gate が未達なら No-Go とし、今回の A / Done では exact dimension 未承認と人確認必須を引き継ぐ
 
 ---
 

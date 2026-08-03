@@ -2,12 +2,24 @@
 
 測定日: 2026-08-03
 fixture fingerprint: `6dae657f2b803c54c6af1afe4ed54ad4f447324c32802e1943dc5711a9bf1718`
+human audit fingerprint: `9c1fdca9e1c5b70bd40d84a219a81dedca976e70447d42e2523e2fc4b16cc263`
 
 ## 判定
 
-No-Go。gold は音声の独立人手監査前であり、数値は provisional。既存 YouTube VTT を fallback-only とし、S9-3 の高精度モデル採用へ進めない。
+Go。decision mode は operational transcript reference、採用モデルは `ggml-large-v3-turbo-q5_0`。
 
-q5 / turbo とも CER、glossary、cue、wall time、peak RSS の技術 gate は通過したが、gold audit gate が fail closed した。
+ユーザー原文「4本とも文字起こしは概ね問題なし」は、表示 transcript content の運用上の reference としてのみ採用した。human verified exact transcript とは記録しない。
+fixture gold の `gold_audit_status` は `unverified_provisional` のまま。glossary の個別 exact approval、文字・句読点 exactness、cue anchor の正確なミリ秒は未承認・未主張のまま。
+operational transcript reference は Go だが、boundary automation は No-Go / 不採用で、人の preview / 区間確認を必須とする。S9-2 start allowed は TranscriptArtifact / resolver の着手範囲だけを示す。
+
+## 人手監査の次元分離
+
+- 原文: `4本とも文字起こしは概ね問題なし`
+- displayed transcript content: human reviewed / no material issue reported / operational benchmark reference
+- glossary: not explicitly audited
+- character and punctuation exactness: not claimed
+- cue anchor exact milliseconds: unapproved
+- boundary/editorial outcomes: existing partial audit preserved
 
 ## 境界・発話連続性の部分監査
 
@@ -25,7 +37,7 @@ case 1 の `pass` は、今回確認した境界・発話連続性で追加処�
 | 3 | cgal-proper-nouns | 前回表示順 case 3（cgal-proper-nouns）も開始から約6秒まで意味ある発話がなく、開始境界NG。背景音があっても意味ある発話がなければ編集上の無発話として扱う。 | opening_trim_or_review_required |
 | 4 | mkw-long-local-asr | 前回表示順 case 4（mkw-long-local-asr）は開始直後に発話はあるが、約2秒から26秒までほぼ発話がなく、ショートとして致命的。 | internal_gap_removal_or_review_required |
 
-S9-1 はこの部分監査により、既存 cue proxy だけでは無発話・背景音・長い内部 gap を捉え切れないことが分かったため No-Go を維持する。S9-4 / S9-6 は親候補の固定音声 span を切り詰めず、最終 short cutplan / preview で opening trim または内部 gap removal / review を人確認し、audio activity・cue・padding・human preview を併用する。今回の約時刻は観察メモであり、production の普遍的な秒数閾値ではない。
+S9-1 はこの部分監査を境界自動化の採用根拠にはしない。S9-4 / S9-6 は親候補の固定音声 span を機械的に確定せず、最終 short cutplan / preview で opening trim または内部 gap removal / review を人確認し、audio activity・cue・padding・human preview を併用する。今回の約時刻は観察メモであり、production の普遍的な秒数閾値ではない。
 
 ## 代表素材
 
@@ -40,16 +52,16 @@ S9-1 はこの部分監査により、既存 cue proxy だけでは無発話・�
 
 | model | case | baseline CER | candidate CER | relative improvement | glossary found | cue rate baseline → candidate | cold ms | warm ms | peak RSS max |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|
-| ggml-large-v3-turbo-q5_0 | lb4-clip002-short-proper-nouns | 1.016129 | 0.138710 | 86.35% | 2 | 6.20 → 0.80 | 2149 | 2149 | 903921664 |
-| ggml-large-v3-turbo-q5_0 | mkw-long-local-asr | 0.616022 | 0.389503 | 36.77% | 1 | 5.83 → 4.50 | 5170 | 5171 | 932773888 |
-| ggml-large-v3-turbo-q5_0 | cgal-proper-nouns | 0.797009 | 0.138889 | 82.57% | 6 | 10.40 → 2.60 | 4300 | 4307 | 919830528 |
-| ggml-large-v3-turbo-q5_0 | hpe-audio-variation | 0.750000 | 0.188889 | 74.81% | 4 | 5.25 → 0.75 | 2914 | 2915 | 920928256 |
-| **ggml-large-v3-turbo-q5_0 median** | 4 case | — | — | **78.69%** | 13 / 10 | gate pass | — | — | 932773888 |
-| ggml-large-v3-turbo | lb4-clip002-short-proper-nouns | 1.016129 | 0.100000 | 90.16% | 2 | 6.20 → 0.60 | 2268 | 2259 | 2002157568 |
-| ggml-large-v3-turbo | mkw-long-local-asr | 0.616022 | 0.469613 | 23.77% | 1 | 5.83 → 4.17 | 5622 | 5629 | 2017689600 |
-| ggml-large-v3-turbo | cgal-proper-nouns | 0.797009 | 0.128205 | 83.91% | 6 | 10.40 → 2.60 | 4234 | 4239 | 2007891968 |
-| ggml-large-v3-turbo | hpe-audio-variation | 0.750000 | 0.166667 | 77.78% | 4 | 5.25 → 0.75 | 2965 | 2965 | 2009677824 |
-| **ggml-large-v3-turbo median** | 4 case | — | — | **80.85%** | 13 / 10 | gate pass | — | — | 2017689600 |
+| ggml-large-v3-turbo-q5_0 | lb4-clip002-short-proper-nouns | 1.016129 | 0.138710 | 86.35% | 2 | 6.20 → 0.80 | 2263 | 2165 | 908165120 |
+| ggml-large-v3-turbo-q5_0 | mkw-long-local-asr | 0.616022 | 0.389503 | 36.77% | 1 | 5.83 → 4.50 | 5169 | 5183 | 933560320 |
+| ggml-large-v3-turbo-q5_0 | cgal-proper-nouns | 0.797009 | 0.138889 | 82.57% | 6 | 10.40 → 2.60 | 4310 | 4334 | 923729920 |
+| ggml-large-v3-turbo-q5_0 | hpe-audio-variation | 0.750000 | 0.188889 | 74.81% | 4 | 5.25 → 0.75 | 2921 | 2928 | 916389888 |
+| **ggml-large-v3-turbo-q5_0 median** | 4 case | — | — | **78.69%** | 13 / 10 | gate pass | — | — | 933560320 |
+| ggml-large-v3-turbo | lb4-clip002-short-proper-nouns | 1.016129 | 0.100000 | 90.16% | 2 | 6.20 → 0.60 | 2238 | 2229 | 2001256448 |
+| ggml-large-v3-turbo | mkw-long-local-asr | 0.616022 | 0.469613 | 23.77% | 1 | 5.83 → 4.17 | 5616 | 5650 | 2017837056 |
+| ggml-large-v3-turbo | cgal-proper-nouns | 0.797009 | 0.128205 | 83.91% | 6 | 10.40 → 2.60 | 4221 | 4217 | 2009055232 |
+| ggml-large-v3-turbo | hpe-audio-variation | 0.750000 | 0.166667 | 77.78% | 4 | 5.25 → 0.75 | 2939 | 2978 | 2003910656 |
+| **ggml-large-v3-turbo median** | 4 case | — | — | **80.85%** | 13 / 10 | gate pass | — | — | 2017837056 |
 
 ## 実行条件と証跡
 
@@ -59,7 +71,19 @@ S9-1 はこの部分監査により、既存 cue proxy だけでは無発話・�
 - audio cache: `/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/`
 - baseline: production progressive dedupe parity 4/4。candidate: raw cue のまま評価
 - production data hash: before / after は一致。対象 15 ファイル、既存 `ja.vtt` と mp4 は非変更。
+- raw identity: source fixture / model-specific run manifest、audio / VTT hash、range、runtime / settings、run-kind を4 raw reportで照合。case runs は 16 / 16 成功。
+- cold / warm output SHA equality は全 case で確認済み。warm は別 process invocation の再利用観測で、永続 artifact cache hit は計測・主張していない。
+- tie-break metadata: audit-apply 再計測前に固定。prior provisional results known。policy basis は user_wait_time_and_local_constraints。全結果を見る前に宣言したとは主張せず、pass 閾値の変更でもない。
+- selected model: `ggml-large-v3-turbo-q5_0`。tie-break は local-only、worst-case 待ち時間、全体待ち時間、peak memory、model bytes、per-case quality の lexicographic rule。
 - VTT progressive parity: [s9-1-vtt-progressive-parity.json](./s9-1-vtt-progressive-parity.json) で 4/4 case 一致。
+
+## 再現 command
+
+- `uv run python benchmarks/s9_benchmark.py run --manifest docs/benchmarks/s9-1-cases.json --model-name ggml-large-v3-turbo-q5_0 --output-dir /Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/cold-audit-apply --report /Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/cold-audit-apply/report.json --execute-whisper --run-kind cold`
+- `uv run python benchmarks/s9_benchmark.py run --manifest docs/benchmarks/s9-1-cases.json --model-name ggml-large-v3-turbo --output-dir /Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/turbo/cold-audit-apply --report /Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/turbo/cold-audit-apply/report.json --execute-whisper --run-kind cold`
+- `uv run python benchmarks/s9_benchmark.py run --manifest docs/benchmarks/s9-1-cases.json --model-name ggml-large-v3-turbo-q5_0 --output-dir /Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/warm-audit-apply --report /Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/warm-audit-apply/report.json --execute-whisper --run-kind warm`
+- `uv run python benchmarks/s9_benchmark.py run --manifest docs/benchmarks/s9-1-cases.json --model-name ggml-large-v3-turbo --output-dir /Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/turbo/warm-audit-apply --report /Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/turbo/warm-audit-apply/report.json --execute-whisper --run-kind warm`
+- `uv run python benchmarks/s9_compare.py --manifest docs/benchmarks/s9-1-cases.json --q5-cold /Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/cold-audit-apply/report.json --q5-warm /Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/warm-audit-apply/report.json --turbo-cold /Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/turbo/cold-audit-apply/report.json --turbo-warm /Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/turbo/warm-audit-apply/report.json --production-before docs/benchmarks/s9-1-production-hash-before.json --production-after docs/benchmarks/s9-1-production-hash-after.json --parity docs/benchmarks/s9-1-vtt-progressive-parity.json --boundary-audit docs/benchmarks/s9-1-boundary-audit.json --transcript-audit docs/benchmarks/s9-1-human-audit-v2.json --output-json docs/benchmarks/s9-1-report.json --output-md docs/benchmarks/s9-1-report.md`
 
 ## 残余リスク
 
@@ -68,6 +92,8 @@ S9-1 はこの部分監査により、既存 cue proxy だけでは無発話・�
 - mKwn / CGal / hPe は公開 YouTube の audio-only span 取得で、client / network 条件差が残る。
 - candidate cue は raw のまま評価し、rolling VTT dedupe を候補へ適用していない。
 - モデルは Git 管理外の手動 cache にあり、production 自動 download は実装していない。
+- 自然文の「概ね問題なし」は transcript content の operational reference であり、character / punctuation exactness への昇格ではない。
+- glossary は個別表記の明示監査ではなく、cue anchor exact milliseconds も未承認である。
 - 境界監査は transcript / glossary / cue anchor exact times の承認ではなく、4 case の部分的な人手所見である。
 - case 1 の pass は今回確認した境界・発話連続性で追加処置なしという意味だけで、全文品質や最終 short の品質承認ではない。
 - case 2・3 の約6秒、case 4 の約2〜26秒は今回の観察メモであり、production の普遍的な秒数閾値ではない。
