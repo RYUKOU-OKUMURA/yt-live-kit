@@ -45,8 +45,8 @@
 | S9-1 | 代表素材 benchmark・モデル決定 | [x] 完了 |
 | S9-2 | TranscriptArtifact / resolver / fingerprint / persistent cache | [x] 完了 |
 | S9-3 | whisper.cpp runtime・capability・音声区間準備 | [x] 完了 |
-| S9-4 | 親候補区間 Whisper 精査 → short_cut / telop / line 再利用 | [~] 進行中 |
-| S9-5 | UI 設定・進捗・エラー・失効表示 | [ ] 未着手 |
+| S9-4 | 親候補区間 Whisper 精査 → short_cut / telop / line 再利用 | [x] 完了 |
+| S9-5 | UI 設定・進捗・エラー・失効表示 | [~] 進行中 |
 | S9-6 | A/B 受け入れ・回帰・フェーズ判定 | [ ] 未着手 |
 | S9 | 選択親候補区間のローカル Whisper 精査（実装） | [~] 進行中 |
 | P6-PLAN | Shorts 投稿メタデータ品質ゲート計画（docs-only） | [x] 完了 |
@@ -1662,13 +1662,15 @@ data/{video_id}/ ...
 **テスト:** VTT 粗い探索の非回帰、選択区間だけの Whisper 呼び出し、同一 artifact snapshot の cutplan / telop / queue / line 再利用、resolver 再実行が無いこと、multiple range の入力順、padding と preview、人確認必須、digest の in-range / out-of-range 失効、古い artifact と legacy line state の fail closed、queue fingerprint 非回帰、既存 `ja.vtt` の内容不変、FR-25 の字幕 offset / clip ID 非回帰。
 
 **Done 条件:**
-- [ ] 1 本のラインで「VTT で親選択 → 必要区間を精査 → 同じ artifact でサブ区間・台本 → 人確認 → 生成」が成立し、artifact の provenance が画面と保存 JSON で追跡できる
-- [ ] 精査失敗時も既存 VTT の明示 fallback または停止となり、古い結果の黙った再利用が無い
-- [ ] queue / line / UI handoff が同じ immutable artifact reference と digest 配列を保持し、旧 line state の確認を再利用せず、queue fingerprint の既存意味を変えない
+- [x] 1 本のラインで「VTT で親選択 → 必要区間を精査 → 同じ artifact でサブ区間・台本 → 人確認 → 生成」が成立し、artifact の provenance が画面と保存 JSON で追跡できる
+- [x] 精査失敗時も既存 VTT の明示 fallback または停止となり、古い結果の黙った再利用が無い
+- [x] queue / line / UI handoff が同じ immutable artifact reference と digest 配列を保持し、旧 line state の確認を再利用せず、queue fingerprint の既存意味を変えない
 
 **コミット境界:** `short_cut.py` / `telop.py` / queue / line / UI handoff / model / tests を `S9-4` 単位でコミットする。S9-4 のコード変更に UI 設定画面の大規模再構成や local video adapter を混ぜない。
 
-**S9-4 実装・検証実績（2026-08-03、実装ワーカー）:** `TranscriptArtifactRef`、artifact fingerprint、入力順の `used_range_cue_digests` を cutplan → telop → queue spec → line state → output/reuse preflight へ伝播する最小縦断を実装した。既存 VTT 親候補探索と通常 rerun は Whisper を呼ばず、明示した「選択区間を高精度化」だけが S9-3 の selected-range runtime を入力順・整数 ms・padding 付きで呼ぶ。telop prompt は高精度経路で `ja.vtt` を読まず、同一 artifact の absolute cues を使い、Codex は1区間セット1回のままにした。legacy schema 1 line state、欠損 artifact、lineage 不一致は確認・出力を再利用せず未確認へ戻す。focused tests は 269 passed、全体は 1,559 passed / 2 skipped、`uv lock --check`、`git diff --check`、`uv run python -m compileall -q src` も通過した。独立レビュー、S9-4 Done 条件、S9 全体および AC-37 の受け入れ判定は未完了のままとする。
+**S9-4 実装・検証実績（2026-08-03、実装ワーカー）:** `TranscriptArtifactRef`、artifact fingerprint、入力順の `used_range_cue_digests` を cutplan → telop → queue spec → line state → output/reuse preflight へ伝播する最小縦断を実装した。既存 VTT 親候補探索と通常 rerun は Whisper を呼ばず、明示した「選択区間を高精度化」だけが S9-3 の selected-range runtime を入力順・整数 ms・padding 付きで呼ぶ。telop prompt は高精度経路で `ja.vtt` を読まず、同一 artifact の absolute cues を使い、Codex は1区間セット1回のままにした。legacy schema 1 line state、欠損 artifact、lineage 不一致は確認・出力を再利用せず未確認へ戻す。focused tests は 269 passed、全体は 1,559 passed / 2 skipped、`uv lock --check`、`git diff --check`、`uv run python -m compileall -q src` も通過した。
+
+**S9-4 独立レビュー・main 統合実績（2026-08-03）:** 独立レビューで queue fingerprint 非回帰、失効状態の永続化、高精度でない artifact の preflight 拒否、lineage strict schema、同一 artifact cue の UI 利用を再確認し、最終判定は APPROVE（P0 / P1 なし）。main は `a739d58` → `c8b3ab7` → `5f9dcad` の順に統合し、main 上でも focused 269 passed、全体 1,559 passed / 2 skipped、lock / diff / compile を再確認した。S9-4 Done 条件は完了とし、S9 全体と AC-37 は S9-5 / S9-6 の受け入れ前なので未完了を維持する。
 
 `ui/components/shorts_line.py` は、cutplan の同一 artifact reference を line snapshot / state へ渡すために必要な最小 handoff として変更した。
 
