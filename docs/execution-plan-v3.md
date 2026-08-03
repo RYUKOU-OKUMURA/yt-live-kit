@@ -1813,22 +1813,22 @@ data/{video_id}/ ...
 
 **作業:**
 
-- [ ] P6-3-1. upload operation に後方互換な `related_video_status`（`not_ready` / `pending` / `confirmed`）と UTC の `related_video_confirmed_at` だけを追加し、対象 ID は既存 `source_video_id` / `video_id` を唯一の正本として再利用する。P6 専用の重複 ID field、未知状態、不整合 field を拒否する
-- [ ] P6-3-2. upload 成功時だけ `pending` へ遷移し、対象 ID が一致する明示確認時だけ `confirmed` にする lock + atomic queue API を追加する。API / ブラウザを呼ぶ処理は持たせない
-- [ ] P6-3-3. legacy queue で related field が欠落する場合は `state=uploaded` かつ `video_id` ありだけ `pending`、それ以外を `not_ready` に移行し、`confirmed` は推測しない。再起動、二重確認、対象 ID 競合、壊れた JSON、atomic fault injection で既存 operation を保護する
-- [ ] P6-3-4. 既存の upload / publication poll / slot / attempt / reconciliation の状態遷移と schema 読み込みを回帰テストする
-- [ ] P6-3-5. lock 付き queue 読み出しから `pending` の件数と対象 operation 一覧を返す service API を追加し、UI が queue JSON を直接走査しなくてよい契約と再起動テストを固定する
-- [ ] P6-3-6. `pending` のままでも既存 `publishAt`、publication eligibility、poll history を変更せず、publication poll と予定公開を停止しないことをテストする
+- [x] P6-3-1. upload operation に後方互換な `related_video_status`（`not_ready` / `pending` / `confirmed`）と UTC の `related_video_confirmed_at` だけを追加し、対象 ID は既存 `source_video_id` / `video_id` を唯一の正本として再利用する。P6 専用の重複 ID field、未知状態、不整合 field を拒否する
+- [x] P6-3-2. upload 成功時だけ `pending` へ遷移し、対象 ID が一致する明示確認時だけ `confirmed` にする lock + atomic queue API を追加する。API / ブラウザを呼ぶ処理は持たせない
+- [x] P6-3-3. legacy queue で related field が欠落する場合は `state=uploaded` かつ `video_id` ありだけ `pending`、それ以外を `not_ready` に移行し、`confirmed` は推測しない。再起動、二重確認、対象 ID 競合、壊れた JSON、atomic fault injection で既存 operation を保護する
+- [x] P6-3-4. 既存の upload / publication poll / slot / attempt / reconciliation の状態遷移と schema 読み込みを回帰テストする
+- [x] P6-3-5. lock 付き queue 読み出しから `pending` の件数と対象 operation 一覧を返す service API を追加し、UI が queue JSON を直接走査しなくてよい契約と再起動テストを固定する
+- [x] P6-3-6. `pending` のままでも既存 `publishAt`、publication eligibility、poll history を変更せず、publication poll と予定公開を停止しないことをテストする
 
 **Done 条件:**
 
-- [ ] upload 前は `not_ready`、成功後は `pending`、明示確認後だけ `confirmed` となる
-- [ ] legacy operation を読み込め、欠落 field から確認済みを推測しない
-- [ ] queue 更新が lock + atomic で、競合・破損・失敗時に既存 record を保持する
-- [ ] pending 件数と対象一覧が service から決定的に取得でき、壊れた queue を 0 件扱いにしない
-- [ ] 関連動画 field は既存 2 ID と二重管理せず、pending は予定公開の hard gate にならない
-- [ ] `uv run pytest tests/test_upload_queue.py` と全件 `uv run pytest` が通る
-- [ ] 独立レビューで P0 / P1 finding がなく、main に `P6-3` commit として統合される
+- [x] upload 前は `not_ready`、成功後は `pending`、明示確認後だけ `confirmed` となる
+- [x] legacy operation を読み込め、欠落 field から確認済みを推測しない
+- [x] queue 更新が lock + atomic で、競合・破損・失敗時に既存 record を保持する
+- [x] pending 件数と対象一覧が service から決定的に取得でき、壊れた queue を 0 件扱いにしない
+- [x] 関連動画 field は既存 2 ID と二重管理せず、pending は予定公開の hard gate にならない
+- [x] `uv run pytest tests/test_upload_queue.py` と全件 `uv run pytest` が通る（対象 75 passed、全件 1328 passed / 2 skipped）
+- [x] 独立レビューで P0 / P1 finding がなく、main に `P6-3` commit `1ab7658` として統合される
 
 **コミット境界:** upload model / queue の状態契約と専用テストだけを `P6-3` として commit する。Streamlit UI は P6-4 へ分離する。
 
