@@ -335,6 +335,14 @@ def test_execution_plan_keeps_s9_acceptance_unfinished_and_records_next_checks()
     for index in range(1, 7):
         assert f"- [ ] S9-6-{index}." in s9_6_section
         assert f"- [x] S9-6-{index}." not in s9_6_section
+    done_conditions = (
+        "A/B 数値と目視・人確認の証跡、選択モデル、処理時間、失効差、回帰結果、fallback の挙動、Go / No-Go が独立レビュー可能な形で残る",
+        "S9-1 と同じ gold / glossary / threshold / budget が再現 command と fixture fingerprint に結び付き、代表素材と実配信アーカイブの差が記録される",
+        "S9 初版の scope 外（全編 Whisper、字幕なし通常経路、local video、asset ID）は実装されていない",
+    )
+    for condition in done_conditions:
+        assert f"- [ ] {condition}" in s9_6_section
+        assert f"- [x] {condition}" not in s9_6_section
 
     assert "2026-08-04 main の `3d113ef` / `071929d` 統合" in s9_6_section
     assert "初回レビューで P1 二点を指摘し、follow-up で APPROVE" in s9_6_section
