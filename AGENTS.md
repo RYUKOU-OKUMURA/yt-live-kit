@@ -43,7 +43,19 @@
 - 進行中のフェーズは進捗サマリーを `[~] 進行中` にする
 - ユーザーへの報告でも、完了タスク ID と残タスクを短く伝える
 
-### 2.3 やってはいけないこと
+### 2.3 P6 並列 worktree の単一 writer 例外
+
+P6-1〜P6-3 を分離 worktree で並行実装する期間は、[`docs/execution-plan-v3.md`](docs/execution-plan-v3.md) の「P6 並列期間の単一 writer 規約」を優先する。
+
+- P6 ワーカーは `docs/execution-plan-v3.md` を読取専用とし、完了チェック・進捗サマリー・要件・エージェント指示を編集しない。完了事実と commit hash を報告し、レビュー PASS と main 統合後にオーケストレーターだけが P6 節を更新する
+- P6-1、P6-2、P6-3 は計画に記載した相互非重複のファイルだけを編集し、共有 UI / schedule は 3 件の main 統合後に P6-4 の単一 writer が変更する。P6-4 は P6-1 所有の prompt / `services/telop.py` / `tests/test_telop.py` を再変更しない
+- P6 側は S9-1 の benchmark / gold 監査節と証跡を編集しない。S9 側は P6 節を編集しない。同じ行を同時に変更しない
+- 既存の未コミット `.codex/learning/user-decisions.md` は保護対象とし、P6 の plan / 実装 / 進捗 commit に含めない
+- `services/telop.py` を変更する P6-1 は S9-4 より先にレビュー・main 統合し、統合完了を依存元タスクへ報告する
+
+この例外は P6 の明示承認済み並列分割だけに適用し、他フェーズのワーカーが任意に docs 更新権限を放棄・拡張する根拠にはしない。
+
+### 2.4 やってはいけないこと
 
 - 実行計画を読まずに次の実装を始める
 - チェックを更新せずに次フェーズへ進む
@@ -103,6 +115,8 @@
   - NG → 修正指示を impl-sonnet へ再送
 ```
 
+**P6 の承認済み例外:** P6-PLAN の独立レビューと main commit 後に限り、P6-1〜P6-3 を GPT-5.6 luna / max の分離 worktree セッションで並行実装する。各セッションは担当ファイルだけを commit して報告し、オーケストレーターが欠陥優先レビュー、必要な修正依頼、再レビュー、main への cherry-pick、P6 進捗更新を行う。P6-4 は 3 件統合後に直列で開始する。実 YouTube 投稿・公開データ変更・Studio 自動操作は禁止し、API はモックする。
+
 **v3 でのワーカーへの指示に必ず含めること**（詳細は [`docs/v3-agent-prompts.md`](docs/v3-agent-prompts.md) §2 のテンプレート参照）:
 
 - 対象タスク ID（例: `U2`, `S3`）
@@ -110,7 +124,7 @@
 - 完了条件（Done / AC）
 - 変更してよいファイル範囲
 - テスト実行コマンド（`uv run pytest`）
-- 「完了後に execution-plan-v3.md の当該チェックを `[x]` にする」指示
+- 「完了後に execution-plan-v3.md の当該チェックを `[x]` にする」指示。P6 並列 worktree だけは docs を編集せず、完了事実と commit hash をオーケストレーターへ報告する指示に置き換える
 
 **v3 でのレビュー観点（最低限。詳細は `v3-agent-prompts.md` §3）:**
 
@@ -133,7 +147,7 @@ v1/v2 は Cursor 上で、オーケストレーター = Grok 4.5、ワーカー�
 | ワーカー（実装） | Composer 2.5 | `composer-2.5-fast` | 指示されたタスクの実装・テスト・局所的な docs 更新 |
 | レビューワーカー | Composer 2.5 | `composer-2.5-fast` | 実装結果の欠陥優先レビュー、要件・実行計画との差分指摘 |
 
-v2 の並列ウェーブ実行時は、実行計画のチェック更新とコミットをワーカーではなくオーケストレーターがまとめて行うルールだった（[`docs/v2-agent-prompts.md`](docs/v2-agent-prompts.md) §0.3 参照）。v3 は並列ウェーブ運用を行わないため、このルールは v3 には引き継がない（`v3-agent-prompts.md` §1 参照）。
+v2 の並列ウェーブ実行時は、実行計画のチェック更新とコミットをワーカーではなくオーケストレーターがまとめて行うルールだった（[`docs/v2-agent-prompts.md`](docs/v2-agent-prompts.md) §0.3 参照）。v3 は原則として並列ウェーブ運用を行わない。P6-1〜P6-3 だけはユーザーが明示承認した相互非重複の分離 worktree であり、§2.3 の単一 writer 例外を適用する。
 
 ---
 
@@ -163,6 +177,7 @@ v2 の並列ウェーブ実行時は、実行計画のチェック更新とコ�
 
 | 日付 | 内容 |
 |------|------|
+| 2026-08-03 | P6-1〜P6-3 の分離 worktree 並列実装に限る単一 writer 例外を追加。P6 ワーカーの docs 読取専用、P6-4 の共有 UI 単独所有、S9-1 監査節と未コミット学習ログの保護、P6-1 の S9-4 先行統合、API mock 限定を固定 |
 | 2026-08-01 | U6 v3.2 の確定仕様を反映。進捗確認の正本を `execution-plan-v3.md` に統一し、工程・人確認状態を fail closed で永続化する `services/shorts_line.py` をフェーズ U の限定例外として追加 |
 | 2026-08-01 | v3 体制へ改訂。§1 に v3 ドキュメント（execution-plan-v3 / requirements-v3 / v3-agent-prompts）を追加し進捗の正本を明記。§2.3 にスコープ改訂注記を追加。§4 のオーケストレーション体制を Claude（Fable 5）+ `impl-sonnet` に切り替え、旧 Grok 4.5 / Composer 2.5 体制は §4.2 に履歴として残した |
 | 2026-07-30 | 初版。進捗確認必須、コミット方針、Grok 4.5 / Composer 2.5 オーケストレーションを定義 |

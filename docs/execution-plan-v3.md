@@ -49,6 +49,13 @@
 | S9-5 | UI 設定・進捗・エラー・失効表示 | [ ] 未着手 |
 | S9-6 | A/B 受け入れ・回帰・フェーズ判定 | [ ] 未着手 |
 | S9 | 選択親候補区間のローカル Whisper 精査（実装） | [~] 進行中 |
+| P6-PLAN | Shorts 投稿メタデータ品質ゲート計画（docs-only） | [~] 進行中 |
+| P6-1 | タイトル 3 方向生成・検証 | [ ] 未着手 |
+| P6-2 | 概要欄必須構成・投稿前再検証 service | [ ] 未着手 |
+| P6-3 | 関連動画の Studio 手動確認・永続状態 | [ ] 未着手 |
+| P6-4 | 投稿 UI 統合・確認ダイアログ | [ ] 未着手 |
+| P6-5 | P6 統合受け入れ・回帰 | [ ] 未着手 |
+| P6 | Shorts 投稿メタデータ品質ゲート + 関連動画確認追跡 | [~] 進行中 |
 
 **状態の書き方:** `[ ] 未着手` / `[~] 進行中` / `[x] 完了`
 
@@ -64,6 +71,7 @@
 | M14 | 予約投稿が実際に公開される（v3 完了・P3 完了） | [x] |
 | M15 | 毎日 3 本のショート生産ラインが確立する（S8 → U6 → P5 完了、実機でライン 3 周） | [x] |
 | M16 | 親候補探索は VTT、選択区間は provenance 付き Whisper artifact で精査できる | [ ] |
+| M17 | 投稿前のタイトル・概要欄と、アップロード後の関連動画設定を人が保証できる（P6 完了） | [ ] |
 
 ---
 
@@ -228,6 +236,13 @@ data/{video_id}/ ...
 | **S9-5** | S9 UI / 進捗 / 失効表示 | 設定、CTA、job / range 進捗、日本語エラー、fallback、範囲単位失効 | FR-33, FR-35, FR-36, AC-35, AC-37 |
 | **S9-6** | A/B 受け入れ・回帰・フェーズ判定 | 再現 benchmark、cache / failure injection、実機、Go / No-Go、scope guard | AC-30, AC-35, AC-37 |
 | **S9** | 選択親候補区間のローカル Whisper 精査 | 代表素材 benchmark、TranscriptArtifact、whisper.cpp runtime、cutplan / telop 再利用、UI、A/B 受け入れ | FR-35, FR-36, AC-30, AC-35, AC-37 |
+| **P6-PLAN** | P6 要件・計画・writer 境界の確定 | FR / AC、タスク分解、変更範囲、並列時の単一 writer 規約 | FR-37, FR-38, AC-38, AC-39 |
+| **P6-1** | タイトル 3 方向生成・検証 | 固定順 3 候補、legacy 読み込み互換、文字数警告 | FR-23, FR-37, AC-23, AC-38 |
+| **P6-2** | 概要欄必須構成・投稿前再検証 service | 既定テンプレート、必須項目 validator、final body 再検証 | FR-29, FR-37, AC-29, AC-38 |
+| **P6-3** | 関連動画の Studio 手動確認・永続状態 | operation schema、atomic 状態遷移、Studio handoff | FR-38, AC-39 |
+| **P6-4** | 投稿 UI 統合・確認ダイアログ | タイトル警告、最終概要欄 gate、関連動画チェックリスト | FR-27, FR-37, FR-38, AC-27, AC-38, AC-39 |
+| **P6-5** | P6 統合受け入れ・回帰 | API mock、全件テスト、scope guard、独立レビュー | AC-38, AC-39 |
+| **P6** | Shorts 投稿メタデータ品質ゲート + 関連動画確認追跡 | タイトル 3 方向、必須概要欄、upload 後の関連動画人確認 | FR-37, FR-38, AC-38, AC-39 |
 
 各タスクは「実装 → 単体確認 → Done 条件チェック → **タスク完了コミット**」で閉じる。フェーズ末（U5 / S5 / P3）は「フェーズ受け入れ」も兼ねる。P4 / S6 は v3 受け入れ（P3）完了後に追加された要件であり、P3 の証跡・版数には手を入れない。
 
@@ -1697,6 +1712,173 @@ data/{video_id}/ ...
 
 **見積もり目安:** S9-0 0.5 日、S9-1 0.5〜1 日、S9-2 1〜1.5 日、S9-3 1〜2 日、S9-4 1.5〜2 日、S9-5 1〜1.5 日、S9-6 1 日。合計 6.5〜9.5 日。benchmark の No-Go は実装を止めるため、速度は固定の完了条件ではなく S9-6 で採否を判断する。
 
+### P6: Shorts 投稿メタデータ品質ゲート + 関連動画確認追跡
+
+**目的:** 新規ショートのタイトルを役割の異なる 3 方向から選べるようにし、チャンネル登録 CTA と切り抜き元動画案内を投稿前 hard gate で概要欄から欠落させない。YouTube Studio の「関連動画」は upload 成功後の人確認工程として再起動後も追跡するが、未確認を理由に既存の予定公開を技術的に止めない。
+
+**背景:** P4 は任意テンプレートの合成までを実装したが、テンプレート未設定時の後方互換 fallback を許しているため、現在の予約投稿経路ではチャンネル登録 CTA と元動画案内を必須にできない。また Shorts 概要欄の URL は主要クリック導線として扱えないため、元動画への導線は YouTube Studio の「関連動画」を別の人確認工程として管理する必要がある。YouTube Data API に書き込み可能な関連動画 field があるとは仮定せず、P6 は Studio 手動操作のローカル記録だけを実装する。関連動画は upload 後にしか設定できないため、`pending` は要対応表示と集計に使うだけで、`publishAt` の取消・延期・変更や publication poll の停止を行わない。
+
+**フェーズ状態:** [~] 進行中
+
+**全体依存:** `P6-PLAN → {P6-1, P6-2, P6-3} → P6-4 → P6-5`。P6-1〜P6-3 は変更ファイルが重ならない分離 worktree で並行実装できる。P6-4 は 3 タスクが main に統合された後だけ開始する。P6-1 の `telop.py` は S9-4 と競合するため、P6-1 のレビュー PASS・main 統合・依存元タスクへの完了報告を S9-4 着手より先に行う。
+
+#### P6-PLAN: 要件・AC・変更範囲・単一 writer 規約
+
+**目的:** コード変更前に FR-37 / FR-38、AC-38 / AC-39、実装分割、依存順、並列 worktree の writer 境界を docs の正本へ固定する。
+
+**作業:**
+
+- [x] P6-PLAN-1. `requirements-v3.md` にタイトル 3 方向、概要欄必須構成と二重再検証、関連動画の Studio 手動確認・永続状態を定義する
+- [x] P6-PLAN-2. P6-1〜P6-5 の目的、変更ファイル範囲、Done 条件、テスト、統合順を本節へ定義する
+- [x] P6-PLAN-3. `AGENTS.md` と `v3-agent-prompts.md` に P6 並列期間だけの単一 writer 例外を定義し、S9-1 監査節と `.codex/learning/user-decisions.md` を保護対象として明記する
+- [x] P6-PLAN-4. 独立レビューで要件矛盾、ファイル競合、後方互換、確認境界、API scope を欠陥優先で確認し、指摘を反映する
+- [ ] P6-PLAN-5. docs 4 ファイルだけを `P6-PLAN` コミットとして main に記録し、既存の未コミット `.codex/learning/user-decisions.md` を混ぜない
+
+**Done 条件:**
+
+- [x] FR-37 / FR-38 と AC-38 / AC-39 が相互に矛盾せず、P4 の歴史的 fallback と P6 投稿ゲートの優先関係が明記されている
+- [x] 3 並列タスクの変更範囲が重ならず、共有 UI・docs・進捗チェックの writer が一意である
+- [x] P6-1 main 統合前に S9-4 を開始しない依存が計画とワーカー指示の両方にある
+- [x] 実 upload・公開データ変更・Studio 自動操作を行わず、API mock だけで検証する scope が固定されている
+- [x] 独立レビュー PASS 後の docs-only commit から各 worktree を作成できる
+
+**コミット境界:** `AGENTS.md`、`docs/requirements-v3.md`、`docs/execution-plan-v3.md`、`docs/v3-agent-prompts.md` だけを `P6-PLAN` としてコミットする。
+
+#### P6 並列期間の単一 writer 規約
+
+| 所有者 | 書き込み可能範囲 | 禁止事項 |
+|--------|------------------|----------|
+| P6 オーケストレーター | `AGENTS.md`、P6 関連の `docs/requirements-v3.md` / `docs/execution-plan-v3.md` / `docs/v3-agent-prompts.md`、main への cherry-pick と進捗更新 | S9-1 の benchmark / gold 監査節・証跡を編集しない。`.codex/learning/user-decisions.md` を P6 commit に含めない |
+| P6-1 worktree | `prompts/telop_script.md`、`src/yt_live_kit/services/telop.py`、`tests/test_telop.py` | docs、UI、description、upload model / queue を編集しない |
+| P6-2 worktree | `src/yt_live_kit/services/description.py`、`tests/test_description.py` | docs、UI、schedule、upload model / queue、既存テンプレート実データを編集しない |
+| P6-3 worktree | `src/yt_live_kit/models/upload.py`、`src/yt_live_kit/services/upload_queue.py`、必要な場合だけ新規 `src/yt_live_kit/services/related_video.py`、`tests/test_upload_queue.py`、必要な場合だけ新規 `tests/test_related_video.py` | docs、UI、description、schedule、telop を編集しない |
+| P6-4 worktree | P6-1〜P6-3 統合後の `src/yt_live_kit/ui/components/upload.py`、`src/yt_live_kit/services/schedule.py`、`src/yt_live_kit/models/upload.py`、`tests/test_ui_upload.py`、`tests/test_schedule.py`。公開 API の接続不備が判明した場合だけ P6-2 の `description.py` / `test_description.py` または P6-3 の `upload_queue.py` / `test_upload_queue.py` を最小修正できる | P6-1〜P6-3 と同時に開始しない。`prompts/telop_script.md`、`services/telop.py`、`tests/test_telop.py`、S9 docs / code、設定画面を変更しない |
+| P6-5 オーケストレーター | P6 関連チェック、受け入れ証跡、必要な test / docs のみ | 実 YouTube 書き込み、未確認 AC の先行チェックをしない |
+
+並列 worktree のワーカーは `execution-plan-v3.md` を**読取専用**とし、完了チェックを編集しない。各ワーカーは変更ファイル、テスト件数、commit hash、未完了事項を報告し、レビュー PASS と main 統合後にオーケストレーターだけが P6 節のチェックを更新する。P6 以外の S9-1〜S9-6 節と進捗行は依存元タスクの所有とし、P6 側は同じ行を編集しない。
+
+#### P6-1: タイトル 3 方向生成・検証
+
+**対応要件 / AC:** FR-23、FR-37、AC-23、AC-38。
+
+**変更ファイル範囲:** `prompts/telop_script.md`、`src/yt_live_kit/services/telop.py`、`tests/test_telop.py` のみ。
+
+**作業:**
+
+- [ ] P6-1-1. 同一 Codex 呼び出しの `title_candidates` を固定順の検索明快型・仕事影響型・好奇心型の 3 件にするプロンプト契約を追加する
+- [ ] P6-1-2. 新規生成境界では 3 件ちょうど、strip 後非空、相互非重複、100 文字以下、半角山カッコ無しを検証し、方向名を含む日本語エラーを返す
+- [ ] P6-1-3. 18〜32 文字は警告に留め、既存の 1〜2 件候補を持つ保存済み document の読み込み・編集・再保存を壊さない検証 API を設計する
+- [ ] P6-1-4. Codex 呼び出し回数が増えず、既存 telop segments / hook / description / tags / softfail を変更しないことをテストする
+
+**Done 条件:**
+
+- [ ] 新規生成は方向の異なるタイトル 3 件が無い限り成功にならず、legacy document は読み込み互換を保つ
+- [ ] 長さ警告、重複、空、半角山カッコ、100 文字境界が自動テストされる
+- [ ] `uv run pytest tests/test_telop.py` と全件 `uv run pytest` が通る
+- [ ] 独立レビューで P0 / P1 finding がなく、main に `P6-1` commit として統合される
+- [ ] 統合完了が依存元タスクへ報告されるまで S9-4 を開始しない
+
+**コミット境界:** 変更範囲だけを `P6-1` としてワーカー commit にし、レビュー PASS 後に main へ cherry-pick する。P6-1 の main 統合を P6 内で最優先する。
+
+#### P6-2: 概要欄必須構成・投稿前再検証 service
+
+**対応要件 / AC:** FR-29、FR-37、AC-29、AC-38。
+
+**変更ファイル範囲:** `src/yt_live_kit/services/description.py`、`tests/test_description.py` のみ。
+
+**作業:**
+
+- [ ] P6-2-1. テンプレートが無い場合だけ、必須 placeholder 3 種と固定 CTA 文「チャンネル登録は動画下のチャンネル名からお願いします。」を含む既定テンプレートを lock + atomic write で初回作成する。既存ファイルは bytes を含めて変更しない
+- [ ] P6-2-2. 生成説明、元動画タイトル、開始秒付き元動画 URL、固定 CTA 文の完全一致、template bytes fingerprint、`meta.json` fingerprint を不変の要件 object に構造化し、合成結果と最終編集済み本文を同じ純粋 validator で検証できる service API を追加する
+- [ ] P6-2-3. 必須 placeholder / 解決後項目の欠落、壊れた meta、半角山カッコ、5000 bytes、同名競合、atomic write 失敗を不足箇所が分かる日本語エラーで fail closed にする
+- [ ] P6-2-4. P4 の非投稿 fallback と長尺用 `description_template.txt` の動作を維持し、投稿ゲートは P6-4 から明示的に呼べる後方互換 API とする
+
+**Done 条件:**
+
+- [ ] 初回作成、既存保持、同時作成、失敗時の部分ファイル非残存が自動テストされる
+- [ ] 合成直後と最終編集後に同じ不変要件 object で必須項目を検証でき、日本語エラーが安定している。mutable な template / meta の再読込を confirm 境界へ要求しない
+- [ ] P4 fallback、開始秒 URL、長尺概要欄、5000 bytes、半角山カッコの既存テストに回帰が無い
+- [ ] `uv run pytest tests/test_description.py` と全件 `uv run pytest` が通る
+- [ ] 独立レビューで P0 / P1 finding がなく、main に `P6-2` commit として統合される
+
+**コミット境界:** description service と専用テストだけを `P6-2` として commit する。UI / schedule への接続は P6-4 へ分離する。
+
+#### P6-3: 関連動画の Studio 手動確認・永続状態
+
+**対応要件 / AC:** FR-38、AC-39。
+
+**変更ファイル範囲:** `src/yt_live_kit/models/upload.py`、`src/yt_live_kit/services/upload_queue.py`、必要な場合だけ新規 `src/yt_live_kit/services/related_video.py`、`tests/test_upload_queue.py`、必要な場合だけ新規 `tests/test_related_video.py`。
+
+**作業:**
+
+- [ ] P6-3-1. upload operation に後方互換な `related_video_status`（`not_ready` / `pending` / `confirmed`）と UTC の `related_video_confirmed_at` だけを追加し、対象 ID は既存 `source_video_id` / `video_id` を唯一の正本として再利用する。P6 専用の重複 ID field、未知状態、不整合 field を拒否する
+- [ ] P6-3-2. upload 成功時だけ `pending` へ遷移し、対象 ID が一致する明示確認時だけ `confirmed` にする lock + atomic queue API を追加する。API / ブラウザを呼ぶ処理は持たせない
+- [ ] P6-3-3. legacy queue で related field が欠落する場合は `state=uploaded` かつ `video_id` ありだけ `pending`、それ以外を `not_ready` に移行し、`confirmed` は推測しない。再起動、二重確認、対象 ID 競合、壊れた JSON、atomic fault injection で既存 operation を保護する
+- [ ] P6-3-4. 既存の upload / publication poll / slot / attempt / reconciliation の状態遷移と schema 読み込みを回帰テストする
+- [ ] P6-3-5. lock 付き queue 読み出しから `pending` の件数と対象 operation 一覧を返す service API を追加し、UI が queue JSON を直接走査しなくてよい契約と再起動テストを固定する
+- [ ] P6-3-6. `pending` のままでも既存 `publishAt`、publication eligibility、poll history を変更せず、publication poll と予定公開を停止しないことをテストする
+
+**Done 条件:**
+
+- [ ] upload 前は `not_ready`、成功後は `pending`、明示確認後だけ `confirmed` となる
+- [ ] legacy operation を読み込め、欠落 field から確認済みを推測しない
+- [ ] queue 更新が lock + atomic で、競合・破損・失敗時に既存 record を保持する
+- [ ] pending 件数と対象一覧が service から決定的に取得でき、壊れた queue を 0 件扱いにしない
+- [ ] 関連動画 field は既存 2 ID と二重管理せず、pending は予定公開の hard gate にならない
+- [ ] `uv run pytest tests/test_upload_queue.py` と全件 `uv run pytest` が通る
+- [ ] 独立レビューで P0 / P1 finding がなく、main に `P6-3` commit として統合される
+
+**コミット境界:** upload model / queue の状態契約と専用テストだけを `P6-3` として commit する。Streamlit UI は P6-4 へ分離する。
+
+#### P6-4: 投稿 UI 統合・確認ダイアログ
+
+**前提:** P6-1、P6-2、P6-3 がすべてレビュー PASS 後に main へ統合済みであること。
+
+**対応要件 / AC:** FR-27、FR-37、FR-38、NFR-13、AC-27、AC-38、AC-39。
+
+**変更ファイル範囲:** `src/yt_live_kit/ui/components/upload.py`、`src/yt_live_kit/services/schedule.py`、`src/yt_live_kit/models/upload.py`、`tests/test_ui_upload.py`、`tests/test_schedule.py`。公開 API の接続不備が判明した場合だけ、P6-2 の `src/yt_live_kit/services/description.py` / `tests/test_description.py` または P6-3 の `src/yt_live_kit/services/upload_queue.py` / `tests/test_upload_queue.py` を最小修正できる。**P6-1 所有の `prompts/telop_script.md`、`src/yt_live_kit/services/telop.py`、`tests/test_telop.py` は変更禁止**とし、設定画面と S9 ファイルも変更しない。
+
+**作業:**
+
+- [ ] P6-4-1. タイトル 3 方向を固定順で表示し、18〜32 文字外の警告と legacy 不足案内を出す。最終タイトルの自由編集は維持する
+- [ ] P6-4-2. P6-2 の既定テンプレート確保と必須構成 validator を投稿フォームへ接続し、編集後・preview 作成前・確認確定後の service 境界で同じ不変要件 snapshot を再検証する。期待 4 項目と template / meta fingerprint を preview / content snapshot / fingerprint に凍結し、confirm 後に mutable file を再読込しない
+- [ ] P6-4-2a. content snapshot への概要欄要件 field は legacy operation を読める optional default とし、新しい P6 投稿 preview / confirm では必須にする。legacy record を自動で確認済みにせず、新しい preview の作り直しを日本語で案内する
+- [ ] P6-4-3. 必須項目欠落時は日本語で不足箇所を示し、確認 dialog、operation、job、upload attempt、API session を開始しない。確認 snapshot と送信 body の一致を維持する
+- [ ] P6-4-4. uploaded operation に Studio 編集先、対象元動画、手順、状態を表示し、P6-3 service から得た pending 総件数と対象一覧を表示する。対象 ID を含む `st.dialog` 確定後だけ local confirmed API を呼び、UI が queue JSON を直接集計しない
+- [ ] P6-4-5. rerun、再起動、二重クリック、legacy operation、publication poll、予約枠、投稿確認の既存導線を UI / service テストで回帰確認する
+
+**Done 条件:**
+
+- [ ] AC-38 / AC-39 の UI・service 接続がモックで通り、確定前に外部 write が無い
+- [ ] 概要欄を最終編集して必須項目を削除する race が preview 前と confirm 後の両方で止まる
+- [ ] legacy content snapshot は読み込めるが新しい P6 投稿には再利用されず、要件 snapshot を持つ新 preview が必須になる
+- [ ] 関連動画の確認は local queue だけを更新し、YouTube API / ブラウザを呼ばない
+- [ ] pending 表示・集計が既存 `publishAt` や publication poll を変更せず、予定公開の hard gate にならない
+- [ ] `uv run pytest tests/test_ui_upload.py tests/test_schedule.py` と全件 `uv run pytest` が通る
+- [ ] 独立レビューで P0 / P1 finding がなく、main に `P6-4` commit として統合される
+
+**コミット境界:** 3 service の UI / schedule 接続と統合テストだけを `P6-4` として commit する。
+
+#### P6-5: 統合受け入れ・回帰
+
+**前提:** P6-1〜P6-4 が個別レビュー PASS 後に main へ統合済みであること。
+
+**作業:**
+
+- [ ] P6-5-1. AC-38 / AC-39 の全境界を API mock と一時 data dir で確認し、実 YouTube upload・公開データ変更が無いことを記録する
+- [ ] P6-5-2. 半角山カッコ、100 文字タイトル、5000 bytes 説明文、500 文字タグ、日本語エラー、confirmation race、legacy queue / telop / template の後方互換を欠陥優先で再確認する
+- [ ] P6-5-3. `uv run pytest`、変更範囲 diff、P6-1 main 統合が S9-4 より先であることを確認する
+- [ ] P6-5-4. 独立最終レビューの指摘を同じ実装セッションへ戻して修正し、再レビュー PASS 後だけ AC と進捗を完了へ更新する
+
+**Done 条件:**
+
+- [ ] AC-38 / AC-39 がすべて `[x]` で、証跡がテスト名・件数・commit hash に結び付く
+- [ ] P6 scope 外の Studio 自動操作・関連動画 API write・実 upload・新規依存が無い
+- [ ] 全件テストと独立最終レビューが PASS する
+- [ ] P6-1〜P6-5 と P6 の進捗が完了し、未コミットの学習ログと S9-1 監査節が変更されていない
+
+**P6 のコミット順:** `P6-PLAN` → `P6-1` / `P6-2` / `P6-3`（分離 worktree、個別レビュー後に順次 main 統合。P6-1 を最優先）→ `P6-4` → `P6-5`。main への統合はオーケストレーターだけが行う。
+
 ---
 
 ## 7. 出力ディレクトリ・ソースコード構成（v3 追加分）
@@ -1829,6 +2011,13 @@ S9-PLAN（docs-only 完了）
                      └─ S9-5 UI 設定・進捗・エラー・失効表示
                          └─ S9-6 A/B 受け入れ・回帰・フェーズ判定
 
+P6-PLAN（docs-only。S9-1 の人手 gold 監査と並行可）
+ ├─ P6-1 タイトル 3 方向生成・検証 ── ★main 統合を S9-4 より先に完了
+ ├─ P6-2 概要欄必須構成・投稿前再検証 service
+ └─ P6-3 関連動画の Studio 手動確認・永続状態
+      └─ P6-4 投稿 UI 統合・確認ダイアログ（P6-1〜P6-3 全統合後）
+          └─ P6-5 統合受け入れ・回帰
+
 U7（概要欄 fingerprint 化）は保留 = v4 候補（優先度③: チャプターは保守のみ）
 ```
 
@@ -1853,6 +2042,9 @@ U7（概要欄 fingerprint 化）は保留 = v4 候補（優先度③: チャプ
 | S9-2 を S9-3 より先にする | subprocess の出力形式や cache の正本を先に決め、runtime が独自 JSON や独自 fingerprint を作らないようにする |
 | S9-4 を S9-5 より先にする | UI は `TranscriptArtifact`、resolver、失効理由を表示するだけにし、short_cut / telop への再利用契約を UI 実装と混ぜない |
 | S9-6 を最後にする | benchmark の精度・時間、使用範囲だけの失効、既存 VTT 経路、人確認、1 ジョブ制約を同じ受け入れ証跡で判定する。No-Go は S9 完了にしない |
+| P6-1〜P6-3 を分離して並行する | telop、description、upload operation の変更範囲を物理的に分け、共通 UI と schedule の接続を P6-4 の単一 writer に集約する |
+| P6-1 を S9-4 より先に統合する | 両タスクが `services/telop.py` と telop tests を変更するため、P6 のタイトル契約を main の前提にしてから S9 artifact 伝播を実装する |
+| P6-4 を 3 service 統合後にする | 最終説明文の二重再検証と関連動画状態表示は P6-1〜P6-3 の公開契約を消費する統合作業であり、並行中に UI へ暫定ロジックを複製しない |
 
 ---
 
@@ -1900,6 +2092,12 @@ U7（概要欄 fingerprint 化）は保留 = v4 候補（優先度③: チャプ
 | S9-4 親候補区間 Whisper 精査・short_cut / telop / queue / line 再利用 | 1.5〜2 日 |
 | S9-5 UI 設定・進捗・エラー・失効表示 | 1〜1.5 日 |
 | S9-6 A/B 受け入れ・回帰・フェーズ判定 | 1 日 |
+| P6-PLAN 要件・AC・writer 境界 | 0.5 日 |
+| P6-1 タイトル 3 方向生成・検証 | 0.5〜1 日 |
+| P6-2 概要欄必須構成・再検証 service | 0.5〜1 日 |
+| P6-3 関連動画の永続状態 | 0.5〜1 日 |
+| P6-4 投稿 UI 統合 | 1〜1.5 日 |
+| P6-5 統合受け入れ | 0.5 日 |
 
 **段階リリース案:**
 
@@ -1910,6 +2108,7 @@ U7（概要欄 fingerprint 化）は保留 = v4 候補（優先度③: チャプ
 | **0.3.0** | + P1 → P2 → P0 → P3 | 20 日 | 安全契約・実機 probe・予約公開まで含む v3 完了 |
 | **0.3.1** | + P4・S6・S7・S8 | — | ショート導線の追加要件・ホットフィックス・区間内容の可視化 |
 | **0.4.0** | + S8 → U6 → R1 → H1 → P5（+ U8、G1） | — | 毎日 3 本のショート生産ラインが長期運用の安全境界を含めて確立する（v3.2） |
+| **0.4.1** | + P6 | — | タイトル 3 方向、概要欄必須構成、関連動画の Studio 手動確認を投稿品質ゲートとして追加 |
 
 ---
 
@@ -1922,6 +2121,7 @@ U7（概要欄 fingerprint 化）は保留 = v4 候補（優先度③: チャプ
 | **M13: テロップ付きショートが量産できる** | S5 完了。複数区間を連結したショートがテロップ・フックタイトル付きで複数本まとめて作れる |
 | **M14: 予約投稿が実際に公開される（v3 完了）** | P3 完了。AC-18〜AC-28 充足、実際の予約公開を確認済み |
 | **M15: 毎日 3 本のショート生産ラインが確立する（v3.2）** | S8（AC-34）→ U6（AC-31 / AC-35）→ P5（AC-36）完了。実機でライン 3 周（3 本を予約まで）を通し確認済み。安定性の仕上げである U8（AC-33）も完了 |
+| **M17: 投稿導線の品質ゲートが確立する** | P6-1〜P6-5 と AC-38 / AC-39 完了。投稿前にタイトル 3 方向と概要欄の登録 CTA・元動画案内を保証し、アップロード後の関連動画 Studio 人確認を再起動後も追跡できる |
 
 ---
 
@@ -1929,7 +2129,7 @@ U7（概要欄 fingerprint 化）は保留 = v4 候補（優先度③: チャプ
 
 | 種類 | 対象 | タイミング |
 |------|------|------------|
-| ユニット | U6 の状態サマリー・初期選択・6 工程遷移・review / output fingerprint・編集時失効・atomic / fail closed ライン状態・timezone 日次集計、`_local_settings` の永続化、テロップ台本バリデータ、累積タイムオフセット計算、`assign_next_slot`、metadata / audience / synthetic / consent、resumable retry、operation / attempt / confirm race、kind 別 status bar、反映記録 fingerprint（U7）、構造化エラー通知（U8）、S9 の artifact schema / cue digest / resolver / cache / runtime capability / range offset /失効 | 各タスク内 |
+| ユニット | U6 の状態サマリー・初期選択・6 工程遷移・review / output fingerprint・編集時失効・atomic / fail closed ライン状態・timezone 日次集計、`_local_settings` の永続化、テロップ台本バリデータ、P6 のタイトル 3 方向・概要欄必須構成・関連動画状態、累積タイムオフセット計算、`assign_next_slot`、metadata / audience / synthetic / consent、resumable retry、operation / attempt / confirm race、kind 別 status bar、反映記録 fingerprint（U7）、構造化エラー通知（U8）、S9 の artifact schema / cue digest / resolver / cache / runtime capability / range offset /失効 | 各タスク内 |
 | 回帰 | v1 / v2 の既存テスト（`tests/` 全件）が通ること | 各タスク末 |
 | 実機結合 | 公開アーカイブ 2 本（V7-2 を U5 / S5 で同じ 2 本を通して確認）、S9 の代表素材 2〜5 本で音声のみ・複数区間・cache 再利用・精査済み字幕から生成までを確認、実アップロード 1 本（P0 / P3） | U5 / S5 / S9-1 / S9-6 / P0 / P3 |
 | 目視確認 | サイドバー導線（U0）、確認ダイアログ（U5）、確定リファレンスと左パネル 4 状態・6 工程・編集時失効（U6）、S9 の粗い VTT / 精査済み artifact provenance、進捗・fallback・範囲内外失効、テロップ可読性・つなぎ目（S5）、YouTube 上の実際の公開挙動（P3） | 各フェーズ受け入れ |
@@ -2026,6 +2226,8 @@ S9 初版で実装するのは、既存 YouTube `video_id` の良好な VTT を�
 10. **S9-0**（既存 VTT 互換・非上書き保存契約）を先頭に着手する。再取得時の `ja.vtt` bytes 保持、source VTT の immutable 保存、失敗時非変更を閉じる
 11. **S9-1**（代表素材 benchmark・モデル決定）を続けて着手する。production 非変更で VTT と whisper.cpp 1.9.1 の精度・固有名詞・時間・cache 根拠を取り、Go / No-Go を記録する
 12. **S9-2 → S9-3 → S9-4 → S9-5 → S9-6** の順に進める。各タスク完了時に当該チェックとコミットを閉じ、S9-6 の A/B 受け入れまで S9 を完了にしない
+13. **P6-PLAN を S9-1 の人手 gold 監査と並行して docs-only で閉じる。** 独立レビュー後の plan commit から P6 worktree を作る
+14. **P6-1 / P6-2 / P6-3 を分離 worktree で並行実装し、個別レビュー後に main へ統合する。** P6-1 の統合完了を依存元へ報告してから S9-4 を許可し、3 件統合後に P6-4 → P6-5 を直列で閉じる
 
 ---
 
@@ -2033,6 +2235,7 @@ S9 初版で実装するのは、既存 YouTube `video_id` の良好な VTT を�
 
 | 日付 | 内容 |
 |------|------|
+| 2026-08-03 | **P6-PLAN を開始。** タイトルを検索明快型・仕事影響型・好奇心型の固定 3 方向で生成し、概要欄の生成説明・チャンネル登録 CTA・元動画タイトル・開始秒付き URL を投稿前に二重再検証し、関連動画は API 自動設定せず YouTube Studio の手動確認状態を upload operation に永続化する FR-37 / FR-38 と AC-38 / AC-39 を追加。P6-1〜P6-3 の分離 worktree、P6-4 の単一 UI writer、P6-1 を S9-4 より先に main 統合する依存、S9-1 監査節と学習ログの保護を固定した |
 | 2026-08-03 | **S9-PLAN を確定。** S9 を S9-0 既存 VTT 非上書き契約 → S9-1 benchmark → S9-2 TranscriptArtifact / resolver / fingerprint / persistent cache → S9-3 whisper.cpp runtime / 音声区間 → S9-4 short_cut / telop / queue / line 再利用 → S9-5 UI / 進捗 / 失効 → S9-6 A/B 受け入れの依存順へ分割。各タスクの目的・前提・変更範囲・テスト・Done・コミット境界、候補 lineage、cache identity 分離、gold / glossary / 評価 gate、`ja.vtt` 非破壊、使用範囲 cue digest の fail closed、全編 Whisper / local video / asset ID の将来分離を固定した |
 | 2026-08-03 | **U8 完了。** job error を動画 ID / job ID / 処理種別 / 1 行要約 / 技術詳細 / 発生日時へ構造化し、動画別直近 3 件と上限付き global 要約を session state で分離した。ページ先頭は要約と対象動画導線だけにし、技術ログは現在動画の「詳細・再生成」内の bounded なスクロール領域へ集約。親レビューで初回描画時 consume によりリンクが消える P0 を検出・修正後、U8 対象 159 件、全体 `1266 passed, 2 skipped`、diff-check、43 KiB の疑似 ffmpeg log を使う実ブラウザ確認を通過。独立最終レビューは Finding なし（P0 / P1 なし）。残余 P2 は孤児復元ログの state 上限統一、敵対的 symlink 交換時の TOCTOU、batch 部分失敗を構造化通知へ含める場合の仕様拡張。 |
 | 2026-08-03 | **U6 / P5 クローズ、M15 達成。** 実ブラウザで確定リファレンス、左パネル 4 状態、折り畳み、3 ワークスペース、確認失効を確認し、異なる 3 ラインが予約済みまで到達する工程証跡を照合した。投稿枠を 09:00 / 13:00 / 18:00（Asia/Tokyo）に設定し、既存予約を避けた 3 本が空き枠順に割り当たること、追加 2 本の upload / processing / live private / publishAt / Made for Kids = false を確認した |

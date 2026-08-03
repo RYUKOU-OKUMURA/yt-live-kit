@@ -17,7 +17,9 @@ v2 は Cursor 上で Grok 4.5（オーケストレーター）+ Composer 2.5（�
 
 **v2 のような並列ウェーブ運用は行わない。** [`docs/execution-plan-v3.md`](./execution-plan-v3.md) のタスクは依存関係が強く、基本は依存順に 1 タスクずつ進める。U / S は計画どおり進め、**P フェーズだけは ID の見かけ順ではなく P1 → P2 → P0 → P3 を必須順序とする。** P1 / P2 の安全契約と全 API mock テストより前に P0 実機 probe を行ってはならない。並列化してよいのは、依存関係の無いことが明確な場合（例: U1 ライブラリページと U4 設定ページは互いに依存しない）に限り、オーケストレーターが個別に判断する。
 
-**進捗更新:** `impl-sonnet` ワーカーは `docs/execution-plan-v3.md` のチェックボックスを更新してよい（v2 のウェーブ運用と異なり、並列競合が起きないため）。ただし更新前後で `git diff` を確認し、意図しない箇所を変更していないかレビューする。
+**P6 の明示承認済み例外:** P6-PLAN の独立レビューと main commit 後に限り、P6-1〜P6-3 は GPT-5.6 luna / max の分離 worktree セッションで並行実装する。P6-1 は telop、P6-2 は description、P6-3 は upload operation / queue の非重複範囲だけを所有し、共有 UI / schedule は 3 件の main 統合後に P6-4 が単独で接続する。P6-1 の main 統合は S9-4 より先に完了し、依存元タスクへ報告する。P6 のオーケストレーターは GPT-5.6 sol として計画、欠陥優先レビュー、修正差し戻し、main 統合、進捗更新を担当する。
+
+**進捗更新:** 通常の `impl-sonnet` ワーカーは `docs/execution-plan-v3.md` のチェックボックスを更新してよい（v2 のウェーブ運用と異なり、並列競合が起きないため）。ただし更新前後で `git diff` を確認し、意図しない箇所を変更していないかレビューする。**P6-1〜P6-4 の分離 worktree は例外として docs を読取専用にし、チェック更新・要件変更・変更履歴追加を行わない。** 完了事実、テスト結果、commit hash を報告し、レビュー PASS と main 統合後にオーケストレーターだけが P6 節を更新する。S9-1 の benchmark / gold 監査節と `.codex/learning/user-decisions.md` は全 P6 セッションの保護対象である。
 
 ---
 
@@ -69,6 +71,9 @@ v2 は Cursor 上で Grok 4.5（オーケストレーター）+ Composer 2.5（�
 - 【S9 のタスクのみ】`subtitles/ja.vtt` を上書き・改名・自動置換しない。S9-0 では incoming VTT を隔離し、既存 `ja.vtt` がある場合は bytes を保持して `subtitles/sources/` へ immutable 保存する。親候補探索は YouTube VTT、選択済み区間は provenance 付き `TranscriptArtifact` を resolver から受け取り、同じ artifact reference / fingerprint と順序付き使用区間 cue digest を cutplan / telop / queue / line / review へ渡す
 - 【S9 のタスクのみ】字幕なし・低品質字幕の全編 Whisper、47 本の一括 backfill、local video 入力、`asset_id` への path 移行は実装しない。音声のみを選択区間へ使い、現行 1 ジョブ制約と人の境界確認を維持する
 - 【S9 のタスクのみ】whisper-cli の version / capability / model fingerprint / JSON schema を実行前に検証し、未知形式・部分 artifact・cache 不一致は高精度扱いにしない。モデル自動取得、shell command の自由入力、実 YouTube 書き込みは禁止する
+- 【P6 のタスクのみ】実 YouTube upload、公開データ変更、YouTube Studio のブラウザ自動操作を行わない。googleapiclient は必ずモックし、関連動画は local operation の手動確認状態だけを扱う
+- 【P6-1〜P6-3】execution-plan-v3.md と requirements-v3.md は読取専用。割り当てられた変更ファイル範囲外、S9-1 監査節、`.codex/learning/user-decisions.md` を編集しない。worktree 内でタスク ID 入り commit を作り、main への merge / cherry-pick は行わない
+- 【P6-4】P6-1〜P6-3 が main に統合された commit から開始する。UI / schedule の単一 writer として service の公開 API を接続し、UI に validator・queue 状態遷移・pending 集計を複製しない。P6-1 所有の `prompts/telop_script.md`、`services/telop.py`、`tests/test_telop.py` は変更しない
 
 ## Done 条件
 （execution-plan-v3.md の当該タスクの「Done 条件」をそのまま転記する）
@@ -78,9 +83,11 @@ uv run pytest
 
 ## 完了後に必ず行うこと
 1. docs/execution-plan-v3.md の当該タスクのチェックボックス（作業・Done 条件）を
-   完了した事実だけ `- [x]` にする。未確認の項目にはチェックを入れない
+   完了した事実だけ `- [x]` にする。未確認の項目にはチェックを入れない。
+   P6-1〜P6-4 は例外として docs を編集せず、完了項目を報告に列挙する
 2. タスクが「大きな実装タスク」（execution-plan-v3.md §3.4 のリスト）に該当する場合、
-   コミットが必要である旨を報告に明記する（コミット自体はオーケストレーターが行う）
+   コミットが必要である旨を報告に明記する（通常タスクのコミット自体はオーケストレーターが行う）。
+   **P6-1〜P6-4 は例外として、担当範囲だけをタスク ID 入りで worktree commit し、commit hash を報告する。main への merge / cherry-pick と進捗更新はオーケストレーターだけが行う**
 
 ## 完了時の報告フォーマット（必ずこの形式で報告する）
 ### 実装したもの
@@ -277,6 +284,11 @@ S9 は通常テンプレートに次のブロックを追加して `impl-sonnet`
 | S9-4 | VTT で親候補を選び、選択区間だけを Whisper。cutplan / telop / queue / line / review が同じ immutable artifact と ordered used-range cue digest を使い、padding / preview / 人確認・FR-25 の境界正規化を維持しているか |
 | S9-5 | UI が明示 CTA、job ID、進捗、cache、runtime / model、coarse fallback、失効理由を日本語で表示し、service の resolver / fingerprint ロジックを複製せず、既存確認境界を維持しているか |
 | S9-6 | A/B と全回帰、cache restart、failure injection、実機 1 本の証跡を揃え、S9-1 の No-Go や未確認 AC を完了扱いにしていないか |
+| P6-1 | 同一 Codex 呼び出しで固定順 3 方向を生成し、新規生成は 3 件必須、legacy 1〜2 件は読み込み互換、18〜32 文字は警告だけか。`telop.py` 以外の P6 / S9 範囲を触っていないか |
+| P6-2 | テンプレートが無い時だけ固定 CTA 文を含む必須構成の既定を atomic 作成し、既存 bytes を上書きせず、期待 4 項目と template / meta fingerprint を不変 object にして合成後と最終編集後を同じ純粋 validator で検証できるか。P4 fallback と長尺概要欄を壊していないか |
+| P6-3 | related video が `not_ready` → upload 成功後 `pending` →対象 ID の明示確認後 `confirmed` だけで遷移し、既存 `source_video_id` / `video_id` を唯一の正本として重複 ID を追加せず、service が lock 付き queue から pending 件数・対象一覧を返すか。pending が `publishAt` / publication poll を止めず、legacy queue、lock / atomic、poll / slot / attempt が非回帰か。API / browser 呼び出しが無いか |
+| P6-4 | 期待 4 項目と template / meta fingerprint の不変 snapshot を preview / content snapshot / fingerprint へ凍結し、最終説明文を preview 前と confirm 後に mutable file の再読込なしで二重再検証するか。欠落時に operation / job / attempt / API が始まらないか。Studio 手動確認は service の pending 集計を表示し、対象 ID を示す dialog 後に local queue だけを更新するか。P6-1 の3ファイルを再変更していないか |
+| P6-5 | AC-38 / AC-39、半角山カッコ、日本語エラー、確認 race、後方互換、全件テスト、scope guard、P6-1 の S9-4 先行統合を証跡で確認したか |
 | P0 | P1 / P2 の安全経路だけを使い、実 upload と審査フォームが別承認か。private lock / processing を poll し、lock を成功扱いにしていないか |
 | P1 | private / aware future publishAt / notify false、metadata、audience / synthetic / consent、resumable、LA attempt、operation、job_id、kind dispatch を API mock で固定したか |
 | P2 | IANA policy、slot と attempt の分離、全項目 preview、既定未同意、確定後再検証、同時 confirm、operation / job ID の再起動復元を検証したか |
@@ -288,6 +300,7 @@ S9 は通常テンプレートに次のブロックを追加して `impl-sonnet`
 
 | 日付 | 内容 |
 |------|------|
+| 2026-08-03 | **P6 分離セッション規約を追加。** GPT-5.6 sol のオーケストレーターと GPT-5.6 luna / max の P6 実装セッション、P6-1〜P6-3 の非重複 writer、P6-4 の共有 UI 単一 writer、docs / S9-1 監査節 / 学習ログの保護、P6-1 の S9-4 先行統合、API mock 限定、P6 欠陥優先レビュー項目を固定 |
 | 2026-08-03 | **S9 実行セッションを追加。** S9-0〜S9-6 の依存順、既存 VTT 非上書き、`TranscriptArtifact` / resolver / cue digest / cache、候補 lineage、whisper-cli 1.9.1 capability、音声のみ・1 ジョブ・使用範囲だけの fail closed、gold / glossary / A-B gate、UI / A/B / Go-No-Go の指示テンプレートとレビュー観点を追加 |
 | 2026-08-01 | U6 v3.2 確定仕様を反映。フェーズ U の限定 service 例外、左パネルと 6 工程、品質判定 4 分離、review fingerprint、fail closed ライン状態、timezone 日次集計、差分表示のレビュー観点とクイックリファレンスを追加 |
 | 2026-08-01 | P 安全監査の独立レビューを反映。P1 → P2 → P0 → P3 の必須順序、P0 公開可能性の承認、単一 queue record、job crash recovery / fault injection、具体的 poll / lock 判定をレビュー観点へ追加 |

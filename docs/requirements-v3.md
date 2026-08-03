@@ -283,6 +283,24 @@ Streamlit は、エントリスクリプト（[`src/yt_live_kit/ui/app.py`](../s
 | **出力** | 区間ごとの絶対時刻 cue と status を含む精査済み `TranscriptArtifact`、runtime / model / input の診断情報、cache hit / miss と処理時間。1 区間でも失敗した partial artifact は要求全体の高精度結果として resolver が返さず、runtime 不備や精査失敗時は日本語エラーと明示された YouTube VTT fallback を返す |
 | **スコープ** | 字幕なし・低品質字幕を理由に全編 Whisper を通常経路へ入れない。全編再文字起こし、47 本の一括 backfill、VTT の自動置換、無確認の自動境界確定は将来フェーズとする |
 
+### FR-37: ショート投稿メタデータの品質ゲート（P6）
+
+| 項目 | 内容 |
+|------|------|
+| **入力** | FR-22 / FR-23 の同一 Codex CLI 呼び出し結果、FR-29 のショート専用テンプレート、元動画 `VideoMeta`、投稿直前にユーザーが編集した最終タイトル・説明文・タグ |
+| **処理** | 新規のテロップ台本生成では、`title_candidates` を固定順の 3 件、すなわち ①検索明快型（固有名詞と主題を前半へ置く）、②仕事影響型（誰にどんな変化があるかを示す）、③好奇心型（結論を過度に隠さない疑問・意外性）として同じ Codex 呼び出し内で生成する。3 件は strip 後に非空、相互に同一でなく、100 文字以下、半角山カッコ無しを必須とする。日本語タイトル 18〜32 文字は推奨警告であり、保存拒否の条件にはしない。既存の 1〜2 件タイトルを持つ保存済み台本は読み込み互換を維持するが、新規生成の完了条件には使わず、UI で再生成または手動補完を案内する。概要欄は `{{description}}`、`{{source_title}}`、`{{source_url}}` と、固定 CTA 文「チャンネル登録は動画下のチャンネル名からお願いします。」を必須構成とする。テンプレートが無い場合は既存ファイルを上書きせず、この必須構成を満たす安全な既定テンプレートを原子的に初回作成する。合成時と、投稿確認ダイアログを開く直前・確定後の upload 再検証時の両方で、最終編集済み説明文に生成説明、元動画タイトル、開始秒付き元動画 URL、固定 CTA 文が残っていることを検証する。合成時に期待する 4 項目、template bytes fingerprint、`meta.json` fingerprint を不変の要件 snapshot として preview / content snapshot / fingerprint へ凍結し、確定後は mutable な template / meta を再読込せず、この snapshot と最終本文を再検証する。template / meta の変更を反映する場合は新しい preview と確認を作り直す |
+| **出力** | 方向の異なるタイトル候補 3 件、必須構成を満たす最終説明文、不変の概要欄要件 snapshot、投稿可否と日本語の不足理由。確認済み content snapshot と `videos.insert` body は再検証を通った同一本文だけを使う |
+| **スコープ** | タイトル候補を得るための Codex 呼び出し回数は増やさない。概要欄 URL を Shorts フィード上のクリック導線とはみなさず、元動画への主要導線は FR-38 の YouTube Studio「関連動画」とする。既存テンプレートは自動上書きせず、不足時は投稿だけを fail closed にして修正箇所を日本語で案内する。実 YouTube 投稿や公開データ変更を P6 の自動テストで行わない |
+
+### FR-38: 関連動画の Studio 手動確認と永続状態（P6）
+
+| 項目 | 内容 |
+|------|------|
+| **入力** | upload operation の元動画 ID、アップロード成功後の Shorts の YouTube video ID、ユーザーによる YouTube Studio での関連動画設定結果 |
+| **処理** | YouTube Data API に書き込み可能な関連動画 field があると仮定せず、アップロード成功後に YouTube Studio の編集画面と設定対象の元動画を明示する手動チェックリストを表示する。対象 ID の唯一の正本は既存 `UploadOperation.source_video_id` と、upload 成功後に入る `UploadOperation.video_id` とし、P6 専用の重複 ID field を追加しない。新規 field は `related_video_status`（`not_ready` / `pending` / `confirmed`）と UTC の `related_video_confirmed_at` だけにする。`uploaded` になる前は `not_ready`、アップロード成功後は `pending`、正本の 2 ID を表示する確認ダイアログでユーザーが「Studio で関連動画を設定済み」と確定した場合だけ `confirmed` に遷移する。確認操作はローカル状態だけを lock + atomic write で更新し、YouTube API を呼ばない。既存 operation で両 field が欠落する場合は、`state=uploaded` かつ `video_id` があるものだけ `pending`、それ以外を `not_ready` とする後方互換 migration を行い、`confirmed` は絶対に推測しない |
+| **出力** | operation ごとの関連動画状態、正本 field から表示する対象元動画 ID・対象 Shorts video ID、確認時刻、`pending` の総件数と対象一覧、未確認時の日本語案内。集計は lock 付き queue service が行い、UI は queue JSON を直接走査しない。再起動後も同じ状態を表示する |
+| **スコープ** | 関連動画の自動設定、YouTube Studio のブラウザ自動操作、実 API upload、公開データ変更は P6 の対象外。対象は自チャンネルの元動画を Studio で人が設定した事実の記録に限定する。関連動画確認は upload 後の追跡工程であり、`pending` のままでも既存の `publishAt` を取消・延期・変更せず、公開を技術的に止める hard gate にはしない。未確認は「要対応」として残し、publication poll は既存どおり継続する |
+
 ---
 
 ## 5. ショート量産の機能要件
@@ -422,7 +440,7 @@ Streamlit は、エントリスクリプト（[`src/yt_live_kit/ui/app.py`](../s
 | **入力** | FR-23 で生成したショートの説明文、元動画 ID、切り抜き先頭区間の開始ミリ秒、ユーザーが編集する定型文テンプレート `data/_config/shorts_description_template.txt` |
 | **処理** | テンプレートの `{{description}}` / `{{source_title}}` / `{{source_url}}` を置換して、投稿用の説明文を合成する。`{{source_title}}` と `{{source_url}}` は `data/{video_id}/meta.json`（FR-01 の `VideoMeta`）を正本とし、`{{source_url}}` には切り抜き先頭区間の開始秒を `t` クエリとして付与する。チャンネル URL は専用プレースホルダーを設けず、テンプレート本文へユーザーが直接記載する |
 | **出力** | 合成済みの説明文。確認ダイアログ（FR-27）の「説明文全文」に合成後の本文が表示され、その本文がそのまま `videos.insert` の `snippet.description` になる |
-| **スコープ** | 長尺用の `description_template.txt`（FR-21 のタイムライン合成）とはファイル・関数ともに分離する。テンプレート未設定時は合成せず、FR-23 の説明文をそのまま使う（後方互換）。UI 上のテンプレート編集画面は持たず、ファイル直接編集とする |
+| **スコープ** | 長尺用の `description_template.txt`（FR-21 のタイムライン合成）とはファイル・関数ともに分離する。P4 時点の非投稿利用ではテンプレート未設定時に FR-23 の説明文をそのまま使う後方互換を維持する。P6 の予約投稿経路では FR-37 の既定テンプレート初回作成と必須構成ゲートを優先し、不完全な本文の投稿は許可しない。UI 上のテンプレート編集画面は持たず、ファイル直接編集とする |
 
 合成の安全契約を次のとおり固定する。
 
@@ -607,7 +625,7 @@ Streamlit は、エントリスクリプト（[`src/yt_live_kit/ui/app.py`](../s
 
 - [x] `data/_config/shorts_description_template.txt` の `{{description}}` / `{{source_title}}` / `{{source_url}}` が置換され、テンプレートに直接書いたチャンネル URL がそのまま説明文へ入る
 - [x] `{{source_url}}` に切り抜き先頭区間の開始秒が `t` クエリとして付き、同じ入力から常に同じ URL になる（連結モードでも先頭区間基準）
-- [x] テンプレート未設定時は FR-23 の説明文がそのまま使われ、既存の投稿導線に回帰が無い
+- [x] P4 時点ではテンプレート未設定時に FR-23 の説明文がそのまま使われ、既存の投稿導線に回帰が無い。P6 の予約投稿経路は AC-38 の必須構成ゲートへ移行する
 - [x] 確認ダイアログの「説明文全文」が合成後の本文を表示し、その本文が preview fingerprint・content snapshot・`videos.insert` body と一致する
 - [x] 半角山カッコ・5000 bytes 超過・`meta.json` 欠損の各ケースが、テンプレートが原因と分かる日本語エラーで拒否され、preview が作られない
 - [x] 長尺用 `description_template.txt` の合成（FR-21）に影響が無い
@@ -708,6 +726,26 @@ Streamlit は、エントリスクリプト（[`src/yt_live_kit/ui/app.py`](../s
 - [ ] 代表素材 3〜5 本の A/B で YouTube VTT と whisper.cpp の精度・固有名詞・境界確認・処理時間を記録し、固定 gold transcript / 固有名詞表、事前宣言した改善閾値・wall time・peak memory budget、採用モデルと Go / No-Go 根拠を docs に残す
 - [ ] 字幕なし・低品質字幕の全編 Whisper、47 本の一括 backfill、local video 入力、asset ID 移行は S9 初版の受け入れ対象に含めず、将来フェーズとして明記されている
 
+### AC-38: タイトル 3 方向と概要欄必須構成（FR-37 / P6）
+
+- [ ] 新規テロップ台本生成 1 回の出力に、固定順の検索明快型・仕事影響型・好奇心型のタイトル候補がちょうど 3 件含まれ、非空・重複・100 文字・半角山カッコの境界がテストされている
+- [ ] 日本語タイトル 18〜32 文字の範囲外は警告されるが保存可能で、既存の 1〜2 件候補を持つ台本は読み込める。新規生成では不足を成功扱いにせず、再生成または手動補完を日本語で案内する
+- [ ] ショート専用テンプレートが無い場合だけ、`{{description}}`、`{{source_title}}`、`{{source_url}}` と固定 CTA 文「チャンネル登録は動画下のチャンネル名からお願いします。」を含む既定テンプレートが原子的に作成され、既存テンプレートは自動上書きされない
+- [ ] 合成済み説明文が生成説明、元動画タイトル、開始秒付き元動画 URL、固定 CTA 文の完全一致を含み、1 項目でも欠ける場合は不足箇所を示す日本語エラーで preview / operation / job / API 開始前に拒否される
+- [ ] ユーザーが確認画面で最終説明文を編集して必須項目を削除した場合、投稿確認ダイアログを開く直前と確定後の両方で再検証され、古い fingerprint・snapshot・本文を再利用しない
+- [ ] 期待する 4 項目、template bytes fingerprint、`meta.json` fingerprint が preview / content snapshot / fingerprint に不変 snapshot として保存され、確定後は template / meta を再読込せず同じ snapshot で再検証する。変更を反映する場合は preview から作り直す
+- [ ] 確認ダイアログの最終本文、content snapshot、`videos.insert` の `snippet.description` が同一で、半角山カッコ・5000 bytes・100 文字タイトル・500 文字タグの既存安全契約と後方互換テストが通る
+- [ ] P6 の自動テストは YouTube API をモックし、実 upload・実公開データ変更・追加の Codex 呼び出しを行わない
+
+### AC-39: 関連動画の Studio 手動確認（FR-38 / P6）
+
+- [ ] upload operation が後方互換な `related_video_status` と `related_video_confirmed_at` を持ち、`not_ready` / `pending` / `confirmed` と確認時刻を lock + atomic write で永続化する。対象 ID は既存 `source_video_id` / `video_id` を唯一の正本として再利用し、重複 field を追加しない
+- [ ] upload 成功前は `not_ready`、成功後は `pending` となる。legacy の欠落 field は `state=uploaded` かつ `video_id` ありだけ `pending`、それ以外は `not_ready` に移行し、再起動復元から `confirmed` を推測しない
+- [ ] UI に Shorts の Studio 編集先、設定対象の元動画、手順が日本語で表示され、対象 2 ID を示す確認ダイアログの確定時だけローカル状態が `confirmed` になる
+- [ ] `confirmed` への更新は YouTube API、ブラウザ自動操作、upload を呼ばず、二重クリック・壊れた queue・対象 ID 不一致を fail closed にする
+- [ ] 未確認件数と operation ごとの状態が再起動後も復元され、既存 queue JSON・既存投稿・publication poll・予約枠・attempt 台帳に回帰が無い
+- [ ] `pending` は要対応として表示するが、既存 `publishAt` を取消・延期・変更せず、未確認を理由に publication poll や予定公開を技術的に停止しない
+
 ### AC-36: 投稿枠の複数化と既定値設定（FR-28 v3.2 / FR-20 v3.2 / P5）
 
 - [x] `daily_times` に複数時刻を設定でき、`assign_next_slot` が日内の枠を時刻順に埋めてから翌日に進む
@@ -736,6 +774,8 @@ Streamlit は、エントリスクリプト（[`src/yt_live_kit/ui/app.py`](../s
 | transcript resolver | 粗い候補探索には YouTube VTT、選択済み区間には有効な Whisper artifact を返し、不一致や破損を高精度扱いにしない解決器 |
 | 精査済み字幕 | S9 で選択した親候補区間だけを whisper.cpp で再文字起こしした artifact。Whisper の時刻は境界の唯一の正本ではなく、人確認用の材料である |
 | 高精度字幕 fallback | runtime 不備や cache 不一致時に、精査済みと偽らず既存 YouTube VTT を明示的に使う経路 |
+| タイトル 3 方向 | P6 で固定する検索明快型・仕事影響型・好奇心型の 3 候補。新規生成は同じ Codex 呼び出し内で固定順に返す |
+| 関連動画確認状態 | YouTube Studio で Shorts の関連動画を元動画へ設定した事実を、`not_ready` / `pending` / `confirmed` で upload operation に保存するローカル状態 |
 | フックタイトル | ショート冒頭 1〜2 秒に表示する、視聴継続を促す大きなテロップ |
 | キュー量産 | 複数のショート候補を選択し、まとめてバックグラウンド生成する操作（内部では単一ジョブが順次処理する） |
 | スケジュールポリシー | 「毎日 18:00 に 1 本」のような、予約投稿の自動割り当てルール |
@@ -747,6 +787,7 @@ Streamlit は、エントリスクリプト（[`src/yt_live_kit/ui/app.py`](../s
 
 | 日付 | 内容 |
 |------|------|
+| 2026-08-03 | **P6 投稿メタデータ品質ゲートを追加。** FR-37 / AC-38 に同一 Codex 呼び出し内のタイトル固定 3 方向、概要欄の生成説明・チャンネル登録 CTA・元動画タイトル・開始秒付き URL、合成時と投稿確定時の再検証を定義。FR-38 / AC-39 に YouTube API 自動設定を行わない Studio 手動確認と `not_ready` / `pending` / `confirmed` の永続状態を定義し、P4 の歴史的 fallback と P6 投稿ゲートの優先関係を明記した |
 | 2026-08-03 | **AC-33 完了。** ジョブエラーを必須 6 field の構造化通知へ移行し、上部 1 行要約、対象動画導線、動画別直近 3 件、上限付き global 要約、現在動画だけの技術詳細表示を実装。長い ffmpeg log の実ブラウザ確認、全件テスト、独立レビューを通過した |
 | 2026-08-03 | **AC-31 / AC-35 / AC-36 受け入れ完了。** 実ブラウザで 3 ワークスペース、左パネル 4 状態、折り畳み、確認失効、生産ライン 3 周を確認した。09:00 / 13:00 / 18:00（Asia/Tokyo）の複数枠設定と、既存予約を避ける空き枠順の 3 本予約を実機で確認し、全件テストと独立レビューを通過した |
 | 2026-08-01 | **v3.2 UI 確定仕様。** 3 ワークスペースと 6 工程の責務、左パネルの常設プレビューと縮約工程、品質チェックの 4 分離、人確認の既定未チェック、review fingerprint による編集時失効、atomic / fail closed なライン状態、`SchedulePolicy.timezone` 基準の日次完了数を FR-17 / FR-31 / FR-33 と AC-31 / AC-35 に固定。完成イメージを視覚リファレンスとして追加 |
