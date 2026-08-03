@@ -2,10 +2,12 @@
 
 import hashlib
 import json
+import threading
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
+import yt_live_kit.services.description as description_service
 from yt_live_kit.config import Settings
 from yt_live_kit.services.description import (
     DEFAULT_SHORTS_DESCRIPTION_TEMPLATE,
@@ -270,6 +272,10 @@ def test_quality_gate_creates_default_template_and_freezes_requirements(tmp_path
     assert result.requirements.meta_json_fingerprint == hashlib.sha256(
         meta_path.read_bytes()
     ).hexdigest()
+    assert result.requirements.generated_description_occurrences == 1
+    assert result.requirements.source_title_occurrences == 2
+    assert result.requirements.source_url_occurrences == 1
+    assert result.requirements.fixed_cta_line_occurrences == 1
     assert validate_shorts_description(result.description, result.requirements) == ()
 
     with pytest.raises((AttributeError, TypeError, ValueError)):
@@ -304,6 +310,9 @@ def test_quality_gate_uses_same_pure_validator_for_final_edited_body(tmp_path):
     final_body = result.description + "\nユーザーが編集した補足。"
 
     assert validate_shorts_description(final_body, result.requirements) == ()
+    get_shorts_template_path(settings).write_bytes("壊れた template".encode("utf-8"))
+    (tmp_path / video_id / "meta.json").write_bytes("壊れた meta".encode("utf-8"))
+    assert validate_shorts_description(final_body, result.requirements) == ()
     assert "チャンネル登録 CTA" in validate_shorts_description(
         final_body.replace(SHORTS_DESCRIPTION_CTA, ""), result.requirements
     )
@@ -331,6 +340,96 @@ def test_quality_gate_requires_fixed_cta_as_an_exact_template_line(tmp_path):
         build_shorts_description_for_upload(
             "生成説明", video_id=video_id, settings=settings
         )
+
+
+def test_validator_distinguishes_contained_generated_description_from_source_title(
+    tmp_path,
+):
+    settings = Settings(data_dir=tmp_path)
+    video_id = "gate003c"
+    _write_meta(tmp_path, video_id, title="元のライブ配信")
+    save_shorts_template(_valid_quality_template(), settings=settings)
+
+    result = build_shorts_description_for_upload(
+        "ライブ配信", video_id=video_id, settings=settings
+    )
+    edited = result.description.replace(
+        "ライブ配信\n\n元動画: ", "\n\n元動画: ", 1
+    )
+
+    assert "生成した説明文" in validate_shorts_description(
+        edited, result.requirements
+    )
+    assert validate_shorts_description(result.description, result.requirements) == ()
+
+
+def test_validator_requires_all_four_items_with_duplicate_and_static_occurrences(
+    tmp_path,
+):
+    settings = Settings(data_dir=tmp_path)
+    video_id = "gate003d"
+    _write_meta(tmp_path, video_id, title="元のライブ配信")
+    save_shorts_template(
+        "説明1={{description}}\n"
+        "説明2={{description}}\n"
+        "静的タイトル=元のライブ配信\n"
+        "タイトル={{source_title}}\n"
+        "URL1={{source_url}}\n"
+        "URL2={{source_url}}\n"
+        f"{SHORTS_DESCRIPTION_CTA}\n"
+        f"{SHORTS_DESCRIPTION_CTA}\n",
+        settings=settings,
+    )
+
+    result = build_shorts_description_for_upload(
+        "ライブ配信", video_id=video_id, start_ms=12_000, settings=settings
+    )
+    assert result.requirements.generated_description_occurrences == 4
+    assert result.requirements.source_title_occurrences == 2
+    assert result.requirements.source_url_occurrences == 2
+    assert result.requirements.fixed_cta_line_occurrences == 2
+
+    edited = result.description.replace("説明1=ライブ配信\n", "説明1=\n")
+    assert "生成した説明文" in validate_shorts_description(
+        edited, result.requirements
+    )
+
+    edited = result.description.replace(
+        "静的タイトル=元のライブ配信\n", "静的タイトル=\n"
+    )
+    assert "元動画タイトル" in validate_shorts_description(
+        edited, result.requirements
+    )
+
+    edited = result.description.replace("URL1=https://", "URL1=")
+    assert "開始秒付き元動画 URL" in validate_shorts_description(
+        edited, result.requirements
+    )
+
+    edited = result.description.replace(f"{SHORTS_DESCRIPTION_CTA}\n", "", 1)
+    assert "チャンネル登録 CTA" in validate_shorts_description(
+        edited, result.requirements
+    )
+
+
+def test_validator_distinguishes_equal_generated_and_source_title_values(tmp_path):
+    settings = Settings(data_dir=tmp_path)
+    video_id = "gate003e"
+    _write_meta(tmp_path, video_id, title="同じ")
+    save_shorts_template(_valid_quality_template(), settings=settings)
+
+    result = build_shorts_description_for_upload(
+        "同じ", video_id=video_id, settings=settings
+    )
+    assert result.requirements.generated_description_occurrences == 2
+    assert result.requirements.source_title_occurrences == 2
+
+    edited = result.description.replace(
+        "同じ\n\n元動画: ", "\n\n元動画: ", 1
+    )
+    missing = validate_shorts_description(edited, result.requirements)
+    assert "生成した説明文" in missing
+    assert "元動画タイトル" in missing
 
 
 def test_quality_gate_rejects_missing_required_placeholders_without_overwriting_file(
@@ -403,6 +502,51 @@ def test_default_template_creation_is_safe_under_same_process_concurrency(tmp_pa
     assert paths == [path] * 8
     assert path.read_text(encoding="utf-8") == DEFAULT_SHORTS_DESCRIPTION_TEMPLATE
     assert not list(path.parent.glob(".*.tmp"))
+
+
+def test_user_save_waits_for_default_creation_and_wins_deterministically(
+    tmp_path, monkeypatch
+):
+    settings = Settings(data_dir=tmp_path)
+    default_write_entered = threading.Event()
+    release_default_write = threading.Event()
+    original_write = description_service.write_text_atomically
+
+    def pause_default_write(path, text, **kwargs):
+        if text == DEFAULT_SHORTS_DESCRIPTION_TEMPLATE:
+            default_write_entered.set()
+            if not release_default_write.wait(timeout=5):
+                raise TimeoutError("default write release timeout")
+        return original_write(path, text, **kwargs)
+
+    monkeypatch.setattr(
+        "yt_live_kit.services.description.write_text_atomically", pause_default_write
+    )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        ensure_future = executor.submit(
+            ensure_shorts_description_template, settings
+        )
+        assert default_write_entered.wait(timeout=5)
+        save_future = executor.submit(save_shorts_template, "USER_TEMPLATE", settings)
+        release_default_write.set()
+        ensure_future.result(timeout=5)
+        save_future.result(timeout=5)
+
+    assert get_shorts_template_path(settings).read_text(encoding="utf-8") == (
+        "USER_TEMPLATE"
+    )
+
+
+def test_existing_user_save_is_never_replaced_by_later_default_creation(tmp_path):
+    settings = Settings(data_dir=tmp_path)
+
+    save_shorts_template("USER_TEMPLATE", settings=settings)
+    ensure_shorts_description_template(settings=settings)
+
+    assert get_shorts_template_path(settings).read_text(encoding="utf-8") == (
+        "USER_TEMPLATE"
+    )
 
 
 def test_default_template_creation_fails_closed_when_atomic_write_fails(

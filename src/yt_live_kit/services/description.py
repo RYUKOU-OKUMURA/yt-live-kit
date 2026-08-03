@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import re
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Lock
@@ -61,10 +63,22 @@ class ShortsDescriptionRequirements:
     fixed_cta: str
     template_bytes_fingerprint: str
     meta_json_fingerprint: str
+    generated_description_occurrences: int = 1
+    source_title_occurrences: int = 1
+    source_url_occurrences: int = 1
+    fixed_cta_line_occurrences: int = 1
 
     def __post_init__(self) -> None:
         if self.fixed_cta != SHORTS_DESCRIPTION_CTA:
             raise ValueError("固定 CTA は変更できません。")
+        for count in (
+            self.generated_description_occurrences,
+            self.source_title_occurrences,
+            self.source_url_occurrences,
+            self.fixed_cta_line_occurrences,
+        ):
+            if not isinstance(count, int) or count < 0:
+                raise ValueError("概要欄の出現必要数は 0 以上の整数で指定してください。")
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,6 +133,15 @@ def get_shorts_template_path(settings: Settings | None = None) -> Path:
     return settings.data_dir / _CONFIG_DIR / _SHORTS_TEMPLATE_FILENAME
 
 
+@contextmanager
+def _shorts_template_write_lock(path: Path) -> Iterator[None]:
+    """既定作成とユーザー保存で共有する thread + process lock."""
+    lock_path = path.parent / _SHORTS_TEMPLATE_LOCK_FILENAME
+    with _SHORTS_TEMPLATE_THREAD_LOCK:
+        with advisory_lock(lock_path):
+            yield
+
+
 def ensure_shorts_description_template(settings: Settings | None = None) -> Path:
     """投稿ゲート用の既定ショートテンプレートを初回だけ作成する.
 
@@ -127,23 +150,19 @@ def ensure_shorts_description_template(settings: Settings | None = None) -> Path
     """
     settings = settings or get_settings()
     path = get_shorts_template_path(settings)
-    lock_path = path.parent / _SHORTS_TEMPLATE_LOCK_FILENAME
 
     try:
-        # fcntl の lock はプロセス間排他だが、同一プロセス内のスレッド競合も
-        # 明示的に直列化して、初回作成の check-and-create を一つにする。
-        with _SHORTS_TEMPLATE_THREAD_LOCK:
-            with advisory_lock(lock_path):
-                if path.is_file():
-                    return path
-                write_text_atomically(
-                    path,
-                    DEFAULT_SHORTS_DESCRIPTION_TEMPLATE,
-                    encoding="utf-8",
-                )
-                if not path.is_file():
-                    raise OSError("既定テンプレートの保存結果を確認できません。")
+        with _shorts_template_write_lock(path):
+            if path.is_file():
                 return path
+            write_text_atomically(
+                path,
+                DEFAULT_SHORTS_DESCRIPTION_TEMPLATE,
+                encoding="utf-8",
+            )
+            if not path.is_file():
+                raise OSError("既定テンプレートの保存結果を確認できません。")
+            return path
     except DescriptionError:
         raise
     except Exception as exc:
@@ -157,9 +176,17 @@ def save_shorts_template(text: str, settings: Settings | None = None) -> Path:
     """ショート用概要欄テンプレートを保存してパスを返す."""
     settings = settings or get_settings()
     path = get_shorts_template_path(settings)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
-    return path
+    try:
+        with _shorts_template_write_lock(path):
+            write_text_atomically(path, text, encoding="utf-8")
+            return path
+    except DescriptionError:
+        raise
+    except Exception as exc:
+        raise DescriptionError(
+            "ショート用概要欄テンプレートを安全に保存できませんでした。"
+            f"{path} を確認してください。"
+        ) from exc
 
 
 def _load_video_meta(video_id: str, settings: Settings) -> VideoMeta:
@@ -244,6 +271,11 @@ def _contains_exact_line(text: str, expected: str) -> bool:
     return expected in text.splitlines()
 
 
+def _count_occurrences(text: str, expected: str) -> int:
+    """空文字を Python の特殊な count semantics にしない."""
+    return text.count(expected) if expected else 0
+
+
 def _with_start_seconds(url: str, start_ms: int | None) -> str:
     """元配信 URL へ切り抜き開始秒を t クエリとして付ける."""
     if start_ms is None or start_ms < 1000:
@@ -274,14 +306,35 @@ def validate_shorts_description(
 
     missing: list[str] = []
     required_items = (
-        ("生成した説明文", requirements.generated_description),
-        ("元動画タイトル", requirements.source_title),
-        ("開始秒付き元動画 URL", requirements.source_url),
+        (
+            "生成した説明文",
+            requirements.generated_description,
+            requirements.generated_description_occurrences,
+        ),
+        (
+            "元動画タイトル",
+            requirements.source_title,
+            requirements.source_title_occurrences,
+        ),
+        (
+            "開始秒付き元動画 URL",
+            requirements.source_url,
+            requirements.source_url_occurrences,
+        ),
     )
-    for label, expected in required_items:
-        if not expected or expected not in text:
+    for label, expected, required_count in required_items:
+        if (
+            not expected
+            or required_count < 1
+            or _count_occurrences(text, expected) < required_count
+        ):
             missing.append(label)
-    if not _contains_exact_line(text, requirements.fixed_cta):
+    actual_cta_line_count = text.splitlines().count(requirements.fixed_cta)
+    if (
+        not requirements.fixed_cta
+        or requirements.fixed_cta_line_occurrences < 1
+        or actual_cta_line_count < requirements.fixed_cta_line_occurrences
+    ):
         missing.append("チャンネル登録 CTA")
 
     if _UNRESOLVED_PLACEHOLDER_RE.search(text):
@@ -339,6 +392,9 @@ def _build_quality_gated_shorts_description(
     meta, meta_fingerprint = _load_video_meta_with_fingerprint(video_id, settings)
     generated_description = base_description.strip()
     source_url = _with_start_seconds(meta.url, start_ms)
+    description = template.replace(_DESCRIPTION_PLACEHOLDER, generated_description)
+    description = description.replace(_SOURCE_TITLE_PLACEHOLDER, meta.title)
+    description = description.replace(_SOURCE_URL_PLACEHOLDER, source_url)
     requirements = ShortsDescriptionRequirements(
         generated_description=generated_description,
         source_title=meta.title,
@@ -346,10 +402,15 @@ def _build_quality_gated_shorts_description(
         fixed_cta=SHORTS_DESCRIPTION_CTA,
         template_bytes_fingerprint=template_fingerprint,
         meta_json_fingerprint=meta_fingerprint,
+        generated_description_occurrences=_count_occurrences(
+            description, generated_description
+        ),
+        source_title_occurrences=_count_occurrences(description, meta.title),
+        source_url_occurrences=_count_occurrences(description, source_url),
+        fixed_cta_line_occurrences=description.splitlines().count(
+            SHORTS_DESCRIPTION_CTA
+        ),
     )
-    description = template.replace(_DESCRIPTION_PLACEHOLDER, generated_description)
-    description = description.replace(_SOURCE_TITLE_PLACEHOLDER, meta.title)
-    description = description.replace(_SOURCE_URL_PLACEHOLDER, source_url)
     require_valid_shorts_description(description, requirements)
     return ShortsDescriptionBuild(description=description, requirements=requirements)
 
