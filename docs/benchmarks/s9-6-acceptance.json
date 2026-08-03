@@ -1,0 +1,156 @@
+{
+  "task_id": "S9-6",
+  "status": "fallback_only_human_confirmation_pending",
+  "phase_complete": false,
+  "s9_complete": false,
+  "m16_complete": false,
+  "ac30": false,
+  "ac35": false,
+  "ac37": false,
+  "canonical_fixture_fingerprint": "6dae657f2b803c54c6af1afe4ed54ad4f447324c32802e1943dc5711a9bf1718",
+  "q5_run_manifest_fingerprint": "a25d0fbc8233a1db7f0c2ecbb332781b19e5fd5b31260a5b0b2d03be7270de5e",
+  "fingerprint_semantics": {
+    "canonical_fixture": "代表素材と評価入力を識別する fingerprint",
+    "q5_run_manifest": "q5 turbo の実行条件と run 集合を識別する fingerprint",
+    "same_fingerprint_claim": false,
+    "note": "canonical fixture と q5 run manifest は意味が異なるため、同一 fingerprint とは主張しない"
+  },
+  "reproduction": {
+    "q5_cold": {
+      "case_count": 4,
+      "exit_code": 0,
+      "summary": "4ケースすべて終了コード0"
+    },
+    "focused_s9": {
+      "passed": 123,
+      "summary": "focused S9 は123件 passed"
+    },
+    "single_report": {
+      "verdict": "no_go",
+      "comparator_available": false,
+      "gold_audit_status": "provisional",
+      "reason": [
+        "comparator不足",
+        "gold_audit_status=provisional"
+      ]
+    }
+  },
+  "metrics": {
+    "cer_relative_improvement_percent": 78.694,
+    "glossary_exact_match": {
+      "q5": {
+        "matched": 13,
+        "total": 19
+      },
+      "vtt": {
+        "matched": 10,
+        "total": 19
+      }
+    },
+    "cue_error": {
+      "q5": 2.35,
+      "vtt": 6.95
+    },
+    "wall_time_ms": {
+      "min": 2331,
+      "max": 5286
+    },
+    "peak_rss_bytes": {
+      "min": 904462336,
+      "max": 926924800
+    }
+  },
+  "canonical_evidence": {
+    "q5_model": "turbo",
+    "q5_turbo_runs": 16,
+    "cold_warm_output_sha_equal": true,
+    "production_scope": {
+      "file_count": 15,
+      "before_after_unchanged": true
+    },
+    "vtt_parity": {
+      "matched": 4,
+      "total": 4
+    },
+    "gold_audit_status": "unverified_provisional",
+    "usage_scope": "operational_transcript_reference_only"
+  },
+  "case_outcomes": [
+    {
+      "case_id": "case1",
+      "editorial_outcome": "no_additional_edit",
+      "transcript_assessment": "broadly_acceptable",
+      "notes": "追加編集なし。transcript は概ね許容可能"
+    },
+    {
+      "case_id": "case2",
+      "editorial_outcome": "opening_trim_required_then_human_preview",
+      "transcript_assessment": "broadly_acceptable",
+      "notes": "冒頭約6秒が無音。opening trim 後に人が preview する必要がある"
+    },
+    {
+      "case_id": "case3",
+      "editorial_outcome": "opening_trim_required_then_human_preview",
+      "transcript_assessment": "broadly_acceptable",
+      "notes": "冒頭約6秒が無音。opening trim 後に人が preview する必要がある"
+    },
+    {
+      "case_id": "case4",
+      "editorial_outcome": "internal_gap_removal_required_then_human_preview",
+      "transcript_assessment": "broadly_acceptable",
+      "notes": "冒頭に発話はあるが、約2秒から約26秒は大半が無発話。internal gap removal 後に人が preview する必要がある"
+    }
+  ],
+  "acceptance_rules": {
+    "parent_candidate_silence": "allowed",
+    "final_short_silence": "not_allowed",
+    "whisper_timestamp_auto_boundary_confirmation": false,
+    "transcripts_broadly_acceptable_alone_sufficient_for_go": false
+  },
+  "human_evidence": {
+    "automated": [
+      "q5 cold 4 cases exit0",
+      "focused S9 123 passed",
+      "q5 turbo 16 runs",
+      "cold/warm output SHA equal",
+      "production scope 15 files before/after unchanged",
+      "VTT parity 4/4"
+    ],
+    "existing_human": [
+      "S9-4/S9-5で確認済みの同一artifact lineageを既存証跡として参照",
+      "S9-4/S9-5で確認済みのrange-local invalidationを既存証跡として参照",
+      "runtime unavailable時の日本語fallbackを既存証跡として参照"
+    ],
+    "current_ui_pending": [
+      "case2/3のopening trim後preview",
+      "case4のinternal gap removal後preview",
+      "final shortに致命的な無発話がないことの確認"
+    ]
+  },
+  "existing_test_evidence": {
+    "source": "S9-4/S9-5",
+    "items": [
+      "同一artifact lineage",
+      "range-local invalidation",
+      "runtime unavailable時の日本語fallback"
+    ],
+    "current_ui_edit_after_preview_verified": false
+  },
+  "pending": [
+    "case2/3 opening trim後preview",
+    "case4 internal gap removal後preview",
+    "final shortに致命的無発話なし確認",
+    "exact gold/glossary/cue anchor監査、またはS9-6で採用可能な明示的waiver"
+  ],
+  "decision": {
+    "verdict": "no_go",
+    "reason": [
+      "single report は comparator不足かつ gold_audit_status=provisional のため no_go",
+      "canonical evidence の gold は unverified_provisional で、operational transcript reference に限定される",
+      "case2/3/4 の編集後 preview と final short の致命的無発話確認が未完了",
+      "transcripts が概ね許容可能でも、それだけでは Go に不十分",
+      "Whisper timestamp による境界の自動確定は false"
+    ],
+    "self_approval": false
+  }
+}
