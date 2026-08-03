@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import ast
 from contextlib import ExitStack, contextmanager, nullcontext
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, call, patch
+
+import pytest
 
 from yt_live_kit.config import Settings
 from yt_live_kit.models.clips import ClipCandidate
@@ -22,6 +24,7 @@ from yt_live_kit.services.shorts_line import (
 )
 from yt_live_kit.services.youtube_api import YouTubeAPIError
 from yt_live_kit.ui.components.clipboard import build_clipboard_copy_html
+from yt_live_kit.ui.state import JobErrorNotification
 from yt_live_kit.ui.views import video_detail
 from yt_live_kit.ui.views._local_settings import (
     load_description_applied_ids,
@@ -92,6 +95,35 @@ def _invoke_button_callback(label_to_click: str):
         return False
 
     return button
+
+
+class _ExpanderStub:
+    def __init__(self, is_open: bool) -> None:
+        self.open = is_open
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args: object) -> bool:
+        return False
+
+
+def _job_error_notification(
+    *,
+    video_id: str,
+    job_id: str,
+    summary: str,
+    detail: str | None,
+    occurred_at: datetime,
+) -> JobErrorNotification:
+    return JobErrorNotification(
+        video_id=video_id,
+        job_id=job_id,
+        kind="ffmpeg",
+        summary=summary,
+        detail=detail,
+        occurred_at=occurred_at,
+    )
 
 
 def test_detail_summary_keeps_generated_and_reservable_counts_separate() -> None:
@@ -586,7 +618,9 @@ def test_render_detail_draws_only_selected_workspace(tmp_path: Path) -> None:
             patch("yt_live_kit.ui.views.video_detail.render_shorts_section")
         )
         publish = stack.enter_context(patch("yt_live_kit.ui.views.video_detail._render_publish_workspace"))
-        stack.enter_context(patch("yt_live_kit.ui.views.video_detail._render_details_and_regeneration"))
+        details = stack.enter_context(
+            patch("yt_live_kit.ui.views.video_detail._render_details_and_regeneration")
+        )
         subheader = stack.enter_context(
             patch("yt_live_kit.ui.views.video_detail.st.subheader")
         )
@@ -605,6 +639,251 @@ def test_render_detail_draws_only_selected_workspace(tmp_path: Path) -> None:
     shorts.assert_called_once_with(result, expanded=False)
     publish.assert_not_called()
     subheader.assert_not_called()
+    details.assert_called_once_with(video, result, settings=settings, busy=False)
+
+
+def test_video_error_history_omits_empty_history() -> None:
+    with (
+        patch.object(video_detail, "get_job_error_history", return_value=[]) as history,
+        patch.object(video_detail.st, "subheader") as subheader,
+        patch.object(video_detail.st, "container") as container,
+    ):
+        video_detail._render_video_error_history("video-a", settings=MagicMock())
+
+    history.assert_called_once_with("video-a")
+    subheader.assert_not_called()
+    container.assert_not_called()
+
+
+def test_video_error_history_separates_video_a_and_b() -> None:
+    occurred_at = datetime(2026, 8, 3, tzinfo=timezone.utc)
+    notices = [
+        _job_error_notification(
+            video_id="video-a",
+            job_id="job-a",
+            summary="A の失敗",
+            detail="A detail",
+            occurred_at=occurred_at,
+        ),
+        _job_error_notification(
+            video_id="video-b",
+            job_id="job-b",
+            summary="B の失敗",
+            detail="B detail",
+            occurred_at=occurred_at,
+        ),
+    ]
+    with (
+        patch.object(video_detail, "get_job_error_history", return_value=notices) as history,
+        patch.object(video_detail.st, "subheader"),
+        patch.object(video_detail.st, "container", return_value=nullcontext()),
+        patch.object(video_detail.st, "text") as text,
+        patch.object(video_detail.st, "text_area"),
+    ):
+        video_detail._render_video_error_history("video-a", settings=MagicMock())
+
+    history.assert_called_once_with("video-a")
+    rendered = "\n".join(str(item.args[0]) for item in text.call_args_list)
+    assert "job-a" in rendered
+    assert "job-b" not in rendered
+
+
+@pytest.mark.parametrize("count", [3, 4])
+def test_video_error_history_is_newest_first_and_limited_to_three(count: int) -> None:
+    base = datetime(2026, 8, 3, tzinfo=timezone.utc)
+    notices = [
+        _job_error_notification(
+            video_id="video-a",
+            job_id=f"job-{index}",
+            summary=f"summary-{index}",
+            detail=f"detail-{index}",
+            occurred_at=base + timedelta(minutes=index),
+        )
+        for index in range(count)
+    ]
+    with (
+        patch.object(video_detail, "get_job_error_history", return_value=notices),
+        patch.object(video_detail.st, "subheader"),
+        patch.object(video_detail.st, "container", return_value=nullcontext()) as container,
+        patch.object(video_detail.st, "text") as text,
+        patch.object(video_detail.st, "text_area") as text_area,
+    ):
+        video_detail._render_video_error_history("video-a", settings=MagicMock())
+
+    rendered_job_ids = [
+        item.args[0]
+        for item in text.call_args_list
+        if item.args[0].startswith("job ID:")
+    ]
+    assert rendered_job_ids == [
+        f"job ID: job-{index}" for index in range(count - 1, max(-1, count - 4), -1)
+    ]
+    assert container.call_count == 3
+    assert text_area.call_count == 3
+
+
+def test_video_error_history_sanitizes_summary_and_preserves_detail_newlines() -> None:
+    notice = _job_error_notification(
+        video_id="video-a",
+        job_id="job-a",
+        summary="  失敗\n<summary>\twith  spaces  ",
+        detail="Trace <raw>\nline 2 > end",
+        occurred_at=datetime(2026, 8, 3, tzinfo=timezone.utc),
+    )
+    with (
+        patch.object(video_detail, "get_job_error_history", return_value=[notice]),
+        patch.object(video_detail.st, "subheader"),
+        patch.object(video_detail.st, "container", return_value=nullcontext()),
+        patch.object(video_detail.st, "text") as text,
+        patch.object(video_detail.st, "text_area") as text_area,
+        patch.object(video_detail.st, "markdown") as markdown,
+    ):
+        video_detail._render_video_error_history("video-a", settings=MagicMock())
+
+    summary_text = next(
+        item.args[0] for item in text.call_args_list if item.args[0].startswith("要約:")
+    )
+    assert summary_text == "要約: 失敗 〈summary〉 with spaces"
+    assert text_area.call_args.kwargs["value"] == "Trace 〈raw〉\nline 2 〉 end"
+    markdown.assert_not_called()
+
+
+def test_closed_details_skip_error_history_and_log_reads(tmp_path: Path) -> None:
+    video = _video()
+    settings = Settings(data_dir=tmp_path)
+    with (
+        patch.object(video_detail.st, "expander", return_value=_ExpanderStub(False)),
+        patch.object(video_detail, "get_job_error_history") as history,
+        patch.object(video_detail, "read_job_error_log") as read_log,
+        patch.object(video_detail, "_render_transcript") as transcript,
+    ):
+        video_detail._render_details_and_regeneration(
+            video,
+            _result(tmp_path),
+            settings=settings,
+            busy=False,
+        )
+
+    history.assert_not_called()
+    read_log.assert_not_called()
+    transcript.assert_not_called()
+
+
+def test_video_error_detail_uses_state_detail_without_reading_log() -> None:
+    notice = _job_error_notification(
+        video_id="video-a",
+        job_id="job-a",
+        summary="失敗",
+        detail="state detail <raw>\nline",
+        occurred_at=datetime(2026, 8, 3, tzinfo=timezone.utc),
+    )
+    with (
+        patch.object(video_detail, "get_job_error_history", return_value=[notice]),
+        patch.object(video_detail, "read_job_error_log") as read_log,
+        patch.object(video_detail.st, "subheader"),
+        patch.object(video_detail.st, "container", return_value=nullcontext()),
+        patch.object(video_detail.st, "text"),
+        patch.object(video_detail.st, "text_area") as text_area,
+    ):
+        video_detail._render_video_error_history("video-a", settings=MagicMock())
+
+    read_log.assert_not_called()
+    assert text_area.call_args.kwargs["value"] == "state detail 〈raw〉\nline"
+
+
+def test_video_error_detail_reads_bounded_log_when_state_detail_is_missing() -> None:
+    notice = _job_error_notification(
+        video_id="video-a",
+        job_id="job-a",
+        summary="失敗",
+        detail=None,
+        occurred_at=datetime(2026, 8, 3, tzinfo=timezone.utc),
+    )
+    settings = MagicMock()
+    with (
+        patch.object(video_detail, "get_job_error_history", return_value=[notice]),
+        patch.object(
+            video_detail,
+            "read_job_error_log",
+            return_value="log <raw>\nsecond line",
+        ) as read_log,
+        patch.object(video_detail.st, "subheader"),
+        patch.object(video_detail.st, "container", return_value=nullcontext()),
+        patch.object(video_detail.st, "text"),
+        patch.object(video_detail.st, "text_area") as text_area,
+    ):
+        video_detail._render_video_error_history("video-a", settings=settings)
+
+    read_log.assert_called_once_with(
+        "job-a",
+        settings,
+        max_bytes=video_detail._MAX_DETAIL_JOB_ERROR_LOG_BYTES,
+    )
+    assert text_area.call_args.kwargs["value"] == "log 〈raw〉\nsecond line"
+
+
+def test_video_error_detail_omits_missing_log_silently() -> None:
+    notice = _job_error_notification(
+        video_id="video-a",
+        job_id="job-a",
+        summary="失敗",
+        detail=None,
+        occurred_at=datetime(2026, 8, 3, tzinfo=timezone.utc),
+    )
+    with (
+        patch.object(video_detail, "get_job_error_history", return_value=[notice]),
+        patch.object(video_detail, "read_job_error_log", return_value=None) as read_log,
+        patch.object(video_detail.st, "subheader"),
+        patch.object(video_detail.st, "container", return_value=nullcontext()),
+        patch.object(video_detail.st, "text"),
+        patch.object(video_detail.st, "text_area") as text_area,
+    ):
+        video_detail._render_video_error_history("video-a", settings=MagicMock())
+
+    read_log.assert_called_once()
+    text_area.assert_not_called()
+
+
+def test_details_keep_existing_content_after_error_history(tmp_path: Path) -> None:
+    video = _video(transcript=True, chapters=True, clips=True)
+    result = _result(tmp_path, chapters="0:00 はじめに")
+    settings = MagicMock()
+    with (
+        patch.object(
+            video_detail.st,
+            "expander",
+            return_value=_ExpanderStub(True),
+        ) as expander,
+        patch.object(video_detail, "_render_video_error_history") as history,
+        patch.object(video_detail, "_render_transcript") as transcript,
+        patch.object(video_detail, "_render_chapters") as chapters,
+        patch.object(video_detail, "_render_regenerate_control") as regenerate,
+        patch.object(video_detail.st, "markdown"),
+        patch.object(video_detail.st, "button", return_value=False),
+    ):
+        video_detail._render_details_and_regeneration(
+            video,
+            result,
+            settings=settings,
+            busy=False,
+        )
+
+    expander.assert_called_once_with(
+        "詳細・再生成",
+        expanded=False,
+        key="detail_regeneration_vid1234567",
+        on_change="rerun",
+    )
+    history.assert_called_once_with(video.video_id, settings=settings)
+    transcript.assert_called_once_with(result)
+    chapters.assert_called_once_with(video, result, busy=False, settings=settings)
+    regenerate.assert_called_once_with(
+        video,
+        target="clips",
+        complete=True,
+        busy=False,
+        settings=settings,
+    )
 
 
 _VALID_CHAPTERS = "0:00 はじめに\n0:10 本題\n0:20 まとめ"

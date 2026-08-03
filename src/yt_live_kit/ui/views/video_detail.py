@@ -17,7 +17,14 @@ from yt_live_kit.services.chapter_validator import validate_chapters
 from yt_live_kit.services.clips import load_candidates_file
 from yt_live_kit.services.highlights import load_segments_file
 from yt_live_kit.services.history import ProcessedVideo, list_processed_videos
-from yt_live_kit.services.jobs import JobBusyError, JobState, get_active_job, is_busy, start_job
+from yt_live_kit.services.jobs import (
+    JobBusyError,
+    JobState,
+    get_active_job,
+    is_busy,
+    read_job_error_log,
+    start_job,
+)
 from yt_live_kit.services.pipeline import (
     PipelineResult,
     load_result_from_disk,
@@ -41,8 +48,17 @@ from yt_live_kit.ui.components.shorts_line import (
     run_line_upload_transaction,
     validate_line_reservation,
 )
+from yt_live_kit.ui.components.status_bar import kind_label
 from yt_live_kit.ui.components.upload import render_upload_section
-from yt_live_kit.ui.state import get_selected_video_id, set_active_job_id
+from yt_live_kit.ui.state import (
+    JOB_ERROR_HISTORY_LIMIT,
+    JobErrorNotification,
+    format_job_error_summary_for_display,
+    get_job_error_history,
+    get_selected_video_id,
+    sanitize_job_error_for_display,
+    set_active_job_id,
+)
 from yt_live_kit.ui.views._local_settings import (
     load_description_applied_ids,
     mark_description_applied,
@@ -65,6 +81,7 @@ _WORKSPACE_LABELS: dict[Workspace, str] = {
 }
 _DESCRIPTION_UPDATED_IDS_KEY = "detail_description_updated_ids"
 _DESCRIPTION_SUCCESS_KEY = "detail_description_success"
+_MAX_DETAIL_JOB_ERROR_LOG_BYTES = 64 * 1024
 
 
 @dataclass(frozen=True)
@@ -470,6 +487,75 @@ def _render_transcript(result: PipelineResult) -> None:
         label="全文をコピー",
         key=f"detail_copy_transcript_{result.video_id}",
     )
+
+
+def _render_job_error_notification(
+    notification: JobErrorNotification,
+    *,
+    video_id: str,
+    index: int,
+    settings: Settings,
+) -> None:
+    """動画詳細内の構造化ジョブエラーを安全な native UI で表示する."""
+    with st.container(border=True, gap="small"):
+        st.text(
+            "処理種別: "
+            + sanitize_job_error_for_display(kind_label(notification.kind))
+        )
+        st.text(
+            "発生日時: "
+            + notification.occurred_at.isoformat(timespec="seconds")
+        )
+        st.text(
+            "job ID: "
+            + sanitize_job_error_for_display(notification.job_id or "（なし）")
+        )
+        st.text(
+            "要約: "
+            + format_job_error_summary_for_display(notification.summary)
+        )
+
+        detail = notification.detail
+        if not detail and notification.job_id:
+            detail = read_job_error_log(
+                notification.job_id,
+                settings,
+                max_bytes=_MAX_DETAIL_JOB_ERROR_LOG_BYTES,
+            )
+        if detail:
+            job_key = notification.job_id or f"missing-{index}"
+            st.text_area(
+                "技術ログ",
+                value=sanitize_job_error_for_display(detail),
+                height=220,
+                disabled=True,
+                key=f"detail_job_error_log_{video_id}_{job_key}",
+            )
+
+
+def _render_video_error_history(video_id: str, *, settings: Settings) -> None:
+    """現在の動画に紐づく直近エラーだけを詳細領域へ表示する."""
+    notifications = [
+        notification
+        for notification in get_job_error_history(video_id)
+        if notification.video_id == video_id
+    ]
+    notifications = sorted(
+        notifications,
+        key=lambda notification: notification.occurred_at,
+        reverse=True,
+    )[:JOB_ERROR_HISTORY_LIMIT]
+    if not notifications:
+        return
+
+    st.subheader("エラー履歴")
+    for index, notification in enumerate(notifications):
+        _render_job_error_notification(
+            notification,
+            video_id=video_id,
+            index=index,
+            settings=settings,
+        )
 
 
 def _render_chapters(
@@ -924,6 +1010,7 @@ def _render_details_and_regeneration(
     if not details.open:
         return
     with details:
+        _render_video_error_history(video.video_id, settings=settings)
         _render_transcript(result)
         _render_chapters(video, result, busy=busy, settings=settings)
         st.markdown("**候補の再生成**")
