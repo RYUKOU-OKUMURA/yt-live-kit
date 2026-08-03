@@ -49,7 +49,7 @@
 | S9-5 | UI 設定・進捗・エラー・失効表示 | [ ] 未着手 |
 | S9-6 | A/B 受け入れ・回帰・フェーズ判定 | [ ] 未着手 |
 | S9 | 選択親候補区間のローカル Whisper 精査（実装） | [~] 進行中 |
-| P6-PLAN | Shorts 投稿メタデータ品質ゲート計画（docs-only） | [~] 進行中 |
+| P6-PLAN | Shorts 投稿メタデータ品質ゲート計画（docs-only） | [x] 完了 |
 | P6-1 | タイトル 3 方向生成・検証 | [ ] 未着手 |
 | P6-2 | 概要欄必須構成・投稿前再検証 service | [ ] 未着手 |
 | P6-3 | 関連動画の Studio 手動確認・永続状態 | [ ] 未着手 |
@@ -1726,13 +1726,15 @@ data/{video_id}/ ...
 
 **目的:** コード変更前に FR-37 / FR-38、AC-38 / AC-39、実装分割、依存順、並列 worktree の writer 境界を docs の正本へ固定する。
 
+**タスク状態:** [x] 完了
+
 **作業:**
 
 - [x] P6-PLAN-1. `requirements-v3.md` にタイトル 3 方向、概要欄必須構成と二重再検証、関連動画の Studio 手動確認・永続状態を定義する
 - [x] P6-PLAN-2. P6-1〜P6-5 の目的、変更ファイル範囲、Done 条件、テスト、統合順を本節へ定義する
 - [x] P6-PLAN-3. `AGENTS.md` と `v3-agent-prompts.md` に P6 並列期間だけの単一 writer 例外を定義し、S9-1 監査節と `.codex/learning/user-decisions.md` を保護対象として明記する
 - [x] P6-PLAN-4. 独立レビューで要件矛盾、ファイル競合、後方互換、確認境界、API scope を欠陥優先で確認し、指摘を反映する
-- [ ] P6-PLAN-5. docs 4 ファイルだけを `P6-PLAN` コミットとして main に記録し、既存の未コミット `.codex/learning/user-decisions.md` を混ぜない
+- [x] P6-PLAN-5. docs 4 ファイルだけを `P6-PLAN` コミット `410e99a` として main に記録し、既存の未コミット `.codex/learning/user-decisions.md` を混ぜない
 
 **Done 条件:**
 
