@@ -49,6 +49,21 @@ _VTT_TIMING_RE = re.compile(
 )
 _VTT_TIMING_START_RE = re.compile(r"^\s*(?:\d{2}:)?\d{2}:\d{2}")
 
+# ``subprocess.Popen(preexec_fn=...)`` is unsafe when the caller has worker
+# threads: the child can inherit a lock held by a vanished thread.  Keep the
+# directory-FD based cwd protection by doing the fchdir in this tiny, freshly
+# started Python process, immediately before it execs yt-dlp.  All values that
+# affect the command are positional argv entries; no shell is involved.
+_YTDLP_CWD_FD_WRAPPER = """
+import os
+import sys
+
+directory_fd = int(sys.argv[1])
+program = sys.argv[2]
+os.fchdir(directory_fd)
+os.execvp(program, [program, *sys.argv[3:]])
+"""
+
 # 2025.02.19 以前では字幕取得失敗の実績あり（tech-stack.md 参照）
 YTDLP_MIN_RECOMMENDED_VERSION = "2025.02.19"
 
@@ -910,13 +925,29 @@ def _run_ytdlp(
     pass_fds: tuple[int, ...] = (),
     cwd_fd: int | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    cmd = [settings.ytdlp_path, *args]
     effective_timeout = settings.ytdlp_timeout if timeout is None else timeout
     if cwd_fd is not None and os.name != "posix":
         raise YtdlpError(
             "字幕を隔離保存する実行環境に対応していません。"
         )
-    preexec_fn = None if cwd_fd is None else lambda: os.fchdir(cwd_fd)
+
+    if cwd_fd is None:
+        cmd = [settings.ytdlp_path, *args]
+        inherited_fds = pass_fds
+    else:
+        cmd = [
+            sys.executable,
+            "-c",
+            _YTDLP_CWD_FD_WRAPPER,
+            str(cwd_fd),
+            settings.ytdlp_path,
+            *args,
+        ]
+        # The wrapper must receive cwd_fd even when the caller's additional
+        # descriptors do not include it.  Preserve caller order and remove
+        # duplicates so subprocess does not warn about repeated descriptors.
+        inherited_fds = tuple(dict.fromkeys((*pass_fds, cwd_fd)))
+
     try:
         return subprocess.run(
             cmd,
@@ -924,8 +955,7 @@ def _run_ytdlp(
             text=True,
             check=False,
             timeout=effective_timeout,
-            pass_fds=pass_fds,
-            preexec_fn=preexec_fn,
+            pass_fds=inherited_fds,
         )
     except subprocess.TimeoutExpired as exc:
         raise YtdlpError(

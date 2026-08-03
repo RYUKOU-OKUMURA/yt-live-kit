@@ -3,6 +3,7 @@
 import hashlib
 import os
 import subprocess
+import sys
 from unittest.mock import patch
 
 import pytest
@@ -138,6 +139,82 @@ def test_run_ytdlp_download_uses_download_timeout(mock_run):
     _run_ytdlp(["--skip-download", "https://example.com"], settings, timeout=settings.download_timeout)
 
     assert mock_run.call_args.kwargs["timeout"] == 7200
+
+
+@patch("yt_live_kit.services.ytdlp.subprocess.run")
+def test_run_ytdlp_without_cwd_fd_executes_yt_dlp_directly(mock_run):
+    mock_run.return_value = subprocess.CompletedProcess(
+        args=[], returncode=0, stdout="", stderr=""
+    )
+    settings = Settings(ytdlp_path="yt-dlp")
+
+    _run_ytdlp(["--version"], settings)
+
+    assert mock_run.call_args.args[0] == ["yt-dlp", "--version"]
+    assert "preexec_fn" not in mock_run.call_args.kwargs
+
+
+@pytest.mark.skipif(os.name != "posix", reason="directory FD cwd requires POSIX")
+@patch("yt_live_kit.services.ytdlp.subprocess.run")
+def test_run_ytdlp_cwd_fd_uses_exec_wrapper_and_passes_fd(mock_run, tmp_path):
+    mock_run.return_value = subprocess.CompletedProcess(
+        args=[], returncode=0, stdout="", stderr=""
+    )
+    directory = tmp_path / "incoming"
+    directory.mkdir()
+    descriptor = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        settings = Settings(ytdlp_path="yt-dlp")
+
+        _run_ytdlp(
+            ["--write-auto-sub", "https://example.com/watch?v=123"],
+            settings,
+            pass_fds=(descriptor,),
+            cwd_fd=descriptor,
+        )
+    finally:
+        os.close(descriptor)
+
+    command = mock_run.call_args.args[0]
+    assert command[:2] == [sys.executable, "-c"]
+    assert "os.fchdir(directory_fd)" in command[2]
+    assert "os.execvp(program, [program, *sys.argv[3:]])" in command[2]
+    assert command[3:] == [
+        str(descriptor),
+        "yt-dlp",
+        "--write-auto-sub",
+        "https://example.com/watch?v=123",
+    ]
+    assert mock_run.call_args.kwargs["pass_fds"] == (descriptor,)
+    assert "preexec_fn" not in mock_run.call_args.kwargs
+
+
+@pytest.mark.skipif(os.name != "posix", reason="directory FD cwd requires POSIX")
+def test_run_ytdlp_cwd_fd_allows_relative_output_in_fd_directory(tmp_path):
+    incoming = tmp_path / "incoming"
+    outside = tmp_path / "outside"
+    incoming.mkdir()
+    outside.mkdir()
+    descriptor = os.open(incoming, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        settings = Settings(ytdlp_path=sys.executable, ytdlp_timeout=30)
+        result = _run_ytdlp(
+            [
+                "-c",
+                (
+                    "from pathlib import Path; "
+                    "Path('relative-output.txt').write_text('ok', encoding='utf-8')"
+                ),
+            ],
+            settings,
+            cwd_fd=descriptor,
+        )
+    finally:
+        os.close(descriptor)
+
+    assert result.returncode == 0
+    assert (incoming / "relative-output.txt").read_text(encoding="utf-8") == "ok"
+    assert not (outside / "relative-output.txt").exists()
 
 
 def test_download_subtitles_passes_stable_incoming_fd_to_process(tmp_path, monkeypatch):
