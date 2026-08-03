@@ -18,6 +18,7 @@ from yt_live_kit.config import Settings, get_settings
 from yt_live_kit.models.clips import ClipCandidate
 from yt_live_kit.models.highlights import HighlightSegment
 from yt_live_kit.models.short_cut import ShortCutDocument
+from yt_live_kit.models.transcript import TranscriptArtifact, TranscriptArtifactRef
 from yt_live_kit.services._fsutil import write_text_atomically
 from yt_live_kit.services.ai_prompt import (
     AiPromptError,
@@ -32,6 +33,8 @@ from yt_live_kit.services.subtitle_burn import (
     parse_vtt_with_end,
 )
 from yt_live_kit.services.telop import TelopError, normalize_segment_bounds
+from yt_live_kit.services.transcript_artifact import TranscriptArtifactError, TranscriptArtifactStore
+from yt_live_kit.services.whisper_runtime import run_selected_ranges
 
 logger = logging.getLogger(__name__)
 
@@ -101,6 +104,23 @@ class ShortCutResult:
     cut_plan_path: Path | None
     used_codex: bool
     document: ShortCutDocument | None
+    artifact_ref: TranscriptArtifactRef | None = None
+    artifact_fingerprint: str | None = None
+    used_range_cue_digests: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class RefinedShortCutResult:
+    """選択区間だけを高精度化した cutplan と immutable provenance."""
+
+    video_id: str
+    parent_id: str
+    job_id: str
+    artifact: TranscriptArtifact
+    artifact_ref: TranscriptArtifactRef
+    artifact_fingerprint: str
+    used_range_cue_digests: tuple[str, ...]
+    document: ShortCutDocument
 
 
 def find_project_root() -> Path:
@@ -437,13 +457,74 @@ def _safe_parent_id(parent_id: str) -> str:
     return safe
 
 
+def _artifact_lineage(
+    video_id: str,
+    artifact: TranscriptArtifact,
+    settings: Settings,
+) -> tuple[TranscriptArtifactRef, str, tuple[str, ...]]:
+    """高精度 job の結果から downstream 共通 provenance を一度だけ作る."""
+    if not isinstance(artifact, TranscriptArtifact):
+        raise ShortCutError("高精度字幕 artifact が正しくありません。")
+    if artifact.video_id != video_id:
+        raise ShortCutError("高精度字幕 artifact の動画 ID が一致しません。")
+    if not artifact.is_high_precision:
+        raise ShortCutError(
+            "高精度字幕の生成に失敗しました。明示的な VTT fallback を選ぶか、処理を停止してください。"
+        )
+    try:
+        reference = TranscriptArtifactStore(video_id, settings).artifact_ref(artifact)
+    except TranscriptArtifactError as exc:
+        raise ShortCutError("高精度字幕 artifact の immutable reference を作成できません。") from exc
+    return reference, artifact.artifact_fingerprint, tuple(artifact.used_range_cue_digests)
+
+
+def _document_with_lineage(
+    parent: ParentCandidate,
+    segments: Sequence[HighlightSegment],
+    *,
+    artifact_ref: TranscriptArtifactRef | None = None,
+    artifact_fingerprint: str | None = None,
+    used_range_cue_digests: Sequence[str] = (),
+) -> ShortCutDocument:
+    parent_start_ms, parent_end_ms = parent_bounds_ms(parent)
+    return ShortCutDocument(
+        parent_id=_as_highlight(parent).id,
+        parent_start_ms=parent_start_ms,
+        parent_end_ms=parent_end_ms,
+        candidates=list(segments),
+        artifact_ref=artifact_ref,
+        artifact_fingerprint=artifact_fingerprint,
+        used_range_cue_digests=tuple(used_range_cue_digests),
+    )
+
+
 def save_cut_plan(
     video_id: str,
     parent: ParentCandidate,
     raw_json_text: str,
     settings: Settings,
+    *,
+    artifact_ref: TranscriptArtifactRef | None = None,
+    artifact_fingerprint: str | None = None,
+    used_range_cue_digests: Sequence[str] = (),
+    artifact: TranscriptArtifact | None = None,
 ) -> tuple[Path, ShortCutDocument]:
     """検証を通過したサブ区間だけを atomic 保存する."""
+    if artifact is not None:
+        derived_ref, derived_fingerprint, derived_digests = _artifact_lineage(
+            video_id,
+            artifact,
+            settings,
+        )
+        if artifact_ref is not None and artifact_ref != derived_ref:
+            raise ShortCutError("cutplan の artifact reference が入力 artifact と一致しません。")
+        if artifact_fingerprint is not None and artifact_fingerprint != derived_fingerprint:
+            raise ShortCutError("cutplan の artifact fingerprint が入力 artifact と一致しません。")
+        if used_range_cue_digests and tuple(used_range_cue_digests) != derived_digests:
+            raise ShortCutError("cutplan の used_range_cue_digest が入力 artifact と一致しません。")
+        artifact_ref = derived_ref
+        artifact_fingerprint = derived_fingerprint
+        used_range_cue_digests = derived_digests
     data = _extract_json_object(raw_json_text)
     validation = validate_short_cut(data, parent=parent)
     if not validation.ok:
@@ -453,15 +534,18 @@ def save_cut_plan(
             validation.errors,
         )
 
-    parent_start_ms, parent_end_ms = parent_bounds_ms(parent)
-    document = ShortCutDocument(
-        parent_id=_as_highlight(parent).id,
-        parent_start_ms=parent_start_ms,
-        parent_end_ms=parent_end_ms,
-        candidates=list(validation.segments),
+    document = _document_with_lineage(
+        parent,
+        validation.segments,
+        artifact_ref=artifact_ref,
+        artifact_fingerprint=artifact_fingerprint,
+        used_range_cue_digests=used_range_cue_digests,
     )
     path = cut_plan_path(video_id, document.parent_id, settings)
-    write_text_atomically(path, document.model_dump_json(indent=2))
+    write_text_atomically(
+        path,
+        document.model_dump_json(indent=2, exclude_none=True, exclude_defaults=True),
+    )
     return path, document
 
 
@@ -547,6 +631,91 @@ def suggest_short_cuts(
         used_codex=True,
         document=document,
     )
+
+
+def refine_selected_short_cut(
+    video_id: str,
+    parent: ParentCandidate,
+    segments: Sequence[HighlightSegment],
+    settings: Settings | None = None,
+    *,
+    job_id: str | None = None,
+    on_progress: Callable[[object], None] | None = None,
+) -> RefinedShortCutResult:
+    """人が確定した区間だけを Whisper で精査し、同じ artifact を保存する.
+
+    この関数は明示的な高精度化入口専用であり、候補探索・通常 rerun・動画全体の
+    導線からは呼び出さない。失敗時は既存 cutplan を再利用せず、呼び出し側へ
+    fallback/停止の選択を返す。
+    """
+    settings = settings or get_settings()
+    parent_segment = _as_highlight(parent)
+    validation = validate_short_cut_selection(segments, parent=parent_segment)
+    if not validation.ok:
+        detail = "\n".join(f"- {error}" for error in validation.errors)
+        raise ShortCutValidationError(
+            f"選択区間を高精度化できません:\n{detail}",
+            validation.errors,
+        )
+
+    # pair 形式を runtime に渡し、S9-3 の設定 padding を runtime 側で適用させる。
+    # 入力順はそのまま保持し、Whisper の timestamp で境界を置き換えない。
+    selected_ranges = tuple(
+        (bounds.start_ms, bounds.end_ms)
+        for bounds in normalize_segment_bounds(validation.segments)
+    )
+    try:
+        result = run_selected_ranges(
+            video_id,
+            selected_ranges,
+            settings,
+            job_id=job_id,
+            on_progress=on_progress,
+        )
+    except Exception as exc:
+        if isinstance(exc, (ShortCutError, ShortCutValidationError)):
+            raise
+        raise ShortCutError(
+            "選択区間の高精度字幕に失敗しました。VTT fallback を明示的に選ぶか、処理を停止してください。"
+        ) from exc
+    if not result.is_high_precision or result.artifact is None:
+        diagnostic = result.diagnostic or "Whisper の高精度結果が利用できません。"
+        raise ShortCutError(
+            f"選択区間の高精度字幕に失敗しました: {diagnostic}"
+            " 明示的な VTT fallback を選ぶか、処理を停止してください。"
+        )
+
+    reference, fingerprint, digests = _artifact_lineage(
+        video_id,
+        result.artifact,
+        settings,
+    )
+    document = _document_with_lineage(
+        parent_segment,
+        validation.segments,
+        artifact_ref=reference,
+        artifact_fingerprint=fingerprint,
+        used_range_cue_digests=digests,
+    )
+    path = cut_plan_path(video_id, document.parent_id, settings)
+    write_text_atomically(
+        path,
+        document.model_dump_json(indent=2, exclude_none=True, exclude_defaults=True),
+    )
+    return RefinedShortCutResult(
+        video_id=video_id,
+        parent_id=document.parent_id,
+        job_id=result.job_id,
+        artifact=result.artifact,
+        artifact_ref=reference,
+        artifact_fingerprint=fingerprint,
+        used_range_cue_digests=digests,
+        document=document,
+    )
+
+
+# API 名の揺れを避けるための薄い互換入口。処理本体は常に 1 job / 1 artifact。
+refine_selected_short_cuts = refine_selected_short_cut
 
 
 def selected_total_ms(segments: Sequence[HighlightSegment]) -> int:

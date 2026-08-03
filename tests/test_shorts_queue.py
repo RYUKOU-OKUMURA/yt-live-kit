@@ -15,6 +15,7 @@ from yt_live_kit.config import Settings
 from yt_live_kit.models.clips import ClipCandidate
 from yt_live_kit.models.highlights import HighlightSegment
 from yt_live_kit.models.telop import TelopScriptDocument
+from yt_live_kit.models.transcript import TranscriptArtifactRef
 from yt_live_kit.services.shorts import ShortResult, ShortsError
 from yt_live_kit.services.telop import make_clip_id
 from yt_live_kit.services.shorts_queue import (
@@ -102,6 +103,38 @@ def _specs(count: int = 2) -> tuple[ShortsQueueClipSpec, ...]:
         )
         for target in targets
     )
+
+
+def test_queue_spec_keeps_artifact_lineage_without_changing_queue_fingerprint():
+    candidate = _clip(1, 0, 20)
+    segments = normalize_queue_candidates([candidate], source="clips")
+    target = build_shorts_queue_targets(segments, mode="individual")[0]
+    reference = TranscriptArtifactRef(
+        video_id="video-1",
+        artifact_fingerprint="c" * 64,
+        source_kind="whisper_cpp",
+        path=f"transcripts/artifacts/{'c' * 64}.json",
+    )
+    document = _document(target).model_copy(
+        update={
+            "artifact_ref": reference,
+            "artifact_fingerprint": reference.artifact_fingerprint,
+            "used_range_cue_digests": ("d" * 64,),
+        }
+    )
+    spec = make_shorts_queue_clip_spec(
+        target,
+        document,
+        layout="blur",
+        preset="default",
+        hook_preset="hook",
+    )
+    payload = spec.to_dict()
+    assert payload["artifact_ref"] == reference.model_dump(mode="json")
+    assert payload["used_range_cue_digests"] == ["d" * 64]
+    restored = ShortsQueueClipSpec.from_dict(payload)
+    assert restored.artifact_ref == reference
+    assert restored.used_range_cue_digests == ("d" * 64,)
 
 
 def _spec_payload_for_duration(duration_ms: int) -> dict[str, object]:

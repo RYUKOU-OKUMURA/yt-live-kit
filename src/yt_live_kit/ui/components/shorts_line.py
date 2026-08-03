@@ -58,6 +58,8 @@ from yt_live_kit.services.telop import (
     save_confirmed_telop_script,
     validate_telop_script,
 )
+from yt_live_kit.services.transcript_artifact import TranscriptArtifactError, TranscriptArtifactStore
+from yt_live_kit.services.short_cut import load_cut_plan
 from yt_live_kit.services.subtitle_burn import TELOP_PRESETS
 from yt_live_kit.services.upload_queue import UploadQueueError, list_operations
 from yt_live_kit.ui.components.short_cut import ParentOption, render_short_cut_section
@@ -367,6 +369,24 @@ def _persisted_generation_spec(state: LineState) -> ShortsQueueClipSpec | None:
     return spec if _spec_matches_lineage(spec, state) else None
 
 
+def _cutplan_lineage(
+    video_id: str,
+    option: ParentOption,
+    settings: Settings,
+) -> dict[str, object]:
+    """明示高精度化済み cutplan の provenance だけを line に引き渡す."""
+    document = load_cut_plan(video_id, option.id, settings)
+    if document is None or document.artifact_ref is None:
+        return {}
+    if document.artifact_fingerprint is None:
+        raise LineStateError("cutplan の artifact lineage が不完全です。")
+    return {
+        "artifact_ref": document.artifact_ref,
+        "artifact_fingerprint": document.artifact_fingerprint,
+        "used_range_cue_digests": tuple(document.used_range_cue_digests),
+    }
+
+
 def _generate_line_telop(
     *,
     video_id: str,
@@ -377,10 +397,27 @@ def _generate_line_telop(
 ) -> None:
     """明示操作時だけ台本を生成し、旧 spec/output lineage を失効させる。"""
     try:
+        artifact = None
+        if state.artifact_ref is not None:
+            if state.artifact_fingerprint is None:
+                raise TelopError("ライン state の artifact lineage が不完全です。")
+            try:
+                artifact = TranscriptArtifactStore(video_id, settings).load_artifact(
+                    state.artifact_fingerprint
+                )
+                actual_ref = TranscriptArtifactStore(video_id, settings).artifact_ref(artifact)
+            except TranscriptArtifactError as exc:
+                raise TelopError(
+                    "固定済み字幕 artifact を読み込めません。古い結果は再利用せず、VTT fallback を明示的に選んでください。"
+                ) from exc
+            if actual_ref != state.artifact_ref:
+                raise TelopError("固定済み字幕 artifact reference が state と一致しません。")
         generated = generate_telop_script(
             video_id,
             target.highlight_segments(),
             settings,
+            transcript_artifact=artifact,
+            artifact_ref=state.artifact_ref,
         )
         if generated.document is None:
             raise TelopError("テロップ台本を生成できませんでした。")
@@ -478,6 +515,7 @@ def _start_line(
         )
         return
     try:
+        lineage = _cutplan_lineage(video_id, option, settings)
         target, queue_fingerprint = install_line_snapshot(
             video_id=video_id,
             source=_source_for(option),
@@ -486,6 +524,7 @@ def _start_line(
             layout=defaults.layout,
             preset=defaults.preset,
             hook_preset=defaults.hook_preset,
+            **lineage,
         )
         material_context = _material_context_payload(
             source=_source_for(option),
@@ -498,6 +537,7 @@ def _start_line(
             target.target_id,
             queue_fingerprint,
             material_context=material_context,
+            **lineage,
         )
         save_line_state(state, settings)
         save_active_line(video_id, target.target_id, settings)
@@ -577,6 +617,15 @@ def _restore_context(
         except (OSError, UnicodeError, ValueError, LineStateError):
             document = None
     try:
+        lineage = (
+            {
+                "artifact_ref": state.artifact_ref,
+                "artifact_fingerprint": state.artifact_fingerprint,
+                "used_range_cue_digests": state.used_range_cue_digests,
+            }
+            if state.artifact_ref is not None
+            else {}
+        )
         restore_line_snapshot(
             video_id=video_id,
             source=source,
@@ -587,6 +636,7 @@ def _restore_context(
             hook_preset=defaults.hook_preset,
             expected_fingerprint=state.queue_fingerprint,
             confirmed_spec=spec,
+            **lineage,
         )
     except ShortsQueueError:
         return None
@@ -685,6 +735,9 @@ def _editor_document(
             if value.strip()
         ),
         segments=segments,
+        artifact_ref=draft.artifact_ref,
+        artifact_fingerprint=draft.artifact_fingerprint,
+        used_range_cue_digests=draft.used_range_cue_digests,
     )
 
 

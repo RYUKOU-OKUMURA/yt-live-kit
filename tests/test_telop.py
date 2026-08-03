@@ -12,6 +12,7 @@ import pytest
 
 from yt_live_kit.config import Settings
 from yt_live_kit.models.highlights import HighlightSegment
+from yt_live_kit.models.transcript import TranscriptCue, TranscriptRange
 from yt_live_kit.services.ai_prompt import AiPromptError, CodexNotFoundError
 from yt_live_kit.services.subtitle_burn import parse_vtt_with_end
 from yt_live_kit.services.telop import (
@@ -28,6 +29,7 @@ from yt_live_kit.services.telop import (
     save_confirmed_telop_script,
     validate_telop_script,
 )
+from yt_live_kit.services.transcript_artifact import build_transcript_artifact
 
 SAMPLE_VTT = """WEBVTT
 
@@ -128,6 +130,21 @@ def _prepare_video(tmp_path: Path, video_id: str = "video123") -> Settings:
     return Settings(data_dir=tmp_path)
 
 
+def _high_precision_artifact(video_id: str = "video123"):
+    return build_transcript_artifact(
+        video_id=video_id,
+        source_kind="whisper_cpp",
+        source_ref="transcripts/audio/range.wav",
+        language="ja",
+        ranges=[TranscriptRange(start_ms=10_000, end_ms=16_000)],
+        cues=[TranscriptCue(start_ms=10_500, end_ms=12_250, text="artifact の字幕")],
+        audio_bytes=b"telop-audio",
+        model={"name": "fixed-model", "fingerprint": "a" * 64},
+        runtime={"version": "1.9.1", "fingerprint": "b" * 64},
+        settings={"language": "ja", "padding_ms": 0},
+    )
+
+
 def test_save_confirmed_telop_script_returns_path_and_normalized_document(
     tmp_path: Path,
 ):
@@ -185,6 +202,17 @@ def test_build_prompt_uses_clipped_absolute_times():
     assert "[00:00:10.000 --> 00:00:12.250] 最初の字幕です" in prompt
     assert "[00:00:12.250 --> 00:00:15.750] 次の字幕です" in prompt
     assert "{{segment_transcripts}}" not in prompt
+
+
+def test_build_prompt_uses_absolute_cues_from_artifact_without_vtt():
+    artifact = _high_precision_artifact()
+    prompt = build_telop_prompt(
+        None,
+        [_segment()],
+        artifact=artifact,
+    )
+    assert "[00:00:10.500 --> 00:00:12.250] artifact の字幕" in prompt
+    assert "ja.vtt" not in prompt
 
 
 def test_build_prompt_requires_fixed_title_direction_order():
@@ -603,6 +631,32 @@ def test_generation_invokes_codex_once_and_saves_valid_document(tmp_path: Path):
     assert saved["tags"] == raw_document["tags"]
     assert saved["segments"] == raw_document["segments"]
     assert result.document is not None
+
+
+def test_generation_uses_same_artifact_and_does_not_require_ja_vtt(tmp_path: Path):
+    video_dir = tmp_path / "video123"
+    video_dir.mkdir(parents=True)
+    settings = Settings(data_dir=tmp_path)
+    artifact = _high_precision_artifact()
+    raw_document = _generated_document()
+    raw_document["segments"] = raw_document["segments"][:1]
+    raw = json.dumps(raw_document, ensure_ascii=False)
+    with (
+        patch("yt_live_kit.services.telop.is_codex_available", return_value=True),
+        patch("yt_live_kit.services.telop.invoke_codex", return_value=raw) as invoke,
+    ):
+        result = generate_telop_script(
+            "video123",
+            [_segment()],
+            settings,
+            transcript_artifact=artifact,
+        )
+    invoke.assert_called_once()
+    assert result.document is not None
+    assert result.document.artifact_ref is not None
+    assert result.document.artifact_fingerprint == artifact.artifact_fingerprint
+    assert result.document.used_range_cue_digests == artifact.used_range_cue_digests
+    assert result.script_path is not None and result.script_path.is_file()
 
 
 def test_generation_with_legacy_title_count_fails_at_new_generation_boundary(

@@ -27,6 +27,7 @@ from yt_live_kit.services.short_cut import (
     ShortCutValidationResult,
     load_cut_plan,
     needs_short_cut,
+    refine_selected_short_cut,
     suggest_short_cuts,
     validate_short_cut_selection,
 )
@@ -337,6 +338,45 @@ def suggest_short_cut_job_target(
     )
 
 
+def refine_short_cut_job_target(
+    *,
+    report,
+    settings: Settings,
+    video_id: str,
+    parent_dict: dict,
+    parent_is_clip: bool,
+    segment_dicts: list[dict],
+    job_id: str | None = None,
+) -> None:
+    """start_job 用: 人が選択した区間だけを高精度化する."""
+    parent: ParentCandidate = (
+        ClipCandidate.model_validate(parent_dict)
+        if parent_is_clip
+        else HighlightSegment.model_validate(parent_dict)
+    )
+    try:
+        segments = tuple(HighlightSegment.model_validate(item) for item in segment_dicts)
+    except Exception as exc:
+        raise ValueError("高精度化する区間の形式が正しくありません。") from exc
+
+    def on_progress(progress: object) -> None:
+        status = str(getattr(progress, "status", "whisper"))
+        diagnostic = getattr(progress, "diagnostic", None)
+        report(
+            stage="whisper",
+            message=str(diagnostic or f"選択区間を高精度化しています（{status}）"),
+        )
+
+    refine_selected_short_cut(
+        video_id,
+        parent,
+        segments,
+        settings,
+        job_id=job_id,
+        on_progress=on_progress,
+    )
+
+
 def build_short_cut_job_target(
     *,
     report,
@@ -394,6 +434,33 @@ def _start_suggest(
             settings=settings,
             parent_dict=option.candidate.model_dump(mode="json"),
             parent_is_clip=isinstance(option.candidate, ClipCandidate),
+        )
+    except JobBusyError:
+        st.error(_BUSY_MESSAGE)
+        return
+    set_active_job_id(job_id)
+    st.rerun()
+
+
+def _start_refine(
+    *,
+    video_id: str,
+    title: str,
+    option: ParentOption,
+    segments: Sequence[HighlightSegment],
+    settings: Settings,
+) -> None:
+    try:
+        job_id = start_job(
+            "short_cut_refine",
+            refine_short_cut_job_target,
+            video_id=video_id,
+            title=title,
+            total=len(segments),
+            settings=settings,
+            parent_dict=option.candidate.model_dump(mode="json"),
+            parent_is_clip=isinstance(option.candidate, ClipCandidate),
+            segment_dicts=[segment.model_dump(mode="json") for segment in segments],
         )
     except JobBusyError:
         st.error(_BUSY_MESSAGE)
@@ -539,6 +606,29 @@ def _render_plan(
         st.warning(disabled_message)
 
     busy = is_busy(settings)
+    is_high_precision = (
+        document.artifact_ref is not None
+        and document.artifact_ref.source_kind.value == "whisper_cpp"
+    )
+    if is_high_precision:
+        st.success("選択区間の高精度字幕 artifact を固定済みです。")
+    else:
+        st.caption(
+            "親候補の探索・通常 rerun は既存 VTT のままです。"
+            "人が確認した選択区間だけを高精度化できます。"
+        )
+        if st.button(
+            "選択区間を高精度化",
+            key=f"short_cut_refine_{video_id}",
+            disabled=busy or disabled_message is not None,
+        ):
+            _start_refine(
+                video_id=video_id,
+                title=title,
+                option=option,
+                segments=segments,
+                settings=settings,
+            )
     if on_segments_confirmed is not None:
         if st.button(
             "区間列を確定してテロップ確認へ",

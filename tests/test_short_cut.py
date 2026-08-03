@@ -21,12 +21,15 @@ from yt_live_kit.services.short_cut import (
     load_cut_plan,
     needs_short_cut,
     parent_bounds_ms,
+    refine_selected_short_cut,
     save_cut_plan,
     selected_total_ms,
     suggest_short_cuts,
     validate_short_cut,
     validate_short_cut_selection,
 )
+from yt_live_kit.services.transcript_artifact import build_transcript_artifact
+from yt_live_kit.models.transcript import TranscriptCue, TranscriptRange
 
 _VTT = """WEBVTT
 
@@ -93,6 +96,27 @@ def _prepare_video_dir(tmp_path: Path, video_id: str, *, vtt: str = _VTT) -> Set
     return Settings(data_dir=tmp_path)
 
 
+def _high_precision_artifact(video_id: str = "video-1"):
+    return build_transcript_artifact(
+        video_id=video_id,
+        source_kind="whisper_cpp",
+        source_ref="transcripts/audio/range.wav",
+        language="ja",
+        ranges=[
+            TranscriptRange(start_ms=2_350_000, end_ms=2_360_000),
+            TranscriptRange(start_ms=2_400_000, end_ms=2_410_000),
+        ],
+        cues=[
+            TranscriptCue(start_ms=2_351_000, end_ms=2_355_000, text="一つ目"),
+            TranscriptCue(start_ms=2_401_000, end_ms=2_405_000, text="二つ目"),
+        ],
+        audio_bytes=b"selected-ranges-audio",
+        model={"name": "fixed-model", "fingerprint": "a" * 64},
+        runtime={"version": "1.9.1", "fingerprint": "b" * 64},
+        settings={"language": "ja", "padding_ms": 0},
+    )
+
+
 def test_needs_short_cut_only_for_long_candidates():
     assert needs_short_cut(_parent()) is True
     assert needs_short_cut(_parent(start="00:00:00", end="00:03:00", duration_sec=180)) is False
@@ -101,6 +125,60 @@ def test_needs_short_cut_only_for_long_candidates():
 
 def test_parent_bounds_uses_integer_milliseconds():
     assert parent_bounds_ms(_parent()) == (2_340_000, 3_000_000)
+
+
+def test_refine_selected_short_cut_uses_only_confirmed_ranges_and_persists_lineage(
+    tmp_path: Path,
+):
+    settings = _prepare_video_dir(tmp_path, "video-1")
+    artifact = _high_precision_artifact()
+    segments = (
+        HighlightSegment(
+            id="cut_001",
+            title="一つ目",
+            start="00:39:10",
+            end="00:39:20",
+            duration_sec=10,
+            reason="理由",
+        ),
+        HighlightSegment(
+            id="cut_002",
+            title="二つ目",
+            start="00:40:00",
+            end="00:40:10",
+            duration_sec=10,
+            reason="理由",
+        ),
+    )
+    fake_result = type(
+        "WhisperResult",
+        (),
+        {
+            "is_high_precision": True,
+            "artifact": artifact,
+            "job_id": "job-selected",
+            "diagnostic": None,
+        },
+    )()
+    with patch(
+        "yt_live_kit.services.short_cut.run_selected_ranges",
+        return_value=fake_result,
+    ) as run:
+        result = refine_selected_short_cut(
+            "video-1",
+            _parent(),
+            segments,
+            settings,
+            job_id="job-selected",
+        )
+
+    assert run.call_args.args[0] == "video-1"
+    assert run.call_args.args[1] == ((2_350_000, 2_360_000), (2_400_000, 2_410_000))
+    assert result.document.artifact_ref == result.artifact_ref
+    assert result.document.artifact_fingerprint == artifact.artifact_fingerprint
+    assert result.document.used_range_cue_digests == artifact.used_range_cue_digests
+    saved = load_cut_plan("video-1", "clip_002", settings)
+    assert saved == result.document
 
 
 def test_validate_short_cut_accepts_valid_payload():

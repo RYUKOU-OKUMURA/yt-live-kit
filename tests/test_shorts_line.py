@@ -17,6 +17,7 @@ from yt_live_kit.models.telop import (
     TelopScriptDocument,
     TelopSegmentScript,
 )
+from yt_live_kit.models.transcript import TranscriptArtifactRef
 from yt_live_kit.models.upload import (
     UploadChannel,
     UploadContentSnapshot,
@@ -117,6 +118,17 @@ def _review_fingerprint(document: TelopScriptDocument | None = None) -> str:
     return make_review_fingerprint("video-1", "clip-1", QUEUE_FP, document or _document())
 
 
+def _lineage() -> tuple[TranscriptArtifactRef, str, tuple[str, ...]]:
+    fingerprint = "c" * 64
+    reference = TranscriptArtifactRef(
+        video_id="video-1",
+        artifact_fingerprint=fingerprint,
+        source_kind="whisper_cpp",
+        path=f"transcripts/artifacts/{fingerprint}.json",
+    )
+    return reference, fingerprint, ("d" * 64,)
+
+
 def _generation_spec(*, layout: str = "blur", preset: str = "default") -> dict[str, object]:
     return {
         "target_id": "clip-1",
@@ -125,6 +137,41 @@ def _generation_spec(*, layout: str = "blur", preset: str = "default") -> dict[s
         "hook_preset": "hook",
         "telop_document": _document().model_dump(mode="json"),
     }
+
+
+def test_line_state_propagates_artifact_lineage_into_review_and_generation_spec():
+    reference, fingerprint, digests = _lineage()
+    document = _document().model_copy(
+        update={
+            "artifact_ref": reference,
+            "artifact_fingerprint": fingerprint,
+            "used_range_cue_digests": digests,
+        }
+    )
+    review = _review_fingerprint(document)
+    state = create_line_state(
+        "video-1",
+        "clip-1",
+        QUEUE_FP,
+        review_fingerprint=review,
+        artifact_ref=reference,
+        artifact_fingerprint=fingerprint,
+        used_range_cue_digests=digests,
+        now=NOW,
+    )
+    state = confirm_review(state, review, now=NOW + timedelta(seconds=1))
+    spec = {
+        **_generation_spec(),
+        "artifact_ref": reference.model_dump(mode="json"),
+        "artifact_fingerprint": fingerprint,
+        "used_range_cue_digests": list(digests),
+    }
+    state = set_generation_spec(state, review, spec, now=NOW + timedelta(seconds=2))
+    assert state.artifact_ref == reference
+    assert state.artifact_fingerprint == fingerprint
+    assert state.used_range_cue_digests == digests
+    assert state.generation_spec_json is not None
+    assert "used_range_cue_digests" in state.generation_spec_json
 
 
 def _confirmed_state(tmp_path: Path) -> tuple[LineState, Path]:
@@ -548,6 +595,56 @@ def test_line_state_atomic_round_trip_and_corrupt_fail_closed(tmp_path: Path) ->
     with pytest.raises(LineStateError, match="壊れている"):
         load_line_state("video-1", "clip-1", settings)
     assert path.read_text(encoding="utf-8") == "{broken"
+
+
+def test_legacy_line_state_does_not_reuse_human_or_final_confirmation(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    confirmed, _output_path = _confirmed_state(tmp_path)
+    legacy = confirmed.model_copy(update={"schema_version": 1})
+    save_line_state(legacy, settings)
+
+    restored = load_line_state("video-1", "clip-1", settings)
+
+    assert restored is not None
+    assert restored.schema_version == 2
+    assert restored.review_fingerprint is None
+    assert restored.review_confirmed_fingerprint is None
+    assert restored.preview_confirmed_fingerprint is None
+    assert restored.output_fingerprint is None
+    assert restored.current_stage == LineStage.TELOP_REVIEW
+
+
+def test_missing_artifact_invalidates_line_confirmations_without_resolver(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    reference, fingerprint, digests = _lineage()
+    document = _document().model_copy(
+        update={
+            "artifact_ref": reference,
+            "artifact_fingerprint": fingerprint,
+            "used_range_cue_digests": digests,
+        }
+    )
+    review = _review_fingerprint(document)
+    state = create_line_state(
+        "video-1",
+        "clip-1",
+        QUEUE_FP,
+        review_fingerprint=review,
+        artifact_ref=reference,
+        artifact_fingerprint=fingerprint,
+        used_range_cue_digests=digests,
+        now=NOW,
+    )
+    state = confirm_review(state, review, now=NOW + timedelta(seconds=1))
+    save_line_state(state, settings)
+
+    restored = load_line_state("video-1", "clip-1", settings)
+
+    assert restored is not None
+    assert restored.artifact_ref == reference
+    assert restored.review_confirmed_fingerprint is None
+    assert restored.output_fingerprint is None
+    assert restored.current_stage == LineStage.TELOP_REVIEW
 
 
 def test_stale_confirmed_snapshot_cannot_restore_newer_invalidation(tmp_path: Path) -> None:

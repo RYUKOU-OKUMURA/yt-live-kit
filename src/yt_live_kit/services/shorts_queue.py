@@ -20,6 +20,7 @@ from yt_live_kit.config import Settings, get_settings
 from yt_live_kit.models.clips import ClipCandidate
 from yt_live_kit.models.highlights import HighlightSegment
 from yt_live_kit.models.telop import TelopScriptDocument
+from yt_live_kit.models.transcript import TranscriptArtifactRef
 from yt_live_kit.services.shorts import (
     MAX_DURATION_SEC,
     MIN_DURATION_SEC,
@@ -39,6 +40,7 @@ from yt_live_kit.services.telop import (
     normalize_segment_bounds,
     validate_telop_script,
 )
+from yt_live_kit.services.transcript_artifact import TranscriptArtifactError, TranscriptArtifactStore
 
 QueueSource = Literal["clips", "highlights"]
 QueueMode = Literal["individual", "concat"]
@@ -67,6 +69,14 @@ _SPEC_KEYS = frozenset(
         "preset",
         "hook_preset",
         "output_name",
+    }
+)
+_SPEC_KEYS_WITH_LINEAGE = frozenset(
+    {
+        *_SPEC_KEYS,
+        "artifact_ref",
+        "artifact_fingerprint",
+        "used_range_cue_digests",
     }
 )
 _ITEM_KEYS = frozenset(
@@ -263,6 +273,9 @@ class ShortsQueueClipSpec:
     preset: str
     hook_preset: str
     output_name: str
+    artifact_ref: TranscriptArtifactRef | None = None
+    artifact_fingerprint: str | None = None
+    used_range_cue_digests: tuple[str, ...] = ()
 
     @property
     def telop_document(self) -> TelopScriptDocument:
@@ -282,7 +295,7 @@ class ShortsQueueClipSpec:
         return validation.document
 
     def to_dict(self) -> dict[str, object]:
-        return {
+        payload: dict[str, object] = {
             "target_id": self.target_id,
             "segments": [segment.to_dict() for segment in self.segments],
             "telop_document": json.loads(self.telop_document_json),
@@ -291,12 +304,23 @@ class ShortsQueueClipSpec:
             "hook_preset": self.hook_preset,
             "output_name": self.output_name,
         }
+        if self.artifact_ref is not None:
+            payload.update(
+                {
+                    "artifact_ref": self.artifact_ref.model_dump(mode="json"),
+                    "artifact_fingerprint": self.artifact_fingerprint,
+                    "used_range_cue_digests": list(self.used_range_cue_digests),
+                }
+            )
+        return payload
 
     @classmethod
     def from_dict(cls, value: object) -> ShortsQueueClipSpec:
         if not isinstance(value, Mapping):
             raise ShortsQueueError("確定済み生成対象はオブジェクトで指定してください。")
-        _require_exact_keys(value, _SPEC_KEYS)
+        keys = frozenset(value)
+        if keys not in {_SPEC_KEYS, _SPEC_KEYS_WITH_LINEAGE}:
+            _require_exact_keys(value, _SPEC_KEYS_WITH_LINEAGE)
         raw_segments = value["segments"]
         if not isinstance(raw_segments, list) or not raw_segments:
             raise ShortsQueueError("確定済み生成対象に区間を 1 件以上指定してください。")
@@ -335,6 +359,47 @@ class ShortsQueueClipSpec:
                 "確定済みテロップ台本が入力区間と一致しません: "
                 + "、".join(validation.errors)
             )
+        document = validation.document
+        artifact_ref = document.artifact_ref
+        artifact_fingerprint = document.artifact_fingerprint
+        used_range_cue_digests = tuple(document.used_range_cue_digests)
+        if keys == _SPEC_KEYS_WITH_LINEAGE:
+            raw_ref = value["artifact_ref"]
+            if not isinstance(raw_ref, Mapping):
+                raise ShortsQueueError("artifact reference はオブジェクトで指定してください。")
+            try:
+                artifact_ref = TranscriptArtifactRef.model_validate(dict(raw_ref))
+            except Exception as exc:
+                raise ShortsQueueError("artifact reference の形式が正しくありません。") from exc
+            artifact_fingerprint = _optional_fingerprint(
+                value["artifact_fingerprint"], "artifact fingerprint"
+            )
+            raw_digests = value["used_range_cue_digests"]
+            if not isinstance(raw_digests, list):
+                raise ShortsQueueError("used_range_cue_digests は配列で指定してください。")
+            used_range_cue_digests = tuple(
+                _optional_fingerprint(item, "used_range_cue_digest") or ""
+                for item in raw_digests
+            )
+            if any(not digest for digest in used_range_cue_digests):
+                raise ShortsQueueError("used_range_cue_digest が空です。")
+        has_lineage = (
+            artifact_ref is not None
+            or artifact_fingerprint is not None
+            or bool(used_range_cue_digests)
+        )
+        if has_lineage:
+            if artifact_ref is None or artifact_fingerprint is None:
+                raise ShortsQueueError("artifact lineage が不完全です。")
+            if artifact_fingerprint != artifact_ref.artifact_fingerprint:
+                raise ShortsQueueError("artifact fingerprint が artifact reference と一致しません。")
+            if (
+                document.artifact_ref is None
+                or document.artifact_fingerprint != artifact_fingerprint
+                or document.artifact_ref != artifact_ref
+                or tuple(document.used_range_cue_digests) != used_range_cue_digests
+            ):
+                raise ShortsQueueError("queue spec とテロップ台本の artifact lineage が一致しません。")
         canonical = _canonical_json(validation.document.model_dump(mode="json"))
         return cls(
             target_id=target_id,
@@ -344,6 +409,9 @@ class ShortsQueueClipSpec:
             preset=preset,
             hook_preset=hook_preset,
             output_name=output_name,
+            artifact_ref=artifact_ref,
+            artifact_fingerprint=artifact_fingerprint,
+            used_range_cue_digests=used_range_cue_digests,
         )
 
 
@@ -795,9 +863,18 @@ def make_shorts_queue_input_fingerprint(
     spec: ShortsQueueClipSpec,
 ) -> str:
     """再実行時に同じ immutable input だったことを証明する fingerprint を返す."""
+    spec_payload = spec.to_dict()
+    if spec.artifact_ref is None:
+        raw_document = spec_payload.get("telop_document")
+        if isinstance(raw_document, Mapping):
+            raw_document = dict(raw_document)
+            raw_document.pop("artifact_ref", None)
+            raw_document.pop("artifact_fingerprint", None)
+            raw_document.pop("used_range_cue_digests", None)
+            spec_payload["telop_document"] = raw_document
     payload = {
         "video_id": _require_string(video_id, "動画 ID"),
-        "clip_spec": spec.to_dict(),
+        "clip_spec": spec_payload,
     }
     return hashlib.sha256(_canonical_json(payload).encode("utf-8")).hexdigest()
 
@@ -860,6 +937,10 @@ def can_reuse_shorts_queue_item(
     settings = settings or get_settings()
     if item.status != "succeeded" or item.output_path is None:
         return False
+    try:
+        _validate_spec_artifact_lineage(video_id, spec, settings)
+    except ShortsQueueError:
+        return False
     expected_input = make_shorts_queue_input_fingerprint(video_id, spec)
     if item.input_fingerprint != expected_input or not item.output_fingerprint:
         return False
@@ -881,6 +962,33 @@ def can_reuse_shorts_queue_item(
         return make_shorts_queue_output_fingerprint(actual_path, settings) == item.output_fingerprint
     except (OSError, RuntimeError, ShortsQueueError, ValueError):
         return False
+
+
+def _validate_spec_artifact_lineage(
+    video_id: str,
+    spec: ShortsQueueClipSpec,
+    settings: Settings,
+) -> None:
+    """queue 生成直前に、保存済み immutable artifact だけを検証する."""
+    if spec.artifact_ref is None:
+        return
+    if spec.artifact_fingerprint is None:
+        raise ShortsQueueError("queue spec の artifact lineage が不完全です。")
+    try:
+        artifact = TranscriptArtifactStore(video_id, settings).load_artifact(
+            spec.artifact_fingerprint
+        )
+        actual_ref = TranscriptArtifactStore(video_id, settings).artifact_ref(artifact)
+    except TranscriptArtifactError as exc:
+        raise ShortsQueueError(
+            "queue spec の字幕 artifact を確認できません。古い結果は再利用せず、明示的に再確認してください。"
+        ) from exc
+    if (
+        actual_ref != spec.artifact_ref
+        or artifact.artifact_fingerprint != spec.artifact_fingerprint
+        or tuple(artifact.used_range_cue_digests) != tuple(spec.used_range_cue_digests)
+    ):
+        raise ShortsQueueError("queue spec の artifact lineage が保存済み artifact と一致しません。")
 
 
 def reusable_shorts_queue_items(
@@ -1043,6 +1151,8 @@ def run_shorts_queue(
     validated_specs = tuple(
         ShortsQueueClipSpec.from_dict(spec.to_dict()) for spec in clip_specs
     )
+    for spec in validated_specs:
+        _validate_spec_artifact_lineage(video_id, spec, settings)
     if len({spec.output_name for spec in validated_specs}) != len(validated_specs):
         raise ShortsQueueError("同じ出力先になる生成対象があります。")
     now = datetime.now(timezone.utc)

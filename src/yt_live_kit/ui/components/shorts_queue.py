@@ -13,6 +13,7 @@ from yt_live_kit.config import Settings
 from yt_live_kit.models.clips import ClipCandidate
 from yt_live_kit.models.highlights import HighlightSegment
 from yt_live_kit.models.telop import TelopScriptDocument
+from yt_live_kit.models.transcript import TranscriptArtifactRef
 from yt_live_kit.services.ai_prompt import AiPromptError
 from yt_live_kit.services.clips import load_candidates_file
 from yt_live_kit.services.ffmpeg import FfmpegError, ensure_subtitles_filter
@@ -34,6 +35,7 @@ from yt_live_kit.services.shorts_queue import (
     select_queue_candidates_by_id,
 )
 from yt_live_kit.services.subtitle_burn import TELOP_PRESETS
+from yt_live_kit.services.transcript_artifact import TranscriptArtifactError, TranscriptArtifactStore
 from yt_live_kit.services.telop import (
     TelopError,
     generate_telop_script,
@@ -99,6 +101,9 @@ def install_line_snapshot(
     layout: str,
     preset: str,
     hook_preset: str,
+    artifact_ref: TranscriptArtifactRef | None = None,
+    artifact_fingerprint: str | None = None,
+    used_range_cue_digests: Sequence[str] = (),
 ) -> tuple[ShortsQueueTarget, str]:
     """区間確定済みの 1 本を既存 S4 snapshot 契約へ載せる."""
     normalized = normalize_queue_candidates(segments, source="highlights")
@@ -126,6 +131,9 @@ def install_line_snapshot(
         "original_candidates": (original_candidate,),
         "selected_ids": (original_candidate.id,),
         "segments": normalized,
+        "artifact_ref": artifact_ref,
+        "artifact_fingerprint": artifact_fingerprint,
+        "used_range_cue_digests": tuple(used_range_cue_digests),
     }
     return targets[0], fingerprint
 
@@ -159,6 +167,9 @@ def restore_line_snapshot(
     hook_preset: str,
     expected_fingerprint: str,
     confirmed_spec: ShortsQueueClipSpec | None = None,
+    artifact_ref: TranscriptArtifactRef | None = None,
+    artifact_fingerprint: str | None = None,
+    used_range_cue_digests: Sequence[str] = (),
 ) -> None:
     """永続 material evidence と一致する exact line-mode S4 state を復元する。"""
     restored_target, fingerprint = install_line_snapshot(
@@ -169,6 +180,9 @@ def restore_line_snapshot(
         layout=layout,
         preset=preset,
         hook_preset=hook_preset,
+        artifact_ref=artifact_ref,
+        artifact_fingerprint=artifact_fingerprint,
+        used_range_cue_digests=used_range_cue_digests,
     )
     if restored_target != target or fingerprint != expected_fingerprint:
         _clear_snapshot(video_id)
@@ -183,6 +197,13 @@ def restore_line_snapshot(
         ):
             _clear_snapshot(video_id)
             raise ShortsQueueError("保存済み生成 spec がライン対象と一致しません。")
+        if (
+            confirmed_spec.artifact_ref != artifact_ref
+            or confirmed_spec.artifact_fingerprint != artifact_fingerprint
+            or tuple(confirmed_spec.used_range_cue_digests) != tuple(used_range_cue_digests)
+        ):
+            _clear_snapshot(video_id)
+            raise ShortsQueueError("保存済み生成 spec の artifact lineage がラインと一致しません。")
         install_line_confirmed_spec(video_id, confirmed_spec)
 
 
@@ -519,6 +540,9 @@ def _document_from_editor(
                 "description": description,
                 "tags": [tag.strip() for tag in tags_text.split(",") if tag.strip()],
                 "segments": raw_segments,
+                "artifact_ref": draft.artifact_ref,
+                "artifact_fingerprint": draft.artifact_fingerprint,
+                "used_range_cue_digests": draft.used_range_cue_digests,
             }
         )
     except Exception as exc:
@@ -560,14 +584,32 @@ def _render_target_editor(
                 st.error(_safe_text(errors[target.target_id]))
             if st.button(label, key=f"queue_generate_{target_key}"):
                 try:
+                    artifact = None
+                    raw_fingerprint = snapshot.get("artifact_fingerprint")
+                    if raw_fingerprint:
+                        artifact = TranscriptArtifactStore(video_id, settings).load_artifact(
+                            str(raw_fingerprint)
+                        )
+                        raw_ref = snapshot.get("artifact_ref")
+                        if raw_ref is not None:
+                            if not isinstance(raw_ref, TranscriptArtifactRef):
+                                raw_ref = TranscriptArtifactRef.model_validate(raw_ref)
+                            actual_ref = TranscriptArtifactStore(video_id, settings).artifact_ref(
+                                artifact
+                            )
+                            if actual_ref != raw_ref:
+                                raise TelopError(
+                                    "保存済み artifact reference と実体が一致しません。"
+                                )
                     generated = generate_telop_script(
                         video_id,
                         target.highlight_segments(),
                         settings,
+                        transcript_artifact=artifact,
                     )
                     if generated.document is None:
                         raise TelopError("テロップ台本を生成できませんでした。")
-                except AiPromptError as exc:
+                except (AiPromptError, TranscriptArtifactError, ValueError) as exc:
                     errors[target.target_id] = str(exc)
                 else:
                     drafts[target.target_id] = generated.document

@@ -28,8 +28,10 @@ from pydantic import (
 
 from yt_live_kit.config import Settings
 from yt_live_kit.models.telop import TelopScriptDocument
+from yt_live_kit.models.transcript import TranscriptArtifactRef
 from yt_live_kit.models.upload import UploadOperation, UploadState
 from yt_live_kit.services.schedule import SchedulePolicy
+from yt_live_kit.services.transcript_artifact import TranscriptArtifactError, TranscriptArtifactStore
 from yt_live_kit.services._paths import (
     PathConfinementError,
     confined_video_path,
@@ -37,7 +39,7 @@ from yt_live_kit.services._paths import (
     validate_confined_candidate,
 )
 
-_SCHEMA_VERSION = 1
+_SCHEMA_VERSION = 2
 _WRITE_LOCK = threading.RLock()
 _COMPLETED_UPLOAD_STATES = frozenset({"reserved", "uploading", "uploaded"})
 _ATTENTION_UPLOAD_STATES = frozenset({"failed", "needs_reconciliation"})
@@ -112,6 +114,27 @@ def _validate_digest(value: str | None, label: str, *, optional: bool = False) -
     return value.lower()
 
 
+def _validate_artifact_lineage(
+    artifact_ref: TranscriptArtifactRef | None,
+    artifact_fingerprint: str | None,
+    used_range_cue_digests: Sequence[str],
+) -> tuple[TranscriptArtifactRef | None, str | None, tuple[str, ...]]:
+    """line state に保存する artifact provenance を一組として検証する."""
+    if artifact_ref is None and (artifact_fingerprint is not None or used_range_cue_digests):
+        raise LineStateError("artifact lineage が不完全です。")
+    if artifact_ref is None:
+        return None, None, ()
+    if artifact_fingerprint is None:
+        raise LineStateError("artifact lineage に fingerprint がありません。")
+    fingerprint = _validate_digest(artifact_fingerprint, "artifact fingerprint")
+    if fingerprint != artifact_ref.artifact_fingerprint:
+        raise LineStateError("artifact fingerprint が artifact reference と一致しません。")
+    digests: list[str] = []
+    for digest in used_range_cue_digests:
+        digests.append(_validate_digest(digest, "used_range_cue_digest") or "")
+    return artifact_ref, fingerprint, tuple(digests)
+
+
 def _canonical_json(payload: object) -> str:
     return json.dumps(
         payload,
@@ -162,10 +185,15 @@ def _generation_spec_digest(
 class LineState(_FrozenModel):
     """video と clip ごとの永続ライン状態。"""
 
-    schema_version: Literal[1] = _SCHEMA_VERSION
+    schema_version: Literal[1, 2] = _SCHEMA_VERSION
     video_id: str = Field(min_length=1)
     clip_id: str = Field(min_length=1)
     queue_fingerprint: str = Field(min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$")
+    artifact_ref: TranscriptArtifactRef | None = None
+    artifact_fingerprint: str | None = Field(
+        default=None, min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$"
+    )
+    used_range_cue_digests: tuple[str, ...] = ()
     review_fingerprint: str | None = Field(
         default=None, min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$"
     )
@@ -215,8 +243,31 @@ class LineState(_FrozenModel):
             raise ValueError("投稿 operation ID が正しくありません。")
         return cleaned
 
+    @field_validator("used_range_cue_digests", mode="before")
+    @classmethod
+    def _digests_tuple(cls, value: object) -> tuple[str, ...]:
+        if value is None:
+            return ()
+        if not isinstance(value, (list, tuple)):
+            raise ValueError("used_range_cue_digests は配列で指定してください。")
+        return tuple(value)
+
     @model_validator(mode="after")
     def _consistent_confirmations(self) -> LineState:
+        if self.artifact_ref is None and (
+            self.artifact_fingerprint is not None or self.used_range_cue_digests
+        ):
+            raise ValueError("artifact lineage が不完全です。")
+        if self.artifact_ref is not None:
+            if self.artifact_fingerprint != self.artifact_ref.artifact_fingerprint:
+                raise ValueError("artifact fingerprint が artifact reference と一致しません。")
+            for digest in self.used_range_cue_digests:
+                if not isinstance(digest, str) or len(digest) != 64:
+                    raise ValueError("used_range_cue_digest が正しくありません。")
+                try:
+                    int(digest, 16)
+                except ValueError as exc:
+                    raise ValueError("used_range_cue_digest が正しくありません。") from exc
         review_pair = (self.review_confirmed_fingerprint, self.review_confirmed_at)
         if (review_pair[0] is None) != (review_pair[1] is None):
             raise ValueError("台本確認 fingerprint と確認日時は両方必要です。")
@@ -320,7 +371,8 @@ class LineState(_FrozenModel):
 class ActiveLinePointer(_FrozenModel):
     """動画内で明示選択された未完了ラインへの pointer。"""
 
-    schema_version: Literal[1] = _SCHEMA_VERSION
+    # pointer 自体の形式は変わらない。LineState の schema だけを上げる。
+    schema_version: Literal[1] = 1
     clip_id: str = Field(min_length=1)
     updated_at: datetime
 
@@ -362,6 +414,10 @@ def make_review_fingerprint(
     clip_id: str,
     queue_fingerprint: str,
     document: TelopScriptDocument,
+    *,
+    artifact_ref: TranscriptArtifactRef | None = None,
+    artifact_fingerprint: str | None = None,
+    used_range_cue_digests: Sequence[str] | None = None,
 ) -> str:
     """queue snapshot と現在の台本を分離した canonical hash を返す。"""
     video_id = _safe_identifier(video_id, "動画 ID")
@@ -369,14 +425,43 @@ def make_review_fingerprint(
     queue_fingerprint = _validate_digest(queue_fingerprint, "queue fingerprint")  # type: ignore[assignment]
     if not isinstance(document, TelopScriptDocument):
         raise LineStateError("テロップ台本の入力が正しくありません。")
-    return _canonical_digest(
-        {
-            "video_id": video_id,
-            "clip_id": clip_id,
-            "queue_fingerprint": queue_fingerprint,
-            "telop_document": document.model_dump(mode="json"),
-        }
+    lineage_ref = artifact_ref or document.artifact_ref
+    lineage_fingerprint = artifact_fingerprint or document.artifact_fingerprint
+    lineage_digests = tuple(
+        document.used_range_cue_digests
+        if used_range_cue_digests is None
+        else used_range_cue_digests
     )
+    lineage_ref, lineage_fingerprint, lineage_digests = _validate_artifact_lineage(
+        lineage_ref,
+        lineage_fingerprint,
+        lineage_digests,
+    )
+    if lineage_ref is not None and (
+        document.artifact_ref != lineage_ref
+        or document.artifact_fingerprint != lineage_fingerprint
+        or tuple(document.used_range_cue_digests) != lineage_digests
+    ):
+        raise LineStateError("review fingerprint の artifact lineage が台本と一致しません。")
+    document_payload = document.model_dump(mode="json")
+    if lineage_ref is None:
+        # 既存 VTT 台本の review fingerprint の意味を変えない。
+        document_payload.pop("artifact_ref", None)
+        document_payload.pop("artifact_fingerprint", None)
+        document_payload.pop("used_range_cue_digests", None)
+    payload: dict[str, object] = {
+        "video_id": video_id,
+        "clip_id": clip_id,
+        "queue_fingerprint": queue_fingerprint,
+        "telop_document": document_payload,
+    }
+    if lineage_ref is not None:
+        payload["transcript_artifact"] = {
+            "artifact_ref": lineage_ref.model_dump(mode="json"),
+            "artifact_fingerprint": lineage_fingerprint,
+            "used_range_cue_digests": list(lineage_digests),
+        }
+    return _canonical_digest(payload)
 
 
 def make_material_context_fingerprint(
@@ -525,6 +610,24 @@ def _replace_state(state: LineState, **updates: object) -> LineState:
         raise LineStateError("ライン状態を安全に更新できませんでした。") from exc
 
 
+def _invalidate_transcript_lineage(state: LineState) -> LineState:
+    """artifact 欠損・内容不一致時に人確認と出力の再利用を止める."""
+    return state.model_copy(
+        update={
+            "review_fingerprint": None,
+            "review_confirmed_fingerprint": None,
+            "review_confirmed_at": None,
+            "generation_spec_json": None,
+            "generation_spec_fingerprint": None,
+            "output_fingerprint": None,
+            "preview_confirmed_fingerprint": None,
+            "preview_confirmed_at": None,
+            "upload_operation_id": None,
+            "current_stage": LineStage.TELOP_REVIEW,
+        }
+    )
+
+
 def _state_timestamp(state: LineState, value: datetime | None, label: str) -> datetime:
     timestamp = _timestamp(value, label)
     if timestamp <= state.updated_at:
@@ -539,6 +642,9 @@ def create_line_state(
     *,
     review_fingerprint: str | None = None,
     material_context: Mapping[str, object] | None = None,
+    artifact_ref: TranscriptArtifactRef | None = None,
+    artifact_fingerprint: str | None = None,
+    used_range_cue_digests: Sequence[str] = (),
     now: datetime | None = None,
 ) -> LineState:
     """区間確定後の未確認ライン状態を作る。"""
@@ -548,6 +654,14 @@ def create_line_state(
     review_fingerprint = _validate_digest(
         review_fingerprint, "review fingerprint", optional=True
     )
+    try:
+        artifact_ref, artifact_fingerprint, used_range_cue_digests = _validate_artifact_lineage(
+            artifact_ref,
+            artifact_fingerprint,
+            used_range_cue_digests,
+        )
+    except LineStateError:
+        raise
     material_json: str | None = None
     material_fingerprint: str | None = None
     if material_context is not None:
@@ -566,6 +680,9 @@ def create_line_state(
             video_id=video_id,
             clip_id=clip_id,
             queue_fingerprint=queue_fingerprint,
+            artifact_ref=artifact_ref,
+            artifact_fingerprint=artifact_fingerprint,
+            used_range_cue_digests=used_range_cue_digests,
             review_fingerprint=review_fingerprint,
             material_context_json=material_json,
             material_context_fingerprint=material_fingerprint,
@@ -625,6 +742,26 @@ def set_generation_spec(
     if not isinstance(spec, Mapping):
         raise LineStateError("生成 spec が正しくありません。")
     payload = dict(spec)
+    spec_ref = payload.get("artifact_ref")
+    spec_fingerprint = payload.get("artifact_fingerprint")
+    spec_digests = payload.get("used_range_cue_digests")
+    has_spec_lineage = any(
+        item is not None for item in (spec_ref, spec_fingerprint, spec_digests)
+    )
+    if state.artifact_ref is None:
+        if has_spec_lineage:
+            raise LineStateError("生成 spec に state と異なる artifact lineage があります。")
+    else:
+        if not has_spec_lineage or not isinstance(spec_ref, Mapping):
+            raise LineStateError("生成 spec に artifact lineage がありません。")
+        if not isinstance(spec_digests, (list, tuple)):
+            raise LineStateError("生成 spec の used_range_cue_digests が正しくありません。")
+        if (
+            dict(spec_ref) != state.artifact_ref.model_dump(mode="json")
+            or spec_fingerprint != state.artifact_fingerprint
+            or tuple(spec_digests) != tuple(state.used_range_cue_digests)
+        ):
+            raise LineStateError("生成 spec の artifact lineage が state と一致しません。")
     canonical = _canonical_json(payload)
     fingerprint = make_generation_spec_fingerprint(
         state.video_id,
@@ -958,6 +1095,39 @@ def load_line_state(
         raise LineStateError(
             "ショート生産ラインの対象が保存先と一致しないため復元できません。"
         )
+    if state.schema_version == 1:
+        # lineage のない旧 state の人確認・出力・予約証跡は再利用しない。
+        # 既存 JSON は壊さず読み込み、次回保存時に schema 2 へ昇格する。
+        state = state.model_copy(
+            update={
+                "schema_version": _SCHEMA_VERSION,
+                "review_fingerprint": None,
+                "review_confirmed_fingerprint": None,
+                "review_confirmed_at": None,
+                "generation_spec_json": None,
+                "generation_spec_fingerprint": None,
+                "output_fingerprint": None,
+                "preview_confirmed_fingerprint": None,
+                "preview_confirmed_at": None,
+                "upload_operation_id": None,
+                "current_stage": LineStage.TELOP_REVIEW,
+            }
+        )
+    elif state.artifact_ref is not None:
+        try:
+            artifact = TranscriptArtifactStore(video_id, settings).load_artifact(
+                state.artifact_fingerprint or ""
+            )
+            actual_ref = TranscriptArtifactStore(video_id, settings).artifact_ref(artifact)
+            if (
+                actual_ref != state.artifact_ref
+                or artifact.artifact_fingerprint != state.artifact_fingerprint
+                or tuple(artifact.used_range_cue_digests)
+                != tuple(state.used_range_cue_digests)
+            ):
+                state = _invalidate_transcript_lineage(state)
+        except (TranscriptArtifactError, OSError, ValueError):
+            state = _invalidate_transcript_lineage(state)
     return state
 
 
@@ -1136,6 +1306,9 @@ def recover_line_state(
     *,
     review_fingerprint: str | None = None,
     material_context: Mapping[str, object] | None = None,
+    artifact_ref: TranscriptArtifactRef | None = None,
+    artifact_fingerprint: str | None = None,
+    used_range_cue_digests: Sequence[str] = (),
     generation_spec: Mapping[str, object] | None = None,
     output_fingerprint: str | None = None,
     upload_operation: UploadOperation | None = None,
@@ -1148,6 +1321,9 @@ def recover_line_state(
         queue_fingerprint,
         review_fingerprint=review_fingerprint,
         material_context=material_context,
+        artifact_ref=artifact_ref,
+        artifact_fingerprint=artifact_fingerprint,
+        used_range_cue_digests=used_range_cue_digests,
         now=now,
     )
     output = _validate_digest(output_fingerprint, "output fingerprint", optional=True)

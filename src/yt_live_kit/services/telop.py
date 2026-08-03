@@ -17,6 +17,7 @@ from yt_live_kit.models.telop import (
     TelopScriptDocument,
     TelopSegmentScript,
 )
+from yt_live_kit.models.transcript import TranscriptArtifact, TranscriptArtifactRef
 from yt_live_kit.services._fsutil import write_text_atomically
 from yt_live_kit.services.ai_prompt import (
     AiPromptError,
@@ -29,6 +30,7 @@ from yt_live_kit.services.subtitle_burn import (
     filter_cues_for_segment,
     parse_vtt_with_end,
 )
+from yt_live_kit.services.transcript_artifact import TranscriptArtifactError, TranscriptArtifactStore
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +97,9 @@ class TelopScriptResult:
     script_path: Path | None
     used_codex: bool
     document: TelopScriptDocument | None
+    artifact_ref: TranscriptArtifactRef | None = None
+    artifact_fingerprint: str | None = None
+    used_range_cue_digests: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -272,18 +277,62 @@ def _build_segment_transcripts(
     return "\n\n".join(blocks)
 
 
-def build_telop_prompt(
-    vtt_content: str,
+def _build_segment_transcripts_from_artifact(
+    artifact: TranscriptArtifact,
     segments: Sequence[HighlightSegment],
-    project_root: Path | None = None,
 ) -> str:
-    """選択区間の絶対時刻付き字幕を埋め込んだプロンプトを返す."""
+    """同じ immutable artifact の絶対 cue だけで prompt を組み立てる."""
+    if not isinstance(artifact, TranscriptArtifact):
+        raise TelopError("字幕 artifact が正しくありません。")
+    blocks: list[str] = []
+    for index, segment in enumerate(segments, start=1):
+        bounds = normalize_segment_bounds([segment])[0]
+        lines = [
+            f"## 区間 {index} [{_format_timestamp(bounds.start_sec)} --> "
+            f"{_format_timestamp(bounds.end_sec)}]"
+        ]
+        cues = tuple(
+            cue
+            for cue in artifact.cues
+            if cue.start_ms < bounds.end_ms and cue.end_ms > bounds.start_ms
+        )
+        for cue in cues:
+            lines.append(
+                f"[{_format_timestamp(cue.start_ms / 1000)} --> "
+                f"{_format_timestamp(cue.end_ms / 1000)}] {cue.text}"
+            )
+        if not cues:
+            raise TelopError(
+                f"区間 {index} に高精度字幕がありません。"
+                "区間を字幕のある範囲へ変更してください。"
+            )
+        blocks.append("\n".join(lines))
+    return "\n\n".join(blocks)
+
+
+def build_telop_prompt(
+    vtt_content: str | None = None,
+    segments: Sequence[HighlightSegment] = (),
+    project_root: Path | None = None,
+    *,
+    artifact: TranscriptArtifact | None = None,
+) -> str:
+    """選択区間の絶対時刻付き字幕を埋め込んだプロンプトを返す.
+
+    ``artifact`` が指定された高精度化経路では、VTT を再読込せず artifact の
+    absolute cue だけを使う。未指定時は既存の VTT 導線をそのまま使う。
+    """
     if not segments:
         raise TelopError("区間を 1 件以上指定してください。")
     template = load_telop_template(project_root)
     if PLACEHOLDER not in template:
         raise TelopError(f"テンプレートにプレースホルダ {PLACEHOLDER} がありません。")
-    transcripts = _build_segment_transcripts(vtt_content, segments)
+    if artifact is not None:
+        transcripts = _build_segment_transcripts_from_artifact(artifact, segments)
+    elif vtt_content is not None:
+        transcripts = _build_segment_transcripts(vtt_content, segments)
+    else:
+        raise TelopError("字幕 VTT または immutable artifact を指定してください。")
     return template.replace(PLACEHOLDER, transcripts)
 
 
@@ -537,6 +586,9 @@ def validate_telop_script(
         description=description,
         tags=tags,
         segments=normalized_segments,
+        artifact_ref=data.artifact_ref,
+        artifact_fingerprint=data.artifact_fingerprint,
+        used_range_cue_digests=data.used_range_cue_digests,
     )
     return TelopValidationResult(
         ok=True,
@@ -562,7 +614,15 @@ def _save_document(
     settings: Settings,
 ) -> Path:
     path = settings.data_dir / video_id / "shorts" / "telop" / f"telop_{clip_id}.json"
-    write_text_atomically(path, document.model_dump_json(indent=2))
+    payload = document.model_dump(mode="json")
+    if document.artifact_ref is None:
+        payload.pop("artifact_ref", None)
+        payload.pop("artifact_fingerprint", None)
+        payload.pop("used_range_cue_digests", None)
+    write_text_atomically(
+        path,
+        json.dumps(payload, ensure_ascii=False, indent=2),
+    )
     return path
 
 
@@ -603,25 +663,59 @@ def generate_telop_script(
     on_progress: ProgressCallback = None,
     prompt_only: bool = False,
     codex_path: str = "codex",
+    transcript_artifact: TranscriptArtifact | None = None,
+    artifact_ref: TranscriptArtifactRef | None = None,
+    artifact: TranscriptArtifact | None = None,
 ) -> TelopScriptResult:
     """選択区間から台本とメタデータを 1 回の Codex 呼び出しで生成する."""
     settings = settings or get_settings()
+    if transcript_artifact is not None and artifact is not None and transcript_artifact != artifact:
+        raise TelopError("同じ字幕 artifact を重複指定できません。")
+    transcript_artifact = transcript_artifact or artifact
     video_dir = settings.data_dir / video_id
     if not video_dir.is_dir():
         raise TelopError(f"動画ディレクトリが見つかりません: {video_dir}")
     if not segments:
         raise TelopError("区間を 1 件以上指定してください。")
 
-    vtt_path = video_dir / "subtitles" / "ja.vtt"
-    if not vtt_path.is_file():
-        raise TelopError(f"字幕ファイルが見つかりません: {vtt_path}")
-
     clip_id = make_clip_id(segments)
-    prompt = build_telop_prompt(
-        vtt_path.read_text(encoding="utf-8"),
-        segments,
-        find_project_root(),
-    )
+    lineage_ref: TranscriptArtifactRef | None = None
+    lineage_fingerprint: str | None = None
+    lineage_digests: tuple[str, ...] = ()
+    if transcript_artifact is not None:
+        if transcript_artifact.video_id != video_id:
+            raise TelopError("字幕 artifact の動画 ID が一致しません。")
+        if not transcript_artifact.is_high_precision:
+            raise TelopError(
+                "高精度字幕 artifact が利用できません。VTT fallback を明示的に選ぶか、処理を停止してください。"
+            )
+        try:
+            lineage_ref = TranscriptArtifactStore(video_id, settings).artifact_ref(
+                transcript_artifact
+            )
+        except TranscriptArtifactError as exc:
+            raise TelopError("字幕 artifact の immutable reference を作成できません。") from exc
+        if artifact_ref is not None and artifact_ref != lineage_ref:
+            raise TelopError("指定された artifact reference が入力 artifact と一致しません。")
+        lineage_fingerprint = transcript_artifact.artifact_fingerprint
+        lineage_digests = tuple(transcript_artifact.used_range_cue_digests)
+        prompt = build_telop_prompt(
+            None,
+            segments,
+            find_project_root(),
+            artifact=transcript_artifact,
+        )
+    else:
+        if artifact_ref is not None:
+            raise TelopError("artifact reference だけではテロップ prompt を生成できません。")
+        vtt_path = video_dir / "subtitles" / "ja.vtt"
+        if not vtt_path.is_file():
+            raise TelopError(f"字幕ファイルが見つかりません: {vtt_path}")
+        prompt = build_telop_prompt(
+            vtt_path.read_text(encoding="utf-8"),
+            segments,
+            find_project_root(),
+        )
     prompt_path = _save_prompt(video_id, clip_id, prompt, settings)
     script_path = video_dir / "shorts" / "telop" / f"telop_{clip_id}.json"
 
@@ -633,6 +727,9 @@ def generate_telop_script(
             script_path=None,
             used_codex=False,
             document=None,
+            artifact_ref=lineage_ref,
+            artifact_fingerprint=lineage_fingerprint,
+            used_range_cue_digests=lineage_digests,
         )
 
     if not is_codex_available(codex_path):
@@ -660,12 +757,25 @@ def generate_telop_script(
             validation.errors,
         )
 
-    saved_path = _save_document(video_id, clip_id, validation.document, settings)
+    document = validation.document
+    if transcript_artifact is not None:
+        document = TelopScriptDocument.model_validate(
+            {
+                **document.model_dump(mode="python"),
+                "artifact_ref": lineage_ref,
+                "artifact_fingerprint": lineage_fingerprint,
+                "used_range_cue_digests": lineage_digests,
+            }
+        )
+    saved_path = _save_document(video_id, clip_id, document, settings)
     return TelopScriptResult(
         video_id=video_id,
         clip_id=clip_id,
         prompt_path=prompt_path,
         script_path=saved_path,
         used_codex=True,
-        document=validation.document,
+        document=document,
+        artifact_ref=lineage_ref,
+        artifact_fingerprint=lineage_fingerprint,
+        used_range_cue_digests=lineage_digests,
     )

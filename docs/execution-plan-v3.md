@@ -45,7 +45,7 @@
 | S9-1 | 代表素材 benchmark・モデル決定 | [x] 完了 |
 | S9-2 | TranscriptArtifact / resolver / fingerprint / persistent cache | [x] 完了 |
 | S9-3 | whisper.cpp runtime・capability・音声区間準備 | [x] 完了 |
-| S9-4 | 親候補区間 Whisper 精査 → short_cut / telop / line 再利用 | [ ] 未着手 |
+| S9-4 | 親候補区間 Whisper 精査 → short_cut / telop / line 再利用 | [~] 進行中 |
 | S9-5 | UI 設定・進捗・エラー・失効表示 | [ ] 未着手 |
 | S9-6 | A/B 受け入れ・回帰・フェーズ判定 | [ ] 未着手 |
 | S9 | 選択親候補区間のローカル Whisper 精査（実装） | [~] 進行中 |
@@ -1652,12 +1652,12 @@ data/{video_id}/ ...
 
 **作業:**
 
-- [ ] S9-4-1. 親候補を VTT artifact から選ぶ既存導線に、明示的な「選択区間を高精度化」入口を追加する。候補全体への Whisper 呼び出し、通常 rerun での自動呼び出し、候補探索の Whisper 化は行わない
-- [ ] S9-4-2. resolver から返された artifact reference と順序付き `used_range_cue_digest` 配列を cutplan の immutable snapshot に保存し、境界調整後は FR-25 の `normalize_segment_bounds()` と人確認を通す。Whisper timestamp の自動境界採用はしない
-- [ ] S9-4-3. FR-22 の prompt builder が直接 `ja.vtt` を再読込せず、選択区間と同じ artifact の absolute cues を受け取るようにする。Codex の台本生成は既存どおり 1 区間セット 1 回、人の全文確認を維持する
-- [ ] S9-4-4. `telop_{clip_id}.json`、queue / line snapshot、review fingerprint、output preflight に同じ artifact reference、artifact fingerprint、使用区間 digest 配列を欠落なく伝播する。生成直前は snapshot と resolver の schema / input identity だけを再検証し、別 artifact へ差し替えない
-- [ ] S9-4-5. `shorts_queue.py` の既存 queue fingerprint の意味は変更せず、immutable queue spec に artifact lineage を追加する。`shorts_line.py` と `ui/components/shorts_queue.py` は同じ reference を受け渡し、UI で fingerprint を再計算しない
-- [ ] S9-4-6. line state の schema version を上げ、artifact lineage / digest 配列を持たない legacy state は台本確認・最終確認を再利用せず未確認へ戻す。使用区間外の字幕変更は downstream を保持し、使用区間内の変更、artifact の欠損、音声 / model / settings 不一致は cutplan / telop / review confirmation を再確認対象へ戻す。元に戻しても人確認を自動復帰しない
+- [x] S9-4-1. 親候補を VTT artifact から選ぶ既存導線に、明示的な「選択区間を高精度化」入口を追加する。候補全体への Whisper 呼び出し、通常 rerun での自動呼び出し、候補探索の Whisper 化は行わない
+- [x] S9-4-2. resolver から返された artifact reference と順序付き `used_range_cue_digest` 配列を cutplan の immutable snapshot に保存し、境界調整後は FR-25 の `normalize_segment_bounds()` と人確認を通す。Whisper timestamp の自動境界採用はしない
+- [x] S9-4-3. FR-22 の prompt builder が直接 `ja.vtt` を再読込せず、選択区間と同じ artifact の absolute cues を受け取るようにする。Codex の台本生成は既存どおり 1 区間セット 1 回、人の全文確認を維持する
+- [x] S9-4-4. `telop_{clip_id}.json`、queue / line snapshot、review fingerprint、output preflight に同じ artifact reference、artifact fingerprint、使用区間 digest 配列を欠落なく伝播する。生成直前は snapshot と resolver の schema / input identity だけを再検証し、別 artifact へ差し替えない
+- [x] S9-4-5. `shorts_queue.py` の既存 queue fingerprint の意味は変更せず、immutable queue spec に artifact lineage を追加する。`shorts_line.py` と `ui/components/shorts_queue.py` は同じ reference を受け渡し、UI で fingerprint を再計算しない
+- [x] S9-4-6. line state の schema version を上げ、artifact lineage / digest 配列を持たない legacy state は台本確認・最終確認を再利用せず未確認へ戻す。使用区間外の字幕変更は downstream を保持し、使用区間内の変更、artifact の欠損、音声 / model / settings 不一致は cutplan / telop / review confirmation を再確認対象へ戻す。元に戻しても人確認を自動復帰しない
 
 **テスト:** VTT 粗い探索の非回帰、選択区間だけの Whisper 呼び出し、同一 artifact snapshot の cutplan / telop / queue / line 再利用、resolver 再実行が無いこと、multiple range の入力順、padding と preview、人確認必須、digest の in-range / out-of-range 失効、古い artifact と legacy line state の fail closed、queue fingerprint 非回帰、既存 `ja.vtt` の内容不変、FR-25 の字幕 offset / clip ID 非回帰。
 
@@ -1667,6 +1667,8 @@ data/{video_id}/ ...
 - [ ] queue / line / UI handoff が同じ immutable artifact reference と digest 配列を保持し、旧 line state の確認を再利用せず、queue fingerprint の既存意味を変えない
 
 **コミット境界:** `short_cut.py` / `telop.py` / queue / line / UI handoff / model / tests を `S9-4` 単位でコミットする。S9-4 のコード変更に UI 設定画面の大規模再構成や local video adapter を混ぜない。
+
+**S9-4 実装・検証実績（2026-08-03、実装ワーカー）:** `TranscriptArtifactRef`、artifact fingerprint、入力順の `used_range_cue_digests` を cutplan → telop → queue spec → line state → output/reuse preflight へ伝播する最小縦断を実装した。既存 VTT 親候補探索と通常 rerun は Whisper を呼ばず、明示した「選択区間を高精度化」だけが S9-3 の selected-range runtime を入力順・整数 ms・padding 付きで呼ぶ。telop prompt は高精度経路で `ja.vtt` を読まず、同一 artifact の absolute cues を使い、Codex は1区間セット1回のままにした。legacy schema 1 line state、欠損 artifact、lineage 不一致は確認・出力を再利用せず未確認へ戻す。focused tests は 246 passed、全体は 1,536 passed / 2 skipped、`uv lock --check`、`git diff --check`、`uv run python -m compileall -q src` も通過した。独立レビュー、S9-4 Done 条件、S9 全体および AC-37 の受け入れ判定は未完了のままとする。
 
 #### S9-5: UI 設定・進捗・エラー・失効表示
 
