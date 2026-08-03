@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import re
 import shutil
@@ -28,15 +29,10 @@ from typing import Any
 import fcntl
 
 from yt_live_kit.config import (
+    WHISPER_ADOPTED_CONTRACT,
     WHISPER_BINARY_PATH,
-    WHISPER_BINARY_SHA256,
-    WHISPER_BINARY_VERSION,
-    WHISPER_INITIAL_PROMPT,
-    WHISPER_LANGUAGE,
-    WHISPER_MODEL_NAME,
     WHISPER_MODEL_PATH,
-    WHISPER_MODEL_SHA256,
-    WHISPER_OUTPUT_SCHEMA,
+    WhisperAdoptedContract,
     Settings,
     get_settings,
 )
@@ -66,14 +62,15 @@ from yt_live_kit.services.ytdlp import (
 
 
 ADOPTED_WHISPER_BINARY_PATH = WHISPER_BINARY_PATH
-ADOPTED_WHISPER_BINARY_VERSION = WHISPER_BINARY_VERSION
-ADOPTED_WHISPER_BINARY_SHA256 = WHISPER_BINARY_SHA256
-ADOPTED_WHISPER_MODEL_NAME = WHISPER_MODEL_NAME
+ADOPTED_WHISPER_CONTRACT = WHISPER_ADOPTED_CONTRACT
+ADOPTED_WHISPER_BINARY_VERSION = WHISPER_ADOPTED_CONTRACT.binary_version
+ADOPTED_WHISPER_BINARY_SHA256 = WHISPER_ADOPTED_CONTRACT.binary_sha256
+ADOPTED_WHISPER_MODEL_NAME = WHISPER_ADOPTED_CONTRACT.model_name
 ADOPTED_WHISPER_MODEL_PATH = WHISPER_MODEL_PATH
-ADOPTED_WHISPER_MODEL_SHA256 = WHISPER_MODEL_SHA256
-ADOPTED_WHISPER_OUTPUT_SCHEMA = WHISPER_OUTPUT_SCHEMA
-ADOPTED_WHISPER_LANGUAGE = WHISPER_LANGUAGE
-ADOPTED_WHISPER_INITIAL_PROMPT = WHISPER_INITIAL_PROMPT
+ADOPTED_WHISPER_MODEL_SHA256 = WHISPER_ADOPTED_CONTRACT.model_sha256
+ADOPTED_WHISPER_OUTPUT_SCHEMA = WHISPER_ADOPTED_CONTRACT.output_schema
+ADOPTED_WHISPER_LANGUAGE = WHISPER_ADOPTED_CONTRACT.language
+ADOPTED_WHISPER_INITIAL_PROMPT = WHISPER_ADOPTED_CONTRACT.initial_prompt
 
 _REQUIRED_HELP_FLAGS = frozenset(
     {
@@ -101,6 +98,12 @@ _FULL_JSON_REQUIRED_ROOT_KEYS = frozenset(
 _FULL_JSON_SEGMENT_KEYS = frozenset(
     {"timestamps", "offsets", "text", "tokens", "speaker", "speaker_turn_next"}
 )
+_FULL_JSON_SEGMENT_REQUIRED_KEYS = frozenset({"timestamps", "offsets", "text", "tokens"})
+_FULL_JSON_MODEL_KEYS = frozenset({"type", "multilingual", "vocab", "audio", "text", "mels", "ftype"})
+_FULL_JSON_MODEL_DIM_KEYS = frozenset({"ctx", "state", "head", "layer"})
+_FULL_JSON_PARAMS_KEYS = frozenset({"model", "language", "translate"})
+_FULL_JSON_RESULT_KEYS = frozenset({"language"})
+_FULL_JSON_TOKEN_KEYS = frozenset({"text", "timestamps", "offsets", "id", "p", "t_dtw"})
 _TIMESTAMP_RE = re.compile(
     r"^(?:(?P<hours>\d+):)?(?P<minutes>\d{2}):(?P<seconds>\d{2})[\.,](?P<millis>\d{3})$"
 )
@@ -198,19 +201,24 @@ class WhisperSettingsContract:
 
     @classmethod
     def from_settings(cls, settings: Settings) -> "WhisperSettingsContract":
+        del settings
+        return cls.from_adopted(WHISPER_ADOPTED_CONTRACT)
+
+    @classmethod
+    def from_adopted(cls, contract: WhisperAdoptedContract) -> "WhisperSettingsContract":
         return cls(
-            language=settings.whisper_language,
-            initial_prompt=settings.whisper_initial_prompt,
-            output_schema=settings.whisper_output_schema,
-            timeout_sec=settings.whisper_timeout,
-            threads=settings.whisper_threads,
-            processors=settings.whisper_processors,
-            beam_size=settings.whisper_beam_size,
-            best_of=settings.whisper_best_of,
-            temperature=settings.whisper_temperature,
-            no_fallback=settings.whisper_no_fallback,
-            vad=settings.whisper_vad,
-            padding_ms=settings.whisper_padding_ms,
+            language=contract.language,
+            initial_prompt=contract.initial_prompt,
+            output_schema=contract.output_schema,
+            timeout_sec=contract.timeout_sec,
+            threads=contract.threads,
+            processors=contract.processors,
+            beam_size=contract.beam_size,
+            best_of=contract.best_of,
+            temperature=contract.temperature,
+            no_fallback=contract.no_fallback,
+            vad=contract.vad,
+            padding_ms=contract.padding_ms,
         )
 
     @property
@@ -524,47 +532,78 @@ def _parse_version(stdout: str, stderr: str) -> str:
     return match.group("version")
 
 
-def preflight_whisper_runtime(settings: Settings | None = None) -> WhisperCapability:
-    """whisper-cli・model・JSON capability・FFmpeg を実行前に検査する."""
+def _preflight_whisper_runtime(
+    settings: Settings,
+    *,
+    adopted_contract: WhisperAdoptedContract,
+) -> WhisperCapability:
+    """内部 DI 用 preflight。production は immutable contract wrapper を使う."""
 
-    settings = settings or get_settings()
-    contract = WhisperSettingsContract.from_settings(settings)
+    immutable_fields = (
+        "binary_version",
+        "model_name",
+        "output_schema",
+        "language",
+        "initial_prompt",
+        "timeout_sec",
+        "threads",
+        "processors",
+        "beam_size",
+        "best_of",
+        "temperature",
+        "no_fallback",
+        "vad",
+        "padding_ms",
+    )
+    contract_mismatch = [
+        field
+        for field in immutable_fields
+        if getattr(adopted_contract, field) != getattr(WHISPER_ADOPTED_CONTRACT, field)
+    ]
+    if contract_mismatch:
+        raise WhisperPreflightError(
+            "S9-1 の version / model / schema / prompt / decode / timeout contract は変更できません。",
+            retryable=False,
+            details={"fields": contract_mismatch},
+        )
 
-    # S9-1 の採用値からの変更は Settings/env による明示変更として受け取るが、
-    # full JSON / ja / VAD false の安全契約を黙って弱めることは許可しない。
-    if contract.language != ADOPTED_WHISPER_LANGUAGE:
+    contract = WhisperSettingsContract.from_adopted(adopted_contract)
+
+    # production wrapper は S9-1 contract を固定する。ここは test fixture の
+    # private injection でも別 contract を誤って正当化しないための fail closed。
+    if adopted_contract.language != ADOPTED_WHISPER_LANGUAGE:
         raise WhisperPreflightError("S9 の言語設定は ja 固定です。", retryable=False)
-    if contract.output_schema != ADOPTED_WHISPER_OUTPUT_SCHEMA:
+    if adopted_contract.output_schema != ADOPTED_WHISPER_OUTPUT_SCHEMA:
         raise WhisperPreflightError("未知の whisper JSON schema は保存できません。", retryable=False)
     if contract.vad:
         raise WhisperPreflightError("S9 の VAD は採用設定で無効です。", retryable=False)
-    if settings.whisper_model_name != ADOPTED_WHISPER_MODEL_NAME:
+    if adopted_contract.model_name != ADOPTED_WHISPER_MODEL_NAME:
         raise WhisperPreflightError("S9 の採用 model name と設定が一致しません。", retryable=False)
 
     binary = _resolved_executable(settings.whisper_binary_path, "whisper-cli")
     binary_path, binary_bytes, binary_sha256 = _file_fingerprint(binary, "whisper-cli")
-    if binary_sha256 != settings.whisper_binary_sha256:
+    if binary_sha256 != adopted_contract.binary_sha256:
         raise WhisperPreflightError(
             "whisper-cli の SHA-256 が設定値と一致しません。モデルや実行ファイルを自動更新せず確認してください。",
             retryable=False,
-            details={"actual_sha256": binary_sha256, "expected_sha256": settings.whisper_binary_sha256},
+            details={"actual_sha256": binary_sha256, "expected_sha256": adopted_contract.binary_sha256},
         )
     version_result = _run_inspection(
         [str(binary_path), "--version"],
-        timeout=min(settings.whisper_timeout, 30),
+        timeout=min(adopted_contract.timeout_sec, 30),
         label="whisper-cli version 検査",
     )
     version = _parse_version(version_result.stdout or "", version_result.stderr or "")
-    if version != settings.whisper_binary_version:
+    if version != adopted_contract.binary_version:
         raise WhisperPreflightError(
             "whisper-cli の version が設定値と一致しません。",
             retryable=False,
-            details={"actual_version": version, "expected_version": settings.whisper_binary_version},
+            details={"actual_version": version, "expected_version": adopted_contract.binary_version},
         )
 
     help_result = _run_inspection(
         [str(binary_path), "--help"],
-        timeout=min(settings.whisper_timeout, 30),
+        timeout=min(adopted_contract.timeout_sec, 30),
         label="whisper-cli capability 検査",
     )
     help_text = f"{help_result.stdout or ''}\n{help_result.stderr or ''}"
@@ -581,11 +620,11 @@ def preflight_whisper_runtime(settings: Settings | None = None) -> WhisperCapabi
         Path(settings.whisper_model_path),
         "whisper.cpp model",
     )
-    if model_sha256 != settings.whisper_model_sha256:
+    if model_sha256 != adopted_contract.model_sha256:
         raise WhisperPreflightError(
             "whisper.cpp model の SHA-256 が設定値と一致しません。モデル自動取得は行いません。",
             retryable=False,
-            details={"actual_sha256": model_sha256, "expected_sha256": settings.whisper_model_sha256},
+            details={"actual_sha256": model_sha256, "expected_sha256": adopted_contract.model_sha256},
         )
 
     ffmpeg_path = _resolved_executable(settings.ffmpeg_path, "FFmpeg")
@@ -627,13 +666,22 @@ def preflight_whisper_runtime(settings: Settings | None = None) -> WhisperCapabi
         version=version,
         supported_flags=supported_flags,
         json_timestamp_capability="--output-json-full" in supported_flags,
-        model_name=settings.whisper_model_name,
+        model_name=adopted_contract.model_name,
         model_path=str(model_path),
         model_bytes=model_bytes,
         model_sha256=model_sha256,
         ffmpeg_path=str(ffmpeg_path),
         ffmpeg_version=ffmpeg_version,
         ffmpeg_capabilities=("audio_conversion", "aresample", "pcm_s16le"),
+    )
+
+
+def preflight_whisper_runtime(settings: Settings | None = None) -> WhisperCapability:
+    """immutable S9-1 contract で whisper-cli・model・FFmpeg を検査する."""
+
+    return _preflight_whisper_runtime(
+        settings or get_settings(),
+        adopted_contract=WHISPER_ADOPTED_CONTRACT,
     )
 
 
@@ -659,19 +707,10 @@ def build_whisper_argv(
     elif isinstance(settings, WhisperSettingsContract):
         contract = settings
     else:
-        contract = WhisperSettingsContract(
-            language=ADOPTED_WHISPER_LANGUAGE,
-            initial_prompt=ADOPTED_WHISPER_INITIAL_PROMPT,
-            output_schema=ADOPTED_WHISPER_OUTPUT_SCHEMA,
-            timeout_sec=180,
-            threads=8,
-            processors=1,
-            beam_size=5,
-            best_of=5,
-            temperature=0.0,
-            no_fallback=False,
-            vad=False,
-            padding_ms=0,
+        contract = WhisperSettingsContract.from_adopted(WHISPER_ADOPTED_CONTRACT)
+    if contract != WhisperSettingsContract.from_adopted(WHISPER_ADOPTED_CONTRACT):
+        raise WhisperRuntimeError(
+            "S9-1 の version / model / schema / prompt / decode / timeout contract は変更できません。"
         )
     if contract.vad:
         raise WhisperRuntimeError("S9 の固定 argv では VAD 有効化を許可していません。")
@@ -740,6 +779,202 @@ def _coerce_timestamp_ms(value: Any, *, label: str) -> int:
     raise WhisperOutputError(f"{label} の timestamp 形式が正しくありません。", retryable=False)
 
 
+def _strict_mapping(
+    value: Any,
+    *,
+    allowed: frozenset[str],
+    required: frozenset[str],
+    label: str,
+    details: Mapping[str, Any] | None = None,
+) -> Mapping[str, Any]:
+    if not isinstance(value, Mapping):
+        raise WhisperOutputError(f"{label} は object でなければなりません。", retryable=False, details=details)
+    unknown = set(value) - allowed
+    missing = required - set(value)
+    if unknown or missing:
+        merged = dict(details or {})
+        if unknown:
+            merged["unknown"] = sorted(str(item) for item in unknown)
+        if missing:
+            merged["missing"] = sorted(missing)
+        raise WhisperOutputError(f"{label} の schema が不正です。", retryable=False, details=merged)
+    return value
+
+
+def _strict_string(value: Any, *, label: str, non_empty: bool = True) -> str:
+    if not isinstance(value, str) or (non_empty and not value.strip()) or "\x00" in value:
+        raise WhisperOutputError(f"{label} は文字列として不正です。", retryable=False)
+    return value
+
+
+def _strict_bool(value: Any, *, label: str) -> bool:
+    if not isinstance(value, bool):
+        raise WhisperOutputError(f"{label} は boolean で指定してください。", retryable=False)
+    return value
+
+
+def _strict_int(value: Any, *, label: str, minimum: int | None = None) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise WhisperOutputError(f"{label} は整数で指定してください。", retryable=False)
+    if minimum is not None and value < minimum:
+        raise WhisperOutputError(f"{label} の値が範囲外です。", retryable=False)
+    return value
+
+
+def _strict_timing_pair(
+    value: Any,
+    *,
+    label: str,
+    offsets: bool,
+    allow_zero_length: bool = False,
+    allow_unordered: bool = False,
+) -> tuple[int, int]:
+    pair = _strict_mapping(
+        value,
+        allowed=frozenset({"from", "to"}),
+        required=frozenset({"from", "to"}),
+        label=label,
+    )
+    if offsets:
+        start = _strict_int(pair["from"], label=f"{label}.from", minimum=0)
+        end = _strict_int(pair["to"], label=f"{label}.to", minimum=0)
+    else:
+        if not isinstance(pair["from"], str) or not isinstance(pair["to"], str):
+            raise WhisperOutputError(f"{label} は timestamp 文字列が必要です。", retryable=False)
+        if _TIMESTAMP_RE.fullmatch(pair["from"].strip()) is None or _TIMESTAMP_RE.fullmatch(pair["to"].strip()) is None:
+            raise WhisperOutputError(f"{label} は timestamp 文字列が必要です。", retryable=False)
+        start = _coerce_timestamp_ms(pair["from"], label=f"{label}.from")
+        end = _coerce_timestamp_ms(pair["to"], label=f"{label}.to")
+    if start < 0 or end < 0 or (
+        not allow_unordered
+        and (end < start if allow_zero_length else end <= start)
+    ):
+        raise WhisperOutputError(f"{label} の時刻範囲が正しくありません。", retryable=False)
+    return start, end
+
+
+def _validate_full_json_model(value: Any) -> None:
+    model = _strict_mapping(
+        value,
+        allowed=_FULL_JSON_MODEL_KEYS,
+        required=_FULL_JSON_MODEL_KEYS,
+        label="whisper full JSON の model",
+    )
+    _strict_string(model["type"], label="model.type")
+    _strict_bool(model["multilingual"], label="model.multilingual")
+    for field in ("vocab", "mels", "ftype"):
+        _strict_int(model[field], label=f"model.{field}", minimum=0)
+    for field in ("audio", "text"):
+        dimensions = _strict_mapping(
+            model[field],
+            allowed=_FULL_JSON_MODEL_DIM_KEYS,
+            required=_FULL_JSON_MODEL_DIM_KEYS,
+            label=f"model.{field}",
+        )
+        for dimension in _FULL_JSON_MODEL_DIM_KEYS:
+            _strict_int(dimensions[dimension], label=f"model.{field}.{dimension}", minimum=0)
+
+
+def _validate_full_json_params(value: Any) -> None:
+    params = _strict_mapping(
+        value,
+        allowed=_FULL_JSON_PARAMS_KEYS,
+        required=_FULL_JSON_PARAMS_KEYS,
+        label="whisper full JSON の params",
+    )
+    _strict_string(params["model"], label="params.model")
+    if _strict_string(params["language"], label="params.language") != ADOPTED_WHISPER_LANGUAGE:
+        raise WhisperOutputError("whisper full JSON の language が ja ではありません。", retryable=False)
+    if _strict_bool(params["translate"], label="params.translate"):
+        raise WhisperOutputError("S9 の whisper full JSON は translate=false が必要です。", retryable=False)
+
+
+def _validate_full_json_result(value: Any) -> None:
+    result = _strict_mapping(
+        value,
+        allowed=_FULL_JSON_RESULT_KEYS,
+        required=_FULL_JSON_RESULT_KEYS,
+        label="whisper full JSON の result",
+    )
+    if _strict_string(result["language"], label="result.language") != ADOPTED_WHISPER_LANGUAGE:
+        raise WhisperOutputError("whisper full JSON の result.language が ja ではありません。", retryable=False)
+
+
+def _validate_full_json_token(value: Any, *, index: int, token_index: int) -> None:
+    token = _strict_mapping(
+        value,
+        allowed=_FULL_JSON_TOKEN_KEYS,
+        required=_FULL_JSON_TOKEN_KEYS,
+        label="whisper JSON token",
+        details={"index": index, "token_index": token_index},
+    )
+    _strict_string(token["text"], label="token.text")
+    timestamp_pair = _strict_timing_pair(
+        token["timestamps"],
+        label="token.timestamps",
+        offsets=False,
+        allow_zero_length=True,
+        allow_unordered=True,
+    )
+    offset_pair = _strict_timing_pair(
+        token["offsets"],
+        label="token.offsets",
+        offsets=True,
+        allow_zero_length=True,
+        allow_unordered=True,
+    )
+    if timestamp_pair != offset_pair:
+        raise WhisperOutputError("whisper token の timestamps と offsets が一致しません。", retryable=False)
+    _strict_int(token["id"], label="token.id")
+    probability = token["p"]
+    if isinstance(probability, bool) or not isinstance(probability, (int, float)):
+        raise WhisperOutputError("token.p は数値で指定してください。", retryable=False)
+    if not math.isfinite(float(probability)) or probability < 0 or probability > 1:
+        raise WhisperOutputError("token.p の値が範囲外です。", retryable=False)
+    _strict_int(token["t_dtw"], label="token.t_dtw")
+
+
+def _validate_full_json_segment(value: Any, *, index: int) -> tuple[int, int]:
+    segment = _strict_mapping(
+        value,
+        allowed=_FULL_JSON_SEGMENT_KEYS,
+        required=_FULL_JSON_SEGMENT_REQUIRED_KEYS,
+        label="whisper JSON segment",
+        details={"index": index},
+    )
+    text = _strict_string(segment["text"], label="segment.text")
+    if not text.strip():
+        raise WhisperOutputError("whisper JSON segment の text が空です。", retryable=False, details={"index": index})
+    timestamp_pair = _strict_timing_pair(
+        segment["timestamps"],
+        label="segment.timestamps",
+        offsets=False,
+    )
+    offset_pair = _strict_timing_pair(
+        segment["offsets"],
+        label="segment.offsets",
+        offsets=True,
+    )
+    if timestamp_pair != offset_pair:
+        raise WhisperOutputError("whisper segment の timestamps と offsets が一致しません。", retryable=False, details={"index": index})
+    tokens = segment["tokens"]
+    if not isinstance(tokens, list) or not tokens:
+        raise WhisperOutputError("whisper JSON segment の tokens が空または不正です。", retryable=False, details={"index": index})
+    for token_index, token in enumerate(tokens):
+        # 1.9.1 は segment の cue 時刻とは別に、先頭 token の metadata が
+        # 逆順になる実出力を返すことがある。token は厳密に型・既知 field・
+        # timestamps/offsets 一致だけを検証し、cue 境界には使用しない。
+        _validate_full_json_token(token, index=index, token_index=token_index)
+    if "speaker" in segment and not (
+        isinstance(segment["speaker"], str)
+        or (isinstance(segment["speaker"], int) and not isinstance(segment["speaker"], bool))
+    ):
+        raise WhisperOutputError("segment.speaker の型が不正です。", retryable=False, details={"index": index})
+    if "speaker_turn_next" in segment:
+        _strict_bool(segment["speaker_turn_next"], label="segment.speaker_turn_next")
+    return timestamp_pair
+
+
 def parse_whisper_full_json(
     payload: Mapping[str, Any],
     *,
@@ -750,6 +985,8 @@ def parse_whisper_full_json(
 ) -> tuple[TranscriptCue, ...]:
     """whisper.cpp 1.9.1 full JSON だけを strict parse して絶対 cue にする."""
 
+    if expected_schema != ADOPTED_WHISPER_OUTPUT_SCHEMA:
+        raise WhisperOutputError("未知の whisper JSON schema は保存できません。", retryable=False)
     if not isinstance(payload, Mapping):
         raise WhisperOutputError("whisper output は JSON object でなければなりません。", retryable=False)
     unknown_root = set(payload) - _FULL_JSON_ROOT_KEYS
@@ -762,13 +999,15 @@ def parse_whisper_full_json(
             retryable=False,
             details={"missing": sorted(missing_root)},
         )
-    if "schema" in payload and payload["schema"] != expected_schema:
+    # 1.9.1 の実出力は root schema を出さないため、schema は optional とし、
+    # 固定された full envelope と nested field 群で schema を識別する。
+    if "schema" in payload and payload["schema"] != ADOPTED_WHISPER_OUTPUT_SCHEMA:
         raise WhisperOutputError("whisper JSON schema version が期待値と異なります。", retryable=False)
     if not isinstance(payload["systeminfo"], str) or not payload["systeminfo"].strip():
         raise WhisperOutputError("whisper full JSON の systeminfo が不正です。", retryable=False)
-    for name in ("model", "params", "result"):
-        if not isinstance(payload[name], Mapping):
-            raise WhisperOutputError(f"whisper full JSON の {name} が object ではありません。", retryable=False)
+    _validate_full_json_model(payload["model"])
+    _validate_full_json_params(payload["params"])
+    _validate_full_json_result(payload["result"])
     transcription = payload["transcription"]
     if not isinstance(transcription, list) or not transcription:
         raise WhisperOutputError("whisper JSON の transcription が空または不正です。", retryable=False)
@@ -786,29 +1025,7 @@ def parse_whisper_full_json(
     for index, raw_segment in enumerate(transcription):
         if not isinstance(raw_segment, Mapping):
             raise WhisperOutputError("whisper transcription の要素が object ではありません。", retryable=False, details={"index": index})
-        unknown_segment = set(raw_segment) - _FULL_JSON_SEGMENT_KEYS
-        if unknown_segment:
-            raise WhisperOutputError("whisper JSON segment に未知の field があります。", retryable=False, details={"index": index})
-        text = raw_segment.get("text")
-        if not isinstance(text, str) or not text.strip() or "\x00" in text:
-            raise WhisperOutputError("whisper JSON segment の text が空または不正です。", retryable=False, details={"index": index})
-        timestamps = raw_segment.get("timestamps")
-        offsets = raw_segment.get("offsets")
-        # whisper.cpp full JSON 1.9.1 は timestamps（表示用文字列）と offsets
-        # （整数 millisecond）を同時に出す。固定 schema の両 field は許可し、
-        # timestamp の正本は benchmark parser と同じく timestamps を優先する。
-        timing = timestamps if timestamps is not None else offsets
-        if not isinstance(timing, Mapping) or set(timing) != {"from", "to"}:
-            raise WhisperOutputError("whisper JSON segment の timestamp schema が不正です。", retryable=False, details={"index": index})
-        relative_start = _coerce_timestamp_ms(timing["from"], label="timestamp.from")
-        relative_end = _coerce_timestamp_ms(timing["to"], label="timestamp.to")
-        if timestamps is not None and offsets is not None:
-            if not isinstance(offsets, Mapping) or set(offsets) != {"from", "to"}:
-                raise WhisperOutputError("whisper JSON segment の offsets schema が不正です。", retryable=False, details={"index": index})
-            offset_start = _coerce_timestamp_ms(offsets["from"], label="offsets.from")
-            offset_end = _coerce_timestamp_ms(offsets["to"], label="offsets.to")
-            if (relative_start, relative_end) != (offset_start, offset_end):
-                raise WhisperOutputError("whisper JSON の timestamps と offsets が一致しません。", retryable=False, details={"index": index})
+        relative_start, relative_end = _validate_full_json_segment(raw_segment, index=index)
         if relative_start < 0 or relative_end <= relative_start:
             raise WhisperOutputError("whisper JSON segment の時刻範囲が正しくありません。", retryable=False, details={"index": index})
         if relative_start < previous_relative_end:
@@ -823,7 +1040,7 @@ def parse_whisper_full_json(
                 or absolute_end > allowed_absolute_range.requested_end_ms
             ):
                 raise WhisperOutputError("whisper JSON cue が選択区間の範囲外です。", retryable=False, details={"index": index})
-        cleaned_text = text.strip().replace("<", "〈").replace(">", "〉")
+        cleaned_text = str(raw_segment["text"]).strip().replace("<", "〈").replace(">", "〉")
         cues.append(
             TranscriptCue(
                 start_ms=absolute_start,
@@ -839,6 +1056,15 @@ parse_whisper_json = parse_whisper_full_json
 parse_whisper_output = parse_whisper_full_json
 
 
+def _json_object_without_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("JSON object に重複した field があります。")
+        result[key] = value
+    return result
+
+
 def _read_json_output(path: Path, stdout: str) -> Mapping[str, Any]:
     candidates: list[str] = []
     try:
@@ -852,8 +1078,8 @@ def _read_json_output(path: Path, stdout: str) -> Mapping[str, Any]:
         raise WhisperOutputError("whisper JSON output が生成されませんでした。", retryable=False)
     raw = candidates[0]
     try:
-        payload = json.loads(raw)
-    except (json.JSONDecodeError, TypeError, UnicodeError) as exc:
+        payload = json.loads(raw, object_pairs_hook=_json_object_without_duplicates)
+    except (json.JSONDecodeError, TypeError, UnicodeError, ValueError) as exc:
         raise WhisperOutputError("whisper JSON output が壊れているか途中で切れています。", retryable=False) from exc
     if not isinstance(payload, Mapping):
         raise WhisperOutputError("whisper JSON output の root が object ではありません。", retryable=False)
@@ -1554,6 +1780,7 @@ refine_selected_ranges = run_selected_ranges
 
 
 __all__ = [
+    "ADOPTED_WHISPER_CONTRACT",
     "ADOPTED_WHISPER_BINARY_PATH",
     "ADOPTED_WHISPER_BINARY_SHA256",
     "ADOPTED_WHISPER_BINARY_VERSION",

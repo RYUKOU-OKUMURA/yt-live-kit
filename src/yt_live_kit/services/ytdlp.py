@@ -97,7 +97,7 @@ _AUDIO_FORMAT_SETTINGS: dict[str, Any] = {
     "sample_rate": 16_000,
     "channel": 1,
     "codec": "pcm_s16le",
-    "selector": "bestaudio/best",
+    "selector": "bestaudio",
     "seek": "yt-dlp-download-sections",
     "cue_inclusion_rule": "half_open_overlap",
 }
@@ -349,7 +349,14 @@ def _audio_file_fingerprint(path: Path) -> tuple[bytes, str]:
     return content, hashlib.sha256(content).hexdigest()
 
 
+_EXPECTED_WAV_FORMAT = (16_000, 1, "pcm_s16le")
+
+
 def _inspect_wav_format(content: bytes) -> tuple[int, int, str] | None:
+    """RIFF/WAVE と PCM format を確認する。壊れた bytes は None にする."""
+
+    if len(content) < 12 or content[:4] != b"RIFF" or content[8:12] != b"WAVE":
+        return None
     try:
         import io
 
@@ -357,11 +364,43 @@ def _inspect_wav_format(content: bytes) -> tuple[int, int, str] | None:
             channels = wav.getnchannels()
             sample_rate = wav.getframerate()
             sample_width = wav.getsampwidth()
+            compression = wav.getcomptype()
     except (EOFError, OSError, wave.Error):
         return None
-    if channels <= 0 or sample_rate <= 0 or sample_width <= 0:
+    if (
+        channels <= 0
+        or sample_rate <= 0
+        or sample_width <= 0
+        or compression != "NONE"
+    ):
         return None
     return sample_rate, channels, f"pcm_s{sample_width * 8}le"
+
+
+def _quarantine_audio_cache_file(path: Path, settings: Settings) -> None:
+    """壊れた cache を同一ディレクトリへ隔離し、再生成を可能にする."""
+
+    try:
+        _validate_confined_path(path, settings, "破損した音声 cache")
+        existing = _lstat_without_symlink(path, "破損した音声 cache")
+        if existing is None or not stat.S_ISREG(existing.st_mode):
+            return
+        quarantine = path.with_name(f".{path.name}.corrupt-{uuid.uuid4().hex}")
+        _validate_confined_path(quarantine, settings, "破損した音声 cache 隔離先")
+        os.replace(path, quarantine)
+    except (YtdlpError, OSError):
+        # 隔離できない場合も、壊れた cache を成功扱いにはしない。次の atomic
+        # write が可能なら同じ target を置き換え、symlink 等は fail closed にする。
+        return
+
+
+def _quarantine_audio_cache(
+    audio_path: Path,
+    metadata_path: Path,
+    settings: Settings,
+) -> None:
+    _quarantine_audio_cache_file(audio_path, settings)
+    _quarantine_audio_cache_file(metadata_path, settings)
 
 
 def _atomic_write_audio_cache(
@@ -478,11 +517,7 @@ def _read_audio_cache(
         ):
             return None
         inspected = _inspect_wav_format(content)
-        if inspected is not None and inspected != (
-            _AUDIO_FORMAT_SETTINGS["sample_rate"],
-            _AUDIO_FORMAT_SETTINGS["channel"],
-            _AUDIO_FORMAT_SETTINGS["codec"],
-        ):
+        if inspected != _EXPECTED_WAV_FORMAT:
             return None
         return AudioSpanResult(
             video_id=video_id,
@@ -636,6 +671,7 @@ def prepare_audio_span(
     )
     if cached is not None:
         return cached
+    _quarantine_audio_cache(audio_path, metadata_path, settings)
 
     if shutil.which(settings.ytdlp_path) is None:
         raise AudioSpanError(
@@ -675,17 +711,14 @@ def prepare_audio_span(
         if result.returncode != 0:
             detail = _sanitize_diagnostic(result.stderr or result.stdout)
             raise AudioSpanError(
-                "選択区間の音声取得に失敗しました。"
+                "選択区間の audio-only format（bestaudio）を取得できませんでした。"
+                "動画全体や video format へ fallback せず、既存 YouTube VTT を明示的に使用してください。"
                 + (f"（詳細: {detail}）" if detail else "")
             )
         output_path = _find_audio_output(temporary_dir, settings)
         content, digest = _audio_file_fingerprint(output_path)
         inspected = _inspect_wav_format(content)
-        if inspected is not None and inspected != (
-            _AUDIO_FORMAT_SETTINGS["sample_rate"],
-            _AUDIO_FORMAT_SETTINGS["channel"],
-            _AUDIO_FORMAT_SETTINGS["codec"],
-        ):
+        if inspected != _EXPECTED_WAV_FORMAT:
             raise AudioSpanError("変換後の音声形式が S9 の設定と一致しません。")
         metadata = _audio_cache_metadata(
             video_id=video_id,

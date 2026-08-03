@@ -4,19 +4,23 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
-from yt_live_kit.config import Settings
+from yt_live_kit.config import WHISPER_ADOPTED_CONTRACT, Settings
 from yt_live_kit.models.transcript import TranscriptArtifactStatus
-from yt_live_kit.services.ytdlp import AudioSpanRange, AudioSpanResult
+from yt_live_kit.services.ytdlp import AudioSpanError, AudioSpanRange, AudioSpanResult
 from yt_live_kit.services.whisper_runtime import (
     WhisperCapability,
     WhisperBusyError,
+    WhisperOutputError,
     WhisperPreflightError,
     WhisperProcessResult,
     WhisperRangeStatus,
+    WhisperSettingsContract,
+    _preflight_whisper_runtime,
     _job_gate,
     build_whisper_argv,
     parse_whisper_full_json,
@@ -29,15 +33,40 @@ VIDEO_ID = "IJvd6k6ZmUo"
 
 
 def _full_payload(*, text: str = "こんにちは", start_ms: int = 0, end_ms: int = 500) -> dict:
+    def timestamp(value: int) -> str:
+        hours, remainder = divmod(value, 3_600_000)
+        minutes, remainder = divmod(remainder, 60_000)
+        seconds, milliseconds = divmod(remainder, 1_000)
+        return f"{hours:02d}:{minutes:02d}:{seconds:02d},{milliseconds:03d}"
+
     return {
         "systeminfo": "whisper.cpp test fixture",
-        "model": {"type": "test"},
-        "params": {"language": "ja"},
+        "model": {
+            "type": "large",
+            "multilingual": True,
+            "vocab": 51_866,
+            "audio": {"ctx": 1_500, "state": 1_280, "head": 20, "layer": 32},
+            "text": {"ctx": 448, "state": 1_280, "head": 20, "layer": 4},
+            "mels": 128,
+            "ftype": 8,
+        },
+        "params": {"model": "fixture-model.bin", "language": "ja", "translate": False},
         "result": {"language": "ja"},
         "transcription": [
             {
-                "timestamps": {"from": start_ms, "to": end_ms},
+                "timestamps": {"from": timestamp(start_ms), "to": timestamp(end_ms)},
+                "offsets": {"from": start_ms, "to": end_ms},
                 "text": text,
+                "tokens": [
+                    {
+                        "text": text,
+                        "timestamps": {"from": timestamp(start_ms), "to": timestamp(end_ms)},
+                        "offsets": {"from": start_ms, "to": end_ms},
+                        "id": 1,
+                        "p": 1.0,
+                        "t_dtw": -1,
+                    }
+                ],
             }
         ],
     }
@@ -49,8 +78,6 @@ def _fake_settings(tmp_path: Path) -> Settings:
     binary.chmod(0o755)
     model = tmp_path / "model.bin"
     model.write_bytes(b"whisper-model-fixture")
-    model_sha = hashlib.sha256(model.read_bytes()).hexdigest()
-    binary_sha = hashlib.sha256(binary.read_bytes()).hexdigest()
     ffmpeg = tmp_path / "ffmpeg"
     ffmpeg.write_bytes(b"ffmpeg-fixture")
     ffmpeg.chmod(0o755)
@@ -58,13 +85,18 @@ def _fake_settings(tmp_path: Path) -> Settings:
         data_dir=tmp_path / "data",
         ytdlp_path="yt-dlp-fixture",
         whisper_binary_path=str(binary),
-        whisper_binary_sha256=binary_sha,
-        whisper_binary_version="1.9.1",
         whisper_model_path=str(model),
-        whisper_model_sha256=model_sha,
-        whisper_output_schema="whisper-cli-json-full-v1",
         ffmpeg_path=str(ffmpeg),
-        whisper_timeout=3,
+    )
+
+
+def _fake_contract(settings: Settings):
+    binary_sha = hashlib.sha256(Path(settings.whisper_binary_path).read_bytes()).hexdigest()
+    model_sha = hashlib.sha256(Path(settings.whisper_model_path).read_bytes()).hexdigest()
+    return replace(
+        WHISPER_ADOPTED_CONTRACT,
+        binary_sha256=binary_sha,
+        model_sha256=model_sha,
     )
 
 
@@ -92,13 +124,13 @@ def _fake_capability(settings: Settings) -> WhisperCapability:
             "--threads",
         ),
         json_timestamp_capability=True,
-        model_name=settings.whisper_model_name,
+        model_name=WHISPER_ADOPTED_CONTRACT.model_name,
         model_path=str(model),
         model_bytes=model.stat().st_size,
         model_sha256=hashlib.sha256(model.read_bytes()).hexdigest(),
         ffmpeg_path=settings.ffmpeg_path,
         ffmpeg_version="fixture",
-        ffmpeg_capabilities=("audio_conversion", "download_sections"),
+        ffmpeg_capabilities=("audio_conversion", "aresample", "pcm_s16le"),
     )
 
 
@@ -126,7 +158,7 @@ def _span(settings: Settings, item: AudioSpanRange, *, cache_hit: bool = False) 
             "sample_rate": 16_000,
             "channel": 1,
             "codec": "pcm_s16le",
-            "selector": "bestaudio/best",
+            "selector": "bestaudio",
         },
         cache_hit=cache_hit,
         request_fingerprint=hashlib.sha256(content + b"request").hexdigest(),
@@ -135,14 +167,104 @@ def _span(settings: Settings, item: AudioSpanRange, *, cache_hit: bool = False) 
 
 def test_preflight_rejects_wrong_binary_hash(monkeypatch, tmp_path):
     settings = _fake_settings(tmp_path)
-    settings = settings.model_copy(update={"whisper_binary_sha256": "0" * 64})
+    contract = replace(_fake_contract(settings), binary_sha256="0" * 64)
     monkeypatch.setattr(
         "yt_live_kit.services.whisper_runtime.shutil.which",
         lambda value: value,
     )
 
     with pytest.raises(WhisperPreflightError, match="SHA-256"):
-        preflight_whisper_runtime(settings)
+        _preflight_whisper_runtime(settings, adopted_contract=contract)
+
+
+def test_settings_env_cannot_redefine_adopted_contract(monkeypatch, tmp_path):
+    monkeypatch.setenv("YTLK_WHISPER_BINARY_PATH", str(tmp_path / "custom-whisper"))
+    monkeypatch.setenv("YTLK_WHISPER_BINARY_SHA256", "0" * 64)
+    monkeypatch.setenv("YTLK_WHISPER_BINARY_VERSION", "9.9.9")
+    monkeypatch.setenv("YTLK_WHISPER_MODEL_NAME", "other-model")
+    monkeypatch.setenv("YTLK_WHISPER_MODEL_SHA256", "0" * 64)
+    monkeypatch.setenv("YTLK_WHISPER_OUTPUT_SCHEMA", "other-schema")
+    monkeypatch.setenv("YTLK_WHISPER_LANGUAGE", "en")
+    monkeypatch.setenv("YTLK_WHISPER_THREADS", "1")
+    monkeypatch.setenv("YTLK_WHISPER_PROCESSORS", "2")
+    monkeypatch.setenv("YTLK_WHISPER_BEAM_SIZE", "1")
+    monkeypatch.setenv("YTLK_WHISPER_BEST_OF", "1")
+    monkeypatch.setenv("YTLK_WHISPER_TEMPERATURE", "1")
+    monkeypatch.setenv("YTLK_WHISPER_NO_FALLBACK", "true")
+    monkeypatch.setenv("YTLK_WHISPER_VAD", "true")
+    monkeypatch.setenv("YTLK_WHISPER_PADDING_MS", "500")
+    monkeypatch.setenv("YTLK_WHISPER_INITIAL_PROMPT", "別の prompt")
+    monkeypatch.setenv("YTLK_WHISPER_TIMEOUT", "1")
+    settings = Settings(data_dir=tmp_path)
+    contract = WhisperSettingsContract.from_settings(settings)
+
+    assert settings.whisper_binary_path == str(tmp_path / "custom-whisper")
+    assert not hasattr(settings, "whisper_binary_sha256")
+    assert WHISPER_ADOPTED_CONTRACT.binary_version == "1.9.1"
+    assert contract.output_schema == "whisper-cli-json-full-v1"
+    assert contract.language == "ja"
+    assert contract.threads == 8
+    assert contract.processors == 1
+    assert contract.beam_size == 5
+    assert contract.best_of == 5
+    assert contract.temperature == 0.0
+    assert contract.no_fallback is False
+    assert contract.vad is False
+    assert contract.padding_ms == 0
+    assert contract.initial_prompt == WHISPER_ADOPTED_CONTRACT.initial_prompt
+    assert contract.timeout_sec == 180
+    argv = build_whisper_argv(
+        binary_path=settings.whisper_binary_path,
+        model_path=settings.whisper_model_path,
+        audio_path="/tmp/span.wav",
+        output_json_path="/tmp/result.json",
+        settings=settings,
+        selected_range=AudioSpanRange(0, 1_000),
+    )
+    assert argv[argv.index("-t") + 1] == "8"
+    assert argv[argv.index("--prompt") + 1] == WHISPER_ADOPTED_CONTRACT.initial_prompt
+
+
+def test_public_preflight_always_uses_adopted_contract(monkeypatch, tmp_path):
+    settings = _fake_settings(tmp_path)
+    seen = {}
+
+    def fake_preflight(settings_arg, *, adopted_contract):
+        seen["settings"] = settings_arg
+        seen["contract"] = adopted_contract
+        return _fake_capability(settings_arg)
+
+    monkeypatch.setattr(
+        "yt_live_kit.services.whisper_runtime._preflight_whisper_runtime",
+        fake_preflight,
+    )
+    capability = preflight_whisper_runtime(settings)
+    assert capability.version == "1.9.1"
+    assert seen["settings"] is settings
+    assert seen["contract"] is WHISPER_ADOPTED_CONTRACT
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    (
+        ("binary_version", "9.9.9"),
+        ("model_name", "other-model"),
+        ("initial_prompt", "別の prompt"),
+        ("threads", 1),
+        ("timeout_sec", 1),
+    ),
+)
+def test_internal_contract_injection_rejects_immutable_contract_changes(
+    monkeypatch,
+    tmp_path,
+    field,
+    value,
+):
+    settings = _fake_settings(tmp_path)
+    _patch_successful_preflight(monkeypatch)
+    contract = replace(_fake_contract(settings), **{field: value})
+    with pytest.raises(WhisperPreflightError, match="contract"):
+        _preflight_whisper_runtime(settings, adopted_contract=contract)
 
 
 def _patch_successful_preflight(monkeypatch):
@@ -185,9 +307,9 @@ def _patch_successful_preflight(monkeypatch):
 def test_preflight_checks_version_model_capability_and_ffmpeg(monkeypatch, tmp_path):
     settings = _fake_settings(tmp_path)
     _patch_successful_preflight(monkeypatch)
-    capability = preflight_whisper_runtime(settings)
+    capability = _preflight_whisper_runtime(settings, adopted_contract=_fake_contract(settings))
     assert capability.version == "1.9.1"
-    assert capability.model_sha256 == settings.whisper_model_sha256
+    assert capability.model_sha256 == _fake_contract(settings).model_sha256
     assert capability.json_timestamp_capability is True
     assert "audio_conversion" in capability.ffmpeg_capabilities
 
@@ -198,21 +320,20 @@ def test_preflight_checks_version_model_capability_and_ffmpeg(monkeypatch, tmp_p
 
     monkeypatch.setattr("yt_live_kit.services.whisper_runtime._run_inspection", wrong_version)
     with pytest.raises(WhisperPreflightError, match="version"):
-        preflight_whisper_runtime(settings)
+        _preflight_whisper_runtime(settings, adopted_contract=_fake_contract(settings))
 
 
-@pytest.mark.parametrize(
-    "update",
-    (
-        {"whisper_model_path": "missing-model.bin"},
-        {"whisper_model_sha256": "0" * 64},
-    ),
-)
-def test_preflight_rejects_missing_or_wrong_model(monkeypatch, tmp_path, update):
-    settings = _fake_settings(tmp_path).model_copy(update=update)
+@pytest.mark.parametrize("wrong_path", (True, False))
+def test_preflight_rejects_missing_or_wrong_model(monkeypatch, tmp_path, wrong_path):
+    settings = _fake_settings(tmp_path)
+    contract = _fake_contract(settings)
+    if wrong_path:
+        settings = settings.model_copy(update={"whisper_model_path": "missing-model.bin"})
+    else:
+        contract = replace(contract, model_sha256="0" * 64)
     _patch_successful_preflight(monkeypatch)
     with pytest.raises(WhisperPreflightError, match="model"):
-        preflight_whisper_runtime(settings)
+        _preflight_whisper_runtime(settings, adopted_contract=contract)
 
 
 def test_preflight_rejects_missing_json_capability_and_ffmpeg(monkeypatch, tmp_path):
@@ -228,7 +349,7 @@ def test_preflight_rejects_missing_json_capability_and_ffmpeg(monkeypatch, tmp_p
 
     monkeypatch.setattr("yt_live_kit.services.whisper_runtime._run_inspection", no_json)
     with pytest.raises(WhisperPreflightError, match="capability"):
-        preflight_whisper_runtime(settings)
+        _preflight_whisper_runtime(settings, adopted_contract=_fake_contract(settings))
 
     _patch_successful_preflight(monkeypatch)
     monkeypatch.setattr(
@@ -236,7 +357,7 @@ def test_preflight_rejects_missing_json_capability_and_ffmpeg(monkeypatch, tmp_p
         lambda value: None if value == settings.ffmpeg_path else value,
     )
     with pytest.raises(WhisperPreflightError, match="FFmpeg"):
-        preflight_whisper_runtime(settings)
+        _preflight_whisper_runtime(settings, adopted_contract=_fake_contract(settings))
 
 
 def test_strict_full_json_rejects_unknown_schema_and_out_of_range_cue():
@@ -256,6 +377,27 @@ def test_strict_full_json_rejects_unknown_schema_and_out_of_range_cue():
             relative_duration_ms=1_000,
             allowed_absolute_range=AudioSpanRange(0, 1_000),
         )
+
+
+@pytest.mark.parametrize(
+    "mutate,match",
+    (
+        (lambda payload: payload["model"]["audio"].update({"unknown": 1}), "schema"),
+        (lambda payload: payload["params"].pop("translate"), "schema"),
+        (lambda payload: payload["transcription"][0]["offsets"].update({"unknown": 1}), "schema"),
+        (lambda payload: payload["transcription"][0]["tokens"][0].__setitem__("id", "1"), "整数"),
+        (lambda payload: payload["transcription"][0].pop("tokens"), "schema"),
+        (lambda payload: payload["result"].__setitem__("language", 1), "文字列"),
+    ),
+)
+def test_strict_full_json_rejects_unknown_nested_fields_wrong_types_and_missing_fields(
+    mutate,
+    match,
+):
+    payload = _full_payload()
+    mutate(payload)
+    with pytest.raises(WhisperOutputError, match=match):
+        parse_whisper_full_json(payload)
 
 
 def test_build_argv_is_fixed_full_json_and_contains_adopted_settings():
@@ -394,6 +536,36 @@ def test_partial_failure_is_not_high_precision_and_has_range_diagnostic(monkeypa
     assert result.range_results[1].status is WhisperRangeStatus.FAILED
     assert result.range_results[1].retryable is True
     assert "Whisper" in (result.range_results[1].diagnostic or "")
+
+
+def test_audio_only_failure_returns_explicit_vtt_fallback(monkeypatch, tmp_path):
+    settings = _fake_settings(tmp_path)
+    capability = _fake_capability(settings)
+    monkeypatch.setattr(
+        "yt_live_kit.services.whisper_runtime.preflight_whisper_runtime",
+        lambda _settings: capability,
+    )
+    def fail_audio(*_args, **_kwargs):
+        raise AudioSpanError("audio-only format がありません。")
+
+    monkeypatch.setattr(
+        "yt_live_kit.services.whisper_runtime.prepare_audio_span",
+        fail_audio,
+    )
+
+    result = run_selected_ranges(
+        VIDEO_ID,
+        [AudioSpanRange(1_000, 2_000)],
+        settings,
+        job_id="audio-only-fallback",
+    )
+
+    assert result.status == "failed"
+    assert result.is_high_precision is False
+    assert result.fallback_available is True
+    assert result.fallback_kind == "youtube_vtt"
+    assert "既存 YouTube VTT" in (result.diagnostic or "")
+    assert "audio-only" in (result.range_results[0].diagnostic or "")
 
 
 def test_malformed_output_keeps_typed_process_result(monkeypatch, tmp_path):

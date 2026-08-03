@@ -14,6 +14,7 @@ import pytest
 from yt_live_kit.config import Settings
 from yt_live_kit.models.subtitle import SubtitleSourceMetadata
 from yt_live_kit.services.ytdlp import (
+    AudioSpanError,
     AudioSpanRange,
     MISSING_YTDLP_BINARY_IDENTITY,
     YtdlpError,
@@ -572,7 +573,7 @@ def test_prepare_audio_span_uses_selected_audio_only_range_and_persistent_cache(
     assert first.range.requested_end_ms == 23_956
     assert len(calls) == 1
     command = calls[0]
-    assert command[command.index("-f") + 1] == "bestaudio/best"
+    assert command[command.index("-f") + 1] == "bestaudio"
     assert "--download-sections" in command
     section = command[command.index("--download-sections") + 1]
     assert section == "*00:00:12.095-00:00:23.956"
@@ -624,3 +625,81 @@ def test_prepare_audio_span_corrupt_cache_is_a_miss(monkeypatch, tmp_path):
     second = prepare_audio_span("IJvd6k6ZmUo", (1_000, 2_000), settings)
     assert second.cache_hit is False
     assert calls == 2
+
+
+def test_prepare_audio_span_invalid_wav_cache_is_quarantined_and_regenerated(
+    monkeypatch,
+    tmp_path,
+):
+    settings = Settings(data_dir=tmp_path, ytdlp_path="yt-dlp-test")
+    monkeypatch.setattr(
+        "yt_live_kit.services.ytdlp.shutil.which",
+        lambda value: "/usr/bin/yt-dlp" if value == "yt-dlp-test" else value,
+    )
+    content = _wav_bytes()
+    calls = 0
+
+    def fake_run(args, _settings, *, timeout=None, pass_fds=(), cwd_fd=None):
+        nonlocal calls
+        calls += 1
+        current_fd = os.open(".", os.O_RDONLY)
+        try:
+            os.fchdir(cwd_fd)
+            __import__("pathlib").Path("span.wav").write_bytes(content)
+        finally:
+            os.fchdir(current_fd)
+            os.close(current_fd)
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr("yt_live_kit.services.ytdlp._run_ytdlp", fake_run)
+    first = prepare_audio_span("IJvd6k6ZmUo", (1_000, 2_000), settings)
+    first.path.write_bytes(b"this is not a wav")
+
+    second = prepare_audio_span("IJvd6k6ZmUo", (1_000, 2_000), settings)
+    assert second.cache_hit is False
+    assert second.audio_bytes == content
+    assert calls == 2
+    assert list(first.path.parent.glob(f".{first.path.name}.corrupt-*"))
+
+
+def test_prepare_audio_span_rejects_invalid_generated_wav_with_audio_only_diagnostic(
+    monkeypatch,
+    tmp_path,
+):
+    settings = Settings(data_dir=tmp_path, ytdlp_path="yt-dlp-test")
+    monkeypatch.setattr(
+        "yt_live_kit.services.ytdlp.shutil.which",
+        lambda value: "/usr/bin/yt-dlp" if value == "yt-dlp-test" else value,
+    )
+
+    def invalid_run(args, _settings, *, timeout=None, pass_fds=(), cwd_fd=None):
+        current_fd = os.open(".", os.O_RDONLY)
+        try:
+            os.fchdir(cwd_fd)
+            __import__("pathlib").Path("span.wav").write_bytes(b"this is not a wav")
+        finally:
+            os.fchdir(current_fd)
+            os.close(current_fd)
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr("yt_live_kit.services.ytdlp._run_ytdlp", invalid_run)
+    with pytest.raises(AudioSpanError, match="形式"):
+        prepare_audio_span("IJvd6k6ZmUo", (1_000, 2_000), settings)
+
+
+def test_prepare_audio_span_does_not_fallback_to_video_format(monkeypatch, tmp_path):
+    settings = Settings(data_dir=tmp_path, ytdlp_path="yt-dlp-test")
+    monkeypatch.setattr(
+        "yt_live_kit.services.ytdlp.shutil.which",
+        lambda value: "/usr/bin/yt-dlp" if value == "yt-dlp-test" else value,
+    )
+
+    def no_audio_format(args, _settings, *, timeout=None, pass_fds=(), cwd_fd=None):
+        assert args[args.index("-f") + 1] == "bestaudio"
+        assert "bestaudio/best" not in args
+        assert not any("bestvideo" in item or ".mp4" in item for item in args)
+        return subprocess.CompletedProcess(args, 1, "", "audio-only unavailable")
+
+    monkeypatch.setattr("yt_live_kit.services.ytdlp._run_ytdlp", no_audio_format)
+    with pytest.raises(AudioSpanError, match="audio-only"):
+        prepare_audio_span("IJvd6k6ZmUo", (1_000, 2_000), settings)
