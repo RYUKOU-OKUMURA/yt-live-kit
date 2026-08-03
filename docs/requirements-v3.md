@@ -48,6 +48,7 @@ v3 は次の 3 フェーズで構成する。
 - 価値は生成ボリュームではなく**ケイデンス（毎日のリズム）× 品質**である。品質はその日の注意力ではなく**工程のゲート**が保証する（FR-33）
 - 優先順位: **① ショート動画の生産フローの確立（最優先）** ② 横型ハイライト動画は派生（生産ラインが確立すれば同じ型で低コストに実現できる）③ 概要欄へのチャプター反映は実装済み・機能済みであり、今後のライブ配信後に漏れなく反映されれば十分（**保守のみ。再設計の対象にしない**）
 - まとめて生成（FR-26）は「確定済みの複数本のエンコードを裏で流す実行エンジン」と位置づけ直す。UI の主導線は 1 本を仕上げる工程（FR-33）とする
+- 字幕精度の底上げも、全本を先に再文字起こしする運用ではなく、FR-33 で選んだ親候補の必要区間だけを 1 ジョブで処理する。粗い候補探索は既存の YouTube VTT を使い、品質確認の工程で同じ精査済み字幕を再利用する
 
 ### 1.4 v3 の利用シーン
 
@@ -225,10 +226,12 @@ Streamlit は、エントリスクリプト（[`src/yt_live_kit/ui/app.py`](../s
 
 | 項目 | 内容 |
 |------|------|
-| **入力** | 動画 1 本と、その切り抜き候補（実データは 142 / 142 本が 180 秒超のため、サブ区間提案（FR-30）が事実上必須の入口になる） |
-| **処理** | ショート 1 本を次の工程で仕上げる。**(1) 素材選定**（候補を選ぶ）→ **(2) 区間決定**〔ゲート①: 区間ごとの文字起こしを見て採否・境界を確定〕→ **(3) テロップ確認**〔ゲート②: FR-22 の AI 台本を人が全文確認・修正して確定〕→ **(4) 生成**（FR-25 連結。確定済み複数本は裏でまとめてエンコードしてよい = FR-26 を実行エンジンとして使う）→ **(5) 最終確認**〔ゲート③: プレビューを見て OK / NG〕→ **(6) 予約**（FR-27 / FR-28 の次の空き枠へ）。各ゲートを通過するまで次工程に進めない |
+| **入力** | 動画 1 本と、その切り抜き候補（実データは 142 / 142 本が 180 秒超のため、サブ区間提案（FR-30）が事実上必須の入口になる）。候補の探索は YouTube VTT、選択後の区間確認は resolver が返す粗いまたは精査済み `TranscriptArtifact` を使う |
+| **処理** | ショート 1 本を次の工程で仕上げる。**(1) 素材選定**（候補を選ぶ）→ **(2) 区間決定**〔ゲート①: 必要なら選択親候補区間のローカル精査を明示実行し、区間ごとの文字起こしを見て採否・境界を確定〕→ **(3) テロップ確認**〔ゲート②: FR-22 の AI 台本を人が全文確認・修正して確定〕→ **(4) 生成**（FR-25 連結。確定済み複数本は裏でまとめてエンコードしてよい = FR-26 を実行エンジンとして使う）→ **(5) 最終確認**〔ゲート③: プレビューを見て OK / NG〕→ **(6) 予約**（FR-27 / FR-28 の次の空き枠へ）。各ゲートを通過するまで次工程に進めない |
 | **出力** | 「いま何本目のどの工程にいて、次に何を確認するか」が常に画面から分かる工程表示。1 日 3 本はこのラインを 3 周まわすことで達成する |
 | **スコープ** | **行き止まりゼロ:** ラインに乗せた素材は必ず「予約済み」まで到達できる。180 秒超で弾く・単体生成物が予約に進めない等の途中切れを作らない。**毎回選ばせない:** レイアウト・テロッププリセットは設定ページ（FR-20）の既定値を使い、工程には読み取り専用の適用値と「設定で変更」だけを表示する。単体手動生成（時刻手入力）は補助のまま残すが工程には出さない。既存の安全契約（FR-26 の queue fingerprint / 確定、FR-27 の確認ダイアログ、上書き確認）は工程の各ゲートとして再利用する |
+
+**S9 artifact handoff:** ゲート①で区間列を確定した時点で、resolver の artifact reference と順序付き `used_range_cue_digest` 配列を immutable な line / cutplan snapshot に凍結する。FR-22、FR-25、queue / line、review fingerprint は同じ snapshot を参照し、downstream で resolver を再実行しない。S9 の schema version が無い旧 line state、artifact lineage が無い旧確認、破損・不一致 snapshot は人確認を再利用せず未確認へ戻す。
 
 **ゲート②の品質判定:** 台本の品質表示と生成条件を次の 4 種類に分離する。
 
@@ -241,7 +244,7 @@ Streamlit は、エントリスクリプト（[`src/yt_live_kit/ui/app.py`](../s
 
 行別エディタには本文、時刻、行全体の強調トグルを表示する。AI 案からユーザーが変更した箇所は補助表示してよいが、AI が見逃した誤認識は差分に現れないため、差分確認を全文確認の代わりにしてはならない。また現行の保存形式では AI 内部の修正由来を証明できないため、「Codex が修正」のような出所表示はしない。UI 文言は「AI案から変更」とする。
 
-**fingerprint と失効:** FR-26 の queue fingerprint は既存の意味を変えず、テロップ確認専用の review fingerprint を別に持つ。review fingerprint は `(video_id, clip_id)`、queue fingerprint、`TelopScriptDocument.model_dump(mode="json")` の canonical JSON から計算し、テロップ本文・強調フラグ・台本メタデータのいずれかが変われば人確認を失効させる。一度編集して元に戻しても自動で確認済みへ戻さず、再確認を必須とする。生成直前に fingerprint とハード判定を再検証する。
+**fingerprint と失効:** FR-26 の queue fingerprint は既存の意味を変えず、テロップ確認専用の review fingerprint を別に持つ。line snapshot には artifact reference と順序付き使用区間 cue digest 配列を保存し、queue fingerprint 自体の意味は変更しない。review fingerprint は `(video_id, clip_id)`、queue fingerprint、`TelopScriptDocument.model_dump(mode="json")` の canonical JSON、artifact fingerprint、使用区間 digest 配列から計算し、テロップ本文・強調フラグ・台本メタデータ・使用区間字幕のいずれかが変われば人確認を失効させる。一度編集して元に戻っても自動で確認済みへ戻さず、再確認を必須とする。生成直前に fingerprint とハード判定を再検証する。
 
 **出力 fingerprint と最終確認の失効:** `output_fingerprint` は `video_id`、`clip_id`、生成に使った `review_fingerprint`、`Path.resolve(strict=True)` で得た絶対パス、`st_size`、`st_mtime_ns`、mp4 ファイル内容の SHA-256 を canonical JSON 化して SHA-256 を計算する。生成完了後に計算し、最終確認時の `preview_confirmed_fingerprint` と結び付ける。工程 6 へ進む直前にも再計算し、出力の上書き・置換・欠損または review fingerprint の変更で一致しなければ、台本確認ではなく**最終プレビュー確認だけ**を失効させる。
 
@@ -249,7 +252,7 @@ Streamlit は、エントリスクリプト（[`src/yt_live_kit/ui/app.py`](../s
 
 **本日の進捗:** 左パネルの指標は「本日のライン完了 1／3」と表記し、現在設定されている `SchedulePolicy.timezone`（未設定時の既定 `Asia/Tokyo`）で日付を判定する。`UploadOperation.created_at` を同 timezone へ変換し、同一 `(source_video_id, source_kind, clip_id)` の当日最新 operation だけを対象に `reserved` / `uploading` / `uploaded` を完了数へ含め、`failed` / `needs_reconciliation` は除外して「要対応 N 件」と併記する。timezone 設定を変更した場合は、現在値で当日分を再集計する。YouTube クォータ用の `America/Los_Angeles` 基準 upload attempt 台帳とは混同しない。
 
-刻んだサブ区間（FR-30 の確定区間列）からゲート②のテロップ生成（FR-22）へ直接接続する。これにより YouTube 自動字幕の誤認識を AI 案 + 人の全文確認で直してから焼き込む経路が、長い候補に対しても成立する。FR-31（選択引き継ぎ）はこの接続に統合する。
+刻んだサブ区間（FR-30 の確定区間列）からゲート②のテロップ生成（FR-22）へ直接接続する。これにより YouTube 自動字幕の誤認識を、必要な区間だけローカル Whisper で精査し、さらに AI 案 + 人の全文確認で直してから焼き込む経路が、長い候補に対しても成立する。区間決定で選ばれた resolver 結果の artifact fingerprint と使用区間 cue digest は cutplan、台本、review fingerprint へ同じ値を伝播する。FR-31（選択引き継ぎ）はこの接続に統合する。
 
 完成時のレイアウトと文言の視覚リファレンスは [`references/u6-short-production-line-v3.2.png`](./references/u6-short-production-line-v3.2.png) とする。ただし状態遷移・失効・生成条件は本要件書を正本とし、画像と不一致の場合は本文を優先する。
 
@@ -257,10 +260,28 @@ Streamlit は、エントリスクリプト（[`src/yt_live_kit/ui/app.py`](../s
 
 | 項目 | 内容 |
 |------|------|
-| **入力** | サブ区間提案（FR-30）の各候補区間、`data/{video_id}/subtitles/ja.vtt` |
-| **処理** | 提案された各サブ区間について、**その区間で実際に話している内容（文字起こしテキスト）**を採否チェック・境界入力の隣に表示する。テキストは既存の `parse_vtt_with_end()` + `filter_cues_for_segment()`（[`services/subtitle_burn.py`](../src/yt_live_kit/services/subtitle_burn.py)）相当の区間抽出と progressive 重複除去を通した読みやすい形とする。境界（開始・終了）を変更したら表示テキストも追従する |
+| **入力** | サブ区間提案（FR-30）の各候補区間、resolver が返す coarse または精査済み `TranscriptArtifact`。coarse artifact の取得元は後方互換の `data/{video_id}/subtitles/ja.vtt` |
+| **処理** | 提案された各サブ区間について、**その区間で実際に話している内容（文字起こしテキスト）**を採否チェック・境界入力の隣に表示する。テキストは artifact の絶対時刻 cue を使い、既存の `parse_vtt_with_end()` + `filter_cues_for_segment()`（[`services/subtitle_burn.py`](../src/yt_live_kit/services/subtitle_burn.py)）相当の区間抽出と progressive 重複除去を通した読みやすい形とする。境界（開始・終了）を変更したら表示テキストも追従する。S9 の精査済み artifact を使う場合も、同じ artifact fingerprint を区間確認から台本へ渡す |
 | **出力** | 区間ごとの文字起こし表示。人が「どこで切れているか」を読んで境界を調整できる |
 | **スコープ** | FR-30 の「人の確認を必須とする」を実効化する要件である（現状は確認材料が画面に無く、確認しようがない）。あわせて生成済み動画のプレビュー表示は縦動画が画面幅いっぱいに広がらないよう幅を制限する（`st.video(width=...)`。[`short_cut.py`](../src/yt_live_kit/ui/components/short_cut.py) / [`shorts.py`](../src/yt_live_kit/ui/views/shorts.py) / [`shorts_queue.py`](../src/yt_live_kit/ui/components/shorts_queue.py) / [`highlights.py`](../src/yt_live_kit/ui/views/highlights.py) の 4 箇所）。`services/` の変更は VTT 区間抽出の既存純粋関数の再利用に留め、新設が必要な場合も読み取り専用ヘルパーに限る |
+
+### FR-35: 字幕アーティファクトの解決と永続キャッシュ（S9）
+
+| 項目 | 内容 |
+|------|------|
+| **入力** | 現行の YouTube 動画 ID、取得済み `data/{video_id}/subtitles/ja.vtt`、または S9 が生成したローカル Whisper の区間字幕 |
+| **処理** | `TranscriptArtifact` は取得元、`source_kind`（`youtube_vtt` または `whisper_cpp`）、schema version、モデルと実行環境、設定、音声入力 fingerprint、入力区間の順序付き配列、区間ごとの status（`success` / `fallback` / `failed` / `partial`）、絶対時刻 cue、区間ごとの cue digest、artifact fingerprint を持つ不変の成果物とする。schema は未知 field を拒否する strict モードとし、時刻・padding・VAD を含む境界値は整数ミリ秒で保存する。cache identity は `whisper_cpp` では実際の音声 bytes、sample rate、channel、codec、ffmpeg 設定、取得元、model / runtime / decode 設定・initial prompt・padding・VAD・入力区間列から、`youtube_vtt` では source VTT bytes と取得 metadata・入力区間列から計算し、いずれも path / mtime だけには依存しない。artifact fingerprint は cache identity に成功した cue digest と schema を加えて計算する。Whisper の model / runtime fingerprint には model file、whisper-cli の version / build capability、language、initial prompt、decode / VAD / padding、出力 schema を含める。`resolver` は親候補探索では有効な YouTube VTT を粗い字幕として選び、選択済み親候補区間では要求された全区間が成功した Whisper artifact を優先する。既存 VTT の内容・パス・意味を置き換えず、再取得時も既存 `ja.vtt` の bytes を変更しない。取得中の新しい VTT は隔離した一時領域へ保存し、`ja.vtt` が無い場合だけ初回 bootstrap し、既存なら `subtitles/sources/{source_fingerprint}.vtt` へ immutable source として保存する。取得失敗時は既存 `ja.vtt` と既存成果物を変更しない。artifact と resolver の index は lock 付きで atomic に保存し、クラッシュ後の再構築・破損・不一致は fail closed とする。cache hit は入力音声または source bytes、モデル、設定、区間が一致し、artifact の schema と cue digest を再検証できる場合だけ成立する |
+| **出力** | `data/{video_id}/transcripts/artifacts/{artifact_fingerprint}.json` と `data/{video_id}/transcripts/index.json`。既存の `subtitles/ja.vtt`、`transcript/full.txt`、`transcript/compressed.txt` は後方互換のため残し、source VTT は `subtitles/sources/` に別名で保存する |
+| **スコープ** | S9 初版の保存キーは既存の `video_id` を維持する。`asset_id` による抽象化、`source_kind=local_video`、ローカル動画を入力にする経路は別フェーズで追加し、S9 で現行の data path や `VideoMeta.id` を移行しない |
+
+### FR-36: 選択親候補区間のローカル精査（S9）
+
+| 項目 | 内容 |
+|------|------|
+| **入力** | FR-30 の親候補を人が選択した 1 件以上の絶対時刻区間、既存 VTT の cue、yt-dlp で取得した音声のみの入力、受け入れ済み whisper.cpp 1.9.1 runtime とモデル設定 |
+| **処理** | 明示操作で選択区間列を音声 span として準備し、現行の 1 ジョブ制約の中で入力順に複数区間を処理する。whisper.cpp はサブプロセスとして呼び、出力を絶対時刻へ変換して 1 件の `TranscriptArtifact` に区間順で保存する。`used_range_cue_digest` は正規化済み range、padding、cue inclusion rule、cue の絶対時刻・本文・順序から計算する。区間境界は Whisper の timestamp だけで確定せず、padding、必要な VAD、既存 cue、動画プレビュー、人の確認を使う。精査済み artifact の immutable reference と順序付き区間 digest 配列を FR-30 の cutplan、FR-22 のテロップ台本、FR-25 の生成 preflight、FR-33 の line / review snapshot へ渡し、resolver を downstream で再実行しない |
+| **出力** | 区間ごとの絶対時刻 cue と status を含む精査済み `TranscriptArtifact`、runtime / model / input の診断情報、cache hit / miss と処理時間。1 区間でも失敗した partial artifact は要求全体の高精度結果として resolver が返さず、runtime 不備や精査失敗時は日本語エラーと明示された YouTube VTT fallback を返す |
+| **スコープ** | 字幕なし・低品質字幕を理由に全編 Whisper を通常経路へ入れない。全編再文字起こし、47 本の一括 backfill、VTT の自動置換、無確認の自動境界確定は将来フェーズとする |
 
 ---
 
@@ -272,9 +293,9 @@ Streamlit は、エントリスクリプト（[`src/yt_live_kit/ui/app.py`](../s
 
 | 項目 | 内容 |
 |------|------|
-| **入力** | 選択済み区間（複数）の自動字幕（VTT 由来）、プロンプトテンプレート。カット単位字幕は開始・終了とミリ秒を保持した `[HH:MM:SS.mmm --> HH:MM:SS.mmm] テキスト` 形式で渡す |
-| **処理** | Codex CLI に区間の字幕を渡し、誤認識の修正・句読点付与・短い行への分割・強調行フラグの付与まで済んだ「テロップ台本」を JSON で生成させる。[`services/highlights.py`](../src/yt_live_kit/services/highlights.py) と同じパターン（テンプレート結合 → Codex CLI 実行 → JSON 抽出 → バリデーション → 保存）を踏襲する |
-| **出力** | テロップ台本 JSON（区間ごとの行・行全体に対する強調行フラグ） |
+| **入力** | 選択済み区間（複数）と、その区間を解決した `TranscriptArtifact` の immutable reference。親候補探索は YouTube VTT を使い、S9 の精査が有効なら同じ artifact の絶対時刻 cue と順序付き `used_range_cue_digest` 配列を渡す。カット単位字幕は開始・終了とミリ秒を保持した VTT 相当の時刻付きテキスト形式で渡す |
+| **処理** | cutplan が確定した artifact reference と digest 配列を snapshot として凍結し、downstream で resolver を再実行せず Codex CLI に区間の字幕を渡す。誤認識の修正・句読点付与・短い行への分割・強調行フラグの付与まで済んだ「テロップ台本」を JSON で生成させる。[`services/highlights.py`](../src/yt_live_kit/services/highlights.py) と同じパターン（テンプレート結合 → Codex CLI 実行 → JSON 抽出 → バリデーション → 保存）を踏襲する。保存する台本には使用した artifact fingerprint と順序付き使用区間 cue digest を含め、入力 artifact が変わった場合は確認済み台本を有効扱いにしない |
+| **出力** | テロップ台本 JSON（区間ごとの行・行全体に対する強調行フラグ、使用 artifact reference / fingerprint、順序付き使用区間 cue digest 配列） |
 | **成功条件** | 生成後、UI 上でテキストを人が確認・微修正できること。**自動字幕の品質が上限を決めるため、確認ステップは省略しない** |
 
 ### FR-23: フックタイトル・メタデータ生成
@@ -324,8 +345,8 @@ Streamlit は、エントリスクリプト（[`src/yt_live_kit/ui/app.py`](../s
 
 | 項目 | 内容 |
 |------|------|
-| **入力** | 複数の小区間（人が選択、または AI 候補から選択）、テロップ台本、テロップスタイル |
-| **処理** | 既存の `encode_segment` + `concat_segments`（[`services/ffmpeg.py`](../src/yt_live_kit/services/ffmpeg.py)）と [`services/shorts.py`](../src/yt_live_kit/services/shorts.py) の縦型レイアウト処理（blur / crop、2 パス方式、`INTERMEDIATE_CRF=16`）を組み合わせ、複数の小区間を 1 本のショートに連結する。区間境界は共通 API で `Decimal(str(value))` + `ROUND_HALF_UP` により整数ミリ秒へ正規化し、以後その値を ID、合計尺、エンコード引数、字幕の累積 offset / clip の唯一の基準とする。公開境界では同じ共通 API により冪等に再検証する。入力順を再生順・ID 生成順・エンコード順として保持し、自動で並べ替え・重複除去しない。確認済みテロップ台本は ffmpeg 実行前と字幕関数の公開境界で入力区間との一致を再検証し、フックタイトルは冒頭 1〜2 秒の大テロップとして同じ ASS に載せる |
+| **入力** | 複数の小区間（人が選択、または AI 候補から選択）、artifact reference / fingerprint と順序付き `used_range_cue_digest` 配列を記録した確認済みテロップ台本、テロップスタイル |
+| **処理** | 既存の `encode_segment` + `concat_segments`（[`services/ffmpeg.py`](../src/yt_live_kit/services/ffmpeg.py)）と [`services/shorts.py`](../src/yt_live_kit/services/shorts.py) の縦型レイアウト処理（blur / crop、2 パス方式、`INTERMEDIATE_CRF=16`）を組み合わせ、複数の小区間を 1 本のショートに連結する。区間境界は共通 API で `Decimal(str(value))` + `ROUND_HALF_UP` により整数ミリ秒へ正規化し、以後その値を ID、合計尺、エンコード引数、字幕の累積 offset / clip の唯一の基準とする。公開境界では同じ共通 API により冪等に再検証する。入力順を再生順・ID 生成順・エンコード順として保持し、自動で並べ替え・重複除去しない。確認済みテロップ台本は ffmpeg 実行前と字幕関数の公開境界で入力区間との一致および artifact fingerprint / digest 配列を再検証し、字幕の関係範囲が変わっていれば fail closed で生成を止める。フックタイトルは冒頭 1〜2 秒の大テロップとして同じ ASS に載せる |
 | **出力** | 1 本の縦型 mp4（1080x1920）とコマンドログ |
 | **スコープ** | ショートは **10〜180 秒**（[`shorts.py`](../src/yt_live_kit/services/shorts.py) の `MIN_DURATION_SEC` / `MAX_DURATION_SEC`）を維持する。ハイライト候補は最大 300 秒（`highlights.py` の `MAX_DURATION_SEC`）なので、**180 秒を超える区間を選んだ場合はエラーで止めず、分割・短縮を促す導線にする** |
 
@@ -414,14 +435,14 @@ Streamlit は、エントリスクリプト（[`src/yt_live_kit/ui/app.py`](../s
 
 | 項目 | 内容 |
 |------|------|
-| **入力** | 親候補 1 件（`ClipCandidate` または `HighlightSegment`）、その親区間内の `data/{video_id}/subtitles/ja.vtt`、人が調整した採否と区間境界 |
-| **処理** | 親区間内の字幕だけを絶対時刻付きで Codex CLI へ渡し、合計 180 秒以内に収まるサブ区間を 2〜5 個提案させる。提案は service の純粋関数が「親区間への包含・時系列・非重複・個別尺・合計尺・`duration_sec` 一致・半角山カッコ禁止」で検証し、`data/{video_id}/shorts/cutplan/cut_{parent_id}.json` へ atomic 保存する。人は各区間の採否と開始・終了時刻を調整でき、生成 submit 時に同じ純粋関数で再検証する。確定した区間列は入力順のまま FR-25 の `build_short_from_segments()` へ渡す |
-| **出力** | サブ区間提案 JSON と、確定区間から生成した 1 本の縦型ショート mp4（1080x1920）+ コマンドログ |
+| **入力** | 親候補 1 件（`ClipCandidate` または `HighlightSegment`）、親候補探索に使った YouTube VTT、S9 で選択区間を精査した `TranscriptArtifact`、人が調整した採否と区間境界 |
+| **処理** | 親候補の探索は既存 VTT を粗い入力として維持し、候補 document に coarse VTT artifact fingerprint、全 cue digest、候補 fingerprint を保存する。親区間を選択した後は resolver が返す同一 artifact の immutable reference、絶対時刻 cue、順序付き `used_range_cue_digest` 配列を Codex CLI へ渡し、合計 180 秒以内に収まるサブ区間を 2〜5 個提案させる。提案は service の純粋関数が「親区間への包含・時系列・非重複・個別尺・合計尺・`duration_sec` 一致・半角山カッコ禁止」で検証し、`data/{video_id}/shorts/cutplan/cut_{parent_id}.json` へ atomic 保存する。人は各区間の採否と開始・終了時刻を調整でき、生成 submit 時に同じ純粋関数で再検証する。確定した区間列は入力順のまま FR-25 の `build_short_from_segments()` へ渡し、cutplan には artifact reference / fingerprint と順序付き使用区間 cue digest 配列を immutable snapshot として保存する。FR-22 以降はこの snapshot を使い、resolver を再実行しない |
+| **出力** | coarse artifact provenance と候補 fingerprint を持つサブ区間提案 JSON、精査済み artifact reference / digest 配列を持つ cutplan、確定区間から生成した 1 本の縦型ショート mp4（1080x1920）+ コマンドログ |
 | **スコープ** | 提案は Codex の 1 回呼び出しのみ。**自動採用・自動生成は行わず、人の確認を必須とする**（FR-25 の「区間選定は人、ffmpeg は決定論的に連結」原則を維持）。無音・フィラーの音声解析による自動検出は対象外。テロップ台本（FR-22）の生成・確認は本導線では行わず、既存のキュー量産（FR-26）に委ねる |
 
 提案・確定の安全契約を次のとおり固定する。
 
-- 親候補の尺が 180 秒以下の場合は提案導線を出さず、既存の単一区間生成（FR-25 の 1 区間経路）をそのまま使う
+- 親候補の尺が 180 秒以下の場合は提案導線を出さず、既存の単一区間生成（FR-25 の 1 区間経路）をそのまま使う。S9 の精査を行った場合も、同じ artifact の provenance を単一区間台本へ引き継ぐ
 - 提案 JSON が検証に落ちた場合は、空や部分採用へ暗黙にフォールバックせず日本語エラーで拒否する。保存済みの提案ファイルは書き換えない
 - Codex 呼び出しは明示的な「区間を提案」submit 時だけ行う。通常 rerun では保存済み提案を再利用し、再実行しない
 - 区間境界は FR-25 と同じ `normalize_segment_bounds()` による整数ミリ秒を唯一の基準とし、UI 側で独自に丸めない。合計尺の下限・上限は [`services/shorts.py`](../src/yt_live_kit/services/shorts.py) の `MIN_DURATION_SEC` / `MAX_DURATION_SEC` を正本として参照する
@@ -434,8 +455,9 @@ Streamlit は、エントリスクリプト（[`src/yt_live_kit/ui/app.py`](../s
 
 ### NFR-11: コスト制約の継続
 
-- v1 の NFR-01 を継続する。**従量課金 API は使用しない。** AI 連携は Codex CLI（ChatGPT サブスクリプション内、`codex login` 済み）のみとする
+- v1 の NFR-01 を継続する。**従量課金 API は使用しない。** テキスト生成は Codex CLI（ChatGPT サブスクリプション内、`codex login` 済み）を使い、字幕精査はローカルの whisper.cpp 1.9.1 をサブプロセスで呼ぶ。いずれも外部の従量課金 API を経由しない
 - **新しい pip 依存パッケージを追加しない。** `google-api-python-client` / `google-auth-oauthlib` は v2 で導入済みであり、v3 はこれと yt-dlp / ffmpeg / Streamlit / pydantic / typer で完結させる
+- whisper.cpp の実行ファイルとモデルはアプリが自動取得・自動更新しない。設定された実体、モデル fingerprint、対応 capability を実行前に検証し、未導入・不一致時は高精度 artifact を作成せず日本語で案内する
 
 ### NFR-12: YouTube Data API クォータ制約
 
@@ -600,6 +622,7 @@ Streamlit は、エントリスクリプト（[`src/yt_live_kit/ui/app.py`](../s
 - [x] 180 秒以下の候補では提案導線が出ず、既存の単一区間ショート生成に回帰が無い
 - [x] Codex CLI 未導入時は、プロンプトファイルを使う手動フォールバックが日本語で案内される
 - [x] 人が調整した区間境界が整数ミリ秒として FR-25 と同じ正規化を通り、UI 独自の丸めが入らない
+**S9 非回帰:** 親候補探索に YouTube VTT を残すこと、既存 cutplan の境界・検証・再利用を壊さないことは S9-6 で確認する。S9 固有の artifact / resolver / digest / 失効の受け入れは AC-37 に集約する。
 
 ### AC-31: 動画詳細ページの作業選択型 IA（FR-17 v3.2 / U6）
 
@@ -667,6 +690,23 @@ Streamlit は、エントリスクリプト（[`src/yt_live_kit/ui/app.py`](../s
 - [x] 左パネルの「本日のライン完了 N／3」は `SchedulePolicy.timezone` 基準で集計され、LA 基準の upload attempt 日付と分離される。失敗・要照合は完了数へ含めず「要対応 N 件」と表示される
 - [x] 左プレビューが生成前・生成中・生成後・元素材欠損の工程状態に応じて切り替わる
 - [x] 1 日 3 本の運用がこのライン 3 周で完結することを実機で通し確認済み
+**S9 非回帰:** S9-6 は生産ラインの 6 工程、人確認、既存確認境界、既存 VTT fallback を確認する。S9 固有の UI・runtime・artifact・失効の受け入れは AC-37 に集約する。
+
+### AC-37: 選択区間 Whisper と TranscriptArtifact（FR-35 / FR-36 / S9）
+
+- [ ] `subtitles/ja.vtt` が S9 実行前後で上書きされず、粗い親候補探索と既存 v1〜v3 経路が回帰しない
+- [ ] 再取得は incoming VTT を隔離して保存し、既存 `ja.vtt` がある場合はその bytes を変えず、無い場合だけ初回 bootstrap する。新しい source VTT は `subtitles/sources/` の immutable artifact とし、取得失敗時は既存成果物を変更しない
+- [ ] artifact が strict schema（schema version、未知 field 拒否、`source_kind` enum、整数ミリ秒、`success` / `fallback` / `failed` / `partial` status）で、取得元、video ID、対象区間、絶対時刻 cue、cue digest、音声入力 fingerprint、モデル / runtime / 設定、artifact fingerprint を持ち、atomic 保存を通過する
+- [ ] cache identity と artifact fingerprint が分離され、音声 bytes・sample rate・channel・codec・ffmpeg 設定・source、model file・whisper-cli build / capability・language・initial prompt・decode / VAD / padding・output schema を含む。path / mtime だけの再利用が無い
+- [ ] resolver / artifact index が lock・crash recovery・破損検出を備え、部分 JSON、偽 fingerprint、範囲外 cue、未知 field、不一致 cache は fail closed になる
+- [ ] resolver が親候補探索には有効な YouTube VTT、選択済み区間には有効な whisper.cpp artifact を返し、無効・不一致・部分成果物は高精度として返さない
+- [ ] whisper.cpp 1.9.1 の capability とモデル fingerprint を実行前に検証し、新規 pip 依存・従量課金 API・モデル自動ダウンロードが無い
+- [ ] 音声のみの入力を永続 cache し、複数区間を現行の 1 ジョブ内で入力順に処理できる。動画全体を取得して字幕精査する経路は無い
+- [ ] coarse 候補 document が VTT artifact fingerprint、全 cue digest、candidate fingerprint を持ち、同じ候補内容・表示順から決定的に再構成できる。使用区間に関係する cue の変更だけが downstream を失効させる
+- [ ] 同じ immutable artifact reference と順序付き `used_range_cue_digest` 配列が FR-30 の cutplan、FR-22 の telop、FR-25 の preflight、queue / line、FR-33 の review fingerprint で再利用され、downstream が resolver を再実行しない
+- [ ] 進捗と失敗が job ID、range index、全区間数、cache hit / miss、partial / failed status、retry 可否とともに表示され、runtime 不備・timeout・malformed output・cache corruption は日本語で fallback または停止を示す
+- [ ] 代表素材 3〜5 本の A/B で YouTube VTT と whisper.cpp の精度・固有名詞・境界確認・処理時間を記録し、固定 gold transcript / 固有名詞表、事前宣言した改善閾値・wall time・peak memory budget、採用モデルと Go / No-Go 根拠を docs に残す
+- [ ] 字幕なし・低品質字幕の全編 Whisper、47 本の一括 backfill、local video 入力、asset ID 移行は S9 初版の受け入れ対象に含めず、将来フェーズとして明記されている
 
 ### AC-36: 投稿枠の複数化と既定値設定（FR-28 v3.2 / FR-20 v3.2 / P5）
 
@@ -691,6 +731,11 @@ Streamlit は、エントリスクリプト（[`src/yt_live_kit/ui/app.py`](../s
 | queue fingerprint | FR-26 の候補・区間・レイアウト・プリセット等の選択 snapshot を識別する既存 fingerprint。review fingerprint とは役割を分ける |
 | review fingerprint | テロップ本文・強調フラグ・台本メタデータと対象ショートを識別し、人の台本確認を現在値へ結び付ける fingerprint |
 | ライン状態 | 作成中ショート 1 本の現在工程、各 fingerprint、人の確認記録、upload operation ID を保持する再起動可能な状態 |
+| TranscriptArtifact | YouTube VTT または選択区間の whisper.cpp 結果を、取得元・モデル・設定・絶対時刻 cue・cue digest・入力 / 成果物 fingerprint とともに固定した不変の字幕成果物 |
+| cue digest | artifact の絶対時刻 cue と本文を canonical 化して得る digest。候補・cutplan・台本・review の入力範囲ごとに伝播し、使用範囲の変更を検出する |
+| transcript resolver | 粗い候補探索には YouTube VTT、選択済み区間には有効な Whisper artifact を返し、不一致や破損を高精度扱いにしない解決器 |
+| 精査済み字幕 | S9 で選択した親候補区間だけを whisper.cpp で再文字起こしした artifact。Whisper の時刻は境界の唯一の正本ではなく、人確認用の材料である |
+| 高精度字幕 fallback | runtime 不備や cache 不一致時に、精査済みと偽らず既存 YouTube VTT を明示的に使う経路 |
 | フックタイトル | ショート冒頭 1〜2 秒に表示する、視聴継続を促す大きなテロップ |
 | キュー量産 | 複数のショート候補を選択し、まとめてバックグラウンド生成する操作（内部では単一ジョブが順次処理する） |
 | スケジュールポリシー | 「毎日 18:00 に 1 本」のような、予約投稿の自動割り当てルール |
@@ -719,3 +764,4 @@ Streamlit は、エントリスクリプト（[`src/yt_live_kit/ui/app.py`](../s
 | 2026-08-01 | U5 着手前監査を反映。正式 IA を公開 3 画面 + 非表示詳細に固定し、ストレージ管理の設定画面移設、旧概要欄更新経路の廃止、update / mark の成功境界を明確化 |
 | 2026-08-01 | 2026-06-01 からの YouTube Data API granular quota を反映。`videos.insert` を Video Uploads 専用バケット 1 回 = 1、既定 100 回/日に更新。キュー量産は全台本の事前確認後に開始する v3 境界を明記 |
 | 2026-08-01 | v3 初版。FR-16〜FR-28、NFR-11〜NFR-15、AC-18〜AC-28 を追加。v2 からのスコープ改訂（ジャンプカット・テロップ・自動投稿の解禁）を明記 |
+| 2026-08-03 | **S9-PLAN を確定。** 良好な YouTube VTT を親候補探索に残し、選択親候補区間だけを whisper.cpp 1.9.1 で精査する `TranscriptArtifact` / resolver / 永続 cache を追加要件化。`ja.vtt` は上書きせず、絶対時刻 cue・cue digest・取得元・モデル・設定・fingerprint を cutplan / telop / review へ伝播し、使用範囲だけを fail closed で失効させる契約を FR-22 / FR-25 / FR-30 / FR-33 / FR-35 / FR-36 / AC-30 / AC-35 / AC-37 に固定。全編 Whisper、字幕なし通常経路、ローカル動画・asset ID は将来フェーズへ分離した |

@@ -46,7 +46,7 @@ v2 は Cursor 上で Grok 4.5（オーケストレーター）+ Composer 2.5（�
 
 ## 絶対に守るルール
 - UI にビジネスロジックを書かない。処理は services/ に置き、UI は呼ぶだけにする
-- 従量課金 API を呼ばない。AI 連携は Codex CLI サブプロセスのみ（NFR-11）
+- 従量課金 API を呼ばない。テキスト生成は Codex CLI サブプロセス、S9 のローカル音声精査だけは whisper.cpp 1.9.1 の外部バイナリを使う（NFR-11）
 - ユーザー向けエラーメッセージは必ず日本語にする。スタックトレースをそのまま出さない
 - 半角の山カッコ `<` `>` を成果物テキストに出さない。必要なら全角 〈〉 を使う
 - 新規依存パッケージを追加しない（yt-dlp / ffmpeg / Streamlit / pydantic / typer /
@@ -66,6 +66,9 @@ v2 は Cursor 上で Grok 4.5（オーケストレーター）+ Composer 2.5（�
 - 【U5 のみ】フェーズ受け入れでは実際の YouTube 概要欄を書き換えない。更新前 / 更新後の表示と
   確定前に update が呼ばれないことを安全に手動確認し、update / mark の成功・失敗はモックと
   隔離した一時 data_dir で検証する
+- 【S9 のタスクのみ】`subtitles/ja.vtt` を上書き・改名・自動置換しない。S9-0 では incoming VTT を隔離し、既存 `ja.vtt` がある場合は bytes を保持して `subtitles/sources/` へ immutable 保存する。親候補探索は YouTube VTT、選択済み区間は provenance 付き `TranscriptArtifact` を resolver から受け取り、同じ artifact reference / fingerprint と順序付き使用区間 cue digest を cutplan / telop / queue / line / review へ渡す
+- 【S9 のタスクのみ】字幕なし・低品質字幕の全編 Whisper、47 本の一括 backfill、local video 入力、`asset_id` への path 移行は実装しない。音声のみを選択区間へ使い、現行 1 ジョブ制約と人の境界確認を維持する
+- 【S9 のタスクのみ】whisper-cli の version / capability / model fingerprint / JSON schema を実行前に検証し、未知形式・部分 artifact・cache 不一致は高精度扱いにしない。モデル自動取得、shell command の自由入力、実 YouTube 書き込みは禁止する
 
 ## Done 条件
 （execution-plan-v3.md の当該タスクの「Done 条件」をそのまま転記する）
@@ -88,6 +91,38 @@ uv run pytest
 - 迷った点と、どちらを選んだか、その理由
 ### 申し送り
 - 未対応で残したこと、気づいた別の問題（あれば）
+```
+
+### 2.1 S9 実行セッション用テンプレート
+
+S9 は通常テンプレートに次のブロックを追加して `impl-sonnet` へ渡す。S9-0〜S9-6 は順番を飛ばさず、前タスクの commit SHA と Done / AC の証跡を次タスクへ添付する。
+
+```text
+## S9 実行コンテキスト
+- S9-0: 既存 VTT 互換・非上書き保存。incoming を隔離し、初回だけ `ja.vtt` を bootstrap、再取得は `subtitles/sources/{source_fingerprint}.vtt` へ保存し、失敗時は既存 bytes / downstream を変更しない
+- S9-1: 代表素材 benchmark・モデル決定。production 非変更。固定 gold transcript / 固有名詞 glossary と事前宣言 gate で精度・固有名詞・cue 品質・wall time・peak memory・cache を VTT と A/B 比較し、採用または No-Go を docs に残す
+- S9-2: TranscriptArtifact / resolver / cue digest / persistent cache。strict schema、cache identity と artifact fingerprint の分離、候補 VTT lineage、既存 ja.vtt untouched、用途別 resolver と範囲単位の失効を pure service で固定する
+- S9-3: whisper.cpp 1.9.1 runtime / capability / model settings / 音声のみの span。複数区間を 1 ジョブ内で入力順に処理し、未知出力・部分成功・model mismatch は fail closed にする。audio-only ytdlp helper と job / range / retry contract を含む
+- S9-4: VTT で親候補を選び、選択区間だけ Whisper。cutplan / telop / queue / line は同一 immutable artifact snapshot を再利用し、artifact fingerprint / ordered used_range_cue_digest を review fingerprint まで伝播する。legacy line confirmation は再利用しない
+- S9-5: 設定・明示 CTA・job ID 付き進捗・日本語エラー・coarse fallback・使用範囲だけの失効表示。UI で schema / fingerprint を再実装しない
+- S9-6: 同じ 3〜5 本の代表素材と、可能なら実配信アーカイブ 2 本以上で A/B、境界・人確認・cache restart・failure injection・全回帰を通して Go / No-Go を判定する。Go でない限り S9 を完了扱いにしない
+
+## S9 固定禁止事項
+- 全編 Whisper を通常経路にしない
+- 音声精査のため動画 mp4 全体を取得しない
+- `subtitles/ja.vtt`、既存 full / compressed transcript、既存 cutplan / telop / mp4 を黙って削除・置換しない
+- Whisper timestamp だけで boundary を確定しない。padding / 必要な VAD / preview / 人確認を残す
+- 使用区間外の字幕変更で無関係な downstream を失効させない。使用区間内変更・artifact 不一致は fail closed にする
+- cache identity と artifact fingerprint を混同しない。unknown field、破損 index、partial artifact、range / padding / cue inclusion rule 不一致を高精度として返さない
+- 新規 pip 依存、従量課金 API、モデル自動ダウンロード、自由な shell command を追加しない
+
+## S9 完了報告に必ず含めるもの
+- 対象タスク ID、前タスク commit SHA、変更ファイル一覧
+- `uv run pytest` の件数と対象テスト、benchmark / 実機証跡の有無
+- artifact schema、source_kind、model / runtime / settings、audio / artifact fingerprint、cue digest、失効理由
+- 既存 `ja.vtt` の前後 hash、source VTT の保存先、候補 artifact / candidate fingerprint、gold / glossary / 評価 gate
+- cache hit / miss、複数区間の処理順、1 ジョブ制約、timeout / malformed output / partial failure の挙動
+- 既存 VTT 経路、人確認、FR-30 / FR-22 / FR-25 / FR-33 への伝播と、未対応の将来範囲
 ```
 
 ---
@@ -149,6 +184,24 @@ uv run pytest
 - [ ] 既存 mp4 がある S4 開始は、不変の上書き対象一覧を表示する `st.dialog` の確定ボタンだけが `start_job()` を呼び、busy、キャンセル、確定前再描画、二重クリックで始まらないか
 - [ ] S4 結果が manifest 順に `st.video(Path)` で表示され、mp4 保存は引数なし callable + `on_click="ignore"` + `width="stretch"` で遅延読み込みし、出力欠損 / font warning / item error を日本語表示するか。コピー key が job ID + target ID + 種類で一意か
 
+### 3.3.1 S9 特有の観点
+
+- [ ] S9-0 が incoming VTT を隔離し、既存 `ja.vtt` の bytes / downstream を再取得・失敗・crash 後も保持し、新しい source VTT を immutable 保存しているか。初回 bootstrap と既存保存の境界を `tests/test_ytdlp.py` で確認しているか
+- [ ] S9-1 が production 非変更で代表素材を使い、YouTube VTT と候補 whisper.cpp モデルの CER・固有名詞・cue 品質・wall time・cache hit を同一条件で比較し、採用または No-Go の根拠を docs に残しているか
+- [ ] S9-1 が gold transcript、固有名詞 glossary、選択 range、CER 相対改善 10％、固有名詞 exact match 非悪化、cue 欠落 / 重複 baseline +5％以内、wall time / peak memory budget を実行前に固定し、未達を No-Go としているか
+- [ ] `TranscriptArtifact` が source kind、取得元、既存 video ID、対象 range、絶対時刻 cue、cue digest、audio input fingerprint、model / runtime / settings、artifact fingerprint、schema version を持ち、canonical JSON と atomic 保存を使っているか
+- [ ] schema が strict / unknown field 拒否、整数ミリ秒、status（success / fallback / failed / partial）を持ち、cache identity と artifact fingerprint を分離しているか。audio bytes / codec / ffmpeg 設定と model file / binary build / capability / decode / VAD / padding を path / mtime の代用にしていないか
+- [ ] `subtitles/ja.vtt` を上書きせず、親候補探索は YouTube VTT、選択区間は用途別 resolver の有効な Whisper artifact を使っているか。source / model / settings / range / cue digest 不一致を高精度として返していないか
+- [ ] coarse candidate が VTT artifact fingerprint、全 cue digest、candidate fingerprint を持ち、FR-31 / cutplan / downstream の lineage が候補再生成時に fail closed になるか
+- [ ] S9-3 が whisper-cli 1.9.1 の binary / version / capability / model fingerprint / JSON schema / timeout を実行前に検査し、未知出力・partial result・cache corruption を fail closed にしているか。モデル自動ダウンロードや自由な shell command がないか
+- [ ] 音声のみの入力を使い、選択した複数区間を現行 1 ジョブ内で入力順に処理しているか。per-range status、job ID、range index、retry 可否があり、全編 video download、全編 Whisper、47 本 backfill、local video / asset ID 移行が混入していないか
+- [ ] S9-4 が同じ immutable artifact reference / object / fingerprint / ordered used-range cue digest を short_cut、telop、queue / line、review fingerprint へ伝播し、`ja.vtt` の直接再読込や resolver 再実行で別結果を作っていないか。legacy line confirmation を再利用していないか
+- [ ] Whisper timestamp だけで境界を確定せず、padding、必要な VAD、既存 cue、整数ミリ秒正規化、動画 preview、人確認を維持しているか
+- [ ] 使用区間内の字幕変更・artifact 不一致・model / settings / input 変更は cutplan / telop / review を fail closed で失効させ、使用区間外だけの変更で無関係な downstream を失効させていないか。人確認を元に戻った本文から自動復帰させていないか
+- [ ] S9-5 の UI が候補 card、cutplan panel、telop editor、final review banner で同じ provenance を示し、明示 CTA、対象 range、runtime / model、job ID、段階、現在区間、cache hit / miss、fallback、失効理由を日本語で示し、UI に schema / fingerprint / resolver の業務ロジックを複製していないか
+- [ ] S9-6 が同じ 3〜5 本の fixture、可能なら実配信アーカイブ 2 本以上で既存 VTT / S6 / U6 / FR-25 の非回帰、cache restart、failure injection、A/B の精度・時間・人確認を確認し、未確認の AC を先に `[x]` にしていないか
+- [ ] S9 で新規 pip 依存、従量課金 API、モデル自動取得、YouTube upload / description write、README 更新が追加されていないか
+
 ### 3.4 フェーズ P 特有の観点
 
 - [ ] **実際の YouTube アップロードは、ユーザーの明示的な承認を得てから実行しているか。** `impl-sonnet` が自律的に実アップロードを実行していないか（P0 のテストアップロードも含め、必ずユーザーに実行前に確認する）
@@ -174,7 +227,7 @@ uv run pytest
 | フェーズ | 最重要の注意点 |
 |----------|----------------|
 | **U** | `services/` は原則触らない。例外は U3 の `services/batch.py` 入力伝播と、U6 の新規 `services/shorts_line.py` による工程・人確認状態の atomic / fail closed 永続化だけ。UI 固有の軽量設定は引き続き `_local_settings.py` に置く（[execution-plan-v3.md](./execution-plan-v3.md) §3.2 参照） |
-| **S** | 従量課金 API を使わない。AI 生成は Codex CLI のみ、かつテロップ台本とメタデータは同じ呼び出しで一括生成する。**自動生成をそのまま焼き込まず、必ず人の確認ステップを挟む** |
+| **S** | 従量課金 API を使わない。テキスト生成は Codex CLI、S9 の区間精査は whisper.cpp 1.9.1 のみ。S9 は VTT で親候補を探し、選択区間だけを `TranscriptArtifact` に固定して再利用する。**自動生成をそのまま焼き込まず、必ず人の確認ステップを挟む** |
 | **P** | P1 / P2 を全 API mock で完成してから、同じ本番経路だけを P0 / P3 で別承認により実操作する。private + future publishAt + notify false、audience / synthetic / consent、LA attempt、resumable / reconciliation、永続 operation、confirm race、polling を固定する。private lock 中は P3 を成功扱いにしない |
 | **R1** | 既存 `build_short()` の legacy 経路は、失敗時に以前の完成 mp4 を保護する最終出力の atomic replace に限り変更できる。`build_short_from_segments()`、queue fingerprint、upload transaction、工程 6 の output fingerprint、seek 順は変更しない。R1 の入力 seek 契約は既存実装・テストを文書へ反映し、single-pass 化や seek 方式の変更は G1 で比較してから別タスクにする |
 
@@ -217,6 +270,13 @@ uv run pytest
 | S2 | `TimedCue.emphasis=False` の追加が既存 3 引数構築を壊していないか。プリセット省略 + フックなしで `build_segment_subtitle()` と既存 ASS 出力が v2 完全互換か。通常字幕 / Hook の `\`・波括弧・C0 制御文字・実改行を指定順で安全化してから、選択 preset の強調色と本文復帰色を導出して行全体へ管理タグを付けているか。不明 preset / 不正色 / 空 hook を日本語エラーにし、通常字幕と Hook を同一 ASS に出せるか |
 | S3 | 公開 `NormalizedSegmentBounds` / 正規化 helper の整数 ms を ID・尺（10,000 / 180,000 ms）・encode・字幕 offset / clip の唯一の基準にし、0.5 ms 境界でも一貫するか。入力順を再生・ID・encode 順として保持し、全区間・layout・output 名・明示 hook・preset を source 取得前に検証するか。telop は ffmpeg 前と `build_concatenated_subtitle()` 直呼び境界の両方で tuple 入力に対して再検証し、直呼びでも明示 hook の空文字・半角山カッコを拒否するか。VTT の区間相対 cue に累積 ms を加え、1 回だけ読む fallback、Hook 単独、preset 全伝播、`force_style` なしの 1 回焼き込み、`len(segments) + 3` の進捗契約を満たすか。安全な output 名、`{正式出力stem}.ffmpeg.log`、atomic replace、失敗時の既存 mp4 保護、専用中間ディレクトリ単位の cleanup / keep、エラー型変換、font warningを確認する。legacy `build_short()` は原則不変だが、R1 に限り失敗時の既存出力を守る atomic replace だけを許可し、それ以外の挙動を変えていないか確認する |
 | S4 | form 外の source 切替と表示順、明示 Codex submit、不変 fingerprint と全台本確定が一致する時だけ開始するか。pure service、deep immutable spec、正規化台本、決定的出力名、softfail、単独 writer manifest、非永続 `manifest_path`、video ID 別 job ID と A → B → A 表示分離、latest tie-break、上書き dialog、busy / 二重開始防止まで確認する |
+| S9-0 | incoming VTT の隔離、既存 `ja.vtt` bytes 保持、source VTT immutable 保存、失敗時非変更が先に固定されているか |
+| S9-1 | 代表素材の production 非変更 A/B が先にあり、gold / glossary、VTT baseline、候補 model、精度・固有名詞・cue・wall time・memory・cache、再現 command、Go / No-Go が固定されているか |
+| S9-2 | `TranscriptArtifact` の strict schema / canonical digest / cache identity 分離 / resolver 用途 / candidate lineage / persistent cache / atomic index が先に決まり、`ja.vtt` を変更せず、使用範囲内外の失効を分離できているか |
+| S9-3 | whisper-cli 1.9.1 の capability / model fingerprint / JSON schema を検査し、音声のみ・複数区間・1 ジョブ・timeout / partial failure を扱い、モデル自動取得と全編処理がないか |
+| S9-4 | VTT で親候補を選び、選択区間だけを Whisper。cutplan / telop / queue / line / review が同じ immutable artifact と ordered used-range cue digest を使い、padding / preview / 人確認・FR-25 の境界正規化を維持しているか |
+| S9-5 | UI が明示 CTA、job ID、進捗、cache、runtime / model、coarse fallback、失効理由を日本語で表示し、service の resolver / fingerprint ロジックを複製せず、既存確認境界を維持しているか |
+| S9-6 | A/B と全回帰、cache restart、failure injection、実機 1 本の証跡を揃え、S9-1 の No-Go や未確認 AC を完了扱いにしていないか |
 | P0 | P1 / P2 の安全経路だけを使い、実 upload と審査フォームが別承認か。private lock / processing を poll し、lock を成功扱いにしていないか |
 | P1 | private / aware future publishAt / notify false、metadata、audience / synthetic / consent、resumable、LA attempt、operation、job_id、kind dispatch を API mock で固定したか |
 | P2 | IANA policy、slot と attempt の分離、全項目 preview、既定未同意、確定後再検証、同時 confirm、operation / job ID の再起動復元を検証したか |
@@ -228,6 +288,7 @@ uv run pytest
 
 | 日付 | 内容 |
 |------|------|
+| 2026-08-03 | **S9 実行セッションを追加。** S9-0〜S9-6 の依存順、既存 VTT 非上書き、`TranscriptArtifact` / resolver / cue digest / cache、候補 lineage、whisper-cli 1.9.1 capability、音声のみ・1 ジョブ・使用範囲だけの fail closed、gold / glossary / A-B gate、UI / A/B / Go-No-Go の指示テンプレートとレビュー観点を追加 |
 | 2026-08-01 | U6 v3.2 確定仕様を反映。フェーズ U の限定 service 例外、左パネルと 6 工程、品質判定 4 分離、review fingerprint、fail closed ライン状態、timezone 日次集計、差分表示のレビュー観点とクイックリファレンスを追加 |
 | 2026-08-01 | P 安全監査の独立レビューを反映。P1 → P2 → P0 → P3 の必須順序、P0 公開可能性の承認、単一 queue record、job crash recovery / fault injection、具体的 poll / lock 判定をレビュー観点へ追加 |
 | 2026-08-01 | P0〜P3 着手前安全監査を反映。P1 / P2 先行、scheduled-only の private + future publishAt、Made for Kids / synthetic media 必須選択、Community Guidelines 既定未同意、metadata、resumable / reconciliation、LA attempt、永続 operation、confirm race、jobs / status bar、polling、実操作別承認をレビュー観点へ追加 |
