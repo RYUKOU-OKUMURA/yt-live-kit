@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
+import hashlib
+import re
+from dataclasses import dataclass
 from pathlib import Path
+from threading import Lock
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from pydantic import ValidationError
 
 from yt_live_kit.config import Settings, get_settings
 from yt_live_kit.models.meta import VideoMeta
+from yt_live_kit.services._fsutil import advisory_lock, write_text_atomically
 
 _CONFIG_DIR = "_config"
 _TEMPLATE_FILENAME = "description_template.txt"
@@ -17,10 +22,57 @@ _SHORTS_DESCRIPTION_BYTE_LIMIT = 5000
 _SOURCE_TITLE_PLACEHOLDER = "{{source_title}}"
 _SOURCE_URL_PLACEHOLDER = "{{source_url}}"
 _DESCRIPTION_PLACEHOLDER = "{{description}}"
+SHORTS_DESCRIPTION_CTA = "チャンネル登録は動画下のチャンネル名からお願いします。"
+DEFAULT_SHORTS_DESCRIPTION_TEMPLATE = (
+    f"{_DESCRIPTION_PLACEHOLDER}\n\n"
+    "▼ 元のライブ配信\n"
+    f"{_SOURCE_TITLE_PLACEHOLDER}\n"
+    f"{_SOURCE_URL_PLACEHOLDER}\n\n"
+    f"{SHORTS_DESCRIPTION_CTA}\n"
+)
+
+_SHORTS_TEMPLATE_LOCK_FILENAME = ".shorts_description_template.lock"
+_SHORTS_PLACEHOLDER_NAMES = (
+    _DESCRIPTION_PLACEHOLDER,
+    _SOURCE_TITLE_PLACEHOLDER,
+    _SOURCE_URL_PLACEHOLDER,
+)
+_UNRESOLVED_PLACEHOLDER_RE = re.compile(r"\{\{[^{}]+\}\}")
+_SHORTS_TEMPLATE_THREAD_LOCK = Lock()
 
 
 class DescriptionError(Exception):
     """概要欄生成エラー（ユーザー向け日本語メッセージ）."""
+
+
+@dataclass(frozen=True, slots=True)
+class ShortsDescriptionRequirements:
+    """投稿用ショート概要欄が満たすべき不変の要件 snapshot.
+
+    template / meta の fingerprint は本文へ埋め込む値ではないが、preview を
+    作った時点の入力を示す証跡として同じ snapshot に凍結する。P6-4 はこの
+    object と編集後本文だけを使って、mutable なファイルを再読込せずに再検証
+    できる。
+    """
+
+    generated_description: str
+    source_title: str
+    source_url: str
+    fixed_cta: str
+    template_bytes_fingerprint: str
+    meta_json_fingerprint: str
+
+    def __post_init__(self) -> None:
+        if self.fixed_cta != SHORTS_DESCRIPTION_CTA:
+            raise ValueError("固定 CTA は変更できません。")
+
+
+@dataclass(frozen=True, slots=True)
+class ShortsDescriptionBuild:
+    """投稿ゲートで合成した本文と、その入力要件 snapshot."""
+
+    description: str
+    requirements: ShortsDescriptionRequirements
 
 
 def get_template_path(settings: Settings | None = None) -> Path:
@@ -67,6 +119,40 @@ def get_shorts_template_path(settings: Settings | None = None) -> Path:
     return settings.data_dir / _CONFIG_DIR / _SHORTS_TEMPLATE_FILENAME
 
 
+def ensure_shorts_description_template(settings: Settings | None = None) -> Path:
+    """投稿ゲート用の既定ショートテンプレートを初回だけ作成する.
+
+    存在確認と初回作成を同じ advisory lock の中で行う。既存ファイルは
+    bytes を読まず、書き込みもしないため、ユーザーが編集した内容を変更しない。
+    """
+    settings = settings or get_settings()
+    path = get_shorts_template_path(settings)
+    lock_path = path.parent / _SHORTS_TEMPLATE_LOCK_FILENAME
+
+    try:
+        # fcntl の lock はプロセス間排他だが、同一プロセス内のスレッド競合も
+        # 明示的に直列化して、初回作成の check-and-create を一つにする。
+        with _SHORTS_TEMPLATE_THREAD_LOCK:
+            with advisory_lock(lock_path):
+                if path.is_file():
+                    return path
+                write_text_atomically(
+                    path,
+                    DEFAULT_SHORTS_DESCRIPTION_TEMPLATE,
+                    encoding="utf-8",
+                )
+                if not path.is_file():
+                    raise OSError("既定テンプレートの保存結果を確認できません。")
+                return path
+    except DescriptionError:
+        raise
+    except Exception as exc:
+        raise DescriptionError(
+            "ショート用概要欄の既定テンプレートを安全に初回作成できませんでした。"
+            "保存先の権限と空き容量を確認してください。"
+        ) from exc
+
+
 def save_shorts_template(text: str, settings: Settings | None = None) -> Path:
     """ショート用概要欄テンプレートを保存してパスを返す."""
     settings = settings or get_settings()
@@ -78,6 +164,14 @@ def save_shorts_template(text: str, settings: Settings | None = None) -> Path:
 
 def _load_video_meta(video_id: str, settings: Settings) -> VideoMeta:
     """元配信のメタデータを読む。欠損・破損は空へ倒さず拒否する."""
+    meta, _ = _load_video_meta_with_fingerprint(video_id, settings)
+    return meta
+
+
+def _load_video_meta_with_fingerprint(
+    video_id: str, settings: Settings
+) -> tuple[VideoMeta, str]:
+    """元配信のメタデータと raw bytes fingerprint を読む."""
     meta_path = settings.data_dir / video_id / "meta.json"
     if not meta_path.is_file():
         raise DescriptionError(
@@ -86,13 +180,68 @@ def _load_video_meta(video_id: str, settings: Settings) -> VideoMeta:
             "先に元動画を取り込み直してください。"
         )
     try:
-        return VideoMeta.model_validate_json(meta_path.read_text(encoding="utf-8"))
+        meta_bytes = meta_path.read_bytes()
+        meta = VideoMeta.model_validate_json(meta_bytes)
     except (OSError, UnicodeError, ValidationError) as exc:
         raise DescriptionError(
             "元配信の情報を読み込めませんでした。"
             "ショート用概要欄テンプレートの元配信リンクを使うには、"
             "先に元動画を取り込み直してください。"
         ) from exc
+    return meta, _sha256_bytes(meta_bytes)
+
+
+def _sha256_bytes(value: bytes) -> str:
+    return hashlib.sha256(value).hexdigest()
+
+
+def _read_shorts_template_bytes(path: Path) -> tuple[bytes, str]:
+    try:
+        template_bytes = path.read_bytes()
+    except (OSError, UnicodeError) as exc:
+        raise DescriptionError(
+            "ショート用概要欄テンプレートを読み込めませんでした。"
+            f"{path} を確認してください。"
+        ) from exc
+    return template_bytes, _sha256_bytes(template_bytes)
+
+
+def _decode_shorts_template(template_bytes: bytes, path: Path) -> str:
+    try:
+        return template_bytes.decode("utf-8")
+    except UnicodeError as exc:
+        raise DescriptionError(
+            "ショート用概要欄テンプレートを UTF-8 として読み込めませんでした。"
+            f"{path} を確認してください。"
+        ) from exc
+
+
+def _missing_template_parts(template: str) -> tuple[str, ...]:
+    missing = tuple(
+        placeholder
+        for placeholder in _SHORTS_PLACEHOLDER_NAMES
+        if placeholder not in template
+    )
+    if not _contains_exact_line(template, SHORTS_DESCRIPTION_CTA):
+        return (*missing, "固定 CTA 文")
+    return missing
+
+
+def _format_missing_template_parts(path: Path, missing: tuple[str, ...]) -> str:
+    labels = ", ".join(missing)
+    return (
+        "ショート用概要欄テンプレートに必須項目が不足しています: "
+        f"{labels}。{path} を修正してください。"
+    )
+
+
+def _format_missing_description_parts(missing: tuple[str, ...]) -> str:
+    return "ショート用概要欄の必須項目が不足しています: " + "、".join(missing)
+
+
+def _contains_exact_line(text: str, expected: str) -> bool:
+    """改行を正規化した本文に期待文言そのものの行があるか確認する."""
+    return expected in text.splitlines()
 
 
 def _with_start_seconds(url: str, start_ms: int | None) -> str:
@@ -107,6 +256,124 @@ def _with_start_seconds(url: str, start_ms: int | None) -> str:
     ]
     query.append(("t", f"{start_ms // 1000}s"))
     return urlunsplit(parsed._replace(query=urlencode(query)))
+
+
+def validate_shorts_description(
+    text: str,
+    requirements: ShortsDescriptionRequirements,
+) -> tuple[str, ...]:
+    """説明文を純粋に検証し、不足・違反箇所を日本語の tuple で返す.
+
+    この関数はファイルを読まず、合成直後と投稿確認後で同じ snapshot を
+    そのまま渡して再利用できる。空 tuple は検証成功を表す。
+    """
+    if not isinstance(text, str):
+        return ("最終説明文（文字列）",)
+    if not isinstance(requirements, ShortsDescriptionRequirements):
+        return ("概要欄要件 snapshot",)
+
+    missing: list[str] = []
+    required_items = (
+        ("生成した説明文", requirements.generated_description),
+        ("元動画タイトル", requirements.source_title),
+        ("開始秒付き元動画 URL", requirements.source_url),
+    )
+    for label, expected in required_items:
+        if not expected or expected not in text:
+            missing.append(label)
+    if not _contains_exact_line(text, requirements.fixed_cta):
+        missing.append("チャンネル登録 CTA")
+
+    if _UNRESOLVED_PLACEHOLDER_RE.search(text):
+        missing.append("未置換のプレースホルダー")
+    if "<" in text or ">" in text:
+        missing.append("半角の山カッコ")
+    if len(text.encode("utf-8")) > _SHORTS_DESCRIPTION_BYTE_LIMIT:
+        missing.append("5000 bytes 制限")
+    return tuple(dict.fromkeys(missing))
+
+
+def _raise_description_validation_error(missing: tuple[str, ...]) -> None:
+    if not missing:
+        return
+    if "半角の山カッコ" in missing:
+        raise DescriptionError(
+            "ショート用概要欄に半角の山カッコは使えません。"
+            "テンプレート、元動画タイトル、最終編集本文を確認してください。"
+        )
+    if "5000 bytes 制限" in missing:
+        raise DescriptionError(
+            "ショート用概要欄が UTF-8 で 5000 bytes を超えます。"
+            "テンプレートまたは説明文を短くしてください。"
+        )
+    raise DescriptionError(_format_missing_description_parts(missing))
+
+
+def require_valid_shorts_description(
+    text: str,
+    requirements: ShortsDescriptionRequirements,
+) -> None:
+    """純粋 validator の結果を日本語の DescriptionError に変換する."""
+    _raise_description_validation_error(
+        validate_shorts_description(text, requirements)
+    )
+
+
+def _build_quality_gated_shorts_description(
+    base_description: str,
+    *,
+    video_id: str,
+    start_ms: int | None,
+    settings: Settings,
+) -> ShortsDescriptionBuild:
+    template_path = ensure_shorts_description_template(settings)
+    template_bytes, template_fingerprint = _read_shorts_template_bytes(template_path)
+    template = _decode_shorts_template(template_bytes, template_path)
+
+    missing_template_parts = _missing_template_parts(template)
+    if missing_template_parts:
+        raise DescriptionError(
+            _format_missing_template_parts(template_path, missing_template_parts)
+        )
+
+    meta, meta_fingerprint = _load_video_meta_with_fingerprint(video_id, settings)
+    generated_description = base_description.strip()
+    source_url = _with_start_seconds(meta.url, start_ms)
+    requirements = ShortsDescriptionRequirements(
+        generated_description=generated_description,
+        source_title=meta.title,
+        source_url=source_url,
+        fixed_cta=SHORTS_DESCRIPTION_CTA,
+        template_bytes_fingerprint=template_fingerprint,
+        meta_json_fingerprint=meta_fingerprint,
+    )
+    description = template.replace(_DESCRIPTION_PLACEHOLDER, generated_description)
+    description = description.replace(_SOURCE_TITLE_PLACEHOLDER, meta.title)
+    description = description.replace(_SOURCE_URL_PLACEHOLDER, source_url)
+    require_valid_shorts_description(description, requirements)
+    return ShortsDescriptionBuild(description=description, requirements=requirements)
+
+
+def build_shorts_description_for_upload(
+    base_description: str,
+    *,
+    video_id: str,
+    start_ms: int | None = None,
+    settings: Settings | None = None,
+) -> ShortsDescriptionBuild:
+    """投稿前の必須構成を合成・検証し、本文と不変 requirements を返す.
+
+    P4 の ``build_shorts_description`` とは異なり、投稿ゲートから明示的に
+    呼び出す API である。テンプレート未設定時はここで安全な既定値を初回作成
+    するため、不完全な説明文を投稿経路へ渡さない。
+    """
+    settings = settings or get_settings()
+    return _build_quality_gated_shorts_description(
+        base_description,
+        video_id=video_id,
+        start_ms=start_ms,
+        settings=settings,
+    )
 
 
 def build_shorts_description(

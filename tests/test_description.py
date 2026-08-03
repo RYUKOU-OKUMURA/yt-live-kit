@@ -1,18 +1,26 @@
 """概要欄テンプレート合成のユニットテスト."""
 
+import hashlib
 import json
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
 from yt_live_kit.config import Settings
 from yt_live_kit.services.description import (
+    DEFAULT_SHORTS_DESCRIPTION_TEMPLATE,
     DescriptionError,
+    SHORTS_DESCRIPTION_CTA,
+    ShortsDescriptionRequirements,
     build_description,
     build_shorts_description,
+    build_shorts_description_for_upload,
+    ensure_shorts_description_template,
     get_shorts_template_path,
     get_template_path,
     save_shorts_template,
     save_template,
+    validate_shorts_description,
 )
 
 
@@ -224,3 +232,206 @@ def test_shorts_template_does_not_affect_long_form_description(tmp_path):
     save_shorts_template("ショート専用\n{{description}}", settings=settings)
 
     assert build_description(video_id, settings=settings) == "0:00 開始\n5:00 本編"
+
+
+def _valid_quality_template(extra: str = "") -> str:
+    return (
+        "{{description}}\n\n"
+        "元動画: {{source_title}}\n"
+        "{{source_url}}\n\n"
+        f"{SHORTS_DESCRIPTION_CTA}\n"
+        f"{extra}"
+    )
+
+
+def test_quality_gate_creates_default_template_and_freezes_requirements(tmp_path):
+    settings = Settings(data_dir=tmp_path)
+    video_id = "gate001"
+    _write_meta(tmp_path, video_id)
+
+    result = build_shorts_description_for_upload(
+        "生成説明", video_id=video_id, start_ms=90_500, settings=settings
+    )
+    template_path = get_shorts_template_path(settings)
+    meta_path = tmp_path / video_id / "meta.json"
+
+    assert template_path.read_text(encoding="utf-8") == (
+        DEFAULT_SHORTS_DESCRIPTION_TEMPLATE
+    )
+    assert result.description.startswith("生成説明")
+    assert "https://www.youtube.com/watch?v=gate001&t=90s" in result.description
+    assert SHORTS_DESCRIPTION_CTA in result.description
+    assert result.requirements.generated_description == "生成説明"
+    assert result.requirements.source_title == "元のライブ配信"
+    assert result.requirements.source_url.endswith("t=90s")
+    assert result.requirements.template_bytes_fingerprint == hashlib.sha256(
+        template_path.read_bytes()
+    ).hexdigest()
+    assert result.requirements.meta_json_fingerprint == hashlib.sha256(
+        meta_path.read_bytes()
+    ).hexdigest()
+    assert validate_shorts_description(result.description, result.requirements) == ()
+
+    with pytest.raises((AttributeError, TypeError, ValueError)):
+        result.requirements.source_title = "変更"
+
+
+def test_existing_shorts_template_bytes_are_never_rewritten_by_quality_gate(tmp_path):
+    settings = Settings(data_dir=tmp_path)
+    video_id = "gate002"
+    _write_meta(tmp_path, video_id)
+    template_path = get_shorts_template_path(settings)
+    template_path.parent.mkdir(parents=True, exist_ok=True)
+    original = _valid_quality_template().replace("\n", "\r\n").encode("utf-8")
+    template_path.write_bytes(original)
+
+    build_shorts_description_for_upload(
+        "生成説明", video_id=video_id, settings=settings
+    )
+
+    assert template_path.read_bytes() == original
+
+
+def test_quality_gate_uses_same_pure_validator_for_final_edited_body(tmp_path):
+    settings = Settings(data_dir=tmp_path)
+    video_id = "gate003"
+    _write_meta(tmp_path, video_id)
+    save_shorts_template(_valid_quality_template(), settings=settings)
+
+    result = build_shorts_description_for_upload(
+        "生成説明", video_id=video_id, settings=settings
+    )
+    final_body = result.description + "\nユーザーが編集した補足。"
+
+    assert validate_shorts_description(final_body, result.requirements) == ()
+    assert "チャンネル登録 CTA" in validate_shorts_description(
+        final_body.replace(SHORTS_DESCRIPTION_CTA, ""), result.requirements
+    )
+    decorated_cta = final_body.replace(
+        SHORTS_DESCRIPTION_CTA, f"前置き {SHORTS_DESCRIPTION_CTA}"
+    )
+    assert "チャンネル登録 CTA" in validate_shorts_description(
+        decorated_cta, result.requirements
+    )
+
+
+def test_quality_gate_requires_fixed_cta_as_an_exact_template_line(tmp_path):
+    settings = Settings(data_dir=tmp_path)
+    video_id = "gate003b"
+    _write_meta(tmp_path, video_id)
+    save_shorts_template(
+        _valid_quality_template().replace(
+            f"{SHORTS_DESCRIPTION_CTA}\n",
+            f"前置き {SHORTS_DESCRIPTION_CTA}\n",
+        ),
+        settings=settings,
+    )
+
+    with pytest.raises(DescriptionError, match="固定 CTA 文"):
+        build_shorts_description_for_upload(
+            "生成説明", video_id=video_id, settings=settings
+        )
+
+
+def test_quality_gate_rejects_missing_required_placeholders_without_overwriting_file(
+    tmp_path,
+):
+    settings = Settings(data_dir=tmp_path)
+    video_id = "gate004"
+    _write_meta(tmp_path, video_id)
+    path = get_shorts_template_path(settings)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    original = (
+        "{{description}}\n{{source_title}}\n"
+        f"{SHORTS_DESCRIPTION_CTA}\n"
+    ).encode("utf-8")
+    path.write_bytes(original)
+
+    with pytest.raises(DescriptionError, match=r"\{\{source_url\}\}"):
+        build_shorts_description_for_upload(
+            "生成説明", video_id=video_id, settings=settings
+        )
+
+    assert path.read_bytes() == original
+
+
+def test_quality_gate_rejects_broken_meta_fail_closed(tmp_path):
+    settings = Settings(data_dir=tmp_path)
+    video_id = "gate005"
+    video_dir = tmp_path / video_id
+    video_dir.mkdir(parents=True)
+    (video_dir / "meta.json").write_bytes("{壊れた".encode("utf-8"))
+    save_shorts_template(_valid_quality_template(), settings=settings)
+
+    with pytest.raises(DescriptionError, match="元配信の情報を読み込めませんでした"):
+        build_shorts_description_for_upload(
+            "生成説明", video_id=video_id, settings=settings
+        )
+
+
+def test_quality_gate_rejects_angle_brackets_and_byte_limit(tmp_path):
+    settings = Settings(data_dir=tmp_path)
+    angle_id = "gate006"
+    _write_meta(tmp_path, angle_id)
+    save_shorts_template(_valid_quality_template(), settings=settings)
+
+    with pytest.raises(DescriptionError, match="半角の山カッコは使えません"):
+        build_shorts_description_for_upload(
+            "生成説明 <b>禁止</b>", video_id=angle_id, settings=settings
+        )
+
+    byte_id = "gate007"
+    _write_meta(tmp_path, byte_id)
+    with pytest.raises(DescriptionError, match="5000 bytes を超えます"):
+        build_shorts_description_for_upload(
+            "あ" * 1700, video_id=byte_id, settings=settings
+        )
+
+
+def test_default_template_creation_is_safe_under_same_process_concurrency(tmp_path):
+    settings = Settings(data_dir=tmp_path)
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        paths = list(
+            executor.map(
+                lambda _index: ensure_shorts_description_template(settings),
+                range(8),
+            )
+        )
+
+    path = get_shorts_template_path(settings)
+    assert paths == [path] * 8
+    assert path.read_text(encoding="utf-8") == DEFAULT_SHORTS_DESCRIPTION_TEMPLATE
+    assert not list(path.parent.glob(".*.tmp"))
+
+
+def test_default_template_creation_fails_closed_when_atomic_write_fails(
+    tmp_path, monkeypatch
+):
+    settings = Settings(data_dir=tmp_path)
+
+    def fail_atomic(*_args, **_kwargs):
+        raise OSError("atomic failure")
+
+    monkeypatch.setattr(
+        "yt_live_kit.services.description.write_text_atomically", fail_atomic
+    )
+
+    with pytest.raises(DescriptionError, match="安全に初回作成できません"):
+        ensure_shorts_description_template(settings)
+
+    path = get_shorts_template_path(settings)
+    assert not path.exists()
+    assert not list(path.parent.glob(".*.tmp"))
+
+
+def test_requirements_object_rejects_non_fixed_cta():
+    with pytest.raises(ValueError, match="固定 CTA は変更できません"):
+        ShortsDescriptionRequirements(
+            generated_description="説明",
+            source_title="元動画",
+            source_url="https://example.com/watch?v=1",
+            fixed_cta="別の CTA",
+            template_bytes_fingerprint="template",
+            meta_json_fingerprint="meta",
+        )
