@@ -6,12 +6,14 @@ import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from yt_live_kit.config import Settings
 from yt_live_kit.models.clips import ClipCandidate
 from yt_live_kit.models.highlights import HighlightSegment
 from yt_live_kit.models.short_cut import ShortCutDocument
 from yt_live_kit.models.transcript import TranscriptCue, TranscriptRange
-from yt_live_kit.services.short_cut import validate_short_cut_selection
+from yt_live_kit.services.short_cut import ShortCutError, validate_short_cut_selection
 from yt_live_kit.services.subtitle_burn import TimedCue, parse_vtt_with_end
 from yt_live_kit.services.transcript_artifact import (
     TranscriptArtifactStore,
@@ -34,6 +36,7 @@ from yt_live_kit.ui.components.short_cut import (
     parse_cut_timestamp,
     resolve_transcript_bounds,
     render_short_cut_section,
+    S9_WHISPER_ERROR_PREFIX,
     S9_WHISPER_PROGRESS_PREFIX,
     _render_refine_preview,
     segments_to_pairs,
@@ -650,6 +653,61 @@ def test_refine_job_target_bridges_job_range_progress_without_streamlit(
     }
     assert report.call_args_list[-1].kwargs["current"] == 2
     assert report.call_args_list[-1].kwargs["total"] == 2
+
+
+def test_refine_job_target_keeps_structured_timeout_error_report(
+    tmp_path: Path,
+) -> None:
+    settings = Settings(data_dir=tmp_path)
+    progress = MagicMock(
+        job_id="timeout-job",
+        range_index=1,
+        range_total=2,
+        status="whisper_running",
+        cache_hit=False,
+        retryable=True,
+        diagnostic="whisper-cli の実行がタイムアウトしました。",
+    )
+
+    def run_refine(*args, **kwargs):
+        kwargs["on_progress"](progress)
+        raise TimeoutError("timeout")
+
+    report = MagicMock()
+    with patch(
+        "yt_live_kit.ui.components.short_cut.refine_selected_short_cut",
+        side_effect=run_refine,
+    ):
+        from yt_live_kit.ui.components.short_cut import refine_short_cut_job_target
+
+        with pytest.raises(ShortCutError) as raised:
+            refine_short_cut_job_target(
+                report=report,
+                settings=settings,
+                video_id="video-1",
+                parent_dict=_clip().model_dump(mode="json"),
+                parent_is_clip=True,
+                segment_dicts=[
+                    segment.model_dump(mode="json") for segment in _document().candidates
+                ],
+                job_id="timeout-job",
+            )
+
+    error_call = next(
+        call
+        for call in reversed(report.call_args_list)
+        if call.kwargs["message"].startswith(S9_WHISPER_ERROR_PREFIX)
+    )
+    payload = json.loads(
+        error_call.kwargs["message"][len(S9_WHISPER_ERROR_PREFIX) :]
+    )
+    assert payload["job_id"] == "timeout-job"
+    assert payload["range_index"] == 1
+    assert payload["range_total"] == 2
+    assert payload["retryable"] is True
+    assert payload["existing_artifacts"] == "維持"
+    assert "再試行" in payload["next_action"]
+    assert S9_WHISPER_ERROR_PREFIX in str(raised.value)
 
 
 def test_render_section_reloads_saved_cutplan_after_job_rerun(tmp_path: Path) -> None:

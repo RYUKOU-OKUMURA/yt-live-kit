@@ -24,6 +24,7 @@ from yt_live_kit.services.short_cut import (
     MAX_TOTAL_MS,
     MIN_TOTAL_MS,
     ParentCandidate,
+    ShortCutError,
     ShortCutValidationResult,
     load_cut_plan,
     needs_short_cut,
