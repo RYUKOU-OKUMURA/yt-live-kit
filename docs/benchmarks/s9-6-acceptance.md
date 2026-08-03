@@ -31,12 +31,26 @@ canonical fixture fingerprint は評価入力を識別し、q5 run manifest fing
 - CER 相対改善率: `78.694`％
 - glossary exact match: q5 は `13/19`、VTT は `10/19`
 - cue error: q5 は `2.35`、VTT は `6.95`
+
+### reproduction metrics
+
+以下の wall time と peak RSS は canonical の16 case runsではなく、q5 cold-s9-6-repro の4ケース単独再測定である。
+
+- source report path: `/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/cold-s9-6-repro/report.json`
+- run id: `q5-cold-s9-6-repro`
+- `case_count`: `4`
+- `run_kind`: `cold`
 - wall time: 最小 `2331 ms`、最大 `5286 ms`
 - peak RSS: 最小 `904462336 bytes`、最大 `926924800 bytes`
 
+実 command の argv は JSON の `reproduction_metrics.command_argv_by_case` に、上記 report の `commands[].argv` から転記した。
+
 ## canonical evidence
 
-- q5 turbo は16 runs。
+- `q5_model` は `turbo`。
+- canonical の run counts は q5 `8` case runs、full turbo `8` case runs、合計 `16` case runs。
+- canonical q5 の wall time は最小 `2165 ms`、最大 `5183 ms`。
+- canonical q5 の peak RSS は最小 `902742016 bytes`、最大 `933560320 bytes`。
 - cold と warm の output SHA は一致。
 - production scope は15ファイルで、変更前後に差分なし。
 - VTT parity は `4/4`。
@@ -44,24 +58,37 @@ canonical fixture fingerprint は評価入力を識別し、q5 run manifest fing
 
 ## 4ケースの editorial outcome
 
-| ケース | outcome | 状況 |
+| 実 case ID | outcome | 所見 |
 | --- | --- | --- |
-| case1 | `no_additional_edit` | transcript は概ね許容可能。追加編集なし |
-| case2 | `opening_trim_required_then_human_preview` | 冒頭約6秒が無音。opening trim 後の人 preview が必要 |
-| case3 | `opening_trim_required_then_human_preview` | 冒頭約6秒が無音。opening trim 後の人 preview が必要 |
-| case4 | `internal_gap_removal_required_then_human_preview` | 冒頭に発話はあるが、約2秒から約26秒は大半が無発話。internal gap removal 後の人 preview が必要 |
+| `lb4-clip002-short-proper-nouns` | `pass/no additional edit` | 追加編集なし。transcript は概ね許容可能 |
+| `hpe-audio-variation` | `opening trim/review` | 冒頭約6秒が無音。opening trim 後の人 preview が必要 |
+| `cgal-proper-nouns` | `opening trim/review` | 冒頭約6秒が無音。opening trim 後の人 preview が必要 |
+| `mkw-long-local-asr` | `internal gap removal/review` | 冒頭に発話はあるが、約2秒から約26秒は大半が無発話。internal gap removal 後の人 preview が必要 |
 
 親候補の無音は許容するが、final short の無音は許容しない。Whisper timestamp による境界の自動確定は `false` とする。
+
+4本とも文字起こしは概ね問題ない。ただし displayed transcript は operational reference に限定され、exact gold / glossary / cue anchor の承認を意味しない。
 
 ## 証跡レベル
 
 ### automated
 
-q5 cold 4 cases exit0、focused S9 123 passed、q5 turbo 16 runs、cold/warm output SHA 一致、production scope 15ファイルの変更前後不変、VTT parity 4/4 を記録する。
+q5 cold 4 cases exit0、focused S9 123 passed、canonical run counts q5=8 / full_turbo=8 / total=16 case runs、cold/warm output SHA 一致、production scope 15ファイルの変更前後不変、VTT parity 4/4 を記録する。wall time と peak RSS は q5 cold-s9-6-repro の4ケース単独再測定として分離する。
 
 ### existing_human
 
-S9-4 / S9-5 で確認済みの同一 artifact lineage、range-local invalidation、runtime unavailable 時の日本語 fallback は既存証跡として参照する。これらは今回の実 UI 編集後 preview の確認とは区別する。
+auditor は `user`、audit date は `2026-08-03`。
+
+- human audit fingerprint: `9c1fdca9e1c5b70bd40d84a219a81dedca976e70447d42e2523e2fc4b16cc263`
+- boundary audit fingerprint: `0af9f5ce7888eabcc67fbe767db25c2e4da97c823ea76781eb9aeb25991fd9a1`
+- `lb4-clip002-short-proper-nouns`: `pass/no additional edit`
+- `hpe-audio-variation`: `opening trim/review`
+- `cgal-proper-nouns`: `opening trim/review`
+- `mkw-long-local-asr`: `internal gap removal/review`
+
+4本とも文字起こしは概ね問題ないが、displayed transcript の operational reference に限定する。exact gold / glossary / cue anchor の承認ではない。
+
+同一 artifact lineage、range-local invalidation、runtime unavailable 時の日本語 fallback は `existing_test_evidence` として S9-4 / S9-5 の既存テスト証跡に分類し、existing_human とは区別する。
 
 ### current_ui_pending
 

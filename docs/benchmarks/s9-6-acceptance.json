@@ -50,7 +50,15 @@
     "cue_error": {
       "q5": 2.35,
       "vtt": 6.95
-    },
+    }
+  },
+  "reproduction_metrics": {
+    "source_report_path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/cold-s9-6-repro/report.json",
+    "run_id": "q5-cold-s9-6-repro",
+    "run_directory": "q5/cold-s9-6-repro",
+    "case_count": 4,
+    "run_kind": "cold",
+    "metric_scope": "q5 cold-s9-6-repro の4ケース単独再測定",
     "wall_time_ms": {
       "min": 2331,
       "max": 5286
@@ -58,11 +66,154 @@
     "peak_rss_bytes": {
       "min": 904462336,
       "max": 926924800
+    },
+    "command_argv_by_case": {
+      "lb4-clip002-short-proper-nouns": [
+        "/usr/bin/time",
+        "-l",
+        "/opt/homebrew/bin/whisper-cli",
+        "--model",
+        "/Users/ryukouokumura/Library/Caches/whisper.cpp/models/ggml-large-v3-turbo-q5_0.bin",
+        "--file",
+        "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/LB4px1wRFnY-2853160-2910000.wav",
+        "--language",
+        "ja",
+        "--prompt",
+        "日本語のライブ配信。固有名詞は Claude、Codex、Whisper、Ollama、Together AI、DirectX、Microsoft、Windows、Steam、DX12、iMac、Apple II、HHKB、macOS を含む。",
+        "--output-json",
+        "--output-json-full",
+        "--output-file",
+        "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/cold-s9-6-repro/whisper/lb4-clip002-short-proper-nouns/cold",
+        "--no-prints",
+        "-p",
+        "1",
+        "--offset-t",
+        "0",
+        "--duration",
+        "56840",
+        "--beam-size",
+        "5",
+        "--best-of",
+        "5",
+        "--temperature",
+        "0",
+        "--threads",
+        "8"
+      ],
+      "mkw-long-local-asr": [
+        "/usr/bin/time",
+        "-l",
+        "/opt/homebrew/bin/whisper-cli",
+        "--model",
+        "/Users/ryukouokumura/Library/Caches/whisper.cpp/models/ggml-large-v3-turbo-q5_0.bin",
+        "--file",
+        "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/mKwn-93gg90-1120-1300.16k.wav",
+        "--language",
+        "ja",
+        "--prompt",
+        "日本語のライブ配信。固有名詞は Claude、Codex、Whisper、Ollama、Together AI、DirectX、Microsoft、Windows、Steam、DX12、iMac、Apple II、HHKB、macOS を含む。",
+        "--output-json",
+        "--output-json-full",
+        "--output-file",
+        "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/cold-s9-6-repro/whisper/mkw-long-local-asr/cold",
+        "--no-prints",
+        "-p",
+        "1",
+        "--offset-t",
+        "0",
+        "--duration",
+        "180000",
+        "--beam-size",
+        "5",
+        "--best-of",
+        "5",
+        "--temperature",
+        "0",
+        "--threads",
+        "8"
+      ],
+      "cgal-proper-nouns": [
+        "/usr/bin/time",
+        "-l",
+        "/opt/homebrew/bin/whisper-cli",
+        "--model",
+        "/Users/ryukouokumura/Library/Caches/whisper.cpp/models/ggml-large-v3-turbo-q5_0.bin",
+        "--file",
+        "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/CGalA8SISPE-4220-4340.16k.wav",
+        "--language",
+        "ja",
+        "--prompt",
+        "日本語のライブ配信。固有名詞は Claude、Codex、Whisper、Ollama、Together AI、DirectX、Microsoft、Windows、Steam、DX12、iMac、Apple II、HHKB、macOS を含む。",
+        "--output-json",
+        "--output-json-full",
+        "--output-file",
+        "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/cold-s9-6-repro/whisper/cgal-proper-nouns/cold",
+        "--no-prints",
+        "-p",
+        "1",
+        "--offset-t",
+        "0",
+        "--duration",
+        "120000",
+        "--beam-size",
+        "5",
+        "--best-of",
+        "5",
+        "--temperature",
+        "0",
+        "--threads",
+        "8"
+      ],
+      "hpe-audio-variation": [
+        "/usr/bin/time",
+        "-l",
+        "/opt/homebrew/bin/whisper-cli",
+        "--model",
+        "/Users/ryukouokumura/Library/Caches/whisper.cpp/models/ggml-large-v3-turbo-q5_0.bin",
+        "--file",
+        "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/hPeRSA9YVIM-8640-8730.16k.wav",
+        "--language",
+        "ja",
+        "--prompt",
+        "日本語のライブ配信。固有名詞は Claude、Codex、Whisper、Ollama、Together AI、DirectX、Microsoft、Windows、Steam、DX12、iMac、Apple II、HHKB、macOS を含む。",
+        "--output-json",
+        "--output-json-full",
+        "--output-file",
+        "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/cold-s9-6-repro/whisper/hpe-audio-variation/cold",
+        "--no-prints",
+        "-p",
+        "1",
+        "--offset-t",
+        "0",
+        "--duration",
+        "90000",
+        "--beam-size",
+        "5",
+        "--best-of",
+        "5",
+        "--temperature",
+        "0",
+        "--threads",
+        "8"
+      ]
     }
   },
   "canonical_evidence": {
     "q5_model": "turbo",
-    "q5_turbo_runs": 16,
+    "run_counts": {
+      "q5": 8,
+      "full_turbo": 8,
+      "total": 16,
+      "unit": "case_runs"
+    },
+    "q5_canonical_wall_time_ms": {
+      "min": 2165,
+      "max": 5183
+    },
+    "q5_canonical_peak_rss_bytes": {
+      "min": 902742016,
+      "max": 933560320
+    },
     "cold_warm_output_sha_equal": true,
     "production_scope": {
       "file_count": 15,
@@ -77,30 +228,40 @@
   },
   "case_outcomes": [
     {
-      "case_id": "case1",
+      "case_id": "lb4-clip002-short-proper-nouns",
       "editorial_outcome": "no_additional_edit",
+      "human_observation": "pass/no additional edit",
       "transcript_assessment": "broadly_acceptable",
       "notes": "追加編集なし。transcript は概ね許容可能"
     },
     {
-      "case_id": "case2",
+      "case_id": "hpe-audio-variation",
       "editorial_outcome": "opening_trim_required_then_human_preview",
+      "human_observation": "opening trim/review",
       "transcript_assessment": "broadly_acceptable",
       "notes": "冒頭約6秒が無音。opening trim 後に人が preview する必要がある"
     },
     {
-      "case_id": "case3",
+      "case_id": "cgal-proper-nouns",
       "editorial_outcome": "opening_trim_required_then_human_preview",
+      "human_observation": "opening trim/review",
       "transcript_assessment": "broadly_acceptable",
       "notes": "冒頭約6秒が無音。opening trim 後に人が preview する必要がある"
     },
     {
-      "case_id": "case4",
+      "case_id": "mkw-long-local-asr",
       "editorial_outcome": "internal_gap_removal_required_then_human_preview",
+      "human_observation": "internal gap removal/review",
       "transcript_assessment": "broadly_acceptable",
       "notes": "冒頭に発話はあるが、約2秒から約26秒は大半が無発話。internal gap removal 後に人が preview する必要がある"
     }
   ],
+  "transcript_scope": {
+    "assessment": "4本とも文字起こしは概ね問題なし",
+    "displayed_transcript_scope": "operational_reference_only",
+    "exact_gold_glossary_cue_anchor_approval": false,
+    "note": "displayed transcript の operational reference に限定し、exact gold/glossary/cue anchor の承認とは区別する"
+  },
   "acceptance_rules": {
     "parent_candidate_silence": "allowed",
     "final_short_silence": "not_allowed",
@@ -111,16 +272,37 @@
     "automated": [
       "q5 cold 4 cases exit0",
       "focused S9 123 passed",
-      "q5 turbo 16 runs",
+      "canonical run counts は q5=8、full_turbo=8、total=16 case runs",
       "cold/warm output SHA equal",
       "production scope 15 files before/after unchanged",
-      "VTT parity 4/4"
+      "VTT parity 4/4",
+      "q5 cold-s9-6-repro の reproduction metrics は4ケース単独再測定"
     ],
-    "existing_human": [
-      "S9-4/S9-5で確認済みの同一artifact lineageを既存証跡として参照",
-      "S9-4/S9-5で確認済みのrange-local invalidationを既存証跡として参照",
-      "runtime unavailable時の日本語fallbackを既存証跡として参照"
-    ],
+    "existing_human": {
+      "auditor": "user",
+      "audit_date": "2026-08-03",
+      "human_audit_fingerprint": "9c1fdca9e1c5b70bd40d84a219a81dedca976e70447d42e2523e2fc4b16cc263",
+      "boundary_audit_fingerprint": "0af9f5ce7888eabcc67fbe767db25c2e4da97c823ea76781eb9aeb25991fd9a1",
+      "case_observations": [
+        {
+          "case_id": "lb4-clip002-short-proper-nouns",
+          "observation": "pass/no additional edit"
+        },
+        {
+          "case_id": "hpe-audio-variation",
+          "observation": "opening trim/review"
+        },
+        {
+          "case_id": "cgal-proper-nouns",
+          "observation": "opening trim/review"
+        },
+        {
+          "case_id": "mkw-long-local-asr",
+          "observation": "internal gap removal/review"
+        }
+      ],
+      "transcript_scope": "4本とも文字起こしは概ね問題なし。ただし displayed transcript の operational reference 限定であり、exact gold/glossary/cue anchor 承認ではない"
+    },
     "current_ui_pending": [
       "case2/3のopening trim後preview",
       "case4のinternal gap removal後preview",
@@ -128,6 +310,7 @@
     ]
   },
   "existing_test_evidence": {
+    "classification": "existing_test_evidence",
     "source": "S9-4/S9-5",
     "items": [
       "同一artifact lineage",
