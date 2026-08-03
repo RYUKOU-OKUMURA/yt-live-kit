@@ -8,7 +8,7 @@
 
 YouTube VTT を baseline とし、同じ音声 span を whisper.cpp 1.9.1 の日本語モデルで処理して比較する。S9-1 は production code、既存 `data`、既存 `subtitles/ja.vtt`、既存 mp4 を変更しない。
 
-今回の repository 上には、音声を人が直接聴取して確認した gold transcript の明示的な証跡がない。そのため fixture の gold は既存 transcript / VTT / ASS / cutplan と文脈から手作業で整えた「未監査の仮 gold」とし、実行結果の数値は provisional と記録する。独立した人手音声監査が完了しない限り Go にはしない。これは VTT をそのまま正解にする評価リークと、根拠のない採用判定を防ぐための fail-closed 条件である。
+今回の repository 上には、音声を人が直接聴取して確認した gold transcript の full audit 証跡がない。そのため fixture の gold は既存 transcript / VTT / ASS / cutplan と文脈から手作業で整えた「未監査の仮 gold」とし、実行結果の数値は provisional と記録する。今回追加した [`s9-1-boundary-audit.json`](./s9-1-boundary-audit.json) は、ユーザーが直接聴いた開始境界・発話連続性だけの部分監査であり、transcript 全文、glossary、cue anchor の正確な時刻を audited にはしない。full gold audit が完了しない限り Go にはしない。これは VTT をそのまま正解にする評価リークと、根拠のない採用判定を防ぐための fail-closed 条件である。
 
 ## 代表素材と固定 span
 
@@ -22,6 +22,25 @@ YouTube VTT を baseline とし、同じ音声 span を whisper.cpp 1.9.1 の日
 | `hpe-audio-variation` | `hPeRSA9YVIM` / `clip_003` | 02:24:00.000–02:25:30.000 | 90 秒の別候補。HHKB / Mac / macOS / ファンクションキーを含み、他素材と録音時期・区間条件が異なる | 別配信日の公開音声 span。実測値以外の SNR 推測はしない |
 
 開始時に各 `meta.json`、`subtitles/ja.vtt`、`clips/candidates.json`、該当 cutplan、既存 `LB4px1wRFnY.mp4` の SHA-256 を [`s9-1-production-hash-before.json`](./s9-1-production-hash-before.json) へ保存した。benchmark 後に同じ command を再実行し、値が変わらないことを確認する。
+
+## 境界・発話連続性の部分監査
+
+監査者はユーザー、監査日は 2026-08-03。所見の自然文と機械検証用の strict schema は [`s9-1-boundary-audit.json`](./s9-1-boundary-audit.json) に固定する。既存の `s9-1-cases.json` は変更せず、base fixture fingerprint `6dae657f2b803c54c6af1afe4ed54ad4f447324c32802e1943dc5711a9bf1718` を保持する。boundary audit は別 artifact fingerprint `0af9f5ce7888eabcc67fbe767db25c2e4da97c823ea76781eb9aeb25991fd9a1` で追跡し、base fixture に含めない。したがって旧・新の base fixture fingerprint を置き換える変更ではなく、固定音声と provisional gold の identity を守るための分離である。
+
+前回表示順と case ID の対応は次のとおりである。
+
+| 前回表示順 | case ID | ユーザー所見の要約 | 機械検証する editorial outcome |
+|---:|---|---|---|
+| 1 | `lb4-clip002-short-proper-nouns` | ほぼ問題ない | `pass` |
+| 2 | `hpe-audio-variation` | 開始から約6秒まで意味ある発話がなく、開始境界NG | `opening_trim_or_review_required` |
+| 3 | `cgal-proper-nouns` | 開始から約6秒まで意味ある発話がなく、背景音は意味ある発話として数えない | `opening_trim_or_review_required` |
+| 4 | `mkw-long-local-asr` | 開始直後に発話はあるが、約2秒から26秒までほぼ発話がなく致命的 | `internal_gap_removal_or_review_required` |
+
+この部分監査は、S9-1 の production 非変更 benchmark に対して「無発話部分への cue 幻覚」と、意味ある発話の開始・内部 gap を確認する材料を追加する。約6秒、約2〜26秒は今回の自然な聴取所見であり、production の普遍的な秒数閾値ではない。開始直後に一言あれば通る単純な onset-only gate は禁止する。背景音があっても意味ある発話がなければ編集上は無発話として扱う。
+
+case 1 の `pass` は、今回確認した境界・発話連続性で追加処置なしという意味だけであり、transcript 全文、glossary、cue anchor、最終 short の品質承認ではない。
+
+S9-4 / S9-6 はこの evidence を親候補の固定 span の品質承認へ昇格させない。最終 cutplan / final short が冒頭の無発話と長い内部無発話を残さないことを、audio activity、cue、padding、human preview と人の確認で別途検証する。Whisper timestamp を唯一の境界正本にせず、親候補を切り詰める判断と最終 short の品質判定を分離する。
 
 ## 固定評価契約
 
@@ -57,6 +76,8 @@ YouTube VTT を baseline とし、同じ音声 span を whisper.cpp 1.9.1 の日
 | gold 独立性 | 全 case の gold が人手音声監査済みであること | 未監査の間は必ず No-Go |
 
 全 gate が閾値内でも、gold audit が `unverified_provisional` の間は採用モデルを決定しない。No-Go の場合は後続 S9 実装を高精度経路として進めず、既存 YouTube VTT を fallback-only とする。
+
+境界部分監査の expected editorial outcome が4 caseすべて機械検証できても、full transcript / glossary gold 未完了と既存 cue proxy の盲点があるため、S9-1 は No-Go のままにする。S9-2 以降を開始可能にはしない。
 
 ## 実行条件
 

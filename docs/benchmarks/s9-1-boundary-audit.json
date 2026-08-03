@@ -1,0 +1,107 @@
+{
+  "schema": "s9-1-boundary-audit-v1",
+  "benchmark_id": "s9-1-20260803",
+  "base_fixture_fingerprint": "6dae657f2b803c54c6af1afe4ed54ad4f447324c32802e1943dc5711a9bf1718",
+  "audit_date": "2026-08-03",
+  "auditor": "user",
+  "scope": {
+    "status": "partial_boundary_and_continuity",
+    "source": "user_audio_listening_feedback",
+    "audited_dimensions": [
+      "opening_boundary",
+      "speech_continuity"
+    ],
+    "not_audited_dimensions": [
+      "transcript_full_text",
+      "glossary",
+      "cue_anchor_exact_times"
+    ],
+    "audio_fixture_identity": "fixed_audio_spans_unchanged"
+  },
+  "policy": {
+    "kind": "temporary_benchmark_policy",
+    "meaningful_speech_required": true,
+    "background_audio_is_not_meaningful_speech": true,
+    "simple_onset_only_gate": "forbidden",
+    "whisper_timestamp_sole_authority": false,
+    "required_evidence": [
+      "audio_activity",
+      "cue_context",
+      "padding",
+      "human_preview"
+    ],
+    "production_default": "defer_to_s9_plan_or_s9_4",
+    "threshold_status": "no_new_universal_seconds_threshold"
+  },
+  "previous_display_order": [
+    {
+      "display_order": 1,
+      "case_id": "lb4-clip002-short-proper-nouns"
+    },
+    {
+      "display_order": 2,
+      "case_id": "hpe-audio-variation"
+    },
+    {
+      "display_order": 3,
+      "case_id": "cgal-proper-nouns"
+    },
+    {
+      "display_order": 4,
+      "case_id": "mkw-long-local-asr"
+    }
+  ],
+  "cases": [
+    {
+      "case_id": "lb4-clip002-short-proper-nouns",
+      "display_order": 1,
+      "source_feedback": "前回表示順 case 1（lb4-clip002-short-proper-nouns）は「ほぼ問題ない」。",
+      "opening_signal": "no_material_issue_observed",
+      "internal_continuity": "not_audited",
+      "approximate_timing_note": "開始境界はほぼ問題ないという所見。正確な onset は記録しない。",
+      "expected_editorial_outcome": "pass"
+    },
+    {
+      "case_id": "hpe-audio-variation",
+      "display_order": 2,
+      "source_feedback": "前回表示順 case 2（hpe-audio-variation）は開始から約6秒まで意味ある発話がなく、ショート開始として不利、開始境界NG。",
+      "opening_signal": "no_meaningful_speech_at_opening",
+      "internal_continuity": "not_audited",
+      "approximate_timing_note": "開始から約6秒まで意味ある発話がないという観察。約値を production 閾値にはしない。",
+      "expected_editorial_outcome": "opening_trim_or_review_required"
+    },
+    {
+      "case_id": "cgal-proper-nouns",
+      "display_order": 3,
+      "source_feedback": "前回表示順 case 3（cgal-proper-nouns）も開始から約6秒まで意味ある発話がなく、開始境界NG。背景音があっても意味ある発話がなければ編集上の無発話として扱う。",
+      "opening_signal": "background_audio_without_meaningful_speech_at_opening",
+      "internal_continuity": "not_audited",
+      "approximate_timing_note": "開始から約6秒まで意味ある発話がないという観察。背景音は意味ある発話として数えない。約値を production 閾値にはしない。",
+      "expected_editorial_outcome": "opening_trim_or_review_required"
+    },
+    {
+      "case_id": "mkw-long-local-asr",
+      "display_order": 4,
+      "source_feedback": "前回表示順 case 4（mkw-long-local-asr）は開始直後に発話はあるが、約2秒から26秒までほぼ発話がなく、ショートとして致命的。",
+      "opening_signal": "meaningful_speech_present_at_opening",
+      "internal_continuity": "long_internal_speech_gap",
+      "approximate_timing_note": "開始直後に発話はあるが、約2秒から26秒までほぼ発話がないという観察。約値を production 閾値にはしない。",
+      "expected_editorial_outcome": "internal_gap_removal_or_review_required"
+    }
+  ],
+  "decision": {
+    "boundary_audit_status": "partial_boundary_only",
+    "expected_editorial_outcomes_verified": true,
+    "gold_transcript_status": "unverified_provisional",
+    "gold_glossary_status": "unverified_provisional",
+    "gold_cue_anchor_status": "unverified_provisional",
+    "s9_1_go": false,
+    "s9_2_ready": false,
+    "adopted_model": null,
+    "no_go_reasons": [
+      "gold_not_audited",
+      "cue_proxy_blind_spot",
+      "boundary_audit_is_partial"
+    ]
+  }
+}

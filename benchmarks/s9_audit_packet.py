@@ -17,8 +17,17 @@ import wave
 from pathlib import Path
 from typing import Any
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from benchmarks.s9_benchmark import (  # noqa: E402
+    BoundaryAuditError,
+    evaluate_boundary_audit,
+    manifest_fingerprint,
+)
+
 
 DEFAULT_MANIFEST = Path("docs/benchmarks/s9-1-cases.json")
+DEFAULT_BOUNDARY_AUDIT = Path("docs/benchmarks/s9-1-boundary-audit.json")
 DEFAULT_DOCUMENT = Path("docs/benchmarks/s9-1-human-audit.md")
 EXPECTED_CASE_COUNT = 4
 EXPECTED_AUDIT_STATUS = "unverified_provisional"
@@ -67,6 +76,25 @@ def load_manifest(path: Path) -> dict[str, Any]:
         if case.get("id") not in AUDIT_HINTS:
             raise AuditPacketError(f"未定義の case ID です: {case.get('id')}")
     return manifest
+
+
+def load_boundary_audit(path: Path, manifest: dict[str, Any]) -> dict[str, Any]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise AuditPacketError(f"boundary audit を読めません: {path}: {exc}") from exc
+    except json.JSONDecodeError as exc:
+        raise AuditPacketError(f"boundary audit が JSON として不正です: {path}: {exc}") from exc
+    try:
+        result = evaluate_boundary_audit(
+            value,
+            expected_base_fixture_fingerprint=manifest_fingerprint(manifest),
+            expected_benchmark_id=manifest["benchmark_id"],
+        )
+    except BoundaryAuditError as exc:
+        raise AuditPacketError(f"boundary audit の strict schema 検証に失敗しました: {exc.message}") from exc
+    result["artifact"] = str(path)
+    return result
 
 
 def format_source_timestamp(milliseconds: int) -> str:
@@ -184,10 +212,15 @@ def validate_case_shape(case: dict[str, Any]) -> tuple[int, int, str, list[str],
     return start_ms, end_ms, text, glossary, anchors, case_id
 
 
-def render_packet(manifest: dict[str, Any], audio_infos: dict[str, dict[str, Any]]) -> str:
+def render_packet(
+    manifest: dict[str, Any],
+    audio_infos: dict[str, dict[str, Any]],
+    boundary_audit: dict[str, Any],
+) -> str:
     cases = manifest["cases"]
     validated = [validate_case_shape(case) for case in cases]
     ordered_cases = sorted(cases, key=lambda case: case["range_ms"][1] - case["range_ms"][0])
+    cases_by_id = {case["case_id"]: case for case in boundary_audit["cases"]}
     total_ms = sum(case["range_ms"][1] - case["range_ms"][0] for case in cases)
 
     lines = [
@@ -249,6 +282,34 @@ def render_packet(manifest: dict[str, Any], audio_infos: dict[str, dict[str, Any
             "4. cue anchor は `anchor-1` からのラベルと絶対時刻を確認します。時刻またはラベルが違う場合は anchor ID と訂正値を返します。",
             "5. 下の最小フォーマットを case ごとに1回ずつ、合計4回返します。",
             "",
+            "## 境界・発話連続性の部分監査（2026-08-03）",
+            "",
+            f"監査者: `{boundary_audit['auditor']}` / 監査日: `{boundary_audit['audit_date']}`",
+            f"boundary audit fingerprint: `{boundary_audit['fingerprint']}`",
+            f"base fixture fingerprint: `{boundary_audit['base_fixture_fingerprint']}`",
+            "",
+            "これはユーザーが4本の固定音声を聴いた、開始境界・発話連続性だけの部分監査です。transcript 全文、glossary、cue anchor の正確な時刻は audited にしません。固定音声 span、video ID、range、bytes、SHA-256 は変更していません。",
+            "",
+            "### 前回表示順と所見",
+            "",
+            "| 前回表示順 | case ID | 自然文の所見 | expected editorial outcome |",
+            "|---:|---|---|---|",
+            *(
+                f"| {entry['display_order']} | `{cases_by_id[entry['case_id']]['case_id']}` | {cases_by_id[entry['case_id']]['source_feedback']} | `{cases_by_id[entry['case_id']]['expected_editorial_outcome']}` |"
+                for entry in boundary_audit["previous_display_order"]
+            ),
+            "",
+            "### 部分監査の判定契約",
+            "",
+            "- 背景音があっても意味ある発話がなければ、編集上は無発話として扱う。",
+            "- case 1 の `pass` は、今回確認した境界・発話連続性で追加処置なしという意味だけであり、transcript 全文、glossary、cue anchor、最終 short の品質承認ではない。",
+            "- 約6秒、約2〜26秒という所見は観察メモであり、production の普遍的な秒数閾値ではない。",
+            "- 開始直後に一言あれば通る単純な onset-only gate は使わない。",
+            "- Whisper timestamp を唯一の境界正本にせず、audio activity、cue、padding、human preview を併用する。",
+            "- 親候補の固定音声 span を良好と判定することと、最終 short cutplan から冒頭の無発話・長い内部無発話を残さないことは別判定である。",
+            "",
+            "S9-1 は transcript / glossary gold が未完了で、既存 cue proxy の盲点も判明したため No-Go のままです。S9-2 以降を開始可能にしません。",
+            "",
             "## 音声ファイルの hash と size",
             "",
             "| case ID | bytes | SHA-256 |",
@@ -265,7 +326,7 @@ def render_packet(manifest: dict[str, Any], audio_infos: dict[str, dict[str, Any
         lines.extend(
             [
                 "",
-                f"## Case {number}: `{case_id}`",
+                f"## Fixture case {number}: `{case_id}`",
                 "",
                 "### 固定入力",
                 "",
@@ -286,38 +347,38 @@ def render_packet(manifest: dict[str, Any], audio_infos: dict[str, dict[str, Any
                 text,
                 "```",
                 "",
-                "### Glossary",
+                "### Glossary（gold の完全監査は未実施）",
                 "",
-                "| glossary label | provisional expected | 人手確認 |",
+                "| glossary label | provisional expected | gold 監査状態 |",
                 "|---|---|---|",
             ]
         )
         for term_index, term in enumerate(glossary, 1):
-            lines.append(f"| `glossary-{term_index}` | `{term}` | 承認 / 訂正 |")
+            lines.append(f"| `glossary-{term_index}` | `{term}` | 未監査（境界部分監査のみ） |")
 
         lines.extend(
             [
                 "",
-                "### Cue anchor",
+                "### Cue anchor（正確な時刻の監査は未実施）",
                 "",
                 "ラベルは fixture の anchor ID です。時刻は video の絶対時刻で、音声ファイル内の相対時刻ではありません。",
                 "",
-                "| anchor label | 絶対 range | source time | 人手確認 |",
+                "| anchor label | 絶対 range | source time | gold 監査状態 |",
                 "|---|---|---|---|",
             ]
         )
         for anchor_index, (anchor_start, anchor_end) in enumerate(anchors, 1):
             lines.append(
                 f"| `anchor-{anchor_index}` | `{format_range(anchor_start, anchor_end)}` | "
-                f"`{format_source_timestamp(anchor_start)}〜{format_source_timestamp(anchor_end)}` | 承認 / 訂正 |"
+                f"`{format_source_timestamp(anchor_start)}〜{format_source_timestamp(anchor_end)}` | 未監査（境界部分監査のみ） |"
             )
 
     lines.extend(
         [
             "",
-            "## ユーザー返答の最小フォーマット",
+            "## 将来の full-gold 監査に使う返答フォーマット",
             "",
-            "以下を case ごとに4回返してください。承認の場合は `承認`、訂正の場合は全文または訂正対象が特定できる値を書いてください。",
+            "今回の部分監査は下の形式による transcript / glossary / cue anchor の full-gold 承認ではありません。将来この範囲を監査する場合だけ、case ごとに4回返してください。",
             "",
             "```text",
             "case ID: lb4-clip002-short-proper-nouns",
@@ -328,22 +389,22 @@ def render_packet(manifest: dict[str, Any], audio_infos: dict[str, dict[str, Any
             "監査日: YYYY-MM-DD",
             "```",
             "",
-            "訂正時は、transcript は訂正後の全文、glossary は用語ごとの期待表記、cue anchor は `anchor-ID: 絶対 range / ラベル` の形式で返してください。4 case 全件について transcript、glossary、cue anchor の3項目を埋めてください。",
+            "訂正時は、transcript は訂正後の全文、glossary は用語ごとの期待表記、cue anchor は `anchor-ID: 絶対 range / ラベル` の形式で返してください。4 case 全件の3項目がそろうまで gold は未監査のままです。",
             "",
-            "## 監査後の次手順",
+            "## 今回の監査記録と次手順",
             "",
-            "1. ユーザーの4 case 分の返答を受け取り、監査者・監査日と、承認または訂正の根拠を記録します。返答前に `audit_status` を変更しません。",
-            "2. 訂正があれば `s9-1-cases.json` の gold.text、gold.glossary、gold.cue_anchors_ms へ人手の結果だけを反映します。音声 path、bytes、SHA-256、video ID、absolute range は固定したままにします。",
-            "3. 4 case 全件の監査がそろった後、fixture fingerprint を再計算し、同じ4音声の hash / size と protocol の normalization、cue rule、wall time、memory gate が変わっていないことを確認します。",
-            "4. [`s9-1-protocol.md`](./s9-1-protocol.md) の同じ cold / warm 手順で、固定した4 case と候補2モデルを再測定します。gold だけを監査結果へ更新し、音声 span や評価 gate を都合よく変更しません。",
-            "5. paired median CER 相対改善、glossary exact match 非悪化、cue 欠落・重複率、cold / warm wall time、peak memory、gold audit 必須条件を同じ gate で判定します。",
-            "6. 全 gate を満たした場合だけ採用モデルと設定を決めます。未達なら No-Go とし、既存 YouTube VTT の fallback-only を維持します。人手監査済みでも自動的に Go にはしません。",
+            "1. 今回は boundary / speech continuity の partial audit として記録しました。transcript 全文、glossary、cue anchor exact times の audit_status は変更しません。",
+            "2. 将来 transcript / glossary / cue anchor を監査する場合も、訂正は `s9-1-cases.json` の gold へ人手の結果だけを反映します。音声 path、bytes、SHA-256、video ID、absolute range は固定したままにします。",
+            "3. full-gold 監査がそろった後だけ fixture fingerprint を再計算し、boundary audit の独立 fingerprint と base fixture fingerprint の関係を記録します。今回の境界 artifact は base fixture fingerprint に含めず、既存 fixture identity を保持しています。",
+            "4. [`s9-1-protocol.md`](./s9-1-protocol.md) の同じ cold / warm 手順で、固定した4 case と候補2モデルを再測定します。gold だけを更新し、音声 span や評価 gate を都合よく変更しません。",
+            "5. paired median CER 相対改善、glossary exact match 非悪化、cue 欠落・重複率、cold / warm wall time、peak memory、gold audit 必須条件を同じ gate で判定します。今回の部分監査だけでは adopted model を決めません。",
             "",
-            "再測定と採用判定が完了するまで、このパケット自体は S9-1 の Done 証跡ではなく、監査の準備済み証跡として扱います。",
+            "今回の境界監査 artifact、benchmark report、S9-1 の進捗は、正式 gold 未完了・No-Go・S9-2 以降停止のままです。",
             "",
             "## 関連証跡",
             "",
             "- [`s9-1-cases.json`](./s9-1-cases.json): 固定 fixture と provisional gold の正本",
+            "- [`s9-1-boundary-audit.json`](./s9-1-boundary-audit.json): 境界・発話連続性だけの strict audit artifact",
             "- [`s9-1-protocol.md`](./s9-1-protocol.md): 同じ評価契約・gate・再現手順",
             "- [`s9-1-report.md`](./s9-1-report.md): 現在の provisional 指標と No-Go",
             "- [`s9-1-report.json`](./s9-1-report.json): 機械可読な現在の gate status",
@@ -359,16 +420,24 @@ def render_packet(manifest: dict[str, Any], audio_infos: dict[str, dict[str, Any
     return document
 
 
-def build_packet(manifest_path: Path) -> str:
+def build_packet(
+    manifest_path: Path,
+    boundary_audit_path: Path = DEFAULT_BOUNDARY_AUDIT,
+) -> str:
     manifest = load_manifest(manifest_path)
+    boundary_audit = load_boundary_audit(boundary_audit_path, manifest)
     audio_infos = {
         case["id"]: inspect_audio(manifest, case) for case in manifest["cases"]
     }
-    return render_packet(manifest, audio_infos)
+    return render_packet(manifest, audio_infos, boundary_audit)
 
 
-def generate(manifest_path: Path, document_path: Path) -> None:
-    document = build_packet(manifest_path)
+def generate(
+    manifest_path: Path,
+    document_path: Path,
+    boundary_audit_path: Path = DEFAULT_BOUNDARY_AUDIT,
+) -> None:
+    document = build_packet(manifest_path, boundary_audit_path)
     try:
         document_path.write_text(document, encoding="utf-8")
     except OSError as exc:
@@ -376,8 +445,12 @@ def generate(manifest_path: Path, document_path: Path) -> None:
     print(f"generated: {document_path}")
 
 
-def check(manifest_path: Path, document_path: Path) -> None:
-    expected = build_packet(manifest_path)
+def check(
+    manifest_path: Path,
+    document_path: Path,
+    boundary_audit_path: Path = DEFAULT_BOUNDARY_AUDIT,
+) -> None:
+    expected = build_packet(manifest_path, boundary_audit_path)
     try:
         actual = document_path.read_text(encoding="utf-8")
     except OSError as exc:
@@ -395,6 +468,7 @@ def parse_args() -> argparse.Namespace:
     for command in ("generate", "check"):
         subparser = subparsers.add_parser(command)
         subparser.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST)
+        subparser.add_argument("--boundary-audit", type=Path, required=True)
         subparser.add_argument("--document", type=Path, default=DEFAULT_DOCUMENT)
     return parser.parse_args()
 
@@ -403,9 +477,9 @@ def main() -> int:
     args = parse_args()
     try:
         if args.command == "generate":
-            generate(args.manifest, args.document)
+            generate(args.manifest, args.document, args.boundary_audit)
         else:
-            check(args.manifest, args.document)
+            check(args.manifest, args.document, args.boundary_audit)
     except AuditPacketError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1

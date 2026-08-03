@@ -116,7 +116,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import asdict, dataclass, field, replace
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 import hashlib
 import json
 import math
@@ -134,6 +134,45 @@ REPORT_SCHEMA = "s9-1-benchmark-report-v1"
 WHISPER_OUTPUT_SCHEMA = "whisper.cpp-json-v1"
 WHISPER_OUTPUT_SCHEMAS = frozenset({WHISPER_OUTPUT_SCHEMA, "whisper-cli-json-full-v1"})
 ALLOWED_RUN_KINDS = frozenset({"cold", "warm"})
+BOUNDARY_AUDIT_SCHEMA = "s9-1-boundary-audit-v1"
+BOUNDARY_AUDIT_CASE_IDS = (
+    "lb4-clip002-short-proper-nouns",
+    "hpe-audio-variation",
+    "cgal-proper-nouns",
+    "mkw-long-local-asr",
+)
+BOUNDARY_AUDIT_EXPECTED_OUTCOMES = {
+    "lb4-clip002-short-proper-nouns": "pass",
+    "mkw-long-local-asr": "internal_gap_removal_or_review_required",
+    "cgal-proper-nouns": "opening_trim_or_review_required",
+    "hpe-audio-variation": "opening_trim_or_review_required",
+}
+BOUNDARY_AUDIT_EXPECTED_CASES = {
+    "lb4-clip002-short-proper-nouns": {
+        "display_order": 1,
+        "opening_signal": "no_material_issue_observed",
+        "internal_continuity": "not_audited",
+        "expected_editorial_outcome": "pass",
+    },
+    "hpe-audio-variation": {
+        "display_order": 2,
+        "opening_signal": "no_meaningful_speech_at_opening",
+        "internal_continuity": "not_audited",
+        "expected_editorial_outcome": "opening_trim_or_review_required",
+    },
+    "cgal-proper-nouns": {
+        "display_order": 3,
+        "opening_signal": "background_audio_without_meaningful_speech_at_opening",
+        "internal_continuity": "not_audited",
+        "expected_editorial_outcome": "opening_trim_or_review_required",
+    },
+    "mkw-long-local-asr": {
+        "display_order": 4,
+        "opening_signal": "meaningful_speech_present_at_opening",
+        "internal_continuity": "long_internal_speech_gap",
+        "expected_editorial_outcome": "internal_gap_removal_or_review_required",
+    },
+}
 
 
 class BenchmarkError(Exception):
@@ -173,6 +212,10 @@ class ModelValidationError(BenchmarkError):
 
 class RunnerError(BenchmarkError):
     code = "runner_failed"
+
+
+class BoundaryAuditError(BenchmarkError):
+    code = "invalid_boundary_audit"
 
 
 def _jsonable(value: Any) -> Any:
@@ -309,6 +352,307 @@ def manifest_fingerprint(manifest: Mapping[str, Any]) -> str:
     """path / mtime を根拠にしない fixture / manifest fingerprint。"""
 
     return sha256_bytes(canonical_json_bytes(manifest, strip_file_locations=True))
+
+
+def _require_exact_keys(value: Mapping[str, Any], expected: set[str], *, label: str) -> None:
+    actual = {str(key) for key in value}
+    if actual != expected:
+        raise BoundaryAuditError(
+            f"{label} の field が schema と一致しません。",
+            details={"expected": sorted(expected), "actual": sorted(actual)},
+        )
+
+
+def _require_string(value: Any, *, label: str, pattern: str | None = None) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise BoundaryAuditError(f"{label} は空でない文字列が必要です。")
+    if "<" in value or ">" in value:
+        raise BoundaryAuditError(f"{label} に半角の山カッコを含められません。")
+    if "\n" in value or "\r" in value or "|" in value:
+        raise BoundaryAuditError(f"{label} に Markdown の行・列を壊す文字を含められません。")
+    if pattern is not None and re.fullmatch(pattern, value) is None:
+        raise BoundaryAuditError(f"{label} の形式が不正です。", details={"value": value})
+    return value
+
+
+def validate_boundary_audit(
+    value: Mapping[str, Any],
+    *,
+    expected_case_ids: Sequence[str] | None = None,
+    expected_base_fixture_fingerprint: str | None = None,
+    expected_benchmark_id: str | None = None,
+) -> dict[str, Any]:
+    """S9-1 の部分的な境界監査 artifact を strict に検証する。
+
+    この schema は transcript / glossary の gold を承認するものではない。
+    約時刻は自然文の観察メモとして保持し、production の秒数閾値には変換しない。
+    """
+
+    if not isinstance(value, Mapping):
+        raise BoundaryAuditError("boundary audit の root は object が必要です。")
+    root = dict(value)
+    _require_exact_keys(
+        root,
+        {
+            "schema",
+            "benchmark_id",
+            "base_fixture_fingerprint",
+            "audit_date",
+            "auditor",
+            "scope",
+            "policy",
+            "previous_display_order",
+            "cases",
+            "decision",
+        },
+        label="boundary audit root",
+    )
+    if root["schema"] != BOUNDARY_AUDIT_SCHEMA:
+        raise BoundaryAuditError("boundary audit schema が不正です。", details={"schema": root["schema"]})
+    benchmark_id = _require_string(root["benchmark_id"], label="benchmark_id")
+    if expected_benchmark_id is not None and benchmark_id != expected_benchmark_id:
+        raise BoundaryAuditError(
+            "boundary audit の benchmark_id と base manifest が一致しません。",
+            details={"expected": expected_benchmark_id, "actual": benchmark_id},
+        )
+    base_fingerprint = _require_string(
+        root["base_fixture_fingerprint"],
+        label="base_fixture_fingerprint",
+        pattern=r"[0-9a-f]{64}",
+    )
+    if expected_base_fixture_fingerprint is not None and base_fingerprint != expected_base_fixture_fingerprint:
+        raise BoundaryAuditError(
+            "boundary audit が参照する base fixture fingerprint と manifest が一致しません。",
+            details={"expected": expected_base_fixture_fingerprint, "actual": base_fingerprint},
+        )
+    audit_date = _require_string(root["audit_date"], label="audit_date", pattern=r"\d{4}-\d{2}-\d{2}")
+    try:
+        date.fromisoformat(audit_date)
+    except ValueError as exc:
+        raise BoundaryAuditError("audit_date は実在する ISO 日付である必要があります。", details={"audit_date": audit_date}) from exc
+    if root["auditor"] != "user":
+        raise BoundaryAuditError("auditor は user 固定です。")
+
+    scope = root["scope"]
+    if not isinstance(scope, Mapping):
+        raise BoundaryAuditError("scope は object が必要です。")
+    _require_exact_keys(
+        scope,
+        {"status", "source", "audited_dimensions", "not_audited_dimensions", "audio_fixture_identity"},
+        label="scope",
+    )
+    if scope["status"] != "partial_boundary_and_continuity":
+        raise BoundaryAuditError("scope.status は部分的な境界・連続性監査である必要があります。")
+    if scope["source"] != "user_audio_listening_feedback":
+        raise BoundaryAuditError("scope.source はユーザーの音声聴取所見である必要があります。")
+    if scope["audited_dimensions"] != ["opening_boundary", "speech_continuity"]:
+        raise BoundaryAuditError("scope.audited_dimensions が不正です。")
+    if scope["not_audited_dimensions"] != ["transcript_full_text", "glossary", "cue_anchor_exact_times"]:
+        raise BoundaryAuditError("scope.not_audited_dimensions が不正です。")
+    if scope["audio_fixture_identity"] != "fixed_audio_spans_unchanged":
+        raise BoundaryAuditError("固定音声 span の identity を変更する監査は許可されません。")
+
+    policy = root["policy"]
+    if not isinstance(policy, Mapping):
+        raise BoundaryAuditError("policy は object が必要です。")
+    _require_exact_keys(
+        policy,
+        {
+            "kind",
+            "meaningful_speech_required",
+            "background_audio_is_not_meaningful_speech",
+            "simple_onset_only_gate",
+            "whisper_timestamp_sole_authority",
+            "required_evidence",
+            "production_default",
+            "threshold_status",
+        },
+        label="policy",
+    )
+    expected_policy = {
+        "kind": "temporary_benchmark_policy",
+        "meaningful_speech_required": True,
+        "background_audio_is_not_meaningful_speech": True,
+        "simple_onset_only_gate": "forbidden",
+        "whisper_timestamp_sole_authority": False,
+        "required_evidence": ["audio_activity", "cue_context", "padding", "human_preview"],
+        "production_default": "defer_to_s9_plan_or_s9_4",
+        "threshold_status": "no_new_universal_seconds_threshold",
+    }
+    if dict(policy) != expected_policy:
+        raise BoundaryAuditError("policy が今回固定した暫定 benchmark policy と一致しません。")
+
+    expected_ids = tuple(expected_case_ids) if expected_case_ids is not None else None
+    if expected_ids is not None and (
+        len(expected_ids) != len(BOUNDARY_AUDIT_CASE_IDS)
+        or set(expected_ids) != set(BOUNDARY_AUDIT_CASE_IDS)
+    ):
+        raise BoundaryAuditError(
+            "S9-1 boundary audit の対象 case 集合が固定4 case と一致しません。",
+            details={"expected": list(BOUNDARY_AUDIT_CASE_IDS), "actual": list(expected_ids)},
+        )
+
+    previous_order = root["previous_display_order"]
+    if not isinstance(previous_order, list) or len(previous_order) != len(BOUNDARY_AUDIT_CASE_IDS):
+        raise BoundaryAuditError("previous_display_order は固定4件が必要です。")
+    expected_previous = [
+        (1, "lb4-clip002-short-proper-nouns"),
+        (2, "hpe-audio-variation"),
+        (3, "cgal-proper-nouns"),
+        (4, "mkw-long-local-asr"),
+    ]
+    previous_pairs: list[tuple[int, str]] = []
+    for entry in previous_order:
+        if not isinstance(entry, Mapping):
+            raise BoundaryAuditError("previous_display_order の要素は object が必要です。")
+        _require_exact_keys(entry, {"display_order", "case_id"}, label="previous_display_order item")
+        order = entry["display_order"]
+        case_id = _require_string(entry["case_id"], label="previous_display_order.case_id")
+        if isinstance(order, bool) or not isinstance(order, int):
+            raise BoundaryAuditError("display_order は整数が必要です。")
+        previous_pairs.append((order, case_id))
+    if previous_pairs != expected_previous:
+        raise BoundaryAuditError(
+            "previous_display_order と case ID の対応が固定所見と一致しません。",
+            details={"expected": expected_previous, "actual": previous_pairs},
+        )
+
+    cases = root["cases"]
+    if not isinstance(cases, list) or tuple(
+        item.get("case_id") for item in cases if isinstance(item, Mapping)
+    ) != BOUNDARY_AUDIT_CASE_IDS:
+        raise BoundaryAuditError("boundary audit cases の順序または case 集合が固定値と異なります。")
+    expected_opening = {
+        "no_material_issue_observed",
+        "no_meaningful_speech_at_opening",
+        "background_audio_without_meaningful_speech_at_opening",
+        "meaningful_speech_present_at_opening",
+    }
+    expected_continuity = {"not_audited", "long_internal_speech_gap"}
+    expected_outcomes = set(BOUNDARY_AUDIT_EXPECTED_OUTCOMES.values())
+    for case in cases:
+        if not isinstance(case, Mapping):
+            raise BoundaryAuditError("boundary audit case は object が必要です。")
+        _require_exact_keys(
+            case,
+            {
+                "case_id",
+                "display_order",
+                "source_feedback",
+                "opening_signal",
+                "internal_continuity",
+                "approximate_timing_note",
+                "expected_editorial_outcome",
+            },
+            label="boundary audit case",
+        )
+        case_id = _require_string(case["case_id"], label="case_id")
+        order = case["display_order"]
+        if isinstance(order, bool) or not isinstance(order, int) or order < 1:
+            raise BoundaryAuditError("case.display_order は正の整数が必要です。", details={"case_id": case_id})
+        expected_case = BOUNDARY_AUDIT_EXPECTED_CASES.get(case_id)
+        if expected_case is None:
+            raise BoundaryAuditError("boundary audit case ID が固定所見にありません。", details={"case_id": case_id})
+        _require_string(case["source_feedback"], label=f"{case_id}.source_feedback")
+        _require_string(case["approximate_timing_note"], label=f"{case_id}.approximate_timing_note")
+        if case["opening_signal"] not in expected_opening:
+            raise BoundaryAuditError("opening_signal が不正です。", details={"case_id": case_id})
+        if case["internal_continuity"] not in expected_continuity:
+            raise BoundaryAuditError("internal_continuity が不正です。", details={"case_id": case_id})
+        outcome = case["expected_editorial_outcome"]
+        if outcome not in expected_outcomes:
+            raise BoundaryAuditError("expected_editorial_outcome が不正です。", details={"case_id": case_id})
+        actual_contract = {
+            "display_order": order,
+            "opening_signal": case["opening_signal"],
+            "internal_continuity": case["internal_continuity"],
+            "expected_editorial_outcome": outcome,
+        }
+        if actual_contract != expected_case:
+            raise BoundaryAuditError(
+                "case の display_order / opening_signal / internal_continuity / expected_editorial_outcome が固定所見と一致しません。",
+                details={"case_id": case_id, "expected": expected_case, "actual": actual_contract},
+            )
+    decision = root["decision"]
+    if not isinstance(decision, Mapping):
+        raise BoundaryAuditError("decision は object が必要です。")
+    _require_exact_keys(
+        decision,
+        {
+            "boundary_audit_status",
+            "expected_editorial_outcomes_verified",
+            "gold_transcript_status",
+            "gold_glossary_status",
+            "gold_cue_anchor_status",
+            "s9_1_go",
+            "s9_2_ready",
+            "adopted_model",
+            "no_go_reasons",
+        },
+        label="decision",
+    )
+    if decision["boundary_audit_status"] != "partial_boundary_only":
+        raise BoundaryAuditError("boundary audit は transcript gold の完全監査に昇格できません。")
+    if decision["expected_editorial_outcomes_verified"] is not True:
+        raise BoundaryAuditError("expected editorial outcomes は machine verification 済みである必要があります。")
+    for key in ("gold_transcript_status", "gold_glossary_status", "gold_cue_anchor_status"):
+        if decision[key] != "unverified_provisional":
+            raise BoundaryAuditError(f"{key} は unverified_provisional のままにする必要があります。")
+    if decision["s9_1_go"] is not False or decision["s9_2_ready"] is not False:
+        raise BoundaryAuditError("境界部分監査だけで S9-1 Go / S9-2 ready にはできません。")
+    if decision["adopted_model"] is not None:
+        raise BoundaryAuditError("boundary audit 後も adopted_model は未決定である必要があります。")
+    if decision["no_go_reasons"] != ["gold_not_audited", "cue_proxy_blind_spot", "boundary_audit_is_partial"]:
+        raise BoundaryAuditError("no_go_reasons が fail-closed 契約と一致しません。")
+    return root
+
+
+def boundary_audit_fingerprint(value: Mapping[str, Any]) -> str:
+    """固定音声 fixture とは別に、境界監査証跡の fingerprint を返す。"""
+
+    validated = validate_boundary_audit(value)
+    return sha256_bytes(canonical_json_bytes(validated))
+
+
+def evaluate_boundary_audit(
+    value: Mapping[str, Any],
+    *,
+    expected_base_fixture_fingerprint: str | None = None,
+    expected_benchmark_id: str | None = None,
+) -> dict[str, Any]:
+    """境界監査の機械検証結果を返す。品質 Go 判定とは分離する。"""
+
+    validated = validate_boundary_audit(
+        value,
+        expected_base_fixture_fingerprint=expected_base_fixture_fingerprint,
+        expected_benchmark_id=expected_benchmark_id,
+    )
+    return {
+        "status": "pass",
+        "schema": validated["schema"],
+        "fingerprint": boundary_audit_fingerprint(validated),
+        "base_fixture_fingerprint": validated["base_fixture_fingerprint"],
+        "auditor": validated["auditor"],
+        "audit_date": validated["audit_date"],
+        "audit_status": validated["decision"]["boundary_audit_status"],
+        "expected_editorial_outcomes_verified": validated["decision"]["expected_editorial_outcomes_verified"],
+        "previous_display_order": validated["previous_display_order"],
+        "cases": [
+            {
+                "case_id": case["case_id"],
+                "display_order": case["display_order"],
+                "opening_signal": case["opening_signal"],
+                "internal_continuity": case["internal_continuity"],
+                "source_feedback": case["source_feedback"],
+                "approximate_timing_note": case["approximate_timing_note"],
+                "expected_editorial_outcome": case["expected_editorial_outcome"],
+            }
+            for case in validated["cases"]
+        ],
+        "policy": validated["policy"],
+        "scope": validated["scope"],
+        "decision": validated["decision"],
+    }
 
 
 fixture_fingerprint = manifest_fingerprint

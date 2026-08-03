@@ -1555,6 +1555,7 @@ data/{video_id}/ ...
 - [x] S9-1-2. 同じ音声 span、言語 ja、padding、出力 schema で候補モデルを実行し、YouTube VTT を baseline として比較する
 - [x] S9-1-3. gold transcript に対する日本語 CER、glossary の exact match / 誤り件数、cue の欠落・重複、候補区間の境界確認に必要な情報、wall time、CPU / memory、cache 前提を記録する
 - [x] S9-1-4. Go の場合の採用モデル・設定、または No-Go の未採用理由、再現 command、fixture fingerprint、測定日、Go / No-Go を `docs/benchmarks/` に固定する。今回の No-Go では S9 高精度実装を fallback-only として止める
+- [x] S9-1-BND-AUDIT. ユーザーの前回表示順と case ID を固定対応し、開始境界・発話連続性だけの partial audit、expected editorial outcome、strict schema、boundary artifact の fingerprint を記録した。full transcript / glossary / cue anchor gold は未監査のままにし、S9-1 No-Go と S9-2 以降停止を維持する
 
 **テスト:** benchmark harness の deterministic fixture、gold transcript / glossary の固定値検証、paired VTT / Whisper 比較、事前宣言 gate の判定、未知出力 schema の拒否、途中終了 / timeout、再実行時の同一入力比較、wall time / peak memory budget の記録、`git diff --check`。実ネットワーク・従量課金 API・実 YouTube 書き込みは使わない。
 
@@ -1567,7 +1568,9 @@ data/{video_id}/ ...
 
 **S9-1-AUDIT-PACK 準備済み（2026-08-03、監査前）:** 4 case の固定 range、16,000 Hz mono WAV の絶対 path・bytes・SHA-256、provisional gold transcript 全文、glossary、cue anchor、最小返答形式を [`docs/benchmarks/s9-1-human-audit.md`](./benchmarks/s9-1-human-audit.md) にまとめた。`benchmarks/s9_audit_packet.py check` は `s9-1-cases.json` と音声 cache の実体を読み取り、文書の転記一致を再検査する。ユーザーの音声確認前のため、S9-1 の進捗、Done 条件、gold audit status、採用モデル判定は変更していない。
 
-**次アクション:** gold の独立音声監査が完了するまで、S9-2 以降を高精度モデル採用経路として進めない。監査後に同じ fixture と gate で再判定するか、fallback-only を維持する。
+**S9-1-BND-AUDIT 完了記録（2026-08-03、partial boundary audit）:** ユーザーが確認した前回表示順 1〜4 を `lb4-clip002-short-proper-nouns`、`hpe-audio-variation`、`cgal-proper-nouns`、`mkw-long-local-asr` に対応付け、strict artifact [`s9-1-boundary-audit.json`](./benchmarks/s9-1-boundary-audit.json) として自然文所見を保存した。機械検証する outcome は順に `pass`、`opening_trim_or_review_required`、`opening_trim_or_review_required`、`internal_gap_removal_or_review_required`。case 1 の `pass` は今回確認した境界・発話連続性で追加処置なしという意味だけで、全文品質や最終 short の品質承認ではない。transcript / glossary / cue anchor exact times は `unverified_provisional` のまま、S9-1 は No-Go、S9-2 以降は未着手のまま維持する。base fixture fingerprint は `6dae657f2b803c54c6af1afe4ed54ad4f447324c32802e1943dc5711a9bf1718` のまま変更せず、boundary audit は独立 fingerprint `0af9f5ce7888eabcc67fbe767db25c2e4da97c823ea76781eb9aeb25991fd9a1` で追跡する。
+
+**次アクション:** この部分監査だけでは S9-1 の gold audit gate を満たさず、S9-2 以降を開始可能にしない。transcript / glossary / cue anchor の独立音声監査を完了した後、同じ固定 fixture・boundary artifact・評価 gate で再判定するか、fallback-only を維持する。
 
 **コミット境界:** `docs/benchmarks/` と harness / fixture の production 非変更コミット。メッセージに `S9-1` を含める。S9-1 の計測証跡だけで S9 フェーズ完了にはしない。
 
@@ -1634,6 +1637,8 @@ data/{video_id}/ ...
 
 **前提:** S9-2 の resolver / digest / candidate lineage、S9-3 の runtime / audio span、S6 の `short_cut.py`、S1 の `telop.py`、S3 の整数ミリ秒境界、U6 の line state / review fingerprint。S9-1 が fallback-only の場合は coarse artifact での明示 fallback を実装し、高精度扱いにしない。downstream は S9-2 の artifact reference を受け取り、resolver を再実行しない。
 
+**S9-1 境界品質の分離契約:** 親候補の固定音声 span は冒頭または内部に無発話を含み得るため、その span 自体を切り詰めたり fixture identity を変更したりしない。最終 cutplan / final short は冒頭の無発話と長い内部無発話を残さず、audio activity・cue・padding・human preview と人確認で opening trim または internal gap removal / review を判定する。Whisper timestamp 単独の正本、単純 onset-only gate、今回の約秒数の production 閾値化は許可しない。
+
 **変更ファイル範囲:** `src/yt_live_kit/services/short_cut.py`、`src/yt_live_kit/services/telop.py`、`src/yt_live_kit/services/shorts_queue.py`、`src/yt_live_kit/services/shorts_line.py`、`src/yt_live_kit/ui/components/shorts_queue.py`、cutplan / telop / line model の fingerprint / lineage field、関連 service / UI unit test（`tests/test_short_cut.py`、`tests/test_telop.py`、`tests/test_shorts_queue.py`、`tests/test_shorts_line.py`、`tests/test_ui_shorts_queue.py`、`tests/test_ui_shorts_line.py`）。`clips.py` の親候補生成は VTT 入力を維持し、`ytdlp.py` の `ja.vtt` 保存契約は S9-0 のものを利用して再変更しない。
 
 **作業:**
@@ -1687,6 +1692,8 @@ data/{video_id}/ ...
 **対応要件 / AC:** 運用目標、FR-22、FR-25、FR-30、FR-33、FR-35、FR-36、AC-30、AC-35、AC-37。
 
 **前提:** S9-1〜S9-5 の完了、S9-1 と同じ 3〜5 本の代表素材・gold transcript・固有名詞 glossary・固定 gate、可能なら短い候補と 180 秒超候補を含む実配信アーカイブ 2 本以上、ユーザーが確認できるローカル runtime / model。実 YouTube upload はこのタスクの自動試験に含めない。
+
+**S9-1 境界 evidence の再確認:** final short preview では4 caseの editorial outcome（case 1 は今回の境界・連続性で追加処置なし、case 2・3 は opening trim / review、case 4 は internal gap removal / review）を再確認する。親候補の無発話を許すことと、最終 short に無発話を残さないことは別の acceptance とし、S9-1 の partial auditだけで S9 を完了・Go にしない。
 
 **変更ファイル範囲:** `docs/benchmarks/` の A/B 記録、S9 専用受け入れ fixture / test、`docs/execution-plan-v3.md` と `docs/requirements-v3.md` のチェック更新。既存 production data、README、投稿 API は変更しない。
 

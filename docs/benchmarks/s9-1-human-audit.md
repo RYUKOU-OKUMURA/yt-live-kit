@@ -43,6 +43,34 @@ benchmark ID: `s9-1-20260803`
 4. cue anchor は `anchor-1` からのラベルと絶対時刻を確認します。時刻またはラベルが違う場合は anchor ID と訂正値を返します。
 5. 下の最小フォーマットを case ごとに1回ずつ、合計4回返します。
 
+## 境界・発話連続性の部分監査（2026-08-03）
+
+監査者: `user` / 監査日: `2026-08-03`
+boundary audit fingerprint: `0af9f5ce7888eabcc67fbe767db25c2e4da97c823ea76781eb9aeb25991fd9a1`
+base fixture fingerprint: `6dae657f2b803c54c6af1afe4ed54ad4f447324c32802e1943dc5711a9bf1718`
+
+これはユーザーが4本の固定音声を聴いた、開始境界・発話連続性だけの部分監査です。transcript 全文、glossary、cue anchor の正確な時刻は audited にしません。固定音声 span、video ID、range、bytes、SHA-256 は変更していません。
+
+### 前回表示順と所見
+
+| 前回表示順 | case ID | 自然文の所見 | expected editorial outcome |
+|---:|---|---|---|
+| 1 | `lb4-clip002-short-proper-nouns` | 前回表示順 case 1（lb4-clip002-short-proper-nouns）は「ほぼ問題ない」。 | `pass` |
+| 2 | `hpe-audio-variation` | 前回表示順 case 2（hpe-audio-variation）は開始から約6秒まで意味ある発話がなく、ショート開始として不利、開始境界NG。 | `opening_trim_or_review_required` |
+| 3 | `cgal-proper-nouns` | 前回表示順 case 3（cgal-proper-nouns）も開始から約6秒まで意味ある発話がなく、開始境界NG。背景音があっても意味ある発話がなければ編集上の無発話として扱う。 | `opening_trim_or_review_required` |
+| 4 | `mkw-long-local-asr` | 前回表示順 case 4（mkw-long-local-asr）は開始直後に発話はあるが、約2秒から26秒までほぼ発話がなく、ショートとして致命的。 | `internal_gap_removal_or_review_required` |
+
+### 部分監査の判定契約
+
+- 背景音があっても意味ある発話がなければ、編集上は無発話として扱う。
+- case 1 の `pass` は、今回確認した境界・発話連続性で追加処置なしという意味だけであり、transcript 全文、glossary、cue anchor、最終 short の品質承認ではない。
+- 約6秒、約2〜26秒という所見は観察メモであり、production の普遍的な秒数閾値ではない。
+- 開始直後に一言あれば通る単純な onset-only gate は使わない。
+- Whisper timestamp を唯一の境界正本にせず、audio activity、cue、padding、human preview を併用する。
+- 親候補の固定音声 span を良好と判定することと、最終 short cutplan から冒頭の無発話・長い内部無発話を残さないことは別判定である。
+
+S9-1 は transcript / glossary gold が未完了で、既存 cue proxy の盲点も判明したため No-Go のままです。S9-2 以降を開始可能にしません。
+
 ## 音声ファイルの hash と size
 
 | case ID | bytes | SHA-256 |
@@ -52,7 +80,7 @@ benchmark ID: `s9-1-20260803`
 | `cgal-proper-nouns` | 3840102 | `b3341ee5bbe1288e9919eacb3b94c4aa7fb49001dfd9d5ee8f39a48736e427ba` |
 | `mkw-long-local-asr` | 5760114 | `aa8cd9dd543a3e6b84c25319aeed2c8fdc7bf1761aa45dcade65db179977d4ba` |
 
-## Case 1: `lb4-clip002-short-proper-nouns`
+## Fixture case 1: `lb4-clip002-short-proper-nouns`
 
 ### 固定入力
 
@@ -73,27 +101,27 @@ cases.json の `gold.text` を機械的に転記した値です。音声監査�
 いうのがあるからですね。なんか、僕の個人的な感覚ですけど、クロードの方が割と本質的な話ができるっていうか、なんて言ったらいいかな。やっぱりまだまだなんだかんだ自分はこういうのを作りたいんだよねの抽象的なところで壁打ちをしていって、なんでそれが作りたいの、みたいな本質的な問いを深めていくっていうのはクロードの方がやりやすいんですよね。で、コーデックスは本当に実装とかさせたらマジでエラー少なくやってくれるんで、理想はね、使い分けるがいいんでしょうけど、またその要件定義とかを書く時に自分でしっかりと頭の中整理しながら書ける人だったら、もうクロードいらずに実装だけコーデックスに任せるとかでもいいような気もするんすけどね。
 ```
 
-### Glossary
+### Glossary（gold の完全監査は未実施）
 
-| glossary label | provisional expected | 人手確認 |
+| glossary label | provisional expected | gold 監査状態 |
 |---|---|---|
-| `glossary-1` | `クロード` | 承認 / 訂正 |
-| `glossary-2` | `コーデックス` | 承認 / 訂正 |
-| `glossary-3` | `要件定義` | 承認 / 訂正 |
+| `glossary-1` | `クロード` | 未監査（境界部分監査のみ） |
+| `glossary-2` | `コーデックス` | 未監査（境界部分監査のみ） |
+| `glossary-3` | `要件定義` | 未監査（境界部分監査のみ） |
 
-### Cue anchor
+### Cue anchor（正確な時刻の監査は未実施）
 
 ラベルは fixture の anchor ID です。時刻は video の絶対時刻で、音声ファイル内の相対時刻ではありません。
 
-| anchor label | 絶対 range | source time | 人手確認 |
+| anchor label | 絶対 range | source time | gold 監査状態 |
 |---|---|---|---|
-| `anchor-1` | `2853160–2857000 ms` | `00:47:33.160〜00:47:37.000` | 承認 / 訂正 |
-| `anchor-2` | `2857000–2865000 ms` | `00:47:37.000〜00:47:45.000` | 承認 / 訂正 |
-| `anchor-3` | `2865000–2879000 ms` | `00:47:45.000〜00:47:59.000` | 承認 / 訂正 |
-| `anchor-4` | `2879000–2897000 ms` | `00:47:59.000〜00:48:17.000` | 承認 / 訂正 |
-| `anchor-5` | `2897000–2910000 ms` | `00:48:17.000〜00:48:30.000` | 承認 / 訂正 |
+| `anchor-1` | `2853160–2857000 ms` | `00:47:33.160〜00:47:37.000` | 未監査（境界部分監査のみ） |
+| `anchor-2` | `2857000–2865000 ms` | `00:47:37.000〜00:47:45.000` | 未監査（境界部分監査のみ） |
+| `anchor-3` | `2865000–2879000 ms` | `00:47:45.000〜00:47:59.000` | 未監査（境界部分監査のみ） |
+| `anchor-4` | `2879000–2897000 ms` | `00:47:59.000〜00:48:17.000` | 未監査（境界部分監査のみ） |
+| `anchor-5` | `2897000–2910000 ms` | `00:48:17.000〜00:48:30.000` | 未監査（境界部分監査のみ） |
 
-## Case 2: `mkw-long-local-asr`
+## Fixture case 2: `mkw-long-local-asr`
 
 ### 固定入力
 
@@ -114,30 +142,30 @@ cases.json の `gold.text` を機械的に転記した値です。音声監査�
 よくわかんないけど、これワンチャンローカルで使えんかな。えっと、OllamaとかでローカルLLMを立ち上げて、そのモデルを設定して使うことって可能です。これワンチャンローカルで行けるんだったらマジありだよな。うん。Together AIの料金がわかんねえな。Distil Large V3。あ、こっちか。ん？ 文字起こし。あ、こっちか。ああ。え、0.0015ドル。1分あたり0.0015ドル。だいぶ安いね。だいぶ安いんじゃない？ まあ、音質もだけど。Whisperの部分だけローカルにする。そういうのやってる人いそうだよな。そういうのこれやれなくはないんじゃないかな。いや、マジ楽しみっすね。メモリ8GB。あ、ストレージ512。ああ、いいっすね。なんか新しいガジェットっていいっすよね、マジで。ああ。はいはいはいはい。はい。なるほど。
 ```
 
-### Glossary
+### Glossary（gold の完全監査は未実施）
 
-| glossary label | provisional expected | 人手確認 |
+| glossary label | provisional expected | gold 監査状態 |
 |---|---|---|
-| `glossary-1` | `Ollama` | 承認 / 訂正 |
-| `glossary-2` | `ローカルLLM` | 承認 / 訂正 |
-| `glossary-3` | `Together AI` | 承認 / 訂正 |
-| `glossary-4` | `Distil Large V3` | 承認 / 訂正 |
-| `glossary-5` | `Whisper` | 承認 / 訂正 |
+| `glossary-1` | `Ollama` | 未監査（境界部分監査のみ） |
+| `glossary-2` | `ローカルLLM` | 未監査（境界部分監査のみ） |
+| `glossary-3` | `Together AI` | 未監査（境界部分監査のみ） |
+| `glossary-4` | `Distil Large V3` | 未監査（境界部分監査のみ） |
+| `glossary-5` | `Whisper` | 未監査（境界部分監査のみ） |
 
-### Cue anchor
+### Cue anchor（正確な時刻の監査は未実施）
 
 ラベルは fixture の anchor ID です。時刻は video の絶対時刻で、音声ファイル内の相対時刻ではありません。
 
-| anchor label | 絶対 range | source time | 人手確認 |
+| anchor label | 絶対 range | source time | gold 監査状態 |
 |---|---|---|---|
-| `anchor-1` | `1120000–1140000 ms` | `00:18:40.000〜00:19:00.000` | 承認 / 訂正 |
-| `anchor-2` | `1140000–1165000 ms` | `00:19:00.000〜00:19:25.000` | 承認 / 訂正 |
-| `anchor-3` | `1165000–1190000 ms` | `00:19:25.000〜00:19:50.000` | 承認 / 訂正 |
-| `anchor-4` | `1190000–1220000 ms` | `00:19:50.000〜00:20:20.000` | 承認 / 訂正 |
-| `anchor-5` | `1220000–1260000 ms` | `00:20:20.000〜00:21:00.000` | 承認 / 訂正 |
-| `anchor-6` | `1260000–1300000 ms` | `00:21:00.000〜00:21:40.000` | 承認 / 訂正 |
+| `anchor-1` | `1120000–1140000 ms` | `00:18:40.000〜00:19:00.000` | 未監査（境界部分監査のみ） |
+| `anchor-2` | `1140000–1165000 ms` | `00:19:00.000〜00:19:25.000` | 未監査（境界部分監査のみ） |
+| `anchor-3` | `1165000–1190000 ms` | `00:19:25.000〜00:19:50.000` | 未監査（境界部分監査のみ） |
+| `anchor-4` | `1190000–1220000 ms` | `00:19:50.000〜00:20:20.000` | 未監査（境界部分監査のみ） |
+| `anchor-5` | `1220000–1260000 ms` | `00:20:20.000〜00:21:00.000` | 未監査（境界部分監査のみ） |
+| `anchor-6` | `1260000–1300000 ms` | `00:21:00.000〜00:21:40.000` | 未監査（境界部分監査のみ） |
 
-## Case 3: `cgal-proper-nouns`
+## Fixture case 3: `cgal-proper-nouns`
 
 ### 固定入力
 
@@ -158,31 +186,31 @@ cases.json の `gold.text` を機械的に転記した値です。音声監査�
 最近のGPUも高性能になってきてるので、そんなハードなゲームでなければそこそこ楽しめるのでは。行けるんすかね。あ、これか。DirectXはMicrosoftが開発したWindows向けのゲームや映像音声処理で使われるAPIの集合です。APIの集合です。DirectXを使うとゲーム側はPCごとに違うCPUやGPUの細かい違いをあまり意識せずにグラフィック処理ができます。WindowsのPCゲームではDirectXが前提になっていることが多く、ハードウェアの性能を効率よく引き出すために使われます。うーん。あ、Steamのゲーム説明でDX12対応と書いてあれば、そのゲームがそのAPI世代を前提にグラフィック処理を行うという。はあ、そういうのがあんだ。すげえな。すげえ世界だな。あ、スケルトンは初代iMac。これもっと前、見たことないっすもん。こんなん全然見たことない。すごいっすね。これがいわゆるあれですよね。これこの上にディスプレイをまた自分でつけてってことっすよね。そういうことっすよね。Apple IIは相当高価な商品だったはず。
 ```
 
-### Glossary
+### Glossary（gold の完全監査は未実施）
 
-| glossary label | provisional expected | 人手確認 |
+| glossary label | provisional expected | gold 監査状態 |
 |---|---|---|
-| `glossary-1` | `DirectX` | 承認 / 訂正 |
-| `glossary-2` | `Microsoft` | 承認 / 訂正 |
-| `glossary-3` | `Windows` | 承認 / 訂正 |
-| `glossary-4` | `Steam` | 承認 / 訂正 |
-| `glossary-5` | `DX12` | 承認 / 訂正 |
-| `glossary-6` | `iMac` | 承認 / 訂正 |
-| `glossary-7` | `Apple II` | 承認 / 訂正 |
+| `glossary-1` | `DirectX` | 未監査（境界部分監査のみ） |
+| `glossary-2` | `Microsoft` | 未監査（境界部分監査のみ） |
+| `glossary-3` | `Windows` | 未監査（境界部分監査のみ） |
+| `glossary-4` | `Steam` | 未監査（境界部分監査のみ） |
+| `glossary-5` | `DX12` | 未監査（境界部分監査のみ） |
+| `glossary-6` | `iMac` | 未監査（境界部分監査のみ） |
+| `glossary-7` | `Apple II` | 未監査（境界部分監査のみ） |
 
-### Cue anchor
+### Cue anchor（正確な時刻の監査は未実施）
 
 ラベルは fixture の anchor ID です。時刻は video の絶対時刻で、音声ファイル内の相対時刻ではありません。
 
-| anchor label | 絶対 range | source time | 人手確認 |
+| anchor label | 絶対 range | source time | gold 監査状態 |
 |---|---|---|---|
-| `anchor-1` | `4220000–4238000 ms` | `01:10:20.000〜01:10:38.000` | 承認 / 訂正 |
-| `anchor-2` | `4238000–4260000 ms` | `01:10:38.000〜01:11:00.000` | 承認 / 訂正 |
-| `anchor-3` | `4260000–4285000 ms` | `01:11:00.000〜01:11:25.000` | 承認 / 訂正 |
-| `anchor-4` | `4285000–4310000 ms` | `01:11:25.000〜01:11:50.000` | 承認 / 訂正 |
-| `anchor-5` | `4310000–4340000 ms` | `01:11:50.000〜01:12:20.000` | 承認 / 訂正 |
+| `anchor-1` | `4220000–4238000 ms` | `01:10:20.000〜01:10:38.000` | 未監査（境界部分監査のみ） |
+| `anchor-2` | `4238000–4260000 ms` | `01:10:38.000〜01:11:00.000` | 未監査（境界部分監査のみ） |
+| `anchor-3` | `4260000–4285000 ms` | `01:11:00.000〜01:11:25.000` | 未監査（境界部分監査のみ） |
+| `anchor-4` | `4285000–4310000 ms` | `01:11:25.000〜01:11:50.000` | 未監査（境界部分監査のみ） |
+| `anchor-5` | `4310000–4340000 ms` | `01:11:50.000〜01:12:20.000` | 未監査（境界部分監査のみ） |
 
-## Case 4: `hpe-audio-variation`
+## Fixture case 4: `hpe-audio-variation`
 
 ### 固定入力
 
@@ -203,29 +231,29 @@ cases.json の `gold.text` を機械的に転記した値です。音声監査�
 MacでHHKBを最大限に利用するには、HHKBの物理的なファンクションキーとは別にmacOS固有のファンクションキーをHHKB上のどこかのキーに割り当てるのが最もスマートな方法です。これがしたいんだよね。そう、それがしたいんだよね。ただ、ファンクションキーを押してるとこうなるよってことなんだよね。まあ、みんなこんな感じのことをやってるのか。すごいな。面白。
 ```
 
-### Glossary
+### Glossary（gold の完全監査は未実施）
 
-| glossary label | provisional expected | 人手確認 |
+| glossary label | provisional expected | gold 監査状態 |
 |---|---|---|
-| `glossary-1` | `HHKB` | 承認 / 訂正 |
-| `glossary-2` | `Mac` | 承認 / 訂正 |
-| `glossary-3` | `macOS` | 承認 / 訂正 |
-| `glossary-4` | `ファンクションキー` | 承認 / 訂正 |
+| `glossary-1` | `HHKB` | 未監査（境界部分監査のみ） |
+| `glossary-2` | `Mac` | 未監査（境界部分監査のみ） |
+| `glossary-3` | `macOS` | 未監査（境界部分監査のみ） |
+| `glossary-4` | `ファンクションキー` | 未監査（境界部分監査のみ） |
 
-### Cue anchor
+### Cue anchor（正確な時刻の監査は未実施）
 
 ラベルは fixture の anchor ID です。時刻は video の絶対時刻で、音声ファイル内の相対時刻ではありません。
 
-| anchor label | 絶対 range | source time | 人手確認 |
+| anchor label | 絶対 range | source time | gold 監査状態 |
 |---|---|---|---|
-| `anchor-1` | `8640000–8660000 ms` | `02:24:00.000〜02:24:20.000` | 承認 / 訂正 |
-| `anchor-2` | `8660000–8680000 ms` | `02:24:20.000〜02:24:40.000` | 承認 / 訂正 |
-| `anchor-3` | `8680000–8710000 ms` | `02:24:40.000〜02:25:10.000` | 承認 / 訂正 |
-| `anchor-4` | `8710000–8730000 ms` | `02:25:10.000〜02:25:30.000` | 承認 / 訂正 |
+| `anchor-1` | `8640000–8660000 ms` | `02:24:00.000〜02:24:20.000` | 未監査（境界部分監査のみ） |
+| `anchor-2` | `8660000–8680000 ms` | `02:24:20.000〜02:24:40.000` | 未監査（境界部分監査のみ） |
+| `anchor-3` | `8680000–8710000 ms` | `02:24:40.000〜02:25:10.000` | 未監査（境界部分監査のみ） |
+| `anchor-4` | `8710000–8730000 ms` | `02:25:10.000〜02:25:30.000` | 未監査（境界部分監査のみ） |
 
-## ユーザー返答の最小フォーマット
+## 将来の full-gold 監査に使う返答フォーマット
 
-以下を case ごとに4回返してください。承認の場合は `承認`、訂正の場合は全文または訂正対象が特定できる値を書いてください。
+今回の部分監査は下の形式による transcript / glossary / cue anchor の full-gold 承認ではありません。将来この範囲を監査する場合だけ、case ごとに4回返してください。
 
 ```text
 case ID: lb4-clip002-short-proper-nouns
@@ -236,22 +264,22 @@ cue anchor: 承認 / 訂正
 監査日: YYYY-MM-DD
 ```
 
-訂正時は、transcript は訂正後の全文、glossary は用語ごとの期待表記、cue anchor は `anchor-ID: 絶対 range / ラベル` の形式で返してください。4 case 全件について transcript、glossary、cue anchor の3項目を埋めてください。
+訂正時は、transcript は訂正後の全文、glossary は用語ごとの期待表記、cue anchor は `anchor-ID: 絶対 range / ラベル` の形式で返してください。4 case 全件の3項目がそろうまで gold は未監査のままです。
 
-## 監査後の次手順
+## 今回の監査記録と次手順
 
-1. ユーザーの4 case 分の返答を受け取り、監査者・監査日と、承認または訂正の根拠を記録します。返答前に `audit_status` を変更しません。
-2. 訂正があれば `s9-1-cases.json` の gold.text、gold.glossary、gold.cue_anchors_ms へ人手の結果だけを反映します。音声 path、bytes、SHA-256、video ID、absolute range は固定したままにします。
-3. 4 case 全件の監査がそろった後、fixture fingerprint を再計算し、同じ4音声の hash / size と protocol の normalization、cue rule、wall time、memory gate が変わっていないことを確認します。
-4. [`s9-1-protocol.md`](./s9-1-protocol.md) の同じ cold / warm 手順で、固定した4 case と候補2モデルを再測定します。gold だけを監査結果へ更新し、音声 span や評価 gate を都合よく変更しません。
-5. paired median CER 相対改善、glossary exact match 非悪化、cue 欠落・重複率、cold / warm wall time、peak memory、gold audit 必須条件を同じ gate で判定します。
-6. 全 gate を満たした場合だけ採用モデルと設定を決めます。未達なら No-Go とし、既存 YouTube VTT の fallback-only を維持します。人手監査済みでも自動的に Go にはしません。
+1. 今回は boundary / speech continuity の partial audit として記録しました。transcript 全文、glossary、cue anchor exact times の audit_status は変更しません。
+2. 将来 transcript / glossary / cue anchor を監査する場合も、訂正は `s9-1-cases.json` の gold へ人手の結果だけを反映します。音声 path、bytes、SHA-256、video ID、absolute range は固定したままにします。
+3. full-gold 監査がそろった後だけ fixture fingerprint を再計算し、boundary audit の独立 fingerprint と base fixture fingerprint の関係を記録します。今回の境界 artifact は base fixture fingerprint に含めず、既存 fixture identity を保持しています。
+4. [`s9-1-protocol.md`](./s9-1-protocol.md) の同じ cold / warm 手順で、固定した4 case と候補2モデルを再測定します。gold だけを更新し、音声 span や評価 gate を都合よく変更しません。
+5. paired median CER 相対改善、glossary exact match 非悪化、cue 欠落・重複率、cold / warm wall time、peak memory、gold audit 必須条件を同じ gate で判定します。今回の部分監査だけでは adopted model を決めません。
 
-再測定と採用判定が完了するまで、このパケット自体は S9-1 の Done 証跡ではなく、監査の準備済み証跡として扱います。
+今回の境界監査 artifact、benchmark report、S9-1 の進捗は、正式 gold 未完了・No-Go・S9-2 以降停止のままです。
 
 ## 関連証跡
 
 - [`s9-1-cases.json`](./s9-1-cases.json): 固定 fixture と provisional gold の正本
+- [`s9-1-boundary-audit.json`](./s9-1-boundary-audit.json): 境界・発話連続性だけの strict audit artifact
 - [`s9-1-protocol.md`](./s9-1-protocol.md): 同じ評価契約・gate・再現手順
 - [`s9-1-report.md`](./s9-1-report.md): 現在の provisional 指標と No-Go
 - [`s9-1-report.json`](./s9-1-report.json): 機械可読な現在の gate status

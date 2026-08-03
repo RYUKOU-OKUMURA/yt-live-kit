@@ -19,7 +19,11 @@ from typing import Any, Mapping
 # できるようにする。実行時の外部 path は受け取らず、この file の親だけを使う。
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from benchmarks.s9_benchmark import manifest_fingerprint, sha256_file
+from benchmarks.s9_benchmark import (
+    evaluate_boundary_audit,
+    manifest_fingerprint,
+    sha256_file,
+)
 
 
 CASE_IDS = (
@@ -264,6 +268,17 @@ def _representative_cases(fixture: Mapping[str, Any]) -> list[dict[str, Any]]:
     return result
 
 
+def _load_boundary_audit(path: Path, fixture: Mapping[str, Any]) -> dict[str, Any]:
+    value = _read_json(path)
+    result = evaluate_boundary_audit(
+        value,
+        expected_base_fixture_fingerprint=manifest_fingerprint(fixture),
+        expected_benchmark_id=fixture["benchmark_id"],
+    )
+    result["artifact"] = str(path)
+    return result
+
+
 def build_comparison(
     *,
     manifest_path: Path,
@@ -271,8 +286,12 @@ def build_comparison(
     production_before: Path,
     production_after: Path,
     parity_path: Path,
+    boundary_audit_path: Path | None = None,
 ) -> dict[str, Any]:
     fixture = _read_json(manifest_path)
+    if boundary_audit_path is None:
+        raise ValueError("boundary audit artifact is required for the canonical S9-1 comparison report")
+    boundary_audit = _load_boundary_audit(boundary_audit_path, fixture)
     models = [
         _model_report(name=name, fixture=fixture, cold_path=run_paths[name]["cold"], warm_path=run_paths[name]["warm"])
         for name in MODEL_NAMES
@@ -284,8 +303,27 @@ def build_comparison(
     medians = {model["name"]: model["quality"]["paired_median_relative_cer_improvement"] for model in models}
     runtime_report = _read_json(run_paths[MODEL_NAMES[0]]["cold"])["whisper_runtime"]
     evaluation = fixture["gates"]
-    return {
-        "schema": "s9-1-comparison-report-v2",
+    decision_reason = "gold transcript は音声の独立人手監査前で、品質数値を採用モデル決定の根拠へ昇格できない。"
+    no_go_reasons = ["gold_not_audited"]
+    residual_risks = [
+        "gold は既存 VTT / transcript / ASS / cutplan を文脈利用した仮作成で、音声の独立人手監査をしていない。",
+        "cold は OS page cache を消去した完全 cold ではなく、各 model の cold wave と warm wave を分離した reuse 観測である。",
+        "mKwn / CGal / hPe は公開 YouTube の audio-only span 取得で、client / network 条件差が残る。",
+        "candidate cue は raw のまま評価し、rolling VTT dedupe を候補へ適用していない。",
+        "モデルは Git 管理外の手動 cache にあり、production 自動 download は実装していない。",
+    ]
+    decision_reason += " 境界・発話連続性の所見は部分監査であり、既存 cue proxy の盲点も判明したため、境界監査だけでは No-Go を解除しない。"
+    no_go_reasons.extend(["cue_proxy_blind_spot", "boundary_audit_is_partial"])
+    residual_risks.extend(
+        [
+            "境界監査は transcript / glossary / cue anchor exact times の承認ではなく、4 case の部分的な人手所見である。",
+            "case 1 の pass は今回確認した境界・発話連続性で追加処置なしという意味だけで、全文品質や最終 short の品質承認ではない。",
+            "case 2・3 の約6秒、case 4 の約2〜26秒は今回の観察メモであり、production の普遍的な秒数閾値ではない。",
+            "親候補の固定 span と最終 short cutplan の品質は分離し、S9-4 / S9-6 では audio activity・cue・padding・human preview を併用する必要がある。",
+        ]
+    )
+    report = {
+        "schema": "s9-1-comparison-report-v3",
         "benchmark_id": fixture["benchmark_id"],
         "measurement_date": fixture["measurement_date"],
         "fixture_fingerprint": manifest_fingerprint(fixture),
@@ -300,7 +338,9 @@ def build_comparison(
             "adopted_model": None,
             "go": False,
             "status": "no_go",
-            "reason": "gold transcript は音声の独立人手監査前で、品質数値を採用モデル決定の根拠へ昇格できない。",
+            "reason": decision_reason,
+            "no_go_reasons": no_go_reasons,
+            "s9_2_ready": False,
             "fallback_only": "既存 YouTube VTT baseline を fallback-only とし、S9-3 の高精度モデル採用へ進めない。",
         },
         "evaluation_contract": {
@@ -308,6 +348,7 @@ def build_comparison(
             "normalization": fixture["normalization"],
             "cue_rule": fixture["cue_rule"],
             "gates": evaluation,
+            "boundary_policy": boundary_audit["policy"],
         },
         "representative_cases": _representative_cases(fixture),
         "models": models,
@@ -345,17 +386,13 @@ def build_comparison(
                 for name in MODEL_NAMES
             ]
             + [
-                "uv run python benchmarks/s9_compare.py --manifest docs/benchmarks/s9-1-cases.json --q5-cold ... --q5-warm ... --turbo-cold ... --turbo-warm ... --output-json docs/benchmarks/s9-1-report.json --output-md docs/benchmarks/s9-1-report.md"
+                "uv run python benchmarks/s9_compare.py --manifest docs/benchmarks/s9-1-cases.json --boundary-audit docs/benchmarks/s9-1-boundary-audit.json --q5-cold ... --q5-warm ... --turbo-cold ... --turbo-warm ... --output-json docs/benchmarks/s9-1-report.json --output-md docs/benchmarks/s9-1-report.md"
             ],
         },
-        "residual_risks": [
-            "gold は既存 VTT / transcript / ASS / cutplan を文脈利用した仮作成で、音声の独立人手監査をしていない。",
-            "cold は OS page cache を消去した完全 cold ではなく、各 model の cold wave と warm wave を分離した reuse 観測である。",
-            "mKwn / CGal / hPe は公開 YouTube の audio-only span 取得で、client / network 条件差が残る。",
-            "candidate cue は raw のまま評価し、rolling VTT dedupe を候補へ適用していない。",
-            "モデルは Git 管理外の手動 cache にあり、production 自動 download は実装していない。",
-        ],
+        "residual_risks": residual_risks,
     }
+    report["boundary_audit"] = boundary_audit
+    return report
 
 
 def markdown_report(report: Mapping[str, Any]) -> str:
@@ -371,6 +408,32 @@ def markdown_report(report: Mapping[str, Any]) -> str:
         "",
         "q5 / turbo とも CER、glossary、cue、wall time、peak RSS の技術 gate は通過したが、gold audit gate が fail closed した。",
         "",
+    ]
+    boundary_audit = report.get("boundary_audit")
+    if isinstance(boundary_audit, Mapping):
+        lines += [
+            "## 境界・発話連続性の部分監査",
+            "",
+            f"監査者: {boundary_audit['auditor']} / 監査日: {boundary_audit['audit_date']}",
+            f"boundary audit fingerprint: `{boundary_audit['fingerprint']}`",
+            f"base fixture fingerprint: `{boundary_audit['base_fixture_fingerprint']}`（既存4音声の fixture fingerprint は変更していない）",
+            "",
+            "この証跡は開始境界と発話連続性だけの部分監査であり、transcript 全文、glossary、cue anchor の正確な時刻を audited にはしない。背景音は意味ある発話として数えず、単純な onset-only gate と Whisper timestamp 単独の境界確定は採用しない。",
+            "case 1 の `pass` は、今回確認した境界・発話連続性で追加処置なしという意味だけであり、全文品質・glossary・cue anchor・最終 short の品質承認ではない。",
+            "",
+            "| 前回表示順 | case ID | 観察 | 期待 editorial outcome |",
+            "|---:|---|---|---|",
+        ]
+        for case in boundary_audit["cases"]:
+            lines.append(
+                f"| {case['display_order']} | {case['case_id']} | {case['source_feedback']} | {case['expected_editorial_outcome']} |"
+            )
+        lines += [
+            "",
+            "S9-1 はこの部分監査により、既存 cue proxy だけでは無発話・背景音・長い内部 gap を捉え切れないことが分かったため No-Go を維持する。S9-4 / S9-6 は親候補の固定音声 span を切り詰めず、最終 short cutplan / preview で opening trim または内部 gap removal / review を人確認し、audio activity・cue・padding・human preview を併用する。今回の約時刻は観察メモであり、production の普遍的な秒数閾値ではない。",
+            "",
+        ]
+    lines += [
         "## 代表素材",
         "",
         "| case | video / candidate | range | 選定理由 |",
@@ -429,6 +492,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--production-before", required=True, type=Path)
     parser.add_argument("--production-after", required=True, type=Path)
     parser.add_argument("--parity", required=True, type=Path)
+    parser.add_argument("--boundary-audit", required=True, type=Path)
     parser.add_argument("--output-json", required=True, type=Path)
     parser.add_argument("--output-md", required=True, type=Path)
     return parser
@@ -446,6 +510,7 @@ def main(argv: list[str] | None = None) -> int:
         production_before=args.production_before,
         production_after=args.production_after,
         parity_path=args.parity,
+        boundary_audit_path=args.boundary_audit,
     )
     report["reproduction"]["commands"][-1] = (
         "uv run python benchmarks/s9_compare.py"
@@ -453,7 +518,9 @@ def main(argv: list[str] | None = None) -> int:
         f" --q5-cold {args.q5_cold} --q5-warm {args.q5_warm}"
         f" --turbo-cold {args.turbo_cold} --turbo-warm {args.turbo_warm}"
         f" --production-before {args.production_before} --production-after {args.production_after}"
-        f" --parity {args.parity} --output-json {args.output_json} --output-md {args.output_md}"
+        f" --parity {args.parity}"
+        + f" --boundary-audit {args.boundary_audit}"
+        + f" --output-json {args.output_json} --output-md {args.output_md}"
     )
     args.output_json.parent.mkdir(parents=True, exist_ok=True)
     args.output_md.parent.mkdir(parents=True, exist_ok=True)

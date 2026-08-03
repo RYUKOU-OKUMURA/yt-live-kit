@@ -9,6 +9,24 @@ No-Go。gold は音声の独立人手監査前であり、数値は provisional�
 
 q5 / turbo とも CER、glossary、cue、wall time、peak RSS の技術 gate は通過したが、gold audit gate が fail closed した。
 
+## 境界・発話連続性の部分監査
+
+監査者: user / 監査日: 2026-08-03
+boundary audit fingerprint: `0af9f5ce7888eabcc67fbe767db25c2e4da97c823ea76781eb9aeb25991fd9a1`
+base fixture fingerprint: `6dae657f2b803c54c6af1afe4ed54ad4f447324c32802e1943dc5711a9bf1718`（既存4音声の fixture fingerprint は変更していない）
+
+この証跡は開始境界と発話連続性だけの部分監査であり、transcript 全文、glossary、cue anchor の正確な時刻を audited にはしない。背景音は意味ある発話として数えず、単純な onset-only gate と Whisper timestamp 単独の境界確定は採用しない。
+case 1 の `pass` は、今回確認した境界・発話連続性で追加処置なしという意味だけであり、全文品質・glossary・cue anchor・最終 short の品質承認ではない。
+
+| 前回表示順 | case ID | 観察 | 期待 editorial outcome |
+|---:|---|---|---|
+| 1 | lb4-clip002-short-proper-nouns | 前回表示順 case 1（lb4-clip002-short-proper-nouns）は「ほぼ問題ない」。 | pass |
+| 2 | hpe-audio-variation | 前回表示順 case 2（hpe-audio-variation）は開始から約6秒まで意味ある発話がなく、ショート開始として不利、開始境界NG。 | opening_trim_or_review_required |
+| 3 | cgal-proper-nouns | 前回表示順 case 3（cgal-proper-nouns）も開始から約6秒まで意味ある発話がなく、開始境界NG。背景音があっても意味ある発話がなければ編集上の無発話として扱う。 | opening_trim_or_review_required |
+| 4 | mkw-long-local-asr | 前回表示順 case 4（mkw-long-local-asr）は開始直後に発話はあるが、約2秒から26秒までほぼ発話がなく、ショートとして致命的。 | internal_gap_removal_or_review_required |
+
+S9-1 はこの部分監査により、既存 cue proxy だけでは無発話・背景音・長い内部 gap を捉え切れないことが分かったため No-Go を維持する。S9-4 / S9-6 は親候補の固定音声 span を切り詰めず、最終 short cutplan / preview で opening trim または内部 gap removal / review を人確認し、audio activity・cue・padding・human preview を併用する。今回の約時刻は観察メモであり、production の普遍的な秒数閾値ではない。
+
 ## 代表素材
 
 | case | video / candidate | range | 選定理由 |
@@ -50,3 +68,7 @@ q5 / turbo とも CER、glossary、cue、wall time、peak RSS の技術 gate は
 - mKwn / CGal / hPe は公開 YouTube の audio-only span 取得で、client / network 条件差が残る。
 - candidate cue は raw のまま評価し、rolling VTT dedupe を候補へ適用していない。
 - モデルは Git 管理外の手動 cache にあり、production 自動 download は実装していない。
+- 境界監査は transcript / glossary / cue anchor exact times の承認ではなく、4 case の部分的な人手所見である。
+- case 1 の pass は今回確認した境界・発話連続性で追加処置なしという意味だけで、全文品質や最終 short の品質承認ではない。
+- case 2・3 の約6秒、case 4 の約2〜26秒は今回の観察メモであり、production の普遍的な秒数閾値ではない。
+- 親候補の固定 span と最終 short cutplan の品質は分離し、S9-4 / S9-6 では audio activity・cue・padding・human preview を併用する必要がある。

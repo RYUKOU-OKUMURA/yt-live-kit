@@ -1,5 +1,116 @@
 {
   "benchmark_id": "s9-1-20260803",
+  "boundary_audit": {
+    "artifact": "docs/benchmarks/s9-1-boundary-audit.json",
+    "audit_date": "2026-08-03",
+    "audit_status": "partial_boundary_only",
+    "auditor": "user",
+    "base_fixture_fingerprint": "6dae657f2b803c54c6af1afe4ed54ad4f447324c32802e1943dc5711a9bf1718",
+    "cases": [
+      {
+        "approximate_timing_note": "開始境界はほぼ問題ないという所見。正確な onset は記録しない。",
+        "case_id": "lb4-clip002-short-proper-nouns",
+        "display_order": 1,
+        "expected_editorial_outcome": "pass",
+        "internal_continuity": "not_audited",
+        "opening_signal": "no_material_issue_observed",
+        "source_feedback": "前回表示順 case 1（lb4-clip002-short-proper-nouns）は「ほぼ問題ない」。"
+      },
+      {
+        "approximate_timing_note": "開始から約6秒まで意味ある発話がないという観察。約値を production 閾値にはしない。",
+        "case_id": "hpe-audio-variation",
+        "display_order": 2,
+        "expected_editorial_outcome": "opening_trim_or_review_required",
+        "internal_continuity": "not_audited",
+        "opening_signal": "no_meaningful_speech_at_opening",
+        "source_feedback": "前回表示順 case 2（hpe-audio-variation）は開始から約6秒まで意味ある発話がなく、ショート開始として不利、開始境界NG。"
+      },
+      {
+        "approximate_timing_note": "開始から約6秒まで意味ある発話がないという観察。背景音は意味ある発話として数えない。約値を production 閾値にはしない。",
+        "case_id": "cgal-proper-nouns",
+        "display_order": 3,
+        "expected_editorial_outcome": "opening_trim_or_review_required",
+        "internal_continuity": "not_audited",
+        "opening_signal": "background_audio_without_meaningful_speech_at_opening",
+        "source_feedback": "前回表示順 case 3（cgal-proper-nouns）も開始から約6秒まで意味ある発話がなく、開始境界NG。背景音があっても意味ある発話がなければ編集上の無発話として扱う。"
+      },
+      {
+        "approximate_timing_note": "開始直後に発話はあるが、約2秒から26秒までほぼ発話がないという観察。約値を production 閾値にはしない。",
+        "case_id": "mkw-long-local-asr",
+        "display_order": 4,
+        "expected_editorial_outcome": "internal_gap_removal_or_review_required",
+        "internal_continuity": "long_internal_speech_gap",
+        "opening_signal": "meaningful_speech_present_at_opening",
+        "source_feedback": "前回表示順 case 4（mkw-long-local-asr）は開始直後に発話はあるが、約2秒から26秒までほぼ発話がなく、ショートとして致命的。"
+      }
+    ],
+    "decision": {
+      "adopted_model": null,
+      "boundary_audit_status": "partial_boundary_only",
+      "expected_editorial_outcomes_verified": true,
+      "gold_cue_anchor_status": "unverified_provisional",
+      "gold_glossary_status": "unverified_provisional",
+      "gold_transcript_status": "unverified_provisional",
+      "no_go_reasons": [
+        "gold_not_audited",
+        "cue_proxy_blind_spot",
+        "boundary_audit_is_partial"
+      ],
+      "s9_1_go": false,
+      "s9_2_ready": false
+    },
+    "expected_editorial_outcomes_verified": true,
+    "fingerprint": "0af9f5ce7888eabcc67fbe767db25c2e4da97c823ea76781eb9aeb25991fd9a1",
+    "policy": {
+      "background_audio_is_not_meaningful_speech": true,
+      "kind": "temporary_benchmark_policy",
+      "meaningful_speech_required": true,
+      "production_default": "defer_to_s9_plan_or_s9_4",
+      "required_evidence": [
+        "audio_activity",
+        "cue_context",
+        "padding",
+        "human_preview"
+      ],
+      "simple_onset_only_gate": "forbidden",
+      "threshold_status": "no_new_universal_seconds_threshold",
+      "whisper_timestamp_sole_authority": false
+    },
+    "previous_display_order": [
+      {
+        "case_id": "lb4-clip002-short-proper-nouns",
+        "display_order": 1
+      },
+      {
+        "case_id": "hpe-audio-variation",
+        "display_order": 2
+      },
+      {
+        "case_id": "cgal-proper-nouns",
+        "display_order": 3
+      },
+      {
+        "case_id": "mkw-long-local-asr",
+        "display_order": 4
+      }
+    ],
+    "schema": "s9-1-boundary-audit-v1",
+    "scope": {
+      "audio_fixture_identity": "fixed_audio_spans_unchanged",
+      "audited_dimensions": [
+        "opening_boundary",
+        "speech_continuity"
+      ],
+      "not_audited_dimensions": [
+        "transcript_full_text",
+        "glossary",
+        "cue_anchor_exact_times"
+      ],
+      "source": "user_audio_listening_feedback",
+      "status": "partial_boundary_and_continuity"
+    },
+    "status": "pass"
+  },
   "comparison": {
     "model_selection": "none; No-Go",
     "paired_median_relative_cer_improvement": {
@@ -12,10 +123,31 @@
     "adopted_model": null,
     "fallback_only": "既存 YouTube VTT baseline を fallback-only とし、S9-3 の高精度モデル採用へ進めない。",
     "go": false,
-    "reason": "gold transcript は音声の独立人手監査前で、品質数値を採用モデル決定の根拠へ昇格できない。",
+    "no_go_reasons": [
+      "gold_not_audited",
+      "cue_proxy_blind_spot",
+      "boundary_audit_is_partial"
+    ],
+    "reason": "gold transcript は音声の独立人手監査前で、品質数値を採用モデル決定の根拠へ昇格できない。 境界・発話連続性の所見は部分監査であり、既存 cue proxy の盲点も判明したため、境界監査だけでは No-Go を解除しない。",
+    "s9_2_ready": false,
     "status": "no_go"
   },
   "evaluation_contract": {
+    "boundary_policy": {
+      "background_audio_is_not_meaningful_speech": true,
+      "kind": "temporary_benchmark_policy",
+      "meaningful_speech_required": true,
+      "production_default": "defer_to_s9_plan_or_s9_4",
+      "required_evidence": [
+        "audio_activity",
+        "cue_context",
+        "padding",
+        "human_preview"
+      ],
+      "simple_onset_only_gate": "forbidden",
+      "threshold_status": "no_new_universal_seconds_threshold",
+      "whisper_timestamp_sole_authority": false
+    },
     "candidate_cues": "raw; progressive VTT dedupe is baseline-only",
     "cue_rule": {
       "anchor_matching": "maximum_overlap_then_earliest_start",
@@ -4590,7 +4722,7 @@
       "uv run python benchmarks/s9_benchmark.py run --manifest docs/benchmarks/s9-1-cases.json --model-name ggml-large-v3-turbo --output-dir /Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/turbo/cold-final3 --report /Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/turbo/cold-final3/report.json --execute-whisper --run-kind cold",
       "uv run python benchmarks/s9_benchmark.py run --manifest docs/benchmarks/s9-1-cases.json --model-name ggml-large-v3-turbo-q5_0 --output-dir /Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/warm-final3 --report /Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/warm-final3/report.json --execute-whisper --run-kind warm",
       "uv run python benchmarks/s9_benchmark.py run --manifest docs/benchmarks/s9-1-cases.json --model-name ggml-large-v3-turbo --output-dir /Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/turbo/warm-final3 --report /Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/turbo/warm-final3/report.json --execute-whisper --run-kind warm",
-      "uv run python benchmarks/s9_compare.py --manifest docs/benchmarks/s9-1-cases.json --q5-cold /Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/cold-final3/report.json --q5-warm /Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/warm-final3/report.json --turbo-cold /Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/turbo/cold-final3/report.json --turbo-warm /Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/turbo/warm-final3/report.json --production-before docs/benchmarks/s9-1-production-hash-before.json --production-after docs/benchmarks/s9-1-production-hash-after.json --parity docs/benchmarks/s9-1-vtt-progressive-parity.json --output-json docs/benchmarks/s9-1-report.json --output-md docs/benchmarks/s9-1-report.md"
+      "uv run python benchmarks/s9_compare.py --manifest docs/benchmarks/s9-1-cases.json --q5-cold /Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/cold-final3/report.json --q5-warm /Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/warm-final3/report.json --turbo-cold /Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/turbo/cold-final3/report.json --turbo-warm /Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/turbo/warm-final3/report.json --production-before docs/benchmarks/s9-1-production-hash-before.json --production-after docs/benchmarks/s9-1-production-hash-after.json --parity docs/benchmarks/s9-1-vtt-progressive-parity.json --boundary-audit docs/benchmarks/s9-1-boundary-audit.json --output-json docs/benchmarks/s9-1-report.json --output-md docs/benchmarks/s9-1-report.md"
     ],
     "model_cache_root": "/Users/ryukouokumura/Library/Caches/whisper.cpp/models",
     "shell": false
@@ -4600,7 +4732,11 @@
     "cold は OS page cache を消去した完全 cold ではなく、各 model の cold wave と warm wave を分離した reuse 観測である。",
     "mKwn / CGal / hPe は公開 YouTube の audio-only span 取得で、client / network 条件差が残る。",
     "candidate cue は raw のまま評価し、rolling VTT dedupe を候補へ適用していない。",
-    "モデルは Git 管理外の手動 cache にあり、production 自動 download は実装していない。"
+    "モデルは Git 管理外の手動 cache にあり、production 自動 download は実装していない。",
+    "境界監査は transcript / glossary / cue anchor exact times の承認ではなく、4 case の部分的な人手所見である。",
+    "case 1 の pass は今回確認した境界・発話連続性で追加処置なしという意味だけで、全文品質や最終 short の品質承認ではない。",
+    "case 2・3 の約6秒、case 4 の約2〜26秒は今回の観察メモであり、production の普遍的な秒数閾値ではない。",
+    "親候補の固定 span と最終 short cutplan の品質は分離し、S9-4 / S9-6 では audio activity・cue・padding・human preview を併用する必要がある。"
   ],
   "runtime": {
     "ffmpeg": {
@@ -4645,7 +4781,7 @@
       "version": "2026.07.04"
     }
   },
-  "schema": "s9-1-comparison-report-v2",
+  "schema": "s9-1-comparison-report-v3",
   "source_fingerprints": [
     {
       "bytes": 353340,
