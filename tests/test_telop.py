@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from copy import deepcopy
 from pathlib import Path
 from unittest.mock import patch
 
@@ -110,6 +111,16 @@ def _valid_document() -> dict:
     }
 
 
+def _generated_document() -> dict:
+    data = _valid_document()
+    data["title_candidates"] = [
+        "検索明快型のタイトル案",
+        "仕事影響型のタイトル案",
+        "好奇心型のタイトル案",
+    ]
+    return data
+
+
 def _prepare_video(tmp_path: Path, video_id: str = "video123") -> Settings:
     subtitles = tmp_path / video_id / "subtitles"
     subtitles.mkdir(parents=True)
@@ -176,6 +187,14 @@ def test_build_prompt_uses_clipped_absolute_times():
     assert "{{segment_transcripts}}" not in prompt
 
 
+def test_build_prompt_requires_fixed_title_direction_order():
+    prompt = build_telop_prompt(SAMPLE_VTT, [_segment()])
+    directions = ["検索明快型", "仕事影響型", "好奇心型"]
+    positions = [prompt.index(direction) for direction in directions]
+    assert positions == sorted(positions)
+    assert "ちょうど 3 件" in prompt
+
+
 def test_validate_valid_document_normalizes_strings():
     data = _valid_document()
     data["hook_text"] = "  大事なポイント  "
@@ -184,6 +203,141 @@ def test_validate_valid_document_normalizes_strings():
     assert result.errors == ()
     assert result.document is not None
     assert result.document.hook_text == "大事なポイント"
+
+
+@pytest.mark.parametrize("count", [1, 2])
+def test_validate_legacy_documents_keeps_one_or_two_title_candidates_compatible(
+    count: int,
+):
+    data = _valid_document()
+    data["title_candidates"] = [f"既存タイトル {index}" for index in range(count)]
+    result = validate_telop_script(data, segments=_segments())
+    assert result.ok
+    assert result.document is not None
+    assert result.document.title_candidates == data["title_candidates"]
+
+
+def test_validate_new_generation_requires_three_title_directions():
+    for count in (0, 1, 2, 4):
+        data = _generated_document()
+        data["title_candidates"] = data["title_candidates"][:count]
+        if count == 4:
+            data["title_candidates"].append("追加のタイトル")
+        result = validate_telop_script(
+            data,
+            segments=_segments(),
+            require_three_title_candidates=True,
+        )
+        assert not result.ok
+        message = "\n".join(result.errors)
+        assert "検索明快型" in message
+        assert "仕事影響型" in message
+        assert "好奇心型" in message
+        assert "ちょうど 3 件" in message
+
+
+def test_validate_new_generation_reports_duplicate_extra_titles_without_crashing():
+    data = _generated_document()
+    data["title_candidates"] = [
+        "検索明快型のタイトル案",
+        "仕事影響型のタイトル案",
+        "好奇心型のタイトル案",
+        "追加のタイトル",
+        " 追加のタイトル ",
+    ]
+    result = validate_telop_script(
+        data,
+        segments=_segments(),
+        require_three_title_candidates=True,
+    )
+    assert not result.ok
+    assert any("タイトル案 4とタイトル案 5" in error for error in result.errors)
+
+
+def test_validate_new_generation_schema_error_mentions_title_directions():
+    result = validate_telop_script(
+        {"hook_text": "不足"},
+        segments=_segments(),
+        require_three_title_candidates=True,
+    )
+    assert not result.ok
+    message = "\n".join(result.errors)
+    assert "検索明快型" in message
+    assert "仕事影響型" in message
+    assert "好奇心型" in message
+    assert "JSON 形式が想定と異なります" in message
+
+
+def test_validate_new_generation_strips_titles_and_warns_outside_recommended_length():
+    data = _generated_document()
+    data["title_candidates"] = [
+        "  検索明快型のタイトル案  ",
+        "仕事影響型",
+        "好奇心型のタイトル案",
+    ]
+    result = validate_telop_script(
+        data,
+        segments=_segments(),
+        require_three_title_candidates=True,
+    )
+    assert result.ok
+    assert result.document is not None
+    assert result.document.title_candidates[0] == "検索明快型のタイトル案"
+    assert any("18〜32 文字" in warning for warning in result.warnings)
+
+
+@pytest.mark.parametrize(
+    ("titles", "expected"),
+    [
+        (
+            ["検索明快型", " 検索明快型 ", "好奇心型"],
+            "検索明快型と仕事影響型",
+        ),
+        (["検索明快型", " ", "好奇心型"], "仕事影響型"),
+        (["検索<禁止>", "仕事影響型", "好奇心型"], "検索明快型"),
+        (["あ" * 101, "仕事影響型", "好奇心型"], "検索明快型"),
+    ],
+)
+def test_validate_new_generation_rejects_title_quality_boundaries(
+    titles: list[str], expected: str
+):
+    data = _generated_document()
+    data["title_candidates"] = titles
+    result = validate_telop_script(
+        data,
+        segments=_segments(),
+        require_three_title_candidates=True,
+    )
+    assert not result.ok
+    assert any(expected in error for error in result.errors)
+
+
+def test_validate_new_generation_accepts_exactly_100_character_title():
+    data = _generated_document()
+    data["title_candidates"][0] = "あ" * 100
+    result = validate_telop_script(
+        data,
+        segments=_segments(),
+        require_three_title_candidates=True,
+    )
+    assert result.ok
+
+
+def test_validate_new_generation_keeps_segments_and_metadata_unchanged():
+    data = _generated_document()
+    result = validate_telop_script(
+        data,
+        segments=_segments(),
+        require_three_title_candidates=True,
+    )
+    assert result.ok
+    assert result.document is not None
+    assert result.document.hook_text == data["hook_text"]
+    assert result.document.description == data["description"]
+    assert result.document.tags == data["tags"]
+    assert [segment.model_dump() for segment in result.document.segments] == data[
+        "segments"
+    ]
 
 
 @pytest.mark.parametrize(
@@ -428,7 +582,8 @@ def test_codex_missing_has_install_and_manual_hint(tmp_path: Path):
 
 def test_generation_invokes_codex_once_and_saves_valid_document(tmp_path: Path):
     settings = _prepare_video(tmp_path)
-    raw = json.dumps(_valid_document(), ensure_ascii=False)
+    raw_document = _generated_document()
+    raw = json.dumps(raw_document, ensure_ascii=False)
     with (
         patch("yt_live_kit.services.telop.is_codex_available", return_value=True),
         patch("yt_live_kit.services.telop.invoke_codex", return_value=raw) as invoke,
@@ -439,7 +594,26 @@ def test_generation_invokes_codex_once_and_saves_valid_document(tmp_path: Path):
     assert result.script_path is not None and result.script_path.is_file()
     saved = json.loads(result.script_path.read_text(encoding="utf-8"))
     assert saved["hook_text"] == "大事なポイント"
+    assert saved["title_candidates"] == raw_document["title_candidates"]
+    assert saved["description"] == raw_document["description"]
+    assert saved["tags"] == raw_document["tags"]
+    assert saved["segments"] == raw_document["segments"]
     assert result.document is not None
+
+
+def test_generation_with_legacy_title_count_fails_at_new_generation_boundary(
+    tmp_path: Path,
+):
+    settings = _prepare_video(tmp_path)
+    raw_document = deepcopy(_valid_document())
+    raw = json.dumps(raw_document, ensure_ascii=False)
+    with (
+        patch("yt_live_kit.services.telop.is_codex_available", return_value=True),
+        patch("yt_live_kit.services.telop.invoke_codex", return_value=raw) as invoke,
+        pytest.raises(TelopValidationError, match="検索明快型"),
+    ):
+        generate_telop_script("video123", _segments(), settings)
+    invoke.assert_called_once()
 
 
 def test_codex_failure_preserves_existing_script_and_other_outputs(tmp_path: Path):

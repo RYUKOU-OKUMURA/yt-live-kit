@@ -34,6 +34,10 @@ logger = logging.getLogger(__name__)
 
 PLACEHOLDER = "{{segment_transcripts}}"
 TEMPLATE_NAME = "telop_script.md"
+TITLE_DIRECTIONS = ("検索明快型", "仕事影響型", "好奇心型")
+TITLE_MAX_LENGTH = 100
+TITLE_RECOMMENDED_MIN_LENGTH = 18
+TITLE_RECOMMENDED_MAX_LENGTH = 32
 
 CODEX_INSTALL_HINT = """\
 Codex CLI が見つかりません。テロップ台本の自動生成には Codex CLI が必要です。
@@ -310,12 +314,30 @@ def _has_halfwidth_angle(text: str) -> bool:
     return "<" in text or ">" in text
 
 
+def _title_direction(index: int) -> str:
+    if 1 <= index <= len(TITLE_DIRECTIONS):
+        return TITLE_DIRECTIONS[index - 1]
+    return f"タイトル案 {index}"
+
+
+def _title_label(index: int, *, require_three_title_candidates: bool) -> str:
+    if require_three_title_candidates:
+        return f"{_title_direction(index)}（タイトル案 {index}）"
+    return f"タイトル案 {index}"
+
+
 def validate_telop_script(
     doc: dict | TelopScriptDocument,
     *,
     segments: Sequence[HighlightSegment | tuple[float, float]],
+    require_three_title_candidates: bool = False,
 ) -> TelopValidationResult:
-    """台本のスキーマ、区間境界、文字列、行配置を検証する."""
+    """台本のスキーマ、区間境界、文字列、行配置を検証する.
+
+    ``require_three_title_candidates`` は Codex による新規生成の境界だけで
+    有効にする。保存済みの台本を読み込み・編集する既存経路は、1〜2 件の
+    タイトル候補を受け入れて後方互換を保つ。
+    """
     if not segments:
         return TelopValidationResult(
             ok=False,
@@ -330,11 +352,18 @@ def validate_telop_script(
         )
     except Exception as exc:
         logger.warning("テロップ台本 JSON のスキーマ検証に失敗しました: %s", exc)
+        direction_hint = ""
+        if require_three_title_candidates:
+            direction_hint = (
+                "新規生成では検索明快型・仕事影響型・好奇心型のタイトル案を"
+                "固定順で 3 件返してください。"
+            )
         return TelopValidationResult(
             ok=False,
             errors=(
                 "テロップ台本の JSON 形式が想定と異なります。"
-                "必須項目の不足か、値の型が誤っています。",
+                "必須項目の不足か、値の型が誤っています。"
+                + direction_hint,
             ),
             warnings=(),
         )
@@ -354,11 +383,63 @@ def validate_telop_script(
     description = clean_required(data.description, "説明文")
 
     if not data.title_candidates:
-        errors.append("タイトル案は 1 件以上必要です。")
+        if require_three_title_candidates:
+            errors.append(
+                "新規生成のタイトル案は、検索明快型・仕事影響型・好奇心型を"
+                "固定順でちょうど 3 件必要です。"
+            )
+        else:
+            errors.append("タイトル案は 1 件以上必要です。")
+    elif require_three_title_candidates and len(data.title_candidates) != len(
+        TITLE_DIRECTIONS
+    ):
+        errors.append(
+            "新規生成のタイトル案は、検索明快型・仕事影響型・好奇心型を"
+            f"固定順でちょうど {len(TITLE_DIRECTIONS)} 件必要です。"
+            f"（現在 {len(data.title_candidates)} 件）"
+        )
     titles = [
-        clean_required(value, f"タイトル案 {index}")
+        clean_required(
+            value,
+            _title_label(
+                index,
+                require_three_title_candidates=require_three_title_candidates,
+            ),
+        )
         for index, value in enumerate(data.title_candidates, start=1)
     ]
+    if require_three_title_candidates:
+        seen_titles: dict[str, int] = {}
+        for index, title in enumerate(titles, start=1):
+            if not title:
+                continue
+            previous_index = seen_titles.get(title)
+            if previous_index is not None:
+                previous_direction = _title_direction(previous_index)
+                current_direction = _title_direction(index)
+                errors.append(
+                    f"{previous_direction}と{current_direction}のタイトル案が"
+                    "重複しています。"
+                )
+            else:
+                seen_titles[title] = index
+    for index, title in enumerate(titles, start=1):
+        label = _title_label(
+            index,
+            require_three_title_candidates=require_three_title_candidates,
+        )
+        if not title:
+            continue
+        if require_three_title_candidates and len(title) > TITLE_MAX_LENGTH:
+            errors.append(f"{label}は {TITLE_MAX_LENGTH} 文字以下にしてください。")
+        elif (
+            len(title) < TITLE_RECOMMENDED_MIN_LENGTH
+            or len(title) > TITLE_RECOMMENDED_MAX_LENGTH
+        ):
+            warnings.append(
+                f"{label}は日本語 {TITLE_RECOMMENDED_MIN_LENGTH}〜"
+                f"{TITLE_RECOMMENDED_MAX_LENGTH} 文字を目安にしてください。"
+            )
     if not data.tags:
         errors.append("タグは 1 件以上必要です。")
     tags = [
@@ -561,7 +642,11 @@ def generate_telop_script(
 
     raw_output = invoke_codex(prompt, codex_path=codex_path)
     extracted = _extract_json_object(raw_output)
-    validation = validate_telop_script(extracted, segments=segments)
+    validation = validate_telop_script(
+        extracted,
+        segments=segments,
+        require_three_title_candidates=True,
+    )
     if not validation.ok or validation.document is None:
         detail = "\n".join(f"- {error}" for error in validation.errors)
         raise TelopValidationError(
