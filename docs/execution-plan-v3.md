@@ -1732,6 +1732,8 @@ data/{video_id}/ ...
 - [ ] S9-1 と同じ gold / glossary / threshold / budget が再現 command と fixture fingerprint に結び付き、代表素材と実配信アーカイブの差が記録される
 - [ ] S9 初版の scope 外（全編 Whisper、字幕なし通常経路、local video、asset ID）は実装されていない
 
+**S9-6 受け入れ証跡の追記:** 2026-08-04 main の `3d113ef` / `071929d` 統合後、初回レビューで P1 二点を指摘し、follow-up で APPROVE とした。main focused S9 は123件 passedしたが、判定は fallback-only のまま人 UI 確認待ちである。次の具体的な確認は case2 / case3 の opening trim 後 preview、case4 の internal gap removal 後 preview、final short に無発話がないことの確認とする。exact gold / glossary / cue anchor 監査または明示的 waiverも未完了であり、S9-6 の全チェック、S9、M16、AC-30 / AC-35 / AC-37 の受け入れ判定は未完了を維持する。
+
 **コミット境界:** benchmark / acceptance docs と進捗更新を `S9-6` のフェーズ受け入れコミットに含める。S9 を完了にする場合だけフェーズ状態を `[x] 完了`、M16 と AC の該当チェックを更新する。
 
 **S9 のコミット順:** `S9-0` → `S9-1` → `S9-2` → `S9-3` → `S9-4` → `S9-5` → `S9-6`。各タスクは実装、単体確認、Done 条件、レビュー後に個別コミットし、未確認の AC を先に `[x]` にしない。
