@@ -1,0 +1,172 @@
+{
+  "schema_version": 1,
+  "benchmark_id": "s9-1-20260803",
+  "measurement_date": "2026-08-03",
+  "data_root": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data",
+  "audio_cache_root": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark",
+  "normalization": {
+    "unicode": "NFKC",
+    "strip_whitespace": true,
+    "ignore_punctuation": false,
+    "strip_vtt_html_tags": true,
+    "exclude_text_tokens": ["[音楽]", "[笑い]", "[拍手]", "[鼻息]", "[咳払い]"]
+  },
+  "cue_rule": {
+    "overlap": "cue.end_ms が range.start_ms より大きく、cue.start_ms が range.end_ms より小さい",
+    "dedupe_window_ms": 10,
+    "dedupe_key": "production_deduplicate_progressive_v1",
+    "dedupe_window_semantics": "10ms boundaries are observed in the source but are not an independent deletion rule",
+    "viewer_greeting_policy": "not_auto_excluded_without_human_annotation",
+    "anchor_matching": "maximum_overlap_then_earliest_start"
+  },
+  "gates": {
+    "paired_median_relative_cer_improvement": 0.1,
+    "glossary_exact_match_non_regression": true,
+    "cue_error_rate_delta_points": 5.0,
+    "cold_wall_time_seconds": 180,
+    "warm_wall_time_seconds": 120,
+    "peak_memory_bytes": 8589934592,
+    "require_gold_audit": true
+  },
+  "cache_policy": {
+    "cold_definition": "first process invocation for a case/model pair",
+    "warm_definition": "immediate second invocation with the same audio/model/settings",
+    "os_page_cache_purged": false,
+    "model_auto_download": false
+  },
+  "whisper": {
+    "binary": "/opt/homebrew/bin/whisper-cli",
+    "version": "1.9.1",
+    "language": "ja",
+    "threads": 8,
+    "processors": 1,
+    "initial_prompt": "日本語のライブ配信。固有名詞は Claude、Codex、Whisper、Ollama、Together AI、DirectX、Microsoft、Windows、Steam、DX12、iMac、Apple II、HHKB、macOS を含む。",
+    "decode": {
+      "temperature": 0.0,
+      "best_of": 5,
+      "beam_size": 5,
+      "no_fallback": false,
+      "vad": false,
+      "padding_ms": 0
+    },
+    "output_schema": "whisper-cli-json-full-v1"
+  },
+  "models": [
+    {
+      "name": "ggml-large-v3-turbo",
+      "path": "/Users/ryukouokumura/Library/Caches/whisper.cpp/models/ggml-large-v3-turbo.bin",
+      "distribution_url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin?download=true",
+      "sha256": "1fc70f774d38eb169993ac391eea357ef47c88757ef72ee5943879b7e8e2bc69",
+      "bytes": 1624555275
+    },
+    {
+      "name": "ggml-large-v3-turbo-q5_0",
+      "path": "/Users/ryukouokumura/Library/Caches/whisper.cpp/models/ggml-large-v3-turbo-q5_0.bin",
+      "distribution_url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin?download=true",
+      "sha256": "394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2",
+      "bytes": 574041195
+    }
+  ],
+  "cases": [
+    {
+      "id": "lb4-clip002-short-proper-nouns",
+      "video_id": "LB4px1wRFnY",
+      "source_url": "https://www.youtube.com/watch?v=LB4px1wRFnY",
+      "candidate_id": "clip_002",
+      "selection_basis": "short candidate cutplan cut_001-cut_003",
+      "range_ms": [2853160, 2910000],
+      "source_files": {
+        "meta": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/LB4px1wRFnY/meta.json",
+        "vtt": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/LB4px1wRFnY/subtitles/ja.vtt",
+        "candidates": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/LB4px1wRFnY/clips/candidates.json",
+        "cutplans": [
+          "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/LB4px1wRFnY/shorts/cutplan/cut_clip_002.json"
+        ],
+        "existing_mp4": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/LB4px1wRFnY/clips/source/LB4px1wRFnY.mp4"
+      },
+      "audio_fixture": "LB4px1wRFnY-2853160-2910000.wav",
+      "audio_bytes": 1818958,
+      "audio_sha256": "da80cdd933fb8738dc6ee7aa980b8ca64a4f8143d5fcbf7a971b058adb5c4687",
+      "gold": {
+        "audit_status": "unverified_provisional",
+        "audit_note": "既存 ASS、VTT、cutplan と文脈を手修正した仮 gold。音声の直接聴取による独立確認は未実施。",
+        "basis": ["existing_ass", "existing_vtt", "existing_cutplan", "manual_named_entity_correction"],
+        "text": "いうのがあるからですね。なんか、僕の個人的な感覚ですけど、クロードの方が割と本質的な話ができるっていうか、なんて言ったらいいかな。やっぱりまだまだなんだかんだ自分はこういうのを作りたいんだよねの抽象的なところで壁打ちをしていって、なんでそれが作りたいの、みたいな本質的な問いを深めていくっていうのはクロードの方がやりやすいんですよね。で、コーデックスは本当に実装とかさせたらマジでエラー少なくやってくれるんで、理想はね、使い分けるがいいんでしょうけど、またその要件定義とかを書く時に自分でしっかりと頭の中整理しながら書ける人だったら、もうクロードいらずに実装だけコーデックスに任せるとかでもいいような気もするんすけどね。",
+        "glossary": ["クロード", "コーデックス", "要件定義"],
+        "cue_anchors_ms": [[2853160, 2857000], [2857000, 2865000], [2865000, 2879000], [2879000, 2897000], [2897000, 2910000]]
+      }
+    },
+    {
+      "id": "mkw-long-local-asr",
+      "video_id": "mKwn-93gg90",
+      "source_url": "https://www.youtube.com/watch?v=mKwn-93gg90",
+      "candidate_id": "clip_001",
+      "selection_basis": "long candidate first 180 seconds",
+      "range_ms": [1120000, 1300000],
+      "source_files": {
+        "meta": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/mKwn-93gg90/meta.json",
+        "vtt": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/mKwn-93gg90/subtitles/ja.vtt",
+        "candidates": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/mKwn-93gg90/clips/candidates.json"
+      },
+      "audio_fixture": "mKwn-93gg90-1120-1300.16k.wav",
+      "audio_bytes": 5760114,
+      "audio_sha256": "aa8cd9dd543a3e6b84c25319aeed2c8fdc7bf1761aa45dcade65db179977d4ba",
+      "gold": {
+        "audit_status": "unverified_provisional",
+        "audit_note": "既存 transcript / VTT の文脈から固有名詞を手修正した仮 gold。長尺全体の音声監査は未実施。",
+        "basis": ["existing_transcript", "existing_vtt", "existing_candidate_context", "manual_named_entity_correction"],
+        "text": "よくわかんないけど、これワンチャンローカルで使えんかな。えっと、OllamaとかでローカルLLMを立ち上げて、そのモデルを設定して使うことって可能です。これワンチャンローカルで行けるんだったらマジありだよな。うん。Together AIの料金がわかんねえな。Distil Large V3。あ、こっちか。ん？ 文字起こし。あ、こっちか。ああ。え、0.0015ドル。1分あたり0.0015ドル。だいぶ安いね。だいぶ安いんじゃない？ まあ、音質もだけど。Whisperの部分だけローカルにする。そういうのやってる人いそうだよな。そういうのこれやれなくはないんじゃないかな。いや、マジ楽しみっすね。メモリ8GB。あ、ストレージ512。ああ、いいっすね。なんか新しいガジェットっていいっすよね、マジで。ああ。はいはいはいはい。はい。なるほど。",
+        "glossary": ["Ollama", "ローカルLLM", "Together AI", "Distil Large V3", "Whisper"],
+        "cue_anchors_ms": [[1120000, 1140000], [1140000, 1165000], [1165000, 1190000], [1190000, 1220000], [1220000, 1260000], [1260000, 1300000]]
+      }
+    },
+    {
+      "id": "cgal-proper-nouns",
+      "video_id": "CGalA8SISPE",
+      "source_url": "https://www.youtube.com/watch?v=CGalA8SISPE",
+      "candidate_id": "clip_003",
+      "selection_basis": "proper noun dense candidate first 120 seconds",
+      "range_ms": [4220000, 4340000],
+      "source_files": {
+        "meta": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/CGalA8SISPE/meta.json",
+        "vtt": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/CGalA8SISPE/subtitles/ja.vtt",
+        "candidates": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/CGalA8SISPE/clips/candidates.json"
+      },
+      "audio_fixture": "CGalA8SISPE-4220-4340.16k.wav",
+      "audio_bytes": 3840102,
+      "audio_sha256": "b3341ee5bbe1288e9919eacb3b94c4aa7fb49001dfd9d5ee8f39a48736e427ba",
+      "gold": {
+        "audit_status": "unverified_provisional",
+        "audit_note": "既存 transcript / VTT の文脈から API 名と製品名を手修正した仮 gold。音声の直接確認は未実施。",
+        "basis": ["existing_transcript", "existing_vtt", "existing_candidate_context", "manual_named_entity_correction"],
+        "text": "最近のGPUも高性能になってきてるので、そんなハードなゲームでなければそこそこ楽しめるのでは。行けるんすかね。あ、これか。DirectXはMicrosoftが開発したWindows向けのゲームや映像音声処理で使われるAPIの集合です。APIの集合です。DirectXを使うとゲーム側はPCごとに違うCPUやGPUの細かい違いをあまり意識せずにグラフィック処理ができます。WindowsのPCゲームではDirectXが前提になっていることが多く、ハードウェアの性能を効率よく引き出すために使われます。うーん。あ、Steamのゲーム説明でDX12対応と書いてあれば、そのゲームがそのAPI世代を前提にグラフィック処理を行うという。はあ、そういうのがあんだ。すげえな。すげえ世界だな。あ、スケルトンは初代iMac。これもっと前、見たことないっすもん。こんなん全然見たことない。すごいっすね。これがいわゆるあれですよね。これこの上にディスプレイをまた自分でつけてってことっすよね。そういうことっすよね。Apple IIは相当高価な商品だったはず。",
+        "glossary": ["DirectX", "Microsoft", "Windows", "Steam", "DX12", "iMac", "Apple II"],
+        "cue_anchors_ms": [[4220000, 4238000], [4238000, 4260000], [4260000, 4285000], [4285000, 4310000], [4310000, 4340000]]
+      }
+    },
+    {
+      "id": "hpe-audio-variation",
+      "video_id": "hPeRSA9YVIM",
+      "source_url": "https://www.youtube.com/watch?v=hPeRSA9YVIM",
+      "candidate_id": "clip_003",
+      "selection_basis": "different recording context and device terms",
+      "range_ms": [8640000, 8730000],
+      "source_files": {
+        "meta": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/hPeRSA9YVIM/meta.json",
+        "vtt": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/hPeRSA9YVIM/subtitles/ja.vtt",
+        "candidates": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/hPeRSA9YVIM/clips/candidates.json"
+      },
+      "audio_fixture": "hPeRSA9YVIM-8640-8730.16k.wav",
+      "audio_bytes": 2880078,
+      "audio_sha256": "1eb008e4a05f87877304474f9d65c4b22658a384ea84e6bff2165ff2b9f5d18e",
+      "gold": {
+        "audit_status": "unverified_provisional",
+        "audit_note": "既存 transcript / VTT から HHKB と macOS の表記を手修正した仮 gold。録音条件・音声内容の直接監査は未実施。",
+        "basis": ["existing_transcript", "existing_vtt", "existing_candidate_context", "manual_named_entity_correction"],
+        "text": "MacでHHKBを最大限に利用するには、HHKBの物理的なファンクションキーとは別にmacOS固有のファンクションキーをHHKB上のどこかのキーに割り当てるのが最もスマートな方法です。これがしたいんだよね。そう、それがしたいんだよね。ただ、ファンクションキーを押してるとこうなるよってことなんだよね。まあ、みんなこんな感じのことをやってるのか。すごいな。面白。",
+        "glossary": ["HHKB", "Mac", "macOS", "ファンクションキー"],
+        "cue_anchors_ms": [[8640000, 8660000], [8660000, 8680000], [8680000, 8710000], [8710000, 8730000]]
+      }
+    }
+  ]
+}

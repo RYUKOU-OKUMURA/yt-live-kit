@@ -42,7 +42,7 @@
 | U8 | エラー通知の構造化とページ先頭の整理 | [x] 完了 |
 | S9-PLAN | S9 要件・依存順計画の確定（docs-only） | [x] 完了 |
 | S9-0 | 既存 VTT 互換・非上書き保存契約 | [x] 完了 |
-| S9-1 | 代表素材 benchmark・モデル決定 | [ ] 未着手 |
+| S9-1 | 代表素材 benchmark・モデル決定 | [~] 進行中 |
 | S9-2 | TranscriptArtifact / resolver / fingerprint / persistent cache | [ ] 未着手 |
 | S9-3 | whisper.cpp runtime・capability・音声区間準備 | [ ] 未着手 |
 | S9-4 | 親候補区間 Whisper 精査 → short_cut / telop / line 再利用 | [ ] 未着手 |
@@ -1535,11 +1535,11 @@ data/{video_id}/ ...
 
 **作業:**
 
-- [ ] S9-1-0. 素材ごとの gold transcript、固有名詞 glossary、cue inclusion rule、評価対象 range、CER / 固有名詞 / cue 品質 / wall time / peak memory の判定基準を実行前に固定する。初版 gate は paired median CER の相対改善 10％以上、固有名詞 exact match の非悪化、cue 欠落 / 重複率が VTT baseline +5％以内、かつ事前宣言 budget 内とし、未達は No-Go とする
-- [ ] S9-1-1. `whisper-cli` 1.9.1 の実体、build capability、モデル file fingerprint、ffmpeg / yt-dlp の実体を記録する
-- [ ] S9-1-2. 同じ音声 span、言語 ja、padding、出力 schema で候補モデルを実行し、YouTube VTT を baseline として比較する
-- [ ] S9-1-3. gold transcript に対する日本語 CER、glossary の exact match / 誤り件数、cue の欠落・重複、候補区間の境界確認に必要な情報、wall time、CPU / memory、cache 前提を記録する
-- [ ] S9-1-4. 採用モデル、設定、未採用理由、再現 command、fixture fingerprint、測定日、Go / No-Go を `docs/benchmarks/` に固定する。モデル性能が要件を満たさない場合は S9 実装を fallback-only として止められるようにする
+- [x] S9-1-0. 素材ごとの gold transcript、固有名詞 glossary、cue inclusion rule、評価対象 range、CER / 固有名詞 / cue 品質 / wall time / peak memory の判定基準を実行前に固定する。初版 gate は paired median CER の相対改善 10％以上、固有名詞 exact match の非悪化、cue 欠落 / 重複率が VTT baseline +5％以内、かつ事前宣言 budget 内とし、未達は No-Go とする
+- [x] S9-1-1. `whisper-cli` 1.9.1 の実体、build capability、モデル file fingerprint、ffmpeg / yt-dlp の実体を記録する
+- [x] S9-1-2. 同じ音声 span、言語 ja、padding、出力 schema で候補モデルを実行し、YouTube VTT を baseline として比較する
+- [x] S9-1-3. gold transcript に対する日本語 CER、glossary の exact match / 誤り件数、cue の欠落・重複、候補区間の境界確認に必要な情報、wall time、CPU / memory、cache 前提を記録する
+- [x] S9-1-4. Go の場合の採用モデル・設定、または No-Go の未採用理由、再現 command、fixture fingerprint、測定日、Go / No-Go を `docs/benchmarks/` に固定する。今回の No-Go では S9 高精度実装を fallback-only として止める
 
 **テスト:** benchmark harness の deterministic fixture、gold transcript / glossary の固定値検証、paired VTT / Whisper 比較、事前宣言 gate の判定、未知出力 schema の拒否、途中終了 / timeout、再実行時の同一入力比較、wall time / peak memory budget の記録、`git diff --check`。実ネットワーク・従量課金 API・実 YouTube 書き込みは使わない。
 
@@ -1547,6 +1547,10 @@ data/{video_id}/ ...
 - [ ] 代表素材の A/B 表、採用モデルと設定、処理時間、精度指標、再現 command、未採用理由、Go / No-Go 判定が docs に残り、S9-3 が参照する唯一のモデル設定が決まっている
 - [ ] gold transcript、固有名詞 glossary、選択 span、CER / exact match / cue 欠落・重複 / wall time / peak memory の測定値と判定閾値が同じ fixture fingerprint に結び付き、基準未達は No-Go として記録される
 - [ ] 速度や精度に根拠が無い場合は「実装を進める」判定にせず、fallback-only の根拠を残す
+
+**S9-1 実測証跡（2026-08-03、正式 Done 未達）:** 4 case（`LB4px1wRFnY` 2853160–2910000、`mKwn-93gg90` 1120000–1300000、`CGalA8SISPE` 4220000–4340000、`hPeRSA9YVIM` 8640000–8730000）を固定し、fixture fingerprint `6dae657f2b803c54c6af1afe4ed54ad4f447324c32802e1943dc5711a9bf1718` に結び付けた。q5 は paired median 78.69％、turbo は 80.85％。技術 gate は両候補で通過したが、全 gold が `unverified_provisional` のため No-Go、正式な採用モデルなし、既存 VTT fallback-only とした。モデル SHA、設定、cold / warm、full JSON、baseline parity、production hash unchanged、raw report は [`docs/benchmarks/s9-1-report.md`](./benchmarks/s9-1-report.md) と [`docs/benchmarks/s9-1-report.json`](./benchmarks/s9-1-report.json) に固定した。独立 review と修正後 re-review は [`docs/benchmarks/s9-1-review.md`](./benchmarks/s9-1-review.md) に記録する。正式 Done 条件は未達のまま維持する。
+
+**次アクション:** gold の独立音声監査が完了するまで、S9-2 以降を高精度モデル採用経路として進めない。監査後に同じ fixture と gate で再判定するか、fallback-only を維持する。
 
 **コミット境界:** `docs/benchmarks/` と harness / fixture の production 非変更コミット。メッセージに `S9-1` を含める。S9-1 の計測証跡だけで S9 フェーズ完了にはしない。
 

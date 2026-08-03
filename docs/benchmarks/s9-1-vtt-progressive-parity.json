@@ -1,0 +1,51 @@
+{
+  "schema": "s9-1-vtt-progressive-parity-v1",
+  "production_function": "yt_live_kit.services.vtt_parser.deduplicate_progressive",
+  "benchmark_function": "benchmarks.s9_benchmark.deduplicate_progressive_timed",
+  "cases": [
+    {
+      "case_id": "lb4-clip002-short-proper-nouns",
+      "source_vtt_sha256": "cc6d7fe8f89ffe3ae22f411ece80dcba7c9ab48f96b90b13fa21e7b4216c3fb2",
+      "production_raw_cues": 1434,
+      "benchmark_raw_cues": 1434,
+      "production_dedup_cues": 1434,
+      "benchmark_dedup_cues": 1434,
+      "production_text_sha256": "ceb4ac2ac3b008150e68db31d52c25e2a98c21578cc5fadf694e766c292fb647",
+      "benchmark_text_sha256": "ceb4ac2ac3b008150e68db31d52c25e2a98c21578cc5fadf694e766c292fb647",
+      "text_sequence_equal": true
+    },
+    {
+      "case_id": "mkw-long-local-asr",
+      "source_vtt_sha256": "402f98815be4a087802b3a6314c19a37660392a63cc1611ab0f2eb71e953971c",
+      "production_raw_cues": 1422,
+      "benchmark_raw_cues": 1422,
+      "production_dedup_cues": 1422,
+      "benchmark_dedup_cues": 1422,
+      "production_text_sha256": "bdf7ed501c5ceeb530a90dd7343ef09ea59f9d2536cd7e519cc43ba6a1f6f097",
+      "benchmark_text_sha256": "bdf7ed501c5ceeb530a90dd7343ef09ea59f9d2536cd7e519cc43ba6a1f6f097",
+      "text_sequence_equal": true
+    },
+    {
+      "case_id": "cgal-proper-nouns",
+      "source_vtt_sha256": "0d5a200a43a5325dc4799a45f4c23fc6580a140e5d56f2f188e542f72b269676",
+      "production_raw_cues": 2581,
+      "benchmark_raw_cues": 2581,
+      "production_dedup_cues": 2581,
+      "benchmark_dedup_cues": 2581,
+      "production_text_sha256": "166c22f9c8f063f9ecb0d7be50f4747eeade7dc07f8e66522d2fbf9facf56b00",
+      "benchmark_text_sha256": "166c22f9c8f063f9ecb0d7be50f4747eeade7dc07f8e66522d2fbf9facf56b00",
+      "text_sequence_equal": true
+    },
+    {
+      "case_id": "hpe-audio-variation",
+      "source_vtt_sha256": "d9baff5fff1d4851584d5c2526a85efc6a35e2ac8a5639f5e897028aab45b7fd",
+      "production_raw_cues": 3568,
+      "benchmark_raw_cues": 3568,
+      "production_dedup_cues": 3568,
+      "benchmark_dedup_cues": 3568,
+      "production_text_sha256": "a7d09096f87edee90325bbf1f8240ad0391775edc0f704f404563a1a5a61be6f",
+      "benchmark_text_sha256": "a7d09096f87edee90325bbf1f8240ad0391775edc0f704f404563a1a5a61be6f",
+      "text_sequence_equal": true
+    }
+  ]
+}

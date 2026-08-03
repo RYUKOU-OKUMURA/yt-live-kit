@@ -1,0 +1,4758 @@
+{
+  "benchmark_id": "s9-1-20260803",
+  "comparison": {
+    "model_selection": "none; No-Go",
+    "paired_median_relative_cer_improvement": {
+      "ggml-large-v3-turbo": 0.8084599344652964,
+      "ggml-large-v3-turbo-q5_0": 0.7869427067818489
+    },
+    "provisional_observation": "turbo と q5 は provisional 指標上の差を示すが、gold 未監査のため採用決定ではない。"
+  },
+  "decision": {
+    "adopted_model": null,
+    "fallback_only": "既存 YouTube VTT baseline を fallback-only とし、S9-3 の高精度モデル採用へ進めない。",
+    "go": false,
+    "reason": "gold transcript は音声の独立人手監査前で、品質数値を採用モデル決定の根拠へ昇格できない。",
+    "status": "no_go"
+  },
+  "evaluation_contract": {
+    "candidate_cues": "raw; progressive VTT dedupe is baseline-only",
+    "cue_rule": {
+      "anchor_matching": "maximum_overlap_then_earliest_start",
+      "dedupe_key": "production_deduplicate_progressive_v1",
+      "dedupe_window_ms": 10,
+      "dedupe_window_semantics": "10ms boundaries are observed in the source but are not an independent deletion rule",
+      "overlap": "cue.end_ms が range.start_ms より大きく、cue.start_ms が range.end_ms より小さい",
+      "viewer_greeting_policy": "not_auto_excluded_without_human_annotation"
+    },
+    "gates": {
+      "cold_wall_time_seconds": 180,
+      "cue_error_rate_delta_points": 5.0,
+      "glossary_exact_match_non_regression": true,
+      "paired_median_relative_cer_improvement": 0.1,
+      "peak_memory_bytes": 8589934592,
+      "require_gold_audit": true,
+      "warm_wall_time_seconds": 120
+    },
+    "normalization": {
+      "exclude_text_tokens": [
+        "[音楽]",
+        "[笑い]",
+        "[拍手]",
+        "[鼻息]",
+        "[咳払い]"
+      ],
+      "ignore_punctuation": false,
+      "strip_vtt_html_tags": true,
+      "strip_whitespace": true,
+      "unicode": "NFKC"
+    }
+  },
+  "fixture_fingerprint": "6dae657f2b803c54c6af1afe4ed54ad4f447324c32802e1943dc5711a9bf1718",
+  "gold_audit_status": "provisional",
+  "measurement_date": "2026-08-03",
+  "metrics_status": "provisional",
+  "models": [
+    {
+      "distribution_url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin?download=true",
+      "gates": {
+        "go": false,
+        "gold_audit": {
+          "passed": false,
+          "status": "provisional"
+        },
+        "peak_memory": {
+          "budget_bytes": 8589934592,
+          "passed": true,
+          "values_bytes": [
+            903921664,
+            926728192,
+            919830528,
+            920928256,
+            903118848,
+            932773888,
+            918978560,
+            915062784
+          ]
+        },
+        "quality": {
+          "cue_missing_duplicate": {
+            "passed": true
+          },
+          "glossary_exact_match": {
+            "passed": true
+          },
+          "relative_cer": {
+            "passed": true,
+            "threshold": 0.1,
+            "value": 0.7869427067818489
+          }
+        },
+        "reasons": [
+          {
+            "code": "gold_not_audited",
+            "message": "gold は音声の独立人手監査前であり、fail closed です。"
+          }
+        ],
+        "source_gate_report": {
+          "reasons": [
+            {
+              "code": "gold_not_audited",
+              "message": "gold audit status が audited ではないため fail closed です。"
+            }
+          ],
+          "status": "no_go"
+        },
+        "status": "no_go",
+        "technical_gates_passed": true,
+        "wall_time": {
+          "checks": [
+            {
+              "budget_ms": 180000,
+              "case_id": "lb4-clip002-short-proper-nouns",
+              "passed": true,
+              "run_kind": "cold",
+              "value_ms": 2149
+            },
+            {
+              "budget_ms": 120000,
+              "case_id": "lb4-clip002-short-proper-nouns",
+              "passed": true,
+              "run_kind": "warm",
+              "value_ms": 2149
+            },
+            {
+              "budget_ms": 180000,
+              "case_id": "mkw-long-local-asr",
+              "passed": true,
+              "run_kind": "cold",
+              "value_ms": 5170
+            },
+            {
+              "budget_ms": 120000,
+              "case_id": "mkw-long-local-asr",
+              "passed": true,
+              "run_kind": "warm",
+              "value_ms": 5171
+            },
+            {
+              "budget_ms": 180000,
+              "case_id": "cgal-proper-nouns",
+              "passed": true,
+              "run_kind": "cold",
+              "value_ms": 4300
+            },
+            {
+              "budget_ms": 120000,
+              "case_id": "cgal-proper-nouns",
+              "passed": true,
+              "run_kind": "warm",
+              "value_ms": 4307
+            },
+            {
+              "budget_ms": 180000,
+              "case_id": "hpe-audio-variation",
+              "passed": true,
+              "run_kind": "cold",
+              "value_ms": 2914
+            },
+            {
+              "budget_ms": 120000,
+              "case_id": "hpe-audio-variation",
+              "passed": true,
+              "run_kind": "warm",
+              "value_ms": 2915
+            }
+          ],
+          "passed": true
+        }
+      },
+      "model_fingerprint": {
+        "bytes": 574041195,
+        "path": "/Users/ryukouokumura/Library/Caches/whisper.cpp/models/ggml-large-v3-turbo-q5_0.bin",
+        "sha256": "394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2"
+      },
+      "name": "ggml-large-v3-turbo-q5_0",
+      "quality": {
+        "cases": [
+          {
+            "baseline": {
+              "cache_hit": null,
+              "cer": 1.0161290322580645,
+              "cue": {
+                "assigned_anchor_ids": [
+                  "anchor-1",
+                  "anchor-2",
+                  "anchor-3",
+                  "anchor-4",
+                  "anchor-5"
+                ],
+                "duplicate": 31,
+                "error_count": 31,
+                "error_rate": 6.2,
+                "gold_anchor_count": 5,
+                "missing": 0,
+                "missing_anchor_ids": [],
+                "output_cue_count": 36,
+                "rule": "overlap_half_open"
+              },
+              "glossary": {
+                "exact_match_terms": 3,
+                "expected": 3,
+                "found": 3,
+                "incorrect": 0,
+                "missing": 0,
+                "per_term": [
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "クロード"
+                    ],
+                    "found": [
+                      "クロード"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "クロード"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "コーデックス"
+                    ],
+                    "found": [
+                      "コーデックス"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "コーデックス"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "要件定義"
+                    ],
+                    "found": [
+                      "要件定義"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "要件定義"
+                  }
+                ],
+                "term_count": 3
+              },
+              "levenshtein": 315,
+              "peak_memory_bytes": null,
+              "run_kind": null,
+              "status": "ok",
+              "wall_time_ms": null
+            },
+            "case_id": "lb4-clip002-short-proper-nouns",
+            "cold": {
+              "cache_hit": false,
+              "cer": 0.13870967741935483,
+              "cue": {
+                "assigned_anchor_ids": [
+                  "anchor-2",
+                  "anchor-3",
+                  "anchor-4",
+                  "anchor-5"
+                ],
+                "duplicate": 3,
+                "error_count": 4,
+                "error_rate": 0.8,
+                "gold_anchor_count": 5,
+                "missing": 1,
+                "missing_anchor_ids": [
+                  "anchor-1"
+                ],
+                "output_cue_count": 7,
+                "rule": "overlap_half_open"
+              },
+              "glossary": {
+                "exact_match_terms": 2,
+                "expected": 3,
+                "found": 2,
+                "incorrect": 0,
+                "missing": 1,
+                "per_term": [
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "クロード"
+                    ],
+                    "found": [
+                      "クロード"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "クロード"
+                  },
+                  {
+                    "exact_match": false,
+                    "expected": [
+                      "コーデックス"
+                    ],
+                    "found": [],
+                    "incorrect": [],
+                    "missing": [
+                      "コーデックス"
+                    ],
+                    "term": "コーデックス"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "要件定義"
+                    ],
+                    "found": [
+                      "要件定義"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "要件定義"
+                  }
+                ],
+                "term_count": 3
+              },
+              "levenshtein": 43,
+              "peak_memory_bytes": 903921664,
+              "run_kind": "cold",
+              "status": "ok",
+              "wall_time_ms": 2149
+            },
+            "cold_output": {
+              "bytes": 59029,
+              "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/cold-final3/whisper/lb4-clip002-short-proper-nouns/cold.json",
+              "sha256": "c81341873032e831e19d78831dcdefa6f207a7e792b386f057e1e92d0081a62d"
+            },
+            "cold_warm_output_sha_equal": true,
+            "relative_cer_improvement": 0.8634920634920635,
+            "warm": {
+              "cache_hit": true,
+              "cer": 0.13870967741935483,
+              "cue": {
+                "assigned_anchor_ids": [
+                  "anchor-2",
+                  "anchor-3",
+                  "anchor-4",
+                  "anchor-5"
+                ],
+                "duplicate": 3,
+                "error_count": 4,
+                "error_rate": 0.8,
+                "gold_anchor_count": 5,
+                "missing": 1,
+                "missing_anchor_ids": [
+                  "anchor-1"
+                ],
+                "output_cue_count": 7,
+                "rule": "overlap_half_open"
+              },
+              "glossary": {
+                "exact_match_terms": 2,
+                "expected": 3,
+                "found": 2,
+                "incorrect": 0,
+                "missing": 1,
+                "per_term": [
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "クロード"
+                    ],
+                    "found": [
+                      "クロード"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "クロード"
+                  },
+                  {
+                    "exact_match": false,
+                    "expected": [
+                      "コーデックス"
+                    ],
+                    "found": [],
+                    "incorrect": [],
+                    "missing": [
+                      "コーデックス"
+                    ],
+                    "term": "コーデックス"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "要件定義"
+                    ],
+                    "found": [
+                      "要件定義"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "要件定義"
+                  }
+                ],
+                "term_count": 3
+              },
+              "levenshtein": 43,
+              "peak_memory_bytes": 903118848,
+              "run_kind": "warm",
+              "status": "ok",
+              "wall_time_ms": 2149
+            },
+            "warm_output": {
+              "bytes": 59029,
+              "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/warm-final3/whisper/lb4-clip002-short-proper-nouns/warm.json",
+              "sha256": "c81341873032e831e19d78831dcdefa6f207a7e792b386f057e1e92d0081a62d"
+            }
+          },
+          {
+            "baseline": {
+              "cache_hit": null,
+              "cer": 0.6160220994475138,
+              "cue": {
+                "assigned_anchor_ids": [
+                  "anchor-1",
+                  "anchor-2",
+                  "anchor-3",
+                  "anchor-4",
+                  "anchor-5",
+                  "anchor-6"
+                ],
+                "duplicate": 35,
+                "error_count": 35,
+                "error_rate": 5.833333333333333,
+                "gold_anchor_count": 6,
+                "missing": 0,
+                "missing_anchor_ids": [],
+                "output_cue_count": 41,
+                "rule": "overlap_half_open"
+              },
+              "glossary": {
+                "exact_match_terms": 1,
+                "expected": 5,
+                "found": 1,
+                "incorrect": 0,
+                "missing": 4,
+                "per_term": [
+                  {
+                    "exact_match": false,
+                    "expected": [
+                      "Ollama"
+                    ],
+                    "found": [],
+                    "incorrect": [],
+                    "missing": [
+                      "Ollama"
+                    ],
+                    "term": "Ollama"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "ローカルLLM"
+                    ],
+                    "found": [
+                      "ローカルLLM"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "ローカルLLM"
+                  },
+                  {
+                    "exact_match": false,
+                    "expected": [
+                      "TogetherAI"
+                    ],
+                    "found": [],
+                    "incorrect": [],
+                    "missing": [
+                      "TogetherAI"
+                    ],
+                    "term": "TogetherAI"
+                  },
+                  {
+                    "exact_match": false,
+                    "expected": [
+                      "DistilLargeV3"
+                    ],
+                    "found": [],
+                    "incorrect": [],
+                    "missing": [
+                      "DistilLargeV3"
+                    ],
+                    "term": "DistilLargeV3"
+                  },
+                  {
+                    "exact_match": false,
+                    "expected": [
+                      "Whisper"
+                    ],
+                    "found": [],
+                    "incorrect": [],
+                    "missing": [
+                      "Whisper"
+                    ],
+                    "term": "Whisper"
+                  }
+                ],
+                "term_count": 5
+              },
+              "levenshtein": 223,
+              "peak_memory_bytes": null,
+              "run_kind": null,
+              "status": "ok",
+              "wall_time_ms": null
+            },
+            "case_id": "mkw-long-local-asr",
+            "cold": {
+              "cache_hit": false,
+              "cer": 0.38950276243093923,
+              "cue": {
+                "assigned_anchor_ids": [
+                  "anchor-1",
+                  "anchor-2",
+                  "anchor-3",
+                  "anchor-4",
+                  "anchor-5",
+                  "anchor-6"
+                ],
+                "duplicate": 27,
+                "error_count": 27,
+                "error_rate": 4.5,
+                "gold_anchor_count": 6,
+                "missing": 0,
+                "missing_anchor_ids": [],
+                "output_cue_count": 33,
+                "rule": "overlap_half_open"
+              },
+              "glossary": {
+                "exact_match_terms": 1,
+                "expected": 5,
+                "found": 1,
+                "incorrect": 0,
+                "missing": 4,
+                "per_term": [
+                  {
+                    "exact_match": false,
+                    "expected": [
+                      "Ollama"
+                    ],
+                    "found": [],
+                    "incorrect": [],
+                    "missing": [
+                      "Ollama"
+                    ],
+                    "term": "Ollama"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "ローカルLLM"
+                    ],
+                    "found": [
+                      "ローカルLLM"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "ローカルLLM"
+                  },
+                  {
+                    "exact_match": false,
+                    "expected": [
+                      "TogetherAI"
+                    ],
+                    "found": [],
+                    "incorrect": [],
+                    "missing": [
+                      "TogetherAI"
+                    ],
+                    "term": "TogetherAI"
+                  },
+                  {
+                    "exact_match": false,
+                    "expected": [
+                      "DistilLargeV3"
+                    ],
+                    "found": [],
+                    "incorrect": [],
+                    "missing": [
+                      "DistilLargeV3"
+                    ],
+                    "term": "DistilLargeV3"
+                  },
+                  {
+                    "exact_match": false,
+                    "expected": [
+                      "Whisper"
+                    ],
+                    "found": [],
+                    "incorrect": [],
+                    "missing": [
+                      "Whisper"
+                    ],
+                    "term": "Whisper"
+                  }
+                ],
+                "term_count": 5
+              },
+              "levenshtein": 141,
+              "peak_memory_bytes": 926728192,
+              "run_kind": "cold",
+              "status": "ok",
+              "wall_time_ms": 5170
+            },
+            "cold_output": {
+              "bytes": 90420,
+              "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/cold-final3/whisper/mkw-long-local-asr/cold.json",
+              "sha256": "ac420f3efa30a4446de6e36c99ec86230b40a3a63a38f80a0e2d5429963a44b0"
+            },
+            "cold_warm_output_sha_equal": true,
+            "relative_cer_improvement": 0.36771300448430494,
+            "warm": {
+              "cache_hit": true,
+              "cer": 0.38950276243093923,
+              "cue": {
+                "assigned_anchor_ids": [
+                  "anchor-1",
+                  "anchor-2",
+                  "anchor-3",
+                  "anchor-4",
+                  "anchor-5",
+                  "anchor-6"
+                ],
+                "duplicate": 27,
+                "error_count": 27,
+                "error_rate": 4.5,
+                "gold_anchor_count": 6,
+                "missing": 0,
+                "missing_anchor_ids": [],
+                "output_cue_count": 33,
+                "rule": "overlap_half_open"
+              },
+              "glossary": {
+                "exact_match_terms": 1,
+                "expected": 5,
+                "found": 1,
+                "incorrect": 0,
+                "missing": 4,
+                "per_term": [
+                  {
+                    "exact_match": false,
+                    "expected": [
+                      "Ollama"
+                    ],
+                    "found": [],
+                    "incorrect": [],
+                    "missing": [
+                      "Ollama"
+                    ],
+                    "term": "Ollama"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "ローカルLLM"
+                    ],
+                    "found": [
+                      "ローカルLLM"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "ローカルLLM"
+                  },
+                  {
+                    "exact_match": false,
+                    "expected": [
+                      "TogetherAI"
+                    ],
+                    "found": [],
+                    "incorrect": [],
+                    "missing": [
+                      "TogetherAI"
+                    ],
+                    "term": "TogetherAI"
+                  },
+                  {
+                    "exact_match": false,
+                    "expected": [
+                      "DistilLargeV3"
+                    ],
+                    "found": [],
+                    "incorrect": [],
+                    "missing": [
+                      "DistilLargeV3"
+                    ],
+                    "term": "DistilLargeV3"
+                  },
+                  {
+                    "exact_match": false,
+                    "expected": [
+                      "Whisper"
+                    ],
+                    "found": [],
+                    "incorrect": [],
+                    "missing": [
+                      "Whisper"
+                    ],
+                    "term": "Whisper"
+                  }
+                ],
+                "term_count": 5
+              },
+              "levenshtein": 141,
+              "peak_memory_bytes": 932773888,
+              "run_kind": "warm",
+              "status": "ok",
+              "wall_time_ms": 5171
+            },
+            "warm_output": {
+              "bytes": 90420,
+              "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/warm-final3/whisper/mkw-long-local-asr/warm.json",
+              "sha256": "ac420f3efa30a4446de6e36c99ec86230b40a3a63a38f80a0e2d5429963a44b0"
+            }
+          },
+          {
+            "baseline": {
+              "cache_hit": null,
+              "cer": 0.7970085470085471,
+              "cue": {
+                "assigned_anchor_ids": [
+                  "anchor-1",
+                  "anchor-2",
+                  "anchor-3",
+                  "anchor-4",
+                  "anchor-5"
+                ],
+                "duplicate": 52,
+                "error_count": 52,
+                "error_rate": 10.4,
+                "gold_anchor_count": 5,
+                "missing": 0,
+                "missing_anchor_ids": [],
+                "output_cue_count": 57,
+                "rule": "overlap_half_open"
+              },
+              "glossary": {
+                "exact_match_terms": 3,
+                "expected": 7,
+                "found": 3,
+                "incorrect": 0,
+                "missing": 4,
+                "per_term": [
+                  {
+                    "exact_match": false,
+                    "expected": [
+                      "DirectX"
+                    ],
+                    "found": [],
+                    "incorrect": [],
+                    "missing": [
+                      "DirectX"
+                    ],
+                    "term": "DirectX"
+                  },
+                  {
+                    "exact_match": false,
+                    "expected": [
+                      "Microsoft"
+                    ],
+                    "found": [],
+                    "incorrect": [],
+                    "missing": [
+                      "Microsoft"
+                    ],
+                    "term": "Microsoft"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "Windows"
+                    ],
+                    "found": [
+                      "Windows"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "Windows"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "Steam"
+                    ],
+                    "found": [
+                      "Steam"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "Steam"
+                  },
+                  {
+                    "exact_match": false,
+                    "expected": [
+                      "DX12"
+                    ],
+                    "found": [],
+                    "incorrect": [],
+                    "missing": [
+                      "DX12"
+                    ],
+                    "term": "DX12"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "iMac"
+                    ],
+                    "found": [
+                      "iMac"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "iMac"
+                  },
+                  {
+                    "exact_match": false,
+                    "expected": [
+                      "AppleII"
+                    ],
+                    "found": [],
+                    "incorrect": [],
+                    "missing": [
+                      "AppleII"
+                    ],
+                    "term": "AppleII"
+                  }
+                ],
+                "term_count": 7
+              },
+              "levenshtein": 373,
+              "peak_memory_bytes": null,
+              "run_kind": null,
+              "status": "ok",
+              "wall_time_ms": null
+            },
+            "case_id": "cgal-proper-nouns",
+            "cold": {
+              "cache_hit": false,
+              "cer": 0.1388888888888889,
+              "cue": {
+                "assigned_anchor_ids": [
+                  "anchor-1",
+                  "anchor-2",
+                  "anchor-3",
+                  "anchor-4",
+                  "anchor-5"
+                ],
+                "duplicate": 13,
+                "error_count": 13,
+                "error_rate": 2.6,
+                "gold_anchor_count": 5,
+                "missing": 0,
+                "missing_anchor_ids": [],
+                "output_cue_count": 18,
+                "rule": "overlap_half_open"
+              },
+              "glossary": {
+                "exact_match_terms": 6,
+                "expected": 7,
+                "found": 6,
+                "incorrect": 0,
+                "missing": 1,
+                "per_term": [
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "DirectX"
+                    ],
+                    "found": [
+                      "DirectX"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "DirectX"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "Microsoft"
+                    ],
+                    "found": [
+                      "Microsoft"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "Microsoft"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "Windows"
+                    ],
+                    "found": [
+                      "Windows"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "Windows"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "Steam"
+                    ],
+                    "found": [
+                      "Steam"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "Steam"
+                  },
+                  {
+                    "exact_match": false,
+                    "expected": [
+                      "DX12"
+                    ],
+                    "found": [],
+                    "incorrect": [],
+                    "missing": [
+                      "DX12"
+                    ],
+                    "term": "DX12"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "iMac"
+                    ],
+                    "found": [
+                      "iMac"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "iMac"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "AppleII"
+                    ],
+                    "found": [
+                      "AppleII"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "AppleII"
+                  }
+                ],
+                "term_count": 7
+              },
+              "levenshtein": 65,
+              "peak_memory_bytes": 919830528,
+              "run_kind": "cold",
+              "status": "ok",
+              "wall_time_ms": 4300
+            },
+            "cold_output": {
+              "bytes": 97304,
+              "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/cold-final3/whisper/cgal-proper-nouns/cold.json",
+              "sha256": "de267dee31466642360c4072cb7227b578f6fbb41353547862d3391239294e5b"
+            },
+            "cold_warm_output_sha_equal": true,
+            "relative_cer_improvement": 0.8257372654155497,
+            "warm": {
+              "cache_hit": true,
+              "cer": 0.1388888888888889,
+              "cue": {
+                "assigned_anchor_ids": [
+                  "anchor-1",
+                  "anchor-2",
+                  "anchor-3",
+                  "anchor-4",
+                  "anchor-5"
+                ],
+                "duplicate": 13,
+                "error_count": 13,
+                "error_rate": 2.6,
+                "gold_anchor_count": 5,
+                "missing": 0,
+                "missing_anchor_ids": [],
+                "output_cue_count": 18,
+                "rule": "overlap_half_open"
+              },
+              "glossary": {
+                "exact_match_terms": 6,
+                "expected": 7,
+                "found": 6,
+                "incorrect": 0,
+                "missing": 1,
+                "per_term": [
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "DirectX"
+                    ],
+                    "found": [
+                      "DirectX"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "DirectX"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "Microsoft"
+                    ],
+                    "found": [
+                      "Microsoft"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "Microsoft"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "Windows"
+                    ],
+                    "found": [
+                      "Windows"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "Windows"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "Steam"
+                    ],
+                    "found": [
+                      "Steam"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "Steam"
+                  },
+                  {
+                    "exact_match": false,
+                    "expected": [
+                      "DX12"
+                    ],
+                    "found": [],
+                    "incorrect": [],
+                    "missing": [
+                      "DX12"
+                    ],
+                    "term": "DX12"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "iMac"
+                    ],
+                    "found": [
+                      "iMac"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "iMac"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "AppleII"
+                    ],
+                    "found": [
+                      "AppleII"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "AppleII"
+                  }
+                ],
+                "term_count": 7
+              },
+              "levenshtein": 65,
+              "peak_memory_bytes": 918978560,
+              "run_kind": "warm",
+              "status": "ok",
+              "wall_time_ms": 4307
+            },
+            "warm_output": {
+              "bytes": 97304,
+              "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/warm-final3/whisper/cgal-proper-nouns/warm.json",
+              "sha256": "de267dee31466642360c4072cb7227b578f6fbb41353547862d3391239294e5b"
+            }
+          },
+          {
+            "baseline": {
+              "cache_hit": null,
+              "cer": 0.75,
+              "cue": {
+                "assigned_anchor_ids": [
+                  "anchor-1",
+                  "anchor-2",
+                  "anchor-3",
+                  "anchor-4"
+                ],
+                "duplicate": 21,
+                "error_count": 21,
+                "error_rate": 5.25,
+                "gold_anchor_count": 4,
+                "missing": 0,
+                "missing_anchor_ids": [],
+                "output_cue_count": 25,
+                "rule": "overlap_half_open"
+              },
+              "glossary": {
+                "exact_match_terms": 3,
+                "expected": 4,
+                "found": 3,
+                "incorrect": 0,
+                "missing": 1,
+                "per_term": [
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "HHKB"
+                    ],
+                    "found": [
+                      "HHKB"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "HHKB"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "Mac"
+                    ],
+                    "found": [
+                      "Mac"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "Mac"
+                  },
+                  {
+                    "exact_match": false,
+                    "expected": [
+                      "macOS"
+                    ],
+                    "found": [],
+                    "incorrect": [],
+                    "missing": [
+                      "macOS"
+                    ],
+                    "term": "macOS"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "ファンクションキー"
+                    ],
+                    "found": [
+                      "ファンクションキー"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "ファンクションキー"
+                  }
+                ],
+                "term_count": 4
+              },
+              "levenshtein": 135,
+              "peak_memory_bytes": null,
+              "run_kind": null,
+              "status": "ok",
+              "wall_time_ms": null
+            },
+            "case_id": "hpe-audio-variation",
+            "cold": {
+              "cache_hit": false,
+              "cer": 0.18888888888888888,
+              "cue": {
+                "assigned_anchor_ids": [
+                  "anchor-1",
+                  "anchor-2",
+                  "anchor-3",
+                  "anchor-4"
+                ],
+                "duplicate": 3,
+                "error_count": 3,
+                "error_rate": 0.75,
+                "gold_anchor_count": 4,
+                "missing": 0,
+                "missing_anchor_ids": [],
+                "output_cue_count": 7,
+                "rule": "overlap_half_open"
+              },
+              "glossary": {
+                "exact_match_terms": 4,
+                "expected": 4,
+                "found": 4,
+                "incorrect": 0,
+                "missing": 0,
+                "per_term": [
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "HHKB"
+                    ],
+                    "found": [
+                      "HHKB"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "HHKB"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "Mac"
+                    ],
+                    "found": [
+                      "Mac"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "Mac"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "macOS"
+                    ],
+                    "found": [
+                      "macOS"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "macOS"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "ファンクションキー"
+                    ],
+                    "found": [
+                      "ファンクションキー"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "ファンクションキー"
+                  }
+                ],
+                "term_count": 4
+              },
+              "levenshtein": 34,
+              "peak_memory_bytes": 920928256,
+              "run_kind": "cold",
+              "status": "ok",
+              "wall_time_ms": 2914
+            },
+            "cold_output": {
+              "bytes": 44577,
+              "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/cold-final3/whisper/hpe-audio-variation/cold.json",
+              "sha256": "168e3a22ec89d5e3e8e0e9039c3f5a99c3a5f6d6939c96f76c238ea3a8394562"
+            },
+            "cold_warm_output_sha_equal": true,
+            "relative_cer_improvement": 0.7481481481481481,
+            "warm": {
+              "cache_hit": true,
+              "cer": 0.18888888888888888,
+              "cue": {
+                "assigned_anchor_ids": [
+                  "anchor-1",
+                  "anchor-2",
+                  "anchor-3",
+                  "anchor-4"
+                ],
+                "duplicate": 3,
+                "error_count": 3,
+                "error_rate": 0.75,
+                "gold_anchor_count": 4,
+                "missing": 0,
+                "missing_anchor_ids": [],
+                "output_cue_count": 7,
+                "rule": "overlap_half_open"
+              },
+              "glossary": {
+                "exact_match_terms": 4,
+                "expected": 4,
+                "found": 4,
+                "incorrect": 0,
+                "missing": 0,
+                "per_term": [
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "HHKB"
+                    ],
+                    "found": [
+                      "HHKB"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "HHKB"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "Mac"
+                    ],
+                    "found": [
+                      "Mac"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "Mac"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "macOS"
+                    ],
+                    "found": [
+                      "macOS"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "macOS"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "ファンクションキー"
+                    ],
+                    "found": [
+                      "ファンクションキー"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "ファンクションキー"
+                  }
+                ],
+                "term_count": 4
+              },
+              "levenshtein": 34,
+              "peak_memory_bytes": 915062784,
+              "run_kind": "warm",
+              "status": "ok",
+              "wall_time_ms": 2915
+            },
+            "warm_output": {
+              "bytes": 44577,
+              "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/warm-final3/whisper/hpe-audio-variation/warm.json",
+              "sha256": "168e3a22ec89d5e3e8e0e9039c3f5a99c3a5f6d6939c96f76c238ea3a8394562"
+            }
+          }
+        ],
+        "cue": {
+          "allowed_candidate_rate": 7.0,
+          "baseline": {
+            "duplicate": 139,
+            "error_count": 139,
+            "error_rate": 6.95,
+            "gold_anchor_count": 20,
+            "missing": 0,
+            "output_cue_count": 159
+          },
+          "candidate": {
+            "duplicate": 46,
+            "error_count": 47,
+            "error_rate": 2.35,
+            "gold_anchor_count": 20,
+            "missing": 1,
+            "output_cue_count": 65
+          },
+          "passed": true
+        },
+        "glossary": {
+          "baseline": {
+            "definition": "fixed glossary exact surface; found non-regression and missing/incorrect non-increase",
+            "exact_match_terms": 10,
+            "expected": 19,
+            "found": 10,
+            "incorrect": 0,
+            "missing": 9
+          },
+          "candidate": {
+            "definition": "fixed glossary exact surface; found non-regression and missing/incorrect non-increase",
+            "exact_match_terms": 13,
+            "expected": 19,
+            "found": 13,
+            "incorrect": 0,
+            "missing": 6
+          },
+          "passed": true
+        },
+        "output_stable_cold_warm": true,
+        "paired_median_relative_cer_improvement": 0.7869427067818489
+      },
+      "run_manifest_fingerprint": "a25d0fbc8233a1db7f0c2ecbb332781b19e5fd5b31260a5b0b2d03be7270de5e",
+      "runs": {
+        "cold": {
+          "cases": [
+            {
+              "cache_hit": false,
+              "cer": 0.13870967741935483,
+              "cue": {
+                "assigned_anchor_ids": [
+                  "anchor-2",
+                  "anchor-3",
+                  "anchor-4",
+                  "anchor-5"
+                ],
+                "duplicate": 3,
+                "error_count": 4,
+                "error_rate": 0.8,
+                "gold_anchor_count": 5,
+                "missing": 1,
+                "missing_anchor_ids": [
+                  "anchor-1"
+                ],
+                "output_cue_count": 7,
+                "rule": "overlap_half_open"
+              },
+              "glossary": {
+                "exact_match_terms": 2,
+                "expected": 3,
+                "found": 2,
+                "incorrect": 0,
+                "missing": 1,
+                "per_term": [
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "クロード"
+                    ],
+                    "found": [
+                      "クロード"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "クロード"
+                  },
+                  {
+                    "exact_match": false,
+                    "expected": [
+                      "コーデックス"
+                    ],
+                    "found": [],
+                    "incorrect": [],
+                    "missing": [
+                      "コーデックス"
+                    ],
+                    "term": "コーデックス"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "要件定義"
+                    ],
+                    "found": [
+                      "要件定義"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "要件定義"
+                  }
+                ],
+                "term_count": 3
+              },
+              "levenshtein": 43,
+              "peak_memory_bytes": 903921664,
+              "run_kind": "cold",
+              "status": "ok",
+              "wall_time_ms": 2149
+            },
+            {
+              "cache_hit": false,
+              "cer": 0.38950276243093923,
+              "cue": {
+                "assigned_anchor_ids": [
+                  "anchor-1",
+                  "anchor-2",
+                  "anchor-3",
+                  "anchor-4",
+                  "anchor-5",
+                  "anchor-6"
+                ],
+                "duplicate": 27,
+                "error_count": 27,
+                "error_rate": 4.5,
+                "gold_anchor_count": 6,
+                "missing": 0,
+                "missing_anchor_ids": [],
+                "output_cue_count": 33,
+                "rule": "overlap_half_open"
+              },
+              "glossary": {
+                "exact_match_terms": 1,
+                "expected": 5,
+                "found": 1,
+                "incorrect": 0,
+                "missing": 4,
+                "per_term": [
+                  {
+                    "exact_match": false,
+                    "expected": [
+                      "Ollama"
+                    ],
+                    "found": [],
+                    "incorrect": [],
+                    "missing": [
+                      "Ollama"
+                    ],
+                    "term": "Ollama"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "ローカルLLM"
+                    ],
+                    "found": [
+                      "ローカルLLM"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "ローカルLLM"
+                  },
+                  {
+                    "exact_match": false,
+                    "expected": [
+                      "TogetherAI"
+                    ],
+                    "found": [],
+                    "incorrect": [],
+                    "missing": [
+                      "TogetherAI"
+                    ],
+                    "term": "TogetherAI"
+                  },
+                  {
+                    "exact_match": false,
+                    "expected": [
+                      "DistilLargeV3"
+                    ],
+                    "found": [],
+                    "incorrect": [],
+                    "missing": [
+                      "DistilLargeV3"
+                    ],
+                    "term": "DistilLargeV3"
+                  },
+                  {
+                    "exact_match": false,
+                    "expected": [
+                      "Whisper"
+                    ],
+                    "found": [],
+                    "incorrect": [],
+                    "missing": [
+                      "Whisper"
+                    ],
+                    "term": "Whisper"
+                  }
+                ],
+                "term_count": 5
+              },
+              "levenshtein": 141,
+              "peak_memory_bytes": 926728192,
+              "run_kind": "cold",
+              "status": "ok",
+              "wall_time_ms": 5170
+            },
+            {
+              "cache_hit": false,
+              "cer": 0.1388888888888889,
+              "cue": {
+                "assigned_anchor_ids": [
+                  "anchor-1",
+                  "anchor-2",
+                  "anchor-3",
+                  "anchor-4",
+                  "anchor-5"
+                ],
+                "duplicate": 13,
+                "error_count": 13,
+                "error_rate": 2.6,
+                "gold_anchor_count": 5,
+                "missing": 0,
+                "missing_anchor_ids": [],
+                "output_cue_count": 18,
+                "rule": "overlap_half_open"
+              },
+              "glossary": {
+                "exact_match_terms": 6,
+                "expected": 7,
+                "found": 6,
+                "incorrect": 0,
+                "missing": 1,
+                "per_term": [
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "DirectX"
+                    ],
+                    "found": [
+                      "DirectX"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "DirectX"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "Microsoft"
+                    ],
+                    "found": [
+                      "Microsoft"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "Microsoft"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "Windows"
+                    ],
+                    "found": [
+                      "Windows"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "Windows"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "Steam"
+                    ],
+                    "found": [
+                      "Steam"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "Steam"
+                  },
+                  {
+                    "exact_match": false,
+                    "expected": [
+                      "DX12"
+                    ],
+                    "found": [],
+                    "incorrect": [],
+                    "missing": [
+                      "DX12"
+                    ],
+                    "term": "DX12"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "iMac"
+                    ],
+                    "found": [
+                      "iMac"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "iMac"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "AppleII"
+                    ],
+                    "found": [
+                      "AppleII"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "AppleII"
+                  }
+                ],
+                "term_count": 7
+              },
+              "levenshtein": 65,
+              "peak_memory_bytes": 919830528,
+              "run_kind": "cold",
+              "status": "ok",
+              "wall_time_ms": 4300
+            },
+            {
+              "cache_hit": false,
+              "cer": 0.18888888888888888,
+              "cue": {
+                "assigned_anchor_ids": [
+                  "anchor-1",
+                  "anchor-2",
+                  "anchor-3",
+                  "anchor-4"
+                ],
+                "duplicate": 3,
+                "error_count": 3,
+                "error_rate": 0.75,
+                "gold_anchor_count": 4,
+                "missing": 0,
+                "missing_anchor_ids": [],
+                "output_cue_count": 7,
+                "rule": "overlap_half_open"
+              },
+              "glossary": {
+                "exact_match_terms": 4,
+                "expected": 4,
+                "found": 4,
+                "incorrect": 0,
+                "missing": 0,
+                "per_term": [
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "HHKB"
+                    ],
+                    "found": [
+                      "HHKB"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "HHKB"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "Mac"
+                    ],
+                    "found": [
+                      "Mac"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "Mac"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "macOS"
+                    ],
+                    "found": [
+                      "macOS"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "macOS"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "ファンクションキー"
+                    ],
+                    "found": [
+                      "ファンクションキー"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "ファンクションキー"
+                  }
+                ],
+                "term_count": 4
+              },
+              "levenshtein": 34,
+              "peak_memory_bytes": 920928256,
+              "run_kind": "cold",
+              "status": "ok",
+              "wall_time_ms": 2914
+            }
+          ],
+          "report_path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/cold-final3/report.json"
+        },
+        "warm": {
+          "cases": [
+            {
+              "cache_hit": true,
+              "cer": 0.13870967741935483,
+              "cue": {
+                "assigned_anchor_ids": [
+                  "anchor-2",
+                  "anchor-3",
+                  "anchor-4",
+                  "anchor-5"
+                ],
+                "duplicate": 3,
+                "error_count": 4,
+                "error_rate": 0.8,
+                "gold_anchor_count": 5,
+                "missing": 1,
+                "missing_anchor_ids": [
+                  "anchor-1"
+                ],
+                "output_cue_count": 7,
+                "rule": "overlap_half_open"
+              },
+              "glossary": {
+                "exact_match_terms": 2,
+                "expected": 3,
+                "found": 2,
+                "incorrect": 0,
+                "missing": 1,
+                "per_term": [
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "クロード"
+                    ],
+                    "found": [
+                      "クロード"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "クロード"
+                  },
+                  {
+                    "exact_match": false,
+                    "expected": [
+                      "コーデックス"
+                    ],
+                    "found": [],
+                    "incorrect": [],
+                    "missing": [
+                      "コーデックス"
+                    ],
+                    "term": "コーデックス"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "要件定義"
+                    ],
+                    "found": [
+                      "要件定義"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "要件定義"
+                  }
+                ],
+                "term_count": 3
+              },
+              "levenshtein": 43,
+              "peak_memory_bytes": 903118848,
+              "run_kind": "warm",
+              "status": "ok",
+              "wall_time_ms": 2149
+            },
+            {
+              "cache_hit": true,
+              "cer": 0.38950276243093923,
+              "cue": {
+                "assigned_anchor_ids": [
+                  "anchor-1",
+                  "anchor-2",
+                  "anchor-3",
+                  "anchor-4",
+                  "anchor-5",
+                  "anchor-6"
+                ],
+                "duplicate": 27,
+                "error_count": 27,
+                "error_rate": 4.5,
+                "gold_anchor_count": 6,
+                "missing": 0,
+                "missing_anchor_ids": [],
+                "output_cue_count": 33,
+                "rule": "overlap_half_open"
+              },
+              "glossary": {
+                "exact_match_terms": 1,
+                "expected": 5,
+                "found": 1,
+                "incorrect": 0,
+                "missing": 4,
+                "per_term": [
+                  {
+                    "exact_match": false,
+                    "expected": [
+                      "Ollama"
+                    ],
+                    "found": [],
+                    "incorrect": [],
+                    "missing": [
+                      "Ollama"
+                    ],
+                    "term": "Ollama"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "ローカルLLM"
+                    ],
+                    "found": [
+                      "ローカルLLM"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "ローカルLLM"
+                  },
+                  {
+                    "exact_match": false,
+                    "expected": [
+                      "TogetherAI"
+                    ],
+                    "found": [],
+                    "incorrect": [],
+                    "missing": [
+                      "TogetherAI"
+                    ],
+                    "term": "TogetherAI"
+                  },
+                  {
+                    "exact_match": false,
+                    "expected": [
+                      "DistilLargeV3"
+                    ],
+                    "found": [],
+                    "incorrect": [],
+                    "missing": [
+                      "DistilLargeV3"
+                    ],
+                    "term": "DistilLargeV3"
+                  },
+                  {
+                    "exact_match": false,
+                    "expected": [
+                      "Whisper"
+                    ],
+                    "found": [],
+                    "incorrect": [],
+                    "missing": [
+                      "Whisper"
+                    ],
+                    "term": "Whisper"
+                  }
+                ],
+                "term_count": 5
+              },
+              "levenshtein": 141,
+              "peak_memory_bytes": 932773888,
+              "run_kind": "warm",
+              "status": "ok",
+              "wall_time_ms": 5171
+            },
+            {
+              "cache_hit": true,
+              "cer": 0.1388888888888889,
+              "cue": {
+                "assigned_anchor_ids": [
+                  "anchor-1",
+                  "anchor-2",
+                  "anchor-3",
+                  "anchor-4",
+                  "anchor-5"
+                ],
+                "duplicate": 13,
+                "error_count": 13,
+                "error_rate": 2.6,
+                "gold_anchor_count": 5,
+                "missing": 0,
+                "missing_anchor_ids": [],
+                "output_cue_count": 18,
+                "rule": "overlap_half_open"
+              },
+              "glossary": {
+                "exact_match_terms": 6,
+                "expected": 7,
+                "found": 6,
+                "incorrect": 0,
+                "missing": 1,
+                "per_term": [
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "DirectX"
+                    ],
+                    "found": [
+                      "DirectX"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "DirectX"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "Microsoft"
+                    ],
+                    "found": [
+                      "Microsoft"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "Microsoft"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "Windows"
+                    ],
+                    "found": [
+                      "Windows"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "Windows"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "Steam"
+                    ],
+                    "found": [
+                      "Steam"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "Steam"
+                  },
+                  {
+                    "exact_match": false,
+                    "expected": [
+                      "DX12"
+                    ],
+                    "found": [],
+                    "incorrect": [],
+                    "missing": [
+                      "DX12"
+                    ],
+                    "term": "DX12"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "iMac"
+                    ],
+                    "found": [
+                      "iMac"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "iMac"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "AppleII"
+                    ],
+                    "found": [
+                      "AppleII"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "AppleII"
+                  }
+                ],
+                "term_count": 7
+              },
+              "levenshtein": 65,
+              "peak_memory_bytes": 918978560,
+              "run_kind": "warm",
+              "status": "ok",
+              "wall_time_ms": 4307
+            },
+            {
+              "cache_hit": true,
+              "cer": 0.18888888888888888,
+              "cue": {
+                "assigned_anchor_ids": [
+                  "anchor-1",
+                  "anchor-2",
+                  "anchor-3",
+                  "anchor-4"
+                ],
+                "duplicate": 3,
+                "error_count": 3,
+                "error_rate": 0.75,
+                "gold_anchor_count": 4,
+                "missing": 0,
+                "missing_anchor_ids": [],
+                "output_cue_count": 7,
+                "rule": "overlap_half_open"
+              },
+              "glossary": {
+                "exact_match_terms": 4,
+                "expected": 4,
+                "found": 4,
+                "incorrect": 0,
+                "missing": 0,
+                "per_term": [
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "HHKB"
+                    ],
+                    "found": [
+                      "HHKB"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "HHKB"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "Mac"
+                    ],
+                    "found": [
+                      "Mac"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "Mac"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "macOS"
+                    ],
+                    "found": [
+                      "macOS"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "macOS"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "ファンクションキー"
+                    ],
+                    "found": [
+                      "ファンクションキー"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "ファンクションキー"
+                  }
+                ],
+                "term_count": 4
+              },
+              "levenshtein": 34,
+              "peak_memory_bytes": 915062784,
+              "run_kind": "warm",
+              "status": "ok",
+              "wall_time_ms": 2915
+            }
+          ],
+          "report_path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/warm-final3/report.json"
+        }
+      },
+      "settings_contract": {
+        "binary_fingerprint": {
+          "bytes": 658608,
+          "path": "/opt/homebrew/bin/whisper-cli",
+          "sha256": "1fbabb51a45906bd36684695de9025eab63618a6eedc26971c47fa5affc5fe49"
+        },
+        "binary_path": "/opt/homebrew/bin/whisper-cli",
+        "output_schema": "whisper-cli-json-full-v1",
+        "settings": {
+          "decode": {
+            "beam_size": 5,
+            "best_of": 5,
+            "no_fallback": false,
+            "processors": 1,
+            "temperature": 0.0,
+            "threads": 8,
+            "vad": false
+          },
+          "initial_prompt": "日本語のライブ配信。固有名詞は Claude、Codex、Whisper、Ollama、Together AI、DirectX、Microsoft、Windows、Steam、DX12、iMac、Apple II、HHKB、macOS を含む。",
+          "language": "ja",
+          "output_schema": "whisper-cli-json-full-v1",
+          "padding_ms": 0
+        },
+        "timeout_sec": 180.0,
+        "version": "1.9.1"
+      }
+    },
+    {
+      "distribution_url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin?download=true",
+      "gates": {
+        "go": false,
+        "gold_audit": {
+          "passed": false,
+          "status": "provisional"
+        },
+        "peak_memory": {
+          "budget_bytes": 8589934592,
+          "passed": true,
+          "values_bytes": [
+            2002157568,
+            2017689600,
+            2006564864,
+            2005254144,
+            2000257024,
+            2012233728,
+            2007891968,
+            2009677824
+          ]
+        },
+        "quality": {
+          "cue_missing_duplicate": {
+            "passed": true
+          },
+          "glossary_exact_match": {
+            "passed": true
+          },
+          "relative_cer": {
+            "passed": true,
+            "threshold": 0.1,
+            "value": 0.8084599344652964
+          }
+        },
+        "reasons": [
+          {
+            "code": "gold_not_audited",
+            "message": "gold は音声の独立人手監査前であり、fail closed です。"
+          }
+        ],
+        "source_gate_report": {
+          "reasons": [
+            {
+              "code": "gold_not_audited",
+              "message": "gold audit status が audited ではないため fail closed です。"
+            }
+          ],
+          "status": "no_go"
+        },
+        "status": "no_go",
+        "technical_gates_passed": true,
+        "wall_time": {
+          "checks": [
+            {
+              "budget_ms": 180000,
+              "case_id": "lb4-clip002-short-proper-nouns",
+              "passed": true,
+              "run_kind": "cold",
+              "value_ms": 2268
+            },
+            {
+              "budget_ms": 120000,
+              "case_id": "lb4-clip002-short-proper-nouns",
+              "passed": true,
+              "run_kind": "warm",
+              "value_ms": 2259
+            },
+            {
+              "budget_ms": 180000,
+              "case_id": "mkw-long-local-asr",
+              "passed": true,
+              "run_kind": "cold",
+              "value_ms": 5622
+            },
+            {
+              "budget_ms": 120000,
+              "case_id": "mkw-long-local-asr",
+              "passed": true,
+              "run_kind": "warm",
+              "value_ms": 5629
+            },
+            {
+              "budget_ms": 180000,
+              "case_id": "cgal-proper-nouns",
+              "passed": true,
+              "run_kind": "cold",
+              "value_ms": 4234
+            },
+            {
+              "budget_ms": 120000,
+              "case_id": "cgal-proper-nouns",
+              "passed": true,
+              "run_kind": "warm",
+              "value_ms": 4239
+            },
+            {
+              "budget_ms": 180000,
+              "case_id": "hpe-audio-variation",
+              "passed": true,
+              "run_kind": "cold",
+              "value_ms": 2965
+            },
+            {
+              "budget_ms": 120000,
+              "case_id": "hpe-audio-variation",
+              "passed": true,
+              "run_kind": "warm",
+              "value_ms": 2965
+            }
+          ],
+          "passed": true
+        }
+      },
+      "model_fingerprint": {
+        "bytes": 1624555275,
+        "path": "/Users/ryukouokumura/Library/Caches/whisper.cpp/models/ggml-large-v3-turbo.bin",
+        "sha256": "1fc70f774d38eb169993ac391eea357ef47c88757ef72ee5943879b7e8e2bc69"
+      },
+      "name": "ggml-large-v3-turbo",
+      "quality": {
+        "cases": [
+          {
+            "baseline": {
+              "cache_hit": null,
+              "cer": 1.0161290322580645,
+              "cue": {
+                "assigned_anchor_ids": [
+                  "anchor-1",
+                  "anchor-2",
+                  "anchor-3",
+                  "anchor-4",
+                  "anchor-5"
+                ],
+                "duplicate": 31,
+                "error_count": 31,
+                "error_rate": 6.2,
+                "gold_anchor_count": 5,
+                "missing": 0,
+                "missing_anchor_ids": [],
+                "output_cue_count": 36,
+                "rule": "overlap_half_open"
+              },
+              "glossary": {
+                "exact_match_terms": 3,
+                "expected": 3,
+                "found": 3,
+                "incorrect": 0,
+                "missing": 0,
+                "per_term": [
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "クロード"
+                    ],
+                    "found": [
+                      "クロード"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "クロード"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "コーデックス"
+                    ],
+                    "found": [
+                      "コーデックス"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "コーデックス"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "要件定義"
+                    ],
+                    "found": [
+                      "要件定義"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "要件定義"
+                  }
+                ],
+                "term_count": 3
+              },
+              "levenshtein": 315,
+              "peak_memory_bytes": null,
+              "run_kind": null,
+              "status": "ok",
+              "wall_time_ms": null
+            },
+            "case_id": "lb4-clip002-short-proper-nouns",
+            "cold": {
+              "cache_hit": false,
+              "cer": 0.1,
+              "cue": {
+                "assigned_anchor_ids": [
+                  "anchor-2",
+                  "anchor-3",
+                  "anchor-4",
+                  "anchor-5"
+                ],
+                "duplicate": 2,
+                "error_count": 3,
+                "error_rate": 0.6,
+                "gold_anchor_count": 5,
+                "missing": 1,
+                "missing_anchor_ids": [
+                  "anchor-1"
+                ],
+                "output_cue_count": 6,
+                "rule": "overlap_half_open"
+              },
+              "glossary": {
+                "exact_match_terms": 2,
+                "expected": 3,
+                "found": 2,
+                "incorrect": 0,
+                "missing": 1,
+                "per_term": [
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "クロード"
+                    ],
+                    "found": [
+                      "クロード"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "クロード"
+                  },
+                  {
+                    "exact_match": false,
+                    "expected": [
+                      "コーデックス"
+                    ],
+                    "found": [],
+                    "incorrect": [],
+                    "missing": [
+                      "コーデックス"
+                    ],
+                    "term": "コーデックス"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "要件定義"
+                    ],
+                    "found": [
+                      "要件定義"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "要件定義"
+                  }
+                ],
+                "term_count": 3
+              },
+              "levenshtein": 31,
+              "peak_memory_bytes": 2002157568,
+              "run_kind": "cold",
+              "status": "ok",
+              "wall_time_ms": 2268
+            },
+            "cold_output": {
+              "bytes": 57432,
+              "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/turbo/cold-final3/whisper/lb4-clip002-short-proper-nouns/cold.json",
+              "sha256": "0413a091d3ba834d89834ffdbb0b64d0707ced9f27a2fef9f99d86e273d24a7f"
+            },
+            "cold_warm_output_sha_equal": true,
+            "relative_cer_improvement": 0.9015873015873016,
+            "warm": {
+              "cache_hit": true,
+              "cer": 0.1,
+              "cue": {
+                "assigned_anchor_ids": [
+                  "anchor-2",
+                  "anchor-3",
+                  "anchor-4",
+                  "anchor-5"
+                ],
+                "duplicate": 2,
+                "error_count": 3,
+                "error_rate": 0.6,
+                "gold_anchor_count": 5,
+                "missing": 1,
+                "missing_anchor_ids": [
+                  "anchor-1"
+                ],
+                "output_cue_count": 6,
+                "rule": "overlap_half_open"
+              },
+              "glossary": {
+                "exact_match_terms": 2,
+                "expected": 3,
+                "found": 2,
+                "incorrect": 0,
+                "missing": 1,
+                "per_term": [
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "クロード"
+                    ],
+                    "found": [
+                      "クロード"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "クロード"
+                  },
+                  {
+                    "exact_match": false,
+                    "expected": [
+                      "コーデックス"
+                    ],
+                    "found": [],
+                    "incorrect": [],
+                    "missing": [
+                      "コーデックス"
+                    ],
+                    "term": "コーデックス"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "要件定義"
+                    ],
+                    "found": [
+                      "要件定義"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "要件定義"
+                  }
+                ],
+                "term_count": 3
+              },
+              "levenshtein": 31,
+              "peak_memory_bytes": 2000257024,
+              "run_kind": "warm",
+              "status": "ok",
+              "wall_time_ms": 2259
+            },
+            "warm_output": {
+              "bytes": 57432,
+              "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/turbo/warm-final3/whisper/lb4-clip002-short-proper-nouns/warm.json",
+              "sha256": "0413a091d3ba834d89834ffdbb0b64d0707ced9f27a2fef9f99d86e273d24a7f"
+            }
+          },
+          {
+            "baseline": {
+              "cache_hit": null,
+              "cer": 0.6160220994475138,
+              "cue": {
+                "assigned_anchor_ids": [
+                  "anchor-1",
+                  "anchor-2",
+                  "anchor-3",
+                  "anchor-4",
+                  "anchor-5",
+                  "anchor-6"
+                ],
+                "duplicate": 35,
+                "error_count": 35,
+                "error_rate": 5.833333333333333,
+                "gold_anchor_count": 6,
+                "missing": 0,
+                "missing_anchor_ids": [],
+                "output_cue_count": 41,
+                "rule": "overlap_half_open"
+              },
+              "glossary": {
+                "exact_match_terms": 1,
+                "expected": 5,
+                "found": 1,
+                "incorrect": 0,
+                "missing": 4,
+                "per_term": [
+                  {
+                    "exact_match": false,
+                    "expected": [
+                      "Ollama"
+                    ],
+                    "found": [],
+                    "incorrect": [],
+                    "missing": [
+                      "Ollama"
+                    ],
+                    "term": "Ollama"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "ローカルLLM"
+                    ],
+                    "found": [
+                      "ローカルLLM"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "ローカルLLM"
+                  },
+                  {
+                    "exact_match": false,
+                    "expected": [
+                      "TogetherAI"
+                    ],
+                    "found": [],
+                    "incorrect": [],
+                    "missing": [
+                      "TogetherAI"
+                    ],
+                    "term": "TogetherAI"
+                  },
+                  {
+                    "exact_match": false,
+                    "expected": [
+                      "DistilLargeV3"
+                    ],
+                    "found": [],
+                    "incorrect": [],
+                    "missing": [
+                      "DistilLargeV3"
+                    ],
+                    "term": "DistilLargeV3"
+                  },
+                  {
+                    "exact_match": false,
+                    "expected": [
+                      "Whisper"
+                    ],
+                    "found": [],
+                    "incorrect": [],
+                    "missing": [
+                      "Whisper"
+                    ],
+                    "term": "Whisper"
+                  }
+                ],
+                "term_count": 5
+              },
+              "levenshtein": 223,
+              "peak_memory_bytes": null,
+              "run_kind": null,
+              "status": "ok",
+              "wall_time_ms": null
+            },
+            "case_id": "mkw-long-local-asr",
+            "cold": {
+              "cache_hit": false,
+              "cer": 0.4696132596685083,
+              "cue": {
+                "assigned_anchor_ids": [
+                  "anchor-1",
+                  "anchor-2",
+                  "anchor-3",
+                  "anchor-4",
+                  "anchor-5",
+                  "anchor-6"
+                ],
+                "duplicate": 25,
+                "error_count": 25,
+                "error_rate": 4.166666666666667,
+                "gold_anchor_count": 6,
+                "missing": 0,
+                "missing_anchor_ids": [],
+                "output_cue_count": 31,
+                "rule": "overlap_half_open"
+              },
+              "glossary": {
+                "exact_match_terms": 1,
+                "expected": 5,
+                "found": 1,
+                "incorrect": 0,
+                "missing": 4,
+                "per_term": [
+                  {
+                    "exact_match": false,
+                    "expected": [
+                      "Ollama"
+                    ],
+                    "found": [],
+                    "incorrect": [],
+                    "missing": [
+                      "Ollama"
+                    ],
+                    "term": "Ollama"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "ローカルLLM"
+                    ],
+                    "found": [
+                      "ローカルLLM"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "ローカルLLM"
+                  },
+                  {
+                    "exact_match": false,
+                    "expected": [
+                      "TogetherAI"
+                    ],
+                    "found": [],
+                    "incorrect": [],
+                    "missing": [
+                      "TogetherAI"
+                    ],
+                    "term": "TogetherAI"
+                  },
+                  {
+                    "exact_match": false,
+                    "expected": [
+                      "DistilLargeV3"
+                    ],
+                    "found": [],
+                    "incorrect": [],
+                    "missing": [
+                      "DistilLargeV3"
+                    ],
+                    "term": "DistilLargeV3"
+                  },
+                  {
+                    "exact_match": false,
+                    "expected": [
+                      "Whisper"
+                    ],
+                    "found": [],
+                    "incorrect": [],
+                    "missing": [
+                      "Whisper"
+                    ],
+                    "term": "Whisper"
+                  }
+                ],
+                "term_count": 5
+              },
+              "levenshtein": 170,
+              "peak_memory_bytes": 2017689600,
+              "run_kind": "cold",
+              "status": "ok",
+              "wall_time_ms": 5622
+            },
+            "cold_output": {
+              "bytes": 94909,
+              "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/turbo/cold-final3/whisper/mkw-long-local-asr/cold.json",
+              "sha256": "f7deda132b560285c965edb2c21433c7aa7f8deca2b0163b8b75e5c5e19dfe52"
+            },
+            "cold_warm_output_sha_equal": true,
+            "relative_cer_improvement": 0.2376681614349776,
+            "warm": {
+              "cache_hit": true,
+              "cer": 0.4696132596685083,
+              "cue": {
+                "assigned_anchor_ids": [
+                  "anchor-1",
+                  "anchor-2",
+                  "anchor-3",
+                  "anchor-4",
+                  "anchor-5",
+                  "anchor-6"
+                ],
+                "duplicate": 25,
+                "error_count": 25,
+                "error_rate": 4.166666666666667,
+                "gold_anchor_count": 6,
+                "missing": 0,
+                "missing_anchor_ids": [],
+                "output_cue_count": 31,
+                "rule": "overlap_half_open"
+              },
+              "glossary": {
+                "exact_match_terms": 1,
+                "expected": 5,
+                "found": 1,
+                "incorrect": 0,
+                "missing": 4,
+                "per_term": [
+                  {
+                    "exact_match": false,
+                    "expected": [
+                      "Ollama"
+                    ],
+                    "found": [],
+                    "incorrect": [],
+                    "missing": [
+                      "Ollama"
+                    ],
+                    "term": "Ollama"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "ローカルLLM"
+                    ],
+                    "found": [
+                      "ローカルLLM"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "ローカルLLM"
+                  },
+                  {
+                    "exact_match": false,
+                    "expected": [
+                      "TogetherAI"
+                    ],
+                    "found": [],
+                    "incorrect": [],
+                    "missing": [
+                      "TogetherAI"
+                    ],
+                    "term": "TogetherAI"
+                  },
+                  {
+                    "exact_match": false,
+                    "expected": [
+                      "DistilLargeV3"
+                    ],
+                    "found": [],
+                    "incorrect": [],
+                    "missing": [
+                      "DistilLargeV3"
+                    ],
+                    "term": "DistilLargeV3"
+                  },
+                  {
+                    "exact_match": false,
+                    "expected": [
+                      "Whisper"
+                    ],
+                    "found": [],
+                    "incorrect": [],
+                    "missing": [
+                      "Whisper"
+                    ],
+                    "term": "Whisper"
+                  }
+                ],
+                "term_count": 5
+              },
+              "levenshtein": 170,
+              "peak_memory_bytes": 2012233728,
+              "run_kind": "warm",
+              "status": "ok",
+              "wall_time_ms": 5629
+            },
+            "warm_output": {
+              "bytes": 94909,
+              "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/turbo/warm-final3/whisper/mkw-long-local-asr/warm.json",
+              "sha256": "f7deda132b560285c965edb2c21433c7aa7f8deca2b0163b8b75e5c5e19dfe52"
+            }
+          },
+          {
+            "baseline": {
+              "cache_hit": null,
+              "cer": 0.7970085470085471,
+              "cue": {
+                "assigned_anchor_ids": [
+                  "anchor-1",
+                  "anchor-2",
+                  "anchor-3",
+                  "anchor-4",
+                  "anchor-5"
+                ],
+                "duplicate": 52,
+                "error_count": 52,
+                "error_rate": 10.4,
+                "gold_anchor_count": 5,
+                "missing": 0,
+                "missing_anchor_ids": [],
+                "output_cue_count": 57,
+                "rule": "overlap_half_open"
+              },
+              "glossary": {
+                "exact_match_terms": 3,
+                "expected": 7,
+                "found": 3,
+                "incorrect": 0,
+                "missing": 4,
+                "per_term": [
+                  {
+                    "exact_match": false,
+                    "expected": [
+                      "DirectX"
+                    ],
+                    "found": [],
+                    "incorrect": [],
+                    "missing": [
+                      "DirectX"
+                    ],
+                    "term": "DirectX"
+                  },
+                  {
+                    "exact_match": false,
+                    "expected": [
+                      "Microsoft"
+                    ],
+                    "found": [],
+                    "incorrect": [],
+                    "missing": [
+                      "Microsoft"
+                    ],
+                    "term": "Microsoft"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "Windows"
+                    ],
+                    "found": [
+                      "Windows"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "Windows"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "Steam"
+                    ],
+                    "found": [
+                      "Steam"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "Steam"
+                  },
+                  {
+                    "exact_match": false,
+                    "expected": [
+                      "DX12"
+                    ],
+                    "found": [],
+                    "incorrect": [],
+                    "missing": [
+                      "DX12"
+                    ],
+                    "term": "DX12"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "iMac"
+                    ],
+                    "found": [
+                      "iMac"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "iMac"
+                  },
+                  {
+                    "exact_match": false,
+                    "expected": [
+                      "AppleII"
+                    ],
+                    "found": [],
+                    "incorrect": [],
+                    "missing": [
+                      "AppleII"
+                    ],
+                    "term": "AppleII"
+                  }
+                ],
+                "term_count": 7
+              },
+              "levenshtein": 373,
+              "peak_memory_bytes": null,
+              "run_kind": null,
+              "status": "ok",
+              "wall_time_ms": null
+            },
+            "case_id": "cgal-proper-nouns",
+            "cold": {
+              "cache_hit": false,
+              "cer": 0.1282051282051282,
+              "cue": {
+                "assigned_anchor_ids": [
+                  "anchor-1",
+                  "anchor-2",
+                  "anchor-3",
+                  "anchor-4",
+                  "anchor-5"
+                ],
+                "duplicate": 13,
+                "error_count": 13,
+                "error_rate": 2.6,
+                "gold_anchor_count": 5,
+                "missing": 0,
+                "missing_anchor_ids": [],
+                "output_cue_count": 18,
+                "rule": "overlap_half_open"
+              },
+              "glossary": {
+                "exact_match_terms": 6,
+                "expected": 7,
+                "found": 6,
+                "incorrect": 0,
+                "missing": 1,
+                "per_term": [
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "DirectX"
+                    ],
+                    "found": [
+                      "DirectX"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "DirectX"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "Microsoft"
+                    ],
+                    "found": [
+                      "Microsoft"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "Microsoft"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "Windows"
+                    ],
+                    "found": [
+                      "Windows"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "Windows"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "Steam"
+                    ],
+                    "found": [
+                      "Steam"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "Steam"
+                  },
+                  {
+                    "exact_match": false,
+                    "expected": [
+                      "DX12"
+                    ],
+                    "found": [],
+                    "incorrect": [],
+                    "missing": [
+                      "DX12"
+                    ],
+                    "term": "DX12"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "iMac"
+                    ],
+                    "found": [
+                      "iMac"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "iMac"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "AppleII"
+                    ],
+                    "found": [
+                      "AppleII"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "AppleII"
+                  }
+                ],
+                "term_count": 7
+              },
+              "levenshtein": 60,
+              "peak_memory_bytes": 2006564864,
+              "run_kind": "cold",
+              "status": "ok",
+              "wall_time_ms": 4234
+            },
+            "cold_output": {
+              "bytes": 95849,
+              "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/turbo/cold-final3/whisper/cgal-proper-nouns/cold.json",
+              "sha256": "cb986db8877001cece2a179d988e763057a47eeac2061a44d369ed497d38a17b"
+            },
+            "cold_warm_output_sha_equal": true,
+            "relative_cer_improvement": 0.839142091152815,
+            "warm": {
+              "cache_hit": true,
+              "cer": 0.1282051282051282,
+              "cue": {
+                "assigned_anchor_ids": [
+                  "anchor-1",
+                  "anchor-2",
+                  "anchor-3",
+                  "anchor-4",
+                  "anchor-5"
+                ],
+                "duplicate": 13,
+                "error_count": 13,
+                "error_rate": 2.6,
+                "gold_anchor_count": 5,
+                "missing": 0,
+                "missing_anchor_ids": [],
+                "output_cue_count": 18,
+                "rule": "overlap_half_open"
+              },
+              "glossary": {
+                "exact_match_terms": 6,
+                "expected": 7,
+                "found": 6,
+                "incorrect": 0,
+                "missing": 1,
+                "per_term": [
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "DirectX"
+                    ],
+                    "found": [
+                      "DirectX"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "DirectX"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "Microsoft"
+                    ],
+                    "found": [
+                      "Microsoft"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "Microsoft"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "Windows"
+                    ],
+                    "found": [
+                      "Windows"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "Windows"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "Steam"
+                    ],
+                    "found": [
+                      "Steam"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "Steam"
+                  },
+                  {
+                    "exact_match": false,
+                    "expected": [
+                      "DX12"
+                    ],
+                    "found": [],
+                    "incorrect": [],
+                    "missing": [
+                      "DX12"
+                    ],
+                    "term": "DX12"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "iMac"
+                    ],
+                    "found": [
+                      "iMac"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "iMac"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "AppleII"
+                    ],
+                    "found": [
+                      "AppleII"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "AppleII"
+                  }
+                ],
+                "term_count": 7
+              },
+              "levenshtein": 60,
+              "peak_memory_bytes": 2007891968,
+              "run_kind": "warm",
+              "status": "ok",
+              "wall_time_ms": 4239
+            },
+            "warm_output": {
+              "bytes": 95849,
+              "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/turbo/warm-final3/whisper/cgal-proper-nouns/warm.json",
+              "sha256": "cb986db8877001cece2a179d988e763057a47eeac2061a44d369ed497d38a17b"
+            }
+          },
+          {
+            "baseline": {
+              "cache_hit": null,
+              "cer": 0.75,
+              "cue": {
+                "assigned_anchor_ids": [
+                  "anchor-1",
+                  "anchor-2",
+                  "anchor-3",
+                  "anchor-4"
+                ],
+                "duplicate": 21,
+                "error_count": 21,
+                "error_rate": 5.25,
+                "gold_anchor_count": 4,
+                "missing": 0,
+                "missing_anchor_ids": [],
+                "output_cue_count": 25,
+                "rule": "overlap_half_open"
+              },
+              "glossary": {
+                "exact_match_terms": 3,
+                "expected": 4,
+                "found": 3,
+                "incorrect": 0,
+                "missing": 1,
+                "per_term": [
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "HHKB"
+                    ],
+                    "found": [
+                      "HHKB"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "HHKB"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "Mac"
+                    ],
+                    "found": [
+                      "Mac"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "Mac"
+                  },
+                  {
+                    "exact_match": false,
+                    "expected": [
+                      "macOS"
+                    ],
+                    "found": [],
+                    "incorrect": [],
+                    "missing": [
+                      "macOS"
+                    ],
+                    "term": "macOS"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "ファンクションキー"
+                    ],
+                    "found": [
+                      "ファンクションキー"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "ファンクションキー"
+                  }
+                ],
+                "term_count": 4
+              },
+              "levenshtein": 135,
+              "peak_memory_bytes": null,
+              "run_kind": null,
+              "status": "ok",
+              "wall_time_ms": null
+            },
+            "case_id": "hpe-audio-variation",
+            "cold": {
+              "cache_hit": false,
+              "cer": 0.16666666666666666,
+              "cue": {
+                "assigned_anchor_ids": [
+                  "anchor-1",
+                  "anchor-2",
+                  "anchor-3",
+                  "anchor-4"
+                ],
+                "duplicate": 3,
+                "error_count": 3,
+                "error_rate": 0.75,
+                "gold_anchor_count": 4,
+                "missing": 0,
+                "missing_anchor_ids": [],
+                "output_cue_count": 7,
+                "rule": "overlap_half_open"
+              },
+              "glossary": {
+                "exact_match_terms": 4,
+                "expected": 4,
+                "found": 4,
+                "incorrect": 0,
+                "missing": 0,
+                "per_term": [
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "HHKB"
+                    ],
+                    "found": [
+                      "HHKB"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "HHKB"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "Mac"
+                    ],
+                    "found": [
+                      "Mac"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "Mac"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "macOS"
+                    ],
+                    "found": [
+                      "macOS"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "macOS"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "ファンクションキー"
+                    ],
+                    "found": [
+                      "ファンクションキー"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "ファンクションキー"
+                  }
+                ],
+                "term_count": 4
+              },
+              "levenshtein": 30,
+              "peak_memory_bytes": 2005254144,
+              "run_kind": "cold",
+              "status": "ok",
+              "wall_time_ms": 2965
+            },
+            "cold_output": {
+              "bytes": 43815,
+              "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/turbo/cold-final3/whisper/hpe-audio-variation/cold.json",
+              "sha256": "09daf1eda5997b1f9c1ba42fcb4cc00a5d0708ee44b236824c0bdf54663b26b1"
+            },
+            "cold_warm_output_sha_equal": true,
+            "relative_cer_improvement": 0.7777777777777778,
+            "warm": {
+              "cache_hit": true,
+              "cer": 0.16666666666666666,
+              "cue": {
+                "assigned_anchor_ids": [
+                  "anchor-1",
+                  "anchor-2",
+                  "anchor-3",
+                  "anchor-4"
+                ],
+                "duplicate": 3,
+                "error_count": 3,
+                "error_rate": 0.75,
+                "gold_anchor_count": 4,
+                "missing": 0,
+                "missing_anchor_ids": [],
+                "output_cue_count": 7,
+                "rule": "overlap_half_open"
+              },
+              "glossary": {
+                "exact_match_terms": 4,
+                "expected": 4,
+                "found": 4,
+                "incorrect": 0,
+                "missing": 0,
+                "per_term": [
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "HHKB"
+                    ],
+                    "found": [
+                      "HHKB"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "HHKB"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "Mac"
+                    ],
+                    "found": [
+                      "Mac"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "Mac"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "macOS"
+                    ],
+                    "found": [
+                      "macOS"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "macOS"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "ファンクションキー"
+                    ],
+                    "found": [
+                      "ファンクションキー"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "ファンクションキー"
+                  }
+                ],
+                "term_count": 4
+              },
+              "levenshtein": 30,
+              "peak_memory_bytes": 2009677824,
+              "run_kind": "warm",
+              "status": "ok",
+              "wall_time_ms": 2965
+            },
+            "warm_output": {
+              "bytes": 43815,
+              "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/turbo/warm-final3/whisper/hpe-audio-variation/warm.json",
+              "sha256": "09daf1eda5997b1f9c1ba42fcb4cc00a5d0708ee44b236824c0bdf54663b26b1"
+            }
+          }
+        ],
+        "cue": {
+          "allowed_candidate_rate": 7.0,
+          "baseline": {
+            "duplicate": 139,
+            "error_count": 139,
+            "error_rate": 6.95,
+            "gold_anchor_count": 20,
+            "missing": 0,
+            "output_cue_count": 159
+          },
+          "candidate": {
+            "duplicate": 43,
+            "error_count": 44,
+            "error_rate": 2.2,
+            "gold_anchor_count": 20,
+            "missing": 1,
+            "output_cue_count": 62
+          },
+          "passed": true
+        },
+        "glossary": {
+          "baseline": {
+            "definition": "fixed glossary exact surface; found non-regression and missing/incorrect non-increase",
+            "exact_match_terms": 10,
+            "expected": 19,
+            "found": 10,
+            "incorrect": 0,
+            "missing": 9
+          },
+          "candidate": {
+            "definition": "fixed glossary exact surface; found non-regression and missing/incorrect non-increase",
+            "exact_match_terms": 13,
+            "expected": 19,
+            "found": 13,
+            "incorrect": 0,
+            "missing": 6
+          },
+          "passed": true
+        },
+        "output_stable_cold_warm": true,
+        "paired_median_relative_cer_improvement": 0.8084599344652964
+      },
+      "run_manifest_fingerprint": "9e8e71a6f02f57572ef65c127cf2fa5dfcaa6a7c55c7acf6791ea93d7d3c5ee6",
+      "runs": {
+        "cold": {
+          "cases": [
+            {
+              "cache_hit": false,
+              "cer": 0.1,
+              "cue": {
+                "assigned_anchor_ids": [
+                  "anchor-2",
+                  "anchor-3",
+                  "anchor-4",
+                  "anchor-5"
+                ],
+                "duplicate": 2,
+                "error_count": 3,
+                "error_rate": 0.6,
+                "gold_anchor_count": 5,
+                "missing": 1,
+                "missing_anchor_ids": [
+                  "anchor-1"
+                ],
+                "output_cue_count": 6,
+                "rule": "overlap_half_open"
+              },
+              "glossary": {
+                "exact_match_terms": 2,
+                "expected": 3,
+                "found": 2,
+                "incorrect": 0,
+                "missing": 1,
+                "per_term": [
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "クロード"
+                    ],
+                    "found": [
+                      "クロード"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "クロード"
+                  },
+                  {
+                    "exact_match": false,
+                    "expected": [
+                      "コーデックス"
+                    ],
+                    "found": [],
+                    "incorrect": [],
+                    "missing": [
+                      "コーデックス"
+                    ],
+                    "term": "コーデックス"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "要件定義"
+                    ],
+                    "found": [
+                      "要件定義"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "要件定義"
+                  }
+                ],
+                "term_count": 3
+              },
+              "levenshtein": 31,
+              "peak_memory_bytes": 2002157568,
+              "run_kind": "cold",
+              "status": "ok",
+              "wall_time_ms": 2268
+            },
+            {
+              "cache_hit": false,
+              "cer": 0.4696132596685083,
+              "cue": {
+                "assigned_anchor_ids": [
+                  "anchor-1",
+                  "anchor-2",
+                  "anchor-3",
+                  "anchor-4",
+                  "anchor-5",
+                  "anchor-6"
+                ],
+                "duplicate": 25,
+                "error_count": 25,
+                "error_rate": 4.166666666666667,
+                "gold_anchor_count": 6,
+                "missing": 0,
+                "missing_anchor_ids": [],
+                "output_cue_count": 31,
+                "rule": "overlap_half_open"
+              },
+              "glossary": {
+                "exact_match_terms": 1,
+                "expected": 5,
+                "found": 1,
+                "incorrect": 0,
+                "missing": 4,
+                "per_term": [
+                  {
+                    "exact_match": false,
+                    "expected": [
+                      "Ollama"
+                    ],
+                    "found": [],
+                    "incorrect": [],
+                    "missing": [
+                      "Ollama"
+                    ],
+                    "term": "Ollama"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "ローカルLLM"
+                    ],
+                    "found": [
+                      "ローカルLLM"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "ローカルLLM"
+                  },
+                  {
+                    "exact_match": false,
+                    "expected": [
+                      "TogetherAI"
+                    ],
+                    "found": [],
+                    "incorrect": [],
+                    "missing": [
+                      "TogetherAI"
+                    ],
+                    "term": "TogetherAI"
+                  },
+                  {
+                    "exact_match": false,
+                    "expected": [
+                      "DistilLargeV3"
+                    ],
+                    "found": [],
+                    "incorrect": [],
+                    "missing": [
+                      "DistilLargeV3"
+                    ],
+                    "term": "DistilLargeV3"
+                  },
+                  {
+                    "exact_match": false,
+                    "expected": [
+                      "Whisper"
+                    ],
+                    "found": [],
+                    "incorrect": [],
+                    "missing": [
+                      "Whisper"
+                    ],
+                    "term": "Whisper"
+                  }
+                ],
+                "term_count": 5
+              },
+              "levenshtein": 170,
+              "peak_memory_bytes": 2017689600,
+              "run_kind": "cold",
+              "status": "ok",
+              "wall_time_ms": 5622
+            },
+            {
+              "cache_hit": false,
+              "cer": 0.1282051282051282,
+              "cue": {
+                "assigned_anchor_ids": [
+                  "anchor-1",
+                  "anchor-2",
+                  "anchor-3",
+                  "anchor-4",
+                  "anchor-5"
+                ],
+                "duplicate": 13,
+                "error_count": 13,
+                "error_rate": 2.6,
+                "gold_anchor_count": 5,
+                "missing": 0,
+                "missing_anchor_ids": [],
+                "output_cue_count": 18,
+                "rule": "overlap_half_open"
+              },
+              "glossary": {
+                "exact_match_terms": 6,
+                "expected": 7,
+                "found": 6,
+                "incorrect": 0,
+                "missing": 1,
+                "per_term": [
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "DirectX"
+                    ],
+                    "found": [
+                      "DirectX"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "DirectX"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "Microsoft"
+                    ],
+                    "found": [
+                      "Microsoft"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "Microsoft"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "Windows"
+                    ],
+                    "found": [
+                      "Windows"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "Windows"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "Steam"
+                    ],
+                    "found": [
+                      "Steam"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "Steam"
+                  },
+                  {
+                    "exact_match": false,
+                    "expected": [
+                      "DX12"
+                    ],
+                    "found": [],
+                    "incorrect": [],
+                    "missing": [
+                      "DX12"
+                    ],
+                    "term": "DX12"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "iMac"
+                    ],
+                    "found": [
+                      "iMac"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "iMac"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "AppleII"
+                    ],
+                    "found": [
+                      "AppleII"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "AppleII"
+                  }
+                ],
+                "term_count": 7
+              },
+              "levenshtein": 60,
+              "peak_memory_bytes": 2006564864,
+              "run_kind": "cold",
+              "status": "ok",
+              "wall_time_ms": 4234
+            },
+            {
+              "cache_hit": false,
+              "cer": 0.16666666666666666,
+              "cue": {
+                "assigned_anchor_ids": [
+                  "anchor-1",
+                  "anchor-2",
+                  "anchor-3",
+                  "anchor-4"
+                ],
+                "duplicate": 3,
+                "error_count": 3,
+                "error_rate": 0.75,
+                "gold_anchor_count": 4,
+                "missing": 0,
+                "missing_anchor_ids": [],
+                "output_cue_count": 7,
+                "rule": "overlap_half_open"
+              },
+              "glossary": {
+                "exact_match_terms": 4,
+                "expected": 4,
+                "found": 4,
+                "incorrect": 0,
+                "missing": 0,
+                "per_term": [
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "HHKB"
+                    ],
+                    "found": [
+                      "HHKB"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "HHKB"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "Mac"
+                    ],
+                    "found": [
+                      "Mac"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "Mac"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "macOS"
+                    ],
+                    "found": [
+                      "macOS"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "macOS"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "ファンクションキー"
+                    ],
+                    "found": [
+                      "ファンクションキー"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "ファンクションキー"
+                  }
+                ],
+                "term_count": 4
+              },
+              "levenshtein": 30,
+              "peak_memory_bytes": 2005254144,
+              "run_kind": "cold",
+              "status": "ok",
+              "wall_time_ms": 2965
+            }
+          ],
+          "report_path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/turbo/cold-final3/report.json"
+        },
+        "warm": {
+          "cases": [
+            {
+              "cache_hit": true,
+              "cer": 0.1,
+              "cue": {
+                "assigned_anchor_ids": [
+                  "anchor-2",
+                  "anchor-3",
+                  "anchor-4",
+                  "anchor-5"
+                ],
+                "duplicate": 2,
+                "error_count": 3,
+                "error_rate": 0.6,
+                "gold_anchor_count": 5,
+                "missing": 1,
+                "missing_anchor_ids": [
+                  "anchor-1"
+                ],
+                "output_cue_count": 6,
+                "rule": "overlap_half_open"
+              },
+              "glossary": {
+                "exact_match_terms": 2,
+                "expected": 3,
+                "found": 2,
+                "incorrect": 0,
+                "missing": 1,
+                "per_term": [
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "クロード"
+                    ],
+                    "found": [
+                      "クロード"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "クロード"
+                  },
+                  {
+                    "exact_match": false,
+                    "expected": [
+                      "コーデックス"
+                    ],
+                    "found": [],
+                    "incorrect": [],
+                    "missing": [
+                      "コーデックス"
+                    ],
+                    "term": "コーデックス"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "要件定義"
+                    ],
+                    "found": [
+                      "要件定義"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "要件定義"
+                  }
+                ],
+                "term_count": 3
+              },
+              "levenshtein": 31,
+              "peak_memory_bytes": 2000257024,
+              "run_kind": "warm",
+              "status": "ok",
+              "wall_time_ms": 2259
+            },
+            {
+              "cache_hit": true,
+              "cer": 0.4696132596685083,
+              "cue": {
+                "assigned_anchor_ids": [
+                  "anchor-1",
+                  "anchor-2",
+                  "anchor-3",
+                  "anchor-4",
+                  "anchor-5",
+                  "anchor-6"
+                ],
+                "duplicate": 25,
+                "error_count": 25,
+                "error_rate": 4.166666666666667,
+                "gold_anchor_count": 6,
+                "missing": 0,
+                "missing_anchor_ids": [],
+                "output_cue_count": 31,
+                "rule": "overlap_half_open"
+              },
+              "glossary": {
+                "exact_match_terms": 1,
+                "expected": 5,
+                "found": 1,
+                "incorrect": 0,
+                "missing": 4,
+                "per_term": [
+                  {
+                    "exact_match": false,
+                    "expected": [
+                      "Ollama"
+                    ],
+                    "found": [],
+                    "incorrect": [],
+                    "missing": [
+                      "Ollama"
+                    ],
+                    "term": "Ollama"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "ローカルLLM"
+                    ],
+                    "found": [
+                      "ローカルLLM"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "ローカルLLM"
+                  },
+                  {
+                    "exact_match": false,
+                    "expected": [
+                      "TogetherAI"
+                    ],
+                    "found": [],
+                    "incorrect": [],
+                    "missing": [
+                      "TogetherAI"
+                    ],
+                    "term": "TogetherAI"
+                  },
+                  {
+                    "exact_match": false,
+                    "expected": [
+                      "DistilLargeV3"
+                    ],
+                    "found": [],
+                    "incorrect": [],
+                    "missing": [
+                      "DistilLargeV3"
+                    ],
+                    "term": "DistilLargeV3"
+                  },
+                  {
+                    "exact_match": false,
+                    "expected": [
+                      "Whisper"
+                    ],
+                    "found": [],
+                    "incorrect": [],
+                    "missing": [
+                      "Whisper"
+                    ],
+                    "term": "Whisper"
+                  }
+                ],
+                "term_count": 5
+              },
+              "levenshtein": 170,
+              "peak_memory_bytes": 2012233728,
+              "run_kind": "warm",
+              "status": "ok",
+              "wall_time_ms": 5629
+            },
+            {
+              "cache_hit": true,
+              "cer": 0.1282051282051282,
+              "cue": {
+                "assigned_anchor_ids": [
+                  "anchor-1",
+                  "anchor-2",
+                  "anchor-3",
+                  "anchor-4",
+                  "anchor-5"
+                ],
+                "duplicate": 13,
+                "error_count": 13,
+                "error_rate": 2.6,
+                "gold_anchor_count": 5,
+                "missing": 0,
+                "missing_anchor_ids": [],
+                "output_cue_count": 18,
+                "rule": "overlap_half_open"
+              },
+              "glossary": {
+                "exact_match_terms": 6,
+                "expected": 7,
+                "found": 6,
+                "incorrect": 0,
+                "missing": 1,
+                "per_term": [
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "DirectX"
+                    ],
+                    "found": [
+                      "DirectX"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "DirectX"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "Microsoft"
+                    ],
+                    "found": [
+                      "Microsoft"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "Microsoft"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "Windows"
+                    ],
+                    "found": [
+                      "Windows"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "Windows"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "Steam"
+                    ],
+                    "found": [
+                      "Steam"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "Steam"
+                  },
+                  {
+                    "exact_match": false,
+                    "expected": [
+                      "DX12"
+                    ],
+                    "found": [],
+                    "incorrect": [],
+                    "missing": [
+                      "DX12"
+                    ],
+                    "term": "DX12"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "iMac"
+                    ],
+                    "found": [
+                      "iMac"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "iMac"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "AppleII"
+                    ],
+                    "found": [
+                      "AppleII"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "AppleII"
+                  }
+                ],
+                "term_count": 7
+              },
+              "levenshtein": 60,
+              "peak_memory_bytes": 2007891968,
+              "run_kind": "warm",
+              "status": "ok",
+              "wall_time_ms": 4239
+            },
+            {
+              "cache_hit": true,
+              "cer": 0.16666666666666666,
+              "cue": {
+                "assigned_anchor_ids": [
+                  "anchor-1",
+                  "anchor-2",
+                  "anchor-3",
+                  "anchor-4"
+                ],
+                "duplicate": 3,
+                "error_count": 3,
+                "error_rate": 0.75,
+                "gold_anchor_count": 4,
+                "missing": 0,
+                "missing_anchor_ids": [],
+                "output_cue_count": 7,
+                "rule": "overlap_half_open"
+              },
+              "glossary": {
+                "exact_match_terms": 4,
+                "expected": 4,
+                "found": 4,
+                "incorrect": 0,
+                "missing": 0,
+                "per_term": [
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "HHKB"
+                    ],
+                    "found": [
+                      "HHKB"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "HHKB"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "Mac"
+                    ],
+                    "found": [
+                      "Mac"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "Mac"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "macOS"
+                    ],
+                    "found": [
+                      "macOS"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "macOS"
+                  },
+                  {
+                    "exact_match": true,
+                    "expected": [
+                      "ファンクションキー"
+                    ],
+                    "found": [
+                      "ファンクションキー"
+                    ],
+                    "incorrect": [],
+                    "missing": [],
+                    "term": "ファンクションキー"
+                  }
+                ],
+                "term_count": 4
+              },
+              "levenshtein": 30,
+              "peak_memory_bytes": 2009677824,
+              "run_kind": "warm",
+              "status": "ok",
+              "wall_time_ms": 2965
+            }
+          ],
+          "report_path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/turbo/warm-final3/report.json"
+        }
+      },
+      "settings_contract": {
+        "binary_fingerprint": {
+          "bytes": 658608,
+          "path": "/opt/homebrew/bin/whisper-cli",
+          "sha256": "1fbabb51a45906bd36684695de9025eab63618a6eedc26971c47fa5affc5fe49"
+        },
+        "binary_path": "/opt/homebrew/bin/whisper-cli",
+        "output_schema": "whisper-cli-json-full-v1",
+        "settings": {
+          "decode": {
+            "beam_size": 5,
+            "best_of": 5,
+            "no_fallback": false,
+            "processors": 1,
+            "temperature": 0.0,
+            "threads": 8,
+            "vad": false
+          },
+          "initial_prompt": "日本語のライブ配信。固有名詞は Claude、Codex、Whisper、Ollama、Together AI、DirectX、Microsoft、Windows、Steam、DX12、iMac、Apple II、HHKB、macOS を含む。",
+          "language": "ja",
+          "output_schema": "whisper-cli-json-full-v1",
+          "padding_ms": 0
+        },
+        "timeout_sec": 180.0,
+        "version": "1.9.1"
+      }
+    }
+  ],
+  "production_integrity": {
+    "after_report": "docs/benchmarks/s9-1-production-hash-after.json",
+    "before_report": "docs/benchmarks/s9-1-production-hash-before.json",
+    "checked_file_count": 15,
+    "files": {
+      "CGalA8SISPE/clips/candidates.json": {
+        "bytes": 1839,
+        "sha256": "64755dcbe93d2d51831963cea0e7914cd33220cc14d5a7ce451f129329ac1dce"
+      },
+      "CGalA8SISPE/meta.json": {
+        "bytes": 362,
+        "sha256": "1c3ed3cd36001cc724e38ccb40d6022baffedfd248532e702b4e86c4a9c78f3a"
+      },
+      "CGalA8SISPE/subtitles/ja.vtt": {
+        "bytes": 586766,
+        "sha256": "0d5a200a43a5325dc4799a45f4c23fc6580a140e5d56f2f188e542f72b269676"
+      },
+      "LB4px1wRFnY/clips/candidates.json": {
+        "bytes": 1385,
+        "sha256": "b1717bcdf3be2aabdeeb92a258f07a7de1755788e53e0423fc98b85582e37740"
+      },
+      "LB4px1wRFnY/clips/source/LB4px1wRFnY.mp4": {
+        "bytes": 502876028,
+        "sha256": "5f8e8187fd3520da8ae6186f851995346eb8213123a456fdeb608ead00476aed"
+      },
+      "LB4px1wRFnY/meta.json": {
+        "bytes": 333,
+        "sha256": "391e765a3bcb12656d31840037f2f5033b4de779d654f387ffda0b5fb157e1b8"
+      },
+      "LB4px1wRFnY/shorts/cutplan/cut_clip_002.json": {
+        "bytes": 1123,
+        "sha256": "e9e132343783d7bea5db66887eb20d0d1654a1343fdb09081822acde9bb8ed45"
+      },
+      "LB4px1wRFnY/shorts/cutplan/cut_clip_003.json": {
+        "bytes": 1123,
+        "sha256": "e2fc48665b85aae24164f163d12682442ec19150c702196dff30868f225f296d"
+      },
+      "LB4px1wRFnY/subtitles/ja.vtt": {
+        "bytes": 353340,
+        "sha256": "cc6d7fe8f89ffe3ae22f411ece80dcba7c9ab48f96b90b13fa21e7b4216c3fb2"
+      },
+      "hPeRSA9YVIM/clips/candidates.json": {
+        "bytes": 1400,
+        "sha256": "dd20ddedc12493f6e0bf4a076dee1585ff786c9c63c19e51756128f4fe535bb7"
+      },
+      "hPeRSA9YVIM/meta.json": {
+        "bytes": 340,
+        "sha256": "5b6033f0fbc4f5f8616efd7bc2845c558404051e726af83b0b2e92246ae4e739"
+      },
+      "hPeRSA9YVIM/subtitles/ja.vtt": {
+        "bytes": 852527,
+        "sha256": "d9baff5fff1d4851584d5c2526a85efc6a35e2ac8a5639f5e897028aab45b7fd"
+      },
+      "mKwn-93gg90/clips/candidates.json": {
+        "bytes": 942,
+        "sha256": "418e00d277a49bc078c843e50887a566b6e815b9dbfe1a011fc838e05ff256db"
+      },
+      "mKwn-93gg90/meta.json": {
+        "bytes": 330,
+        "sha256": "4228b6f2f892e72900309ce1db7fd5b55cae876d9ba86d0ec5dc222799659b3b"
+      },
+      "mKwn-93gg90/subtitles/ja.vtt": {
+        "bytes": 334317,
+        "sha256": "402f98815be4a087802b3a6314c19a37660392a63cc1611ab0f2eb71e953971c"
+      }
+    },
+    "unchanged": true
+  },
+  "raw_reports": {
+    "ggml-large-v3-turbo": {
+      "cold": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/turbo/cold-final3/report.json",
+      "warm": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/turbo/warm-final3/report.json"
+    },
+    "ggml-large-v3-turbo-q5_0": {
+      "cold": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/cold-final3/report.json",
+      "warm": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/warm-final3/report.json"
+    }
+  },
+  "representative_cases": [
+    {
+      "audio_fixture": "LB4px1wRFnY-2853160-2910000.wav",
+      "candidate_id": "clip_002",
+      "case_id": "lb4-clip002-short-proper-nouns",
+      "glossary": [
+        "クロード",
+        "コーデックス",
+        "要件定義"
+      ],
+      "gold_audit_status": "unverified_provisional",
+      "gold_basis": [
+        "existing_ass",
+        "existing_vtt",
+        "existing_cutplan",
+        "manual_named_entity_correction"
+      ],
+      "gold_cue_anchors_ms": [
+        [
+          2853160,
+          2857000
+        ],
+        [
+          2857000,
+          2865000
+        ],
+        [
+          2865000,
+          2879000
+        ],
+        [
+          2879000,
+          2897000
+        ],
+        [
+          2897000,
+          2910000
+        ]
+      ],
+      "range_ms": [
+        2853160,
+        2910000
+      ],
+      "selection_basis": "short candidate cutplan cut_001-cut_003",
+      "source_url": "https://www.youtube.com/watch?v=LB4px1wRFnY",
+      "video_id": "LB4px1wRFnY"
+    },
+    {
+      "audio_fixture": "mKwn-93gg90-1120-1300.16k.wav",
+      "candidate_id": "clip_001",
+      "case_id": "mkw-long-local-asr",
+      "glossary": [
+        "Ollama",
+        "ローカルLLM",
+        "Together AI",
+        "Distil Large V3",
+        "Whisper"
+      ],
+      "gold_audit_status": "unverified_provisional",
+      "gold_basis": [
+        "existing_transcript",
+        "existing_vtt",
+        "existing_candidate_context",
+        "manual_named_entity_correction"
+      ],
+      "gold_cue_anchors_ms": [
+        [
+          1120000,
+          1140000
+        ],
+        [
+          1140000,
+          1165000
+        ],
+        [
+          1165000,
+          1190000
+        ],
+        [
+          1190000,
+          1220000
+        ],
+        [
+          1220000,
+          1260000
+        ],
+        [
+          1260000,
+          1300000
+        ]
+      ],
+      "range_ms": [
+        1120000,
+        1300000
+      ],
+      "selection_basis": "long candidate first 180 seconds",
+      "source_url": "https://www.youtube.com/watch?v=mKwn-93gg90",
+      "video_id": "mKwn-93gg90"
+    },
+    {
+      "audio_fixture": "CGalA8SISPE-4220-4340.16k.wav",
+      "candidate_id": "clip_003",
+      "case_id": "cgal-proper-nouns",
+      "glossary": [
+        "DirectX",
+        "Microsoft",
+        "Windows",
+        "Steam",
+        "DX12",
+        "iMac",
+        "Apple II"
+      ],
+      "gold_audit_status": "unverified_provisional",
+      "gold_basis": [
+        "existing_transcript",
+        "existing_vtt",
+        "existing_candidate_context",
+        "manual_named_entity_correction"
+      ],
+      "gold_cue_anchors_ms": [
+        [
+          4220000,
+          4238000
+        ],
+        [
+          4238000,
+          4260000
+        ],
+        [
+          4260000,
+          4285000
+        ],
+        [
+          4285000,
+          4310000
+        ],
+        [
+          4310000,
+          4340000
+        ]
+      ],
+      "range_ms": [
+        4220000,
+        4340000
+      ],
+      "selection_basis": "proper noun dense candidate first 120 seconds",
+      "source_url": "https://www.youtube.com/watch?v=CGalA8SISPE",
+      "video_id": "CGalA8SISPE"
+    },
+    {
+      "audio_fixture": "hPeRSA9YVIM-8640-8730.16k.wav",
+      "candidate_id": "clip_003",
+      "case_id": "hpe-audio-variation",
+      "glossary": [
+        "HHKB",
+        "Mac",
+        "macOS",
+        "ファンクションキー"
+      ],
+      "gold_audit_status": "unverified_provisional",
+      "gold_basis": [
+        "existing_transcript",
+        "existing_vtt",
+        "existing_candidate_context",
+        "manual_named_entity_correction"
+      ],
+      "gold_cue_anchors_ms": [
+        [
+          8640000,
+          8660000
+        ],
+        [
+          8660000,
+          8680000
+        ],
+        [
+          8680000,
+          8710000
+        ],
+        [
+          8710000,
+          8730000
+        ]
+      ],
+      "range_ms": [
+        8640000,
+        8730000
+      ],
+      "selection_basis": "different recording context and device terms",
+      "source_url": "https://www.youtube.com/watch?v=hPeRSA9YVIM",
+      "video_id": "hPeRSA9YVIM"
+    }
+  ],
+  "reproduction": {
+    "cache_root": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark",
+    "commands": [
+      "uv run python benchmarks/s9_benchmark.py run --manifest docs/benchmarks/s9-1-cases.json --model-name ggml-large-v3-turbo-q5_0 --output-dir /Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/cold-final3 --report /Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/cold-final3/report.json --execute-whisper --run-kind cold",
+      "uv run python benchmarks/s9_benchmark.py run --manifest docs/benchmarks/s9-1-cases.json --model-name ggml-large-v3-turbo --output-dir /Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/turbo/cold-final3 --report /Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/turbo/cold-final3/report.json --execute-whisper --run-kind cold",
+      "uv run python benchmarks/s9_benchmark.py run --manifest docs/benchmarks/s9-1-cases.json --model-name ggml-large-v3-turbo-q5_0 --output-dir /Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/warm-final3 --report /Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/warm-final3/report.json --execute-whisper --run-kind warm",
+      "uv run python benchmarks/s9_benchmark.py run --manifest docs/benchmarks/s9-1-cases.json --model-name ggml-large-v3-turbo --output-dir /Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/turbo/warm-final3 --report /Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/turbo/warm-final3/report.json --execute-whisper --run-kind warm",
+      "uv run python benchmarks/s9_compare.py --manifest docs/benchmarks/s9-1-cases.json --q5-cold /Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/cold-final3/report.json --q5-warm /Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/warm-final3/report.json --turbo-cold /Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/turbo/cold-final3/report.json --turbo-warm /Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/turbo/warm-final3/report.json --production-before docs/benchmarks/s9-1-production-hash-before.json --production-after docs/benchmarks/s9-1-production-hash-after.json --parity docs/benchmarks/s9-1-vtt-progressive-parity.json --output-json docs/benchmarks/s9-1-report.json --output-md docs/benchmarks/s9-1-report.md"
+    ],
+    "model_cache_root": "/Users/ryukouokumura/Library/Caches/whisper.cpp/models",
+    "shell": false
+  },
+  "residual_risks": [
+    "gold は既存 VTT / transcript / ASS / cutplan を文脈利用した仮作成で、音声の独立人手監査をしていない。",
+    "cold は OS page cache を消去した完全 cold ではなく、各 model の cold wave と warm wave を分離した reuse 観測である。",
+    "mKwn / CGal / hPe は公開 YouTube の audio-only span 取得で、client / network 条件差が残る。",
+    "candidate cue は raw のまま評価し、rolling VTT dedupe を候補へ適用していない。",
+    "モデルは Git 管理外の手動 cache にあり、production 自動 download は実装していない。"
+  ],
+  "runtime": {
+    "ffmpeg": {
+      "path": "/opt/homebrew/Cellar/ffmpeg-full/8.1.2_2/bin/ffmpeg",
+      "version": "8.1.2"
+    },
+    "host": {
+      "arch": "arm64",
+      "cpu": "Apple M4 Pro",
+      "memory_bytes": 68719476736
+    },
+    "whisper_runtime": {
+      "binary_fingerprint": {
+        "bytes": 658608,
+        "path": "/opt/homebrew/bin/whisper-cli",
+        "sha256": "1fbabb51a45906bd36684695de9025eab63618a6eedc26971c47fa5affc5fe49"
+      },
+      "binary_path": "/opt/homebrew/bin/whisper-cli",
+      "build": "unknown",
+      "capabilities": [],
+      "output_schema": "whisper-cli-json-full-v1",
+      "settings": {
+        "decode": {
+          "beam_size": 5,
+          "best_of": 5,
+          "no_fallback": false,
+          "processors": 1,
+          "temperature": 0.0,
+          "threads": 8,
+          "vad": false
+        },
+        "initial_prompt": "日本語のライブ配信。固有名詞は Claude、Codex、Whisper、Ollama、Together AI、DirectX、Microsoft、Windows、Steam、DX12、iMac、Apple II、HHKB、macOS を含む。",
+        "language": "ja",
+        "output_schema": "whisper-cli-json-full-v1",
+        "padding_ms": 0
+      },
+      "timeout_sec": 180.0,
+      "version": "1.9.1"
+    },
+    "yt_dlp": {
+      "mode": "public audio-only span; no video archive",
+      "version": "2026.07.04"
+    }
+  },
+  "schema": "s9-1-comparison-report-v2",
+  "source_fingerprints": [
+    {
+      "bytes": 353340,
+      "case_id": "lb4-clip002-short-proper-nouns",
+      "kind": "baseline_vtt",
+      "path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/LB4px1wRFnY/subtitles/ja.vtt",
+      "sha256": "cc6d7fe8f89ffe3ae22f411ece80dcba7c9ab48f96b90b13fa21e7b4216c3fb2"
+    },
+    {
+      "bytes": 1818958,
+      "case_id": "lb4-clip002-short-proper-nouns",
+      "kind": "audio",
+      "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/LB4px1wRFnY-2853160-2910000.wav",
+      "sha256": "da80cdd933fb8738dc6ee7aa980b8ca64a4f8143d5fcbf7a971b058adb5c4687"
+    },
+    {
+      "bytes": 334317,
+      "case_id": "mkw-long-local-asr",
+      "kind": "baseline_vtt",
+      "path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/mKwn-93gg90/subtitles/ja.vtt",
+      "sha256": "402f98815be4a087802b3a6314c19a37660392a63cc1611ab0f2eb71e953971c"
+    },
+    {
+      "bytes": 5760114,
+      "case_id": "mkw-long-local-asr",
+      "kind": "audio",
+      "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/mKwn-93gg90-1120-1300.16k.wav",
+      "sha256": "aa8cd9dd543a3e6b84c25319aeed2c8fdc7bf1761aa45dcade65db179977d4ba"
+    },
+    {
+      "bytes": 586766,
+      "case_id": "cgal-proper-nouns",
+      "kind": "baseline_vtt",
+      "path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/CGalA8SISPE/subtitles/ja.vtt",
+      "sha256": "0d5a200a43a5325dc4799a45f4c23fc6580a140e5d56f2f188e542f72b269676"
+    },
+    {
+      "bytes": 3840102,
+      "case_id": "cgal-proper-nouns",
+      "kind": "audio",
+      "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/CGalA8SISPE-4220-4340.16k.wav",
+      "sha256": "b3341ee5bbe1288e9919eacb3b94c4aa7fb49001dfd9d5ee8f39a48736e427ba"
+    },
+    {
+      "bytes": 852527,
+      "case_id": "hpe-audio-variation",
+      "kind": "baseline_vtt",
+      "path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/hPeRSA9YVIM/subtitles/ja.vtt",
+      "sha256": "d9baff5fff1d4851584d5c2526a85efc6a35e2ac8a5639f5e897028aab45b7fd"
+    },
+    {
+      "bytes": 2880078,
+      "case_id": "hpe-audio-variation",
+      "kind": "audio",
+      "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/hPeRSA9YVIM-8640-8730.16k.wav",
+      "sha256": "1eb008e4a05f87877304474f9d65c4b22658a384ea84e6bff2165ff2b9f5d18e"
+    }
+  ],
+  "vtt_progressive_parity": {
+    "all_text_sequence_equal": true,
+    "artifact": "docs/benchmarks/s9-1-vtt-progressive-parity.json",
+    "case_count": 4,
+    "cases": [
+      {
+        "benchmark_dedup_cues": 1434,
+        "benchmark_raw_cues": 1434,
+        "benchmark_text_sha256": "ceb4ac2ac3b008150e68db31d52c25e2a98c21578cc5fadf694e766c292fb647",
+        "case_id": "lb4-clip002-short-proper-nouns",
+        "production_dedup_cues": 1434,
+        "production_raw_cues": 1434,
+        "production_text_sha256": "ceb4ac2ac3b008150e68db31d52c25e2a98c21578cc5fadf694e766c292fb647",
+        "source_vtt_sha256": "cc6d7fe8f89ffe3ae22f411ece80dcba7c9ab48f96b90b13fa21e7b4216c3fb2",
+        "text_sequence_equal": true
+      },
+      {
+        "benchmark_dedup_cues": 1422,
+        "benchmark_raw_cues": 1422,
+        "benchmark_text_sha256": "bdf7ed501c5ceeb530a90dd7343ef09ea59f9d2536cd7e519cc43ba6a1f6f097",
+        "case_id": "mkw-long-local-asr",
+        "production_dedup_cues": 1422,
+        "production_raw_cues": 1422,
+        "production_text_sha256": "bdf7ed501c5ceeb530a90dd7343ef09ea59f9d2536cd7e519cc43ba6a1f6f097",
+        "source_vtt_sha256": "402f98815be4a087802b3a6314c19a37660392a63cc1611ab0f2eb71e953971c",
+        "text_sequence_equal": true
+      },
+      {
+        "benchmark_dedup_cues": 2581,
+        "benchmark_raw_cues": 2581,
+        "benchmark_text_sha256": "166c22f9c8f063f9ecb0d7be50f4747eeade7dc07f8e66522d2fbf9facf56b00",
+        "case_id": "cgal-proper-nouns",
+        "production_dedup_cues": 2581,
+        "production_raw_cues": 2581,
+        "production_text_sha256": "166c22f9c8f063f9ecb0d7be50f4747eeade7dc07f8e66522d2fbf9facf56b00",
+        "source_vtt_sha256": "0d5a200a43a5325dc4799a45f4c23fc6580a140e5d56f2f188e542f72b269676",
+        "text_sequence_equal": true
+      },
+      {
+        "benchmark_dedup_cues": 3568,
+        "benchmark_raw_cues": 3568,
+        "benchmark_text_sha256": "a7d09096f87edee90325bbf1f8240ad0391775edc0f704f404563a1a5a61be6f",
+        "case_id": "hpe-audio-variation",
+        "production_dedup_cues": 3568,
+        "production_raw_cues": 3568,
+        "production_text_sha256": "a7d09096f87edee90325bbf1f8240ad0391775edc0f704f404563a1a5a61be6f",
+        "source_vtt_sha256": "d9baff5fff1d4851584d5c2526a85efc6a35e2ac8a5639f5e897028aab45b7fd",
+        "text_sequence_equal": true
+      }
+    ]
+  }
+}

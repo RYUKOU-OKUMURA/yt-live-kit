@@ -1,0 +1,66 @@
+{
+  "captured_at": "2026-08-03",
+  "root": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data",
+  "files": {
+    "LB4px1wRFnY/meta.json": {
+      "bytes": 333,
+      "sha256": "391e765a3bcb12656d31840037f2f5033b4de779d654f387ffda0b5fb157e1b8"
+    },
+    "LB4px1wRFnY/subtitles/ja.vtt": {
+      "bytes": 353340,
+      "sha256": "cc6d7fe8f89ffe3ae22f411ece80dcba7c9ab48f96b90b13fa21e7b4216c3fb2"
+    },
+    "LB4px1wRFnY/clips/candidates.json": {
+      "bytes": 1385,
+      "sha256": "b1717bcdf3be2aabdeeb92a258f07a7de1755788e53e0423fc98b85582e37740"
+    },
+    "LB4px1wRFnY/shorts/cutplan/cut_clip_002.json": {
+      "bytes": 1123,
+      "sha256": "e9e132343783d7bea5db66887eb20d0d1654a1343fdb09081822acde9bb8ed45"
+    },
+    "LB4px1wRFnY/shorts/cutplan/cut_clip_003.json": {
+      "bytes": 1123,
+      "sha256": "e2fc48665b85aae24164f163d12682442ec19150c702196dff30868f225f296d"
+    },
+    "LB4px1wRFnY/clips/source/LB4px1wRFnY.mp4": {
+      "bytes": 502876028,
+      "sha256": "5f8e8187fd3520da8ae6186f851995346eb8213123a456fdeb608ead00476aed"
+    },
+    "mKwn-93gg90/meta.json": {
+      "bytes": 330,
+      "sha256": "4228b6f2f892e72900309ce1db7fd5b55cae876d9ba86d0ec5dc222799659b3b"
+    },
+    "mKwn-93gg90/subtitles/ja.vtt": {
+      "bytes": 334317,
+      "sha256": "402f98815be4a087802b3a6314c19a37660392a63cc1611ab0f2eb71e953971c"
+    },
+    "mKwn-93gg90/clips/candidates.json": {
+      "bytes": 942,
+      "sha256": "418e00d277a49bc078c843e50887a566b6e815b9dbfe1a011fc838e05ff256db"
+    },
+    "CGalA8SISPE/meta.json": {
+      "bytes": 362,
+      "sha256": "1c3ed3cd36001cc724e38ccb40d6022baffedfd248532e702b4e86c4a9c78f3a"
+    },
+    "CGalA8SISPE/subtitles/ja.vtt": {
+      "bytes": 586766,
+      "sha256": "0d5a200a43a5325dc4799a45f4c23fc6580a140e5d56f2f188e542f72b269676"
+    },
+    "CGalA8SISPE/clips/candidates.json": {
+      "bytes": 1839,
+      "sha256": "64755dcbe93d2d51831963cea0e7914cd33220cc14d5a7ce451f129329ac1dce"
+    },
+    "hPeRSA9YVIM/meta.json": {
+      "bytes": 340,
+      "sha256": "5b6033f0fbc4f5f8616efd7bc2845c558404051e726af83b0b2e92246ae4e739"
+    },
+    "hPeRSA9YVIM/subtitles/ja.vtt": {
+      "bytes": 852527,
+      "sha256": "d9baff5fff1d4851584d5c2526a85efc6a35e2ac8a5639f5e897028aab45b7fd"
+    },
+    "hPeRSA9YVIM/clips/candidates.json": {
+      "bytes": 1400,
+      "sha256": "dd20ddedc12493f6e0bf4a076dee1585ff786c9c63c19e51756128f4fe535bb7"
+    }
+  }
+}
