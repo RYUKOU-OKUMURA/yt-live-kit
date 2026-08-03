@@ -24,10 +24,12 @@ from benchmarks.s9_benchmark import (  # noqa: E402
     evaluate_boundary_audit,
     manifest_fingerprint,
 )
+from benchmarks.s9_human_audit import HumanAuditError, load_human_audit  # noqa: E402
 
 
 DEFAULT_MANIFEST = Path("docs/benchmarks/s9-1-cases.json")
 DEFAULT_BOUNDARY_AUDIT = Path("docs/benchmarks/s9-1-boundary-audit.json")
+DEFAULT_TRANSCRIPT_AUDIT = Path("docs/benchmarks/s9-1-human-audit-v2.json")
 DEFAULT_DOCUMENT = Path("docs/benchmarks/s9-1-human-audit.md")
 EXPECTED_CASE_COUNT = 4
 EXPECTED_AUDIT_STATUS = "unverified_provisional"
@@ -93,6 +95,24 @@ def load_boundary_audit(path: Path, manifest: dict[str, Any]) -> dict[str, Any]:
         )
     except BoundaryAuditError as exc:
         raise AuditPacketError(f"boundary audit の strict schema 検証に失敗しました: {exc.message}") from exc
+    result["artifact"] = str(path)
+    return result
+
+
+def load_transcript_audit(
+    path: Path,
+    manifest: dict[str, Any],
+    boundary_audit: dict[str, Any],
+) -> dict[str, Any]:
+    try:
+        result = load_human_audit(
+            path,
+            expected_base_fixture_fingerprint=manifest_fingerprint(manifest),
+            expected_boundary_audit_fingerprint=boundary_audit["fingerprint"],
+            expected_benchmark_id=manifest["benchmark_id"],
+        )
+    except HumanAuditError as exc:
+        raise AuditPacketError(f"transcript audit の strict schema 検証に失敗しました: {exc.message}") from exc
     result["artifact"] = str(path)
     return result
 
@@ -216,29 +236,35 @@ def render_packet(
     manifest: dict[str, Any],
     audio_infos: dict[str, dict[str, Any]],
     boundary_audit: dict[str, Any],
+    transcript_audit: dict[str, Any],
 ) -> str:
     cases = manifest["cases"]
     validated = [validate_case_shape(case) for case in cases]
     ordered_cases = sorted(cases, key=lambda case: case["range_ms"][1] - case["range_ms"][0])
     cases_by_id = {case["case_id"]: case for case in boundary_audit["cases"]}
+    transcript_cases_by_id = {case["case_id"]: case for case in transcript_audit["cases"]}
     total_ms = sum(case["range_ms"][1] - case["range_ms"][0] for case in cases)
 
     lines = [
         "# S9-1 人手音声監査パケット",
         "",
-        "監査状態: **未完了**。gold は全4 case とも `unverified_provisional` です。",
-        "採用モデル: **未決定**。現行の S9-1 は No-Go のままです。",
+        "監査状態: **transcript content の operational reference 確認済み**。exact gold ではありません。",
+        "採用モデル: このパケット自体では決めません。固定 gate と比較 report の決定を参照してください。",
         "benchmark ID: `" + str(manifest.get("benchmark_id", "不明")) + "`",
+        "human audit fingerprint: `" + transcript_audit["audit_fingerprint"] + "`",
         "",
-        "この文書は、4つの固定音声 span を人が直接聴いて provisional gold を承認または訂正するための準備物です。ユーザーの返答前に、gold を監査済みとして扱ったり、S9-1 の Done、進捗、採用モデル判定を変更したりしません。",
+        "この文書は、2026-08-03 のユーザー自然文監査を構造化した canonical packet です。追加の定型フォーマット入力は要求しません。固定4音声、表示 transcript、監査範囲、exact と境界の未承認事項を同じ証跡へまとめています。",
         "",
-        "## 先に読む注意",
+        "## ユーザー原文と監査範囲",
         "",
-        "- 音声を実際に聴かず承認しないでください。",
-        "- AI出力同士の比較だけでは監査完了にしないでください。",
-        "- 4 case 全件が必要です。1件でも未回答、保留、訂正未確定があれば人手監査完了にしません。",
-        "- provisional gold は既存 transcript、VTT、ASS、cutplan の文脈から作った仮値です。音声を聴く前の正解ではありません。",
-        "- viewer greeting やフィラーを、音声確認なしに自動で削除・除外しないでください。",
+        f"- 原文: `{transcript_audit['source']['exact_quote']}`",
+        f"- 確認 context: {transcript_audit['source']['review_context']}",
+        "- displayed transcript content: human reviewed / no material issue reported / accepted as operational benchmark reference",
+        "- glossary: not explicitly audited。個別用語の exact approval には昇格しません。",
+        "- character / punctuation exactness: not claimed。",
+        "- cue anchor exact milliseconds: unapproved。",
+        "- boundary/editorial outcomes: 既存の partial boundary audit を保持します。",
+        "- boundary auto adoption: prohibited。human boundary review: required。",
         "",
         "## 推奨確認順と所要時間",
         "",
@@ -275,12 +301,9 @@ def render_packet(
             "",
             "## 監査方法",
             "",
-            "1. 上の順番で音声ファイルを1本ずつ最後まで聴きます。macOS では次の形式で再生できます。",
-            "   `afplay \"音声ファイルの絶対 path\"`",
-            "2. case ごとの provisional gold transcript と照合し、聞こえない、足りない、順序が違う、固有名詞が違う箇所を訂正文にします。",
-            "3. glossary は表記を一語ずつ確認します。音声で判断できない場合は承認せず、保留または訂正として返します。",
-            "4. cue anchor は `anchor-1` からのラベルと絶対時刻を確認します。時刻またはラベルが違う場合は anchor ID と訂正値を返します。",
-            "5. 下の最小フォーマットを case ごとに1回ずつ、合計4回返します。",
+            "今回の自然文監査は、4本の表示 transcript content に対する operational reference の確認として記録済みです。別の定型フォーマットを再入力しません。",
+            "「概ね問題なし」は文字単位・句読点単位の完全一致、glossary の個別 exact approval、cue anchor の正確なミリ秒を意味しません。",
+            "固定 fixture の範囲、音声 bytes / SHA-256、model identity、numeric gate は変更せず、境界の partial audit は独立 artifact として保持します。",
             "",
             "## 境界・発話連続性の部分監査（2026-08-03）",
             "",
@@ -308,7 +331,7 @@ def render_packet(
             "- Whisper timestamp を唯一の境界正本にせず、audio activity、cue、padding、human preview を併用する。",
             "- 親候補の固定音声 span を良好と判定することと、最終 short cutplan から冒頭の無発話・長い内部無発話を残さないことは別判定である。",
             "",
-            "S9-1 は transcript / glossary gold が未完了で、既存 cue proxy の盲点も判明したため No-Go のままです。S9-2 以降を開始可能にしません。",
+            "S9-1 の採否はこの packet だけでなく、同じ fixture を再計測した canonical comparison report の全 effective gate と tie-break で決めます。境界自動化はこの packet から採用しません。",
             "",
             "## 音声ファイルの hash と size",
             "",
@@ -339,74 +362,73 @@ def render_packet(
                 f"- bytes: `{info['bytes']}`",
                 f"- SHA-256: `{info['sha256']}`",
                 "",
-                "### Provisional gold transcript",
+                "### Displayed transcript content の operational reference",
                 "",
-                "cases.json の `gold.text` を機械的に転記した値です。音声監査前の provisional です。",
+                "cases.json の `gold.text` を表示 reference として転記した値です。ユーザーはこの case を含む4本について「4本とも文字起こしは概ね問題なし」と述べました。exact transcript とは主張しません。",
+                "",
+                f"- human review status: `{transcript_cases_by_id[case_id]['displayed_transcript_content']['status']}`",
+                f"- acceptance: `{transcript_cases_by_id[case_id]['displayed_transcript_content']['acceptance']}`",
                 "",
                 "```text",
                 text,
                 "```",
                 "",
-                "### Glossary（gold の完全監査は未実施）",
+                "### Glossary（個別 exact audit ではない）",
                 "",
-                "| glossary label | provisional expected | gold 監査状態 |",
+                "| glossary label | fixed reference term | human audit status |",
                 "|---|---|---|",
             ]
         )
         for term_index, term in enumerate(glossary, 1):
-            lines.append(f"| `glossary-{term_index}` | `{term}` | 未監査（境界部分監査のみ） |")
+            lines.append(f"| `glossary-{term_index}` | `{term}` | not_explicitly_audited |")
 
         lines.extend(
             [
                 "",
-                "### Cue anchor（正確な時刻の監査は未実施）",
+                "### Character / punctuation exactness",
+                "",
+                "`not_claimed`。自然文の「概ね問題なし」を文字単位・句読点単位の exact approval へ昇格しません。",
+                "",
+                "### Cue anchor（正確なミリ秒の監査ではない）",
                 "",
                 "ラベルは fixture の anchor ID です。時刻は video の絶対時刻で、音声ファイル内の相対時刻ではありません。",
                 "",
-                "| anchor label | 絶対 range | source time | gold 監査状態 |",
+                "| anchor label | 絶対 range | source time | human audit status |",
                 "|---|---|---|---|",
             ]
         )
         for anchor_index, (anchor_start, anchor_end) in enumerate(anchors, 1):
             lines.append(
                 f"| `anchor-{anchor_index}` | `{format_range(anchor_start, anchor_end)}` | "
-                f"`{format_source_timestamp(anchor_start)}〜{format_source_timestamp(anchor_end)}` | 未監査（境界部分監査のみ） |"
+                f"`{format_source_timestamp(anchor_start)}〜{format_source_timestamp(anchor_end)}` | unapproved |"
             )
+        lines.extend(
+            [
+                "",
+                "### Boundary/editorial dimension",
+                "",
+                f"`{transcript_cases_by_id[case_id]['boundary_editorial']['status']}`。開始境界・発話連続性の所見は [`s9-1-boundary-audit.json`](./s9-1-boundary-audit.json) のまま保持します。境界の自動採用はせず human review を必須にします。",
+            ]
+        )
 
     lines.extend(
         [
             "",
-            "## 将来の full-gold 監査に使う返答フォーマット",
-            "",
-            "今回の部分監査は下の形式による transcript / glossary / cue anchor の full-gold 承認ではありません。将来この範囲を監査する場合だけ、case ごとに4回返してください。",
-            "",
-            "```text",
-            "case ID: lb4-clip002-short-proper-nouns",
-            "transcript: 承認 / 訂正文",
-            "glossary: 承認 / 訂正",
-            "cue anchor: 承認 / 訂正",
-            "監査者:",
-            "監査日: YYYY-MM-DD",
-            "```",
-            "",
-            "訂正時は、transcript は訂正後の全文、glossary は用語ごとの期待表記、cue anchor は `anchor-ID: 絶対 range / ラベル` の形式で返してください。4 case 全件の3項目がそろうまで gold は未監査のままです。",
-            "",
             "## 今回の監査記録と次手順",
             "",
-            "1. 今回は boundary / speech continuity の partial audit として記録しました。transcript 全文、glossary、cue anchor exact times の audit_status は変更しません。",
-            "2. 将来 transcript / glossary / cue anchor を監査する場合も、訂正は `s9-1-cases.json` の gold へ人手の結果だけを反映します。音声 path、bytes、SHA-256、video ID、absolute range は固定したままにします。",
-            "3. full-gold 監査がそろった後だけ fixture fingerprint を再計算し、boundary audit の独立 fingerprint と base fixture fingerprint の関係を記録します。今回の境界 artifact は base fixture fingerprint に含めず、既存 fixture identity を保持しています。",
-            "4. [`s9-1-protocol.md`](./s9-1-protocol.md) の同じ cold / warm 手順で、固定した4 case と候補2モデルを再測定します。gold だけを更新し、音声 span や評価 gate を都合よく変更しません。",
-            "5. paired median CER 相対改善、glossary exact match 非悪化、cue 欠落・重複率、cold / warm wall time、peak memory、gold audit 必須条件を同じ gate で判定します。今回の部分監査だけでは adopted model を決めません。",
-            "",
-            "今回の境界監査 artifact、benchmark report、S9-1 の進捗は、正式 gold 未完了・No-Go・S9-2 以降停止のままです。",
+            "1. ユーザー原文を改変せず、固定4 caseへ statement scope と表示順を対応付けました。",
+            "2. displayed transcript content の operational reference と、glossary / character / punctuation / cue / boundary の状態を別 dimension に保存しました。",
+            "3. `s9-1-cases.json` の gold status、音声 path、bytes、SHA-256、video ID、absolute range は変更していません。",
+            "4. 同じ cold / warm 手順で q5 / turbo を再測定し、numeric gate、operational reference gate、tie-break を canonical report へ固定します。",
+            "5. A で Go になっても boundary の自動採用はせず、人の preview と区間確認を downstream の必須条件として維持します。",
             "",
             "## 関連証跡",
             "",
             "- [`s9-1-cases.json`](./s9-1-cases.json): 固定 fixture と provisional gold の正本",
+            "- [`s9-1-human-audit-v2.json`](./s9-1-human-audit-v2.json): 自然文監査の strict artifact と fingerprint",
             "- [`s9-1-boundary-audit.json`](./s9-1-boundary-audit.json): 境界・発話連続性だけの strict audit artifact",
             "- [`s9-1-protocol.md`](./s9-1-protocol.md): 同じ評価契約・gate・再現手順",
-            "- [`s9-1-report.md`](./s9-1-report.md): 現在の provisional 指標と No-Go",
+            "- [`s9-1-report.md`](./s9-1-report.md): operational transcript reference の canonical decision（q5採用）。exact dimension は未承認、boundary automation は不採用",
             "- [`s9-1-report.json`](./s9-1-report.json): 機械可読な現在の gate status",
             "",
         ]
@@ -423,21 +445,24 @@ def render_packet(
 def build_packet(
     manifest_path: Path,
     boundary_audit_path: Path = DEFAULT_BOUNDARY_AUDIT,
+    transcript_audit_path: Path = DEFAULT_TRANSCRIPT_AUDIT,
 ) -> str:
     manifest = load_manifest(manifest_path)
     boundary_audit = load_boundary_audit(boundary_audit_path, manifest)
+    transcript_audit = load_transcript_audit(transcript_audit_path, manifest, boundary_audit)
     audio_infos = {
         case["id"]: inspect_audio(manifest, case) for case in manifest["cases"]
     }
-    return render_packet(manifest, audio_infos, boundary_audit)
+    return render_packet(manifest, audio_infos, boundary_audit, transcript_audit)
 
 
 def generate(
     manifest_path: Path,
     document_path: Path,
     boundary_audit_path: Path = DEFAULT_BOUNDARY_AUDIT,
+    transcript_audit_path: Path = DEFAULT_TRANSCRIPT_AUDIT,
 ) -> None:
-    document = build_packet(manifest_path, boundary_audit_path)
+    document = build_packet(manifest_path, boundary_audit_path, transcript_audit_path)
     try:
         document_path.write_text(document, encoding="utf-8")
     except OSError as exc:
@@ -449,8 +474,9 @@ def check(
     manifest_path: Path,
     document_path: Path,
     boundary_audit_path: Path = DEFAULT_BOUNDARY_AUDIT,
+    transcript_audit_path: Path = DEFAULT_TRANSCRIPT_AUDIT,
 ) -> None:
-    expected = build_packet(manifest_path, boundary_audit_path)
+    expected = build_packet(manifest_path, boundary_audit_path, transcript_audit_path)
     try:
         actual = document_path.read_text(encoding="utf-8")
     except OSError as exc:
@@ -469,6 +495,7 @@ def parse_args() -> argparse.Namespace:
         subparser = subparsers.add_parser(command)
         subparser.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST)
         subparser.add_argument("--boundary-audit", type=Path, required=True)
+        subparser.add_argument("--transcript-audit", type=Path, default=DEFAULT_TRANSCRIPT_AUDIT)
         subparser.add_argument("--document", type=Path, default=DEFAULT_DOCUMENT)
     return parser.parse_args()
 
@@ -477,9 +504,9 @@ def main() -> int:
     args = parse_args()
     try:
         if args.command == "generate":
-            generate(args.manifest, args.document, args.boundary_audit)
+            generate(args.manifest, args.document, args.boundary_audit, args.transcript_audit)
         else:
-            check(args.manifest, args.document, args.boundary_audit)
+            check(args.manifest, args.document, args.boundary_audit, args.transcript_audit)
     except AuditPacketError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1

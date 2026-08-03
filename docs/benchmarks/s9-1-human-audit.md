@@ -1,18 +1,22 @@
 # S9-1 人手音声監査パケット
 
-監査状態: **未完了**。gold は全4 case とも `unverified_provisional` です。
-採用モデル: **未決定**。現行の S9-1 は No-Go のままです。
+監査状態: **transcript content の operational reference 確認済み**。exact gold ではありません。
+採用モデル: このパケット自体では決めません。固定 gate と比較 report の決定を参照してください。
 benchmark ID: `s9-1-20260803`
+human audit fingerprint: `9c1fdca9e1c5b70bd40d84a219a81dedca976e70447d42e2523e2fc4b16cc263`
 
-この文書は、4つの固定音声 span を人が直接聴いて provisional gold を承認または訂正するための準備物です。ユーザーの返答前に、gold を監査済みとして扱ったり、S9-1 の Done、進捗、採用モデル判定を変更したりしません。
+この文書は、2026-08-03 のユーザー自然文監査を構造化した canonical packet です。追加の定型フォーマット入力は要求しません。固定4音声、表示 transcript、監査範囲、exact と境界の未承認事項を同じ証跡へまとめています。
 
-## 先に読む注意
+## ユーザー原文と監査範囲
 
-- 音声を実際に聴かず承認しないでください。
-- AI出力同士の比較だけでは監査完了にしないでください。
-- 4 case 全件が必要です。1件でも未回答、保留、訂正未確定があれば人手監査完了にしません。
-- provisional gold は既存 transcript、VTT、ASS、cutplan の文脈から作った仮値です。音声を聴く前の正解ではありません。
-- viewer greeting やフィラーを、音声確認なしに自動で削除・除外しないでください。
+- 原文: `4本とも文字起こしは概ね問題なし`
+- 確認 context: 2026-08-03に4本のProvisional gold transcriptを開いて確認した後のユーザー所見。
+- displayed transcript content: human reviewed / no material issue reported / accepted as operational benchmark reference
+- glossary: not explicitly audited。個別用語の exact approval には昇格しません。
+- character / punctuation exactness: not claimed。
+- cue anchor exact milliseconds: unapproved。
+- boundary/editorial outcomes: 既存の partial boundary audit を保持します。
+- boundary auto adoption: prohibited。human boundary review: required。
 
 ## 推奨確認順と所要時間
 
@@ -36,12 +40,9 @@ benchmark ID: `s9-1-20260803`
 
 ## 監査方法
 
-1. 上の順番で音声ファイルを1本ずつ最後まで聴きます。macOS では次の形式で再生できます。
-   `afplay "音声ファイルの絶対 path"`
-2. case ごとの provisional gold transcript と照合し、聞こえない、足りない、順序が違う、固有名詞が違う箇所を訂正文にします。
-3. glossary は表記を一語ずつ確認します。音声で判断できない場合は承認せず、保留または訂正として返します。
-4. cue anchor は `anchor-1` からのラベルと絶対時刻を確認します。時刻またはラベルが違う場合は anchor ID と訂正値を返します。
-5. 下の最小フォーマットを case ごとに1回ずつ、合計4回返します。
+今回の自然文監査は、4本の表示 transcript content に対する operational reference の確認として記録済みです。別の定型フォーマットを再入力しません。
+「概ね問題なし」は文字単位・句読点単位の完全一致、glossary の個別 exact approval、cue anchor の正確なミリ秒を意味しません。
+固定 fixture の範囲、音声 bytes / SHA-256、model identity、numeric gate は変更せず、境界の partial audit は独立 artifact として保持します。
 
 ## 境界・発話連続性の部分監査（2026-08-03）
 
@@ -69,7 +70,7 @@ base fixture fingerprint: `6dae657f2b803c54c6af1afe4ed54ad4f447324c32802e1943dc5
 - Whisper timestamp を唯一の境界正本にせず、audio activity、cue、padding、human preview を併用する。
 - 親候補の固定音声 span を良好と判定することと、最終 short cutplan から冒頭の無発話・長い内部無発話を残さないことは別判定である。
 
-S9-1 は transcript / glossary gold が未完了で、既存 cue proxy の盲点も判明したため No-Go のままです。S9-2 以降を開始可能にしません。
+S9-1 の採否はこの packet だけでなく、同じ fixture を再計測した canonical comparison report の全 effective gate と tie-break で決めます。境界自動化はこの packet から採用しません。
 
 ## 音声ファイルの hash と size
 
@@ -93,33 +94,44 @@ S9-1 は transcript / glossary gold が未完了で、既存 cue proxy の盲点
 - bytes: `1818958`
 - SHA-256: `da80cdd933fb8738dc6ee7aa980b8ca64a4f8143d5fcbf7a971b058adb5c4687`
 
-### Provisional gold transcript
+### Displayed transcript content の operational reference
 
-cases.json の `gold.text` を機械的に転記した値です。音声監査前の provisional です。
+cases.json の `gold.text` を表示 reference として転記した値です。ユーザーはこの case を含む4本について「4本とも文字起こしは概ね問題なし」と述べました。exact transcript とは主張しません。
+
+- human review status: `human_reviewed_no_material_issue_reported`
+- acceptance: `operational_benchmark_reference`
 
 ```text
 いうのがあるからですね。なんか、僕の個人的な感覚ですけど、クロードの方が割と本質的な話ができるっていうか、なんて言ったらいいかな。やっぱりまだまだなんだかんだ自分はこういうのを作りたいんだよねの抽象的なところで壁打ちをしていって、なんでそれが作りたいの、みたいな本質的な問いを深めていくっていうのはクロードの方がやりやすいんですよね。で、コーデックスは本当に実装とかさせたらマジでエラー少なくやってくれるんで、理想はね、使い分けるがいいんでしょうけど、またその要件定義とかを書く時に自分でしっかりと頭の中整理しながら書ける人だったら、もうクロードいらずに実装だけコーデックスに任せるとかでもいいような気もするんすけどね。
 ```
 
-### Glossary（gold の完全監査は未実施）
+### Glossary（個別 exact audit ではない）
 
-| glossary label | provisional expected | gold 監査状態 |
+| glossary label | fixed reference term | human audit status |
 |---|---|---|
-| `glossary-1` | `クロード` | 未監査（境界部分監査のみ） |
-| `glossary-2` | `コーデックス` | 未監査（境界部分監査のみ） |
-| `glossary-3` | `要件定義` | 未監査（境界部分監査のみ） |
+| `glossary-1` | `クロード` | not_explicitly_audited |
+| `glossary-2` | `コーデックス` | not_explicitly_audited |
+| `glossary-3` | `要件定義` | not_explicitly_audited |
 
-### Cue anchor（正確な時刻の監査は未実施）
+### Character / punctuation exactness
+
+`not_claimed`。自然文の「概ね問題なし」を文字単位・句読点単位の exact approval へ昇格しません。
+
+### Cue anchor（正確なミリ秒の監査ではない）
 
 ラベルは fixture の anchor ID です。時刻は video の絶対時刻で、音声ファイル内の相対時刻ではありません。
 
-| anchor label | 絶対 range | source time | gold 監査状態 |
+| anchor label | 絶対 range | source time | human audit status |
 |---|---|---|---|
-| `anchor-1` | `2853160–2857000 ms` | `00:47:33.160〜00:47:37.000` | 未監査（境界部分監査のみ） |
-| `anchor-2` | `2857000–2865000 ms` | `00:47:37.000〜00:47:45.000` | 未監査（境界部分監査のみ） |
-| `anchor-3` | `2865000–2879000 ms` | `00:47:45.000〜00:47:59.000` | 未監査（境界部分監査のみ） |
-| `anchor-4` | `2879000–2897000 ms` | `00:47:59.000〜00:48:17.000` | 未監査（境界部分監査のみ） |
-| `anchor-5` | `2897000–2910000 ms` | `00:48:17.000〜00:48:30.000` | 未監査（境界部分監査のみ） |
+| `anchor-1` | `2853160–2857000 ms` | `00:47:33.160〜00:47:37.000` | unapproved |
+| `anchor-2` | `2857000–2865000 ms` | `00:47:37.000〜00:47:45.000` | unapproved |
+| `anchor-3` | `2865000–2879000 ms` | `00:47:45.000〜00:47:59.000` | unapproved |
+| `anchor-4` | `2879000–2897000 ms` | `00:47:59.000〜00:48:17.000` | unapproved |
+| `anchor-5` | `2897000–2910000 ms` | `00:48:17.000〜00:48:30.000` | unapproved |
+
+### Boundary/editorial dimension
+
+`preserved_partial_boundary_audit`。開始境界・発話連続性の所見は [`s9-1-boundary-audit.json`](./s9-1-boundary-audit.json) のまま保持します。境界の自動採用はせず human review を必須にします。
 
 ## Fixture case 2: `mkw-long-local-asr`
 
@@ -134,36 +146,47 @@ cases.json の `gold.text` を機械的に転記した値です。音声監査�
 - bytes: `5760114`
 - SHA-256: `aa8cd9dd543a3e6b84c25319aeed2c8fdc7bf1761aa45dcade65db179977d4ba`
 
-### Provisional gold transcript
+### Displayed transcript content の operational reference
 
-cases.json の `gold.text` を機械的に転記した値です。音声監査前の provisional です。
+cases.json の `gold.text` を表示 reference として転記した値です。ユーザーはこの case を含む4本について「4本とも文字起こしは概ね問題なし」と述べました。exact transcript とは主張しません。
+
+- human review status: `human_reviewed_no_material_issue_reported`
+- acceptance: `operational_benchmark_reference`
 
 ```text
 よくわかんないけど、これワンチャンローカルで使えんかな。えっと、OllamaとかでローカルLLMを立ち上げて、そのモデルを設定して使うことって可能です。これワンチャンローカルで行けるんだったらマジありだよな。うん。Together AIの料金がわかんねえな。Distil Large V3。あ、こっちか。ん？ 文字起こし。あ、こっちか。ああ。え、0.0015ドル。1分あたり0.0015ドル。だいぶ安いね。だいぶ安いんじゃない？ まあ、音質もだけど。Whisperの部分だけローカルにする。そういうのやってる人いそうだよな。そういうのこれやれなくはないんじゃないかな。いや、マジ楽しみっすね。メモリ8GB。あ、ストレージ512。ああ、いいっすね。なんか新しいガジェットっていいっすよね、マジで。ああ。はいはいはいはい。はい。なるほど。
 ```
 
-### Glossary（gold の完全監査は未実施）
+### Glossary（個別 exact audit ではない）
 
-| glossary label | provisional expected | gold 監査状態 |
+| glossary label | fixed reference term | human audit status |
 |---|---|---|
-| `glossary-1` | `Ollama` | 未監査（境界部分監査のみ） |
-| `glossary-2` | `ローカルLLM` | 未監査（境界部分監査のみ） |
-| `glossary-3` | `Together AI` | 未監査（境界部分監査のみ） |
-| `glossary-4` | `Distil Large V3` | 未監査（境界部分監査のみ） |
-| `glossary-5` | `Whisper` | 未監査（境界部分監査のみ） |
+| `glossary-1` | `Ollama` | not_explicitly_audited |
+| `glossary-2` | `ローカルLLM` | not_explicitly_audited |
+| `glossary-3` | `Together AI` | not_explicitly_audited |
+| `glossary-4` | `Distil Large V3` | not_explicitly_audited |
+| `glossary-5` | `Whisper` | not_explicitly_audited |
 
-### Cue anchor（正確な時刻の監査は未実施）
+### Character / punctuation exactness
+
+`not_claimed`。自然文の「概ね問題なし」を文字単位・句読点単位の exact approval へ昇格しません。
+
+### Cue anchor（正確なミリ秒の監査ではない）
 
 ラベルは fixture の anchor ID です。時刻は video の絶対時刻で、音声ファイル内の相対時刻ではありません。
 
-| anchor label | 絶対 range | source time | gold 監査状態 |
+| anchor label | 絶対 range | source time | human audit status |
 |---|---|---|---|
-| `anchor-1` | `1120000–1140000 ms` | `00:18:40.000〜00:19:00.000` | 未監査（境界部分監査のみ） |
-| `anchor-2` | `1140000–1165000 ms` | `00:19:00.000〜00:19:25.000` | 未監査（境界部分監査のみ） |
-| `anchor-3` | `1165000–1190000 ms` | `00:19:25.000〜00:19:50.000` | 未監査（境界部分監査のみ） |
-| `anchor-4` | `1190000–1220000 ms` | `00:19:50.000〜00:20:20.000` | 未監査（境界部分監査のみ） |
-| `anchor-5` | `1220000–1260000 ms` | `00:20:20.000〜00:21:00.000` | 未監査（境界部分監査のみ） |
-| `anchor-6` | `1260000–1300000 ms` | `00:21:00.000〜00:21:40.000` | 未監査（境界部分監査のみ） |
+| `anchor-1` | `1120000–1140000 ms` | `00:18:40.000〜00:19:00.000` | unapproved |
+| `anchor-2` | `1140000–1165000 ms` | `00:19:00.000〜00:19:25.000` | unapproved |
+| `anchor-3` | `1165000–1190000 ms` | `00:19:25.000〜00:19:50.000` | unapproved |
+| `anchor-4` | `1190000–1220000 ms` | `00:19:50.000〜00:20:20.000` | unapproved |
+| `anchor-5` | `1220000–1260000 ms` | `00:20:20.000〜00:21:00.000` | unapproved |
+| `anchor-6` | `1260000–1300000 ms` | `00:21:00.000〜00:21:40.000` | unapproved |
+
+### Boundary/editorial dimension
+
+`preserved_partial_boundary_audit`。開始境界・発話連続性の所見は [`s9-1-boundary-audit.json`](./s9-1-boundary-audit.json) のまま保持します。境界の自動採用はせず human review を必須にします。
 
 ## Fixture case 3: `cgal-proper-nouns`
 
@@ -178,37 +201,48 @@ cases.json の `gold.text` を機械的に転記した値です。音声監査�
 - bytes: `3840102`
 - SHA-256: `b3341ee5bbe1288e9919eacb3b94c4aa7fb49001dfd9d5ee8f39a48736e427ba`
 
-### Provisional gold transcript
+### Displayed transcript content の operational reference
 
-cases.json の `gold.text` を機械的に転記した値です。音声監査前の provisional です。
+cases.json の `gold.text` を表示 reference として転記した値です。ユーザーはこの case を含む4本について「4本とも文字起こしは概ね問題なし」と述べました。exact transcript とは主張しません。
+
+- human review status: `human_reviewed_no_material_issue_reported`
+- acceptance: `operational_benchmark_reference`
 
 ```text
 最近のGPUも高性能になってきてるので、そんなハードなゲームでなければそこそこ楽しめるのでは。行けるんすかね。あ、これか。DirectXはMicrosoftが開発したWindows向けのゲームや映像音声処理で使われるAPIの集合です。APIの集合です。DirectXを使うとゲーム側はPCごとに違うCPUやGPUの細かい違いをあまり意識せずにグラフィック処理ができます。WindowsのPCゲームではDirectXが前提になっていることが多く、ハードウェアの性能を効率よく引き出すために使われます。うーん。あ、Steamのゲーム説明でDX12対応と書いてあれば、そのゲームがそのAPI世代を前提にグラフィック処理を行うという。はあ、そういうのがあんだ。すげえな。すげえ世界だな。あ、スケルトンは初代iMac。これもっと前、見たことないっすもん。こんなん全然見たことない。すごいっすね。これがいわゆるあれですよね。これこの上にディスプレイをまた自分でつけてってことっすよね。そういうことっすよね。Apple IIは相当高価な商品だったはず。
 ```
 
-### Glossary（gold の完全監査は未実施）
+### Glossary（個別 exact audit ではない）
 
-| glossary label | provisional expected | gold 監査状態 |
+| glossary label | fixed reference term | human audit status |
 |---|---|---|
-| `glossary-1` | `DirectX` | 未監査（境界部分監査のみ） |
-| `glossary-2` | `Microsoft` | 未監査（境界部分監査のみ） |
-| `glossary-3` | `Windows` | 未監査（境界部分監査のみ） |
-| `glossary-4` | `Steam` | 未監査（境界部分監査のみ） |
-| `glossary-5` | `DX12` | 未監査（境界部分監査のみ） |
-| `glossary-6` | `iMac` | 未監査（境界部分監査のみ） |
-| `glossary-7` | `Apple II` | 未監査（境界部分監査のみ） |
+| `glossary-1` | `DirectX` | not_explicitly_audited |
+| `glossary-2` | `Microsoft` | not_explicitly_audited |
+| `glossary-3` | `Windows` | not_explicitly_audited |
+| `glossary-4` | `Steam` | not_explicitly_audited |
+| `glossary-5` | `DX12` | not_explicitly_audited |
+| `glossary-6` | `iMac` | not_explicitly_audited |
+| `glossary-7` | `Apple II` | not_explicitly_audited |
 
-### Cue anchor（正確な時刻の監査は未実施）
+### Character / punctuation exactness
+
+`not_claimed`。自然文の「概ね問題なし」を文字単位・句読点単位の exact approval へ昇格しません。
+
+### Cue anchor（正確なミリ秒の監査ではない）
 
 ラベルは fixture の anchor ID です。時刻は video の絶対時刻で、音声ファイル内の相対時刻ではありません。
 
-| anchor label | 絶対 range | source time | gold 監査状態 |
+| anchor label | 絶対 range | source time | human audit status |
 |---|---|---|---|
-| `anchor-1` | `4220000–4238000 ms` | `01:10:20.000〜01:10:38.000` | 未監査（境界部分監査のみ） |
-| `anchor-2` | `4238000–4260000 ms` | `01:10:38.000〜01:11:00.000` | 未監査（境界部分監査のみ） |
-| `anchor-3` | `4260000–4285000 ms` | `01:11:00.000〜01:11:25.000` | 未監査（境界部分監査のみ） |
-| `anchor-4` | `4285000–4310000 ms` | `01:11:25.000〜01:11:50.000` | 未監査（境界部分監査のみ） |
-| `anchor-5` | `4310000–4340000 ms` | `01:11:50.000〜01:12:20.000` | 未監査（境界部分監査のみ） |
+| `anchor-1` | `4220000–4238000 ms` | `01:10:20.000〜01:10:38.000` | unapproved |
+| `anchor-2` | `4238000–4260000 ms` | `01:10:38.000〜01:11:00.000` | unapproved |
+| `anchor-3` | `4260000–4285000 ms` | `01:11:00.000〜01:11:25.000` | unapproved |
+| `anchor-4` | `4285000–4310000 ms` | `01:11:25.000〜01:11:50.000` | unapproved |
+| `anchor-5` | `4310000–4340000 ms` | `01:11:50.000〜01:12:20.000` | unapproved |
+
+### Boundary/editorial dimension
+
+`preserved_partial_boundary_audit`。開始境界・発話連続性の所見は [`s9-1-boundary-audit.json`](./s9-1-boundary-audit.json) のまま保持します。境界の自動採用はせず human review を必須にします。
 
 ## Fixture case 4: `hpe-audio-variation`
 
@@ -223,63 +257,58 @@ cases.json の `gold.text` を機械的に転記した値です。音声監査�
 - bytes: `2880078`
 - SHA-256: `1eb008e4a05f87877304474f9d65c4b22658a384ea84e6bff2165ff2b9f5d18e`
 
-### Provisional gold transcript
+### Displayed transcript content の operational reference
 
-cases.json の `gold.text` を機械的に転記した値です。音声監査前の provisional です。
+cases.json の `gold.text` を表示 reference として転記した値です。ユーザーはこの case を含む4本について「4本とも文字起こしは概ね問題なし」と述べました。exact transcript とは主張しません。
+
+- human review status: `human_reviewed_no_material_issue_reported`
+- acceptance: `operational_benchmark_reference`
 
 ```text
 MacでHHKBを最大限に利用するには、HHKBの物理的なファンクションキーとは別にmacOS固有のファンクションキーをHHKB上のどこかのキーに割り当てるのが最もスマートな方法です。これがしたいんだよね。そう、それがしたいんだよね。ただ、ファンクションキーを押してるとこうなるよってことなんだよね。まあ、みんなこんな感じのことをやってるのか。すごいな。面白。
 ```
 
-### Glossary（gold の完全監査は未実施）
+### Glossary（個別 exact audit ではない）
 
-| glossary label | provisional expected | gold 監査状態 |
+| glossary label | fixed reference term | human audit status |
 |---|---|---|
-| `glossary-1` | `HHKB` | 未監査（境界部分監査のみ） |
-| `glossary-2` | `Mac` | 未監査（境界部分監査のみ） |
-| `glossary-3` | `macOS` | 未監査（境界部分監査のみ） |
-| `glossary-4` | `ファンクションキー` | 未監査（境界部分監査のみ） |
+| `glossary-1` | `HHKB` | not_explicitly_audited |
+| `glossary-2` | `Mac` | not_explicitly_audited |
+| `glossary-3` | `macOS` | not_explicitly_audited |
+| `glossary-4` | `ファンクションキー` | not_explicitly_audited |
 
-### Cue anchor（正確な時刻の監査は未実施）
+### Character / punctuation exactness
+
+`not_claimed`。自然文の「概ね問題なし」を文字単位・句読点単位の exact approval へ昇格しません。
+
+### Cue anchor（正確なミリ秒の監査ではない）
 
 ラベルは fixture の anchor ID です。時刻は video の絶対時刻で、音声ファイル内の相対時刻ではありません。
 
-| anchor label | 絶対 range | source time | gold 監査状態 |
+| anchor label | 絶対 range | source time | human audit status |
 |---|---|---|---|
-| `anchor-1` | `8640000–8660000 ms` | `02:24:00.000〜02:24:20.000` | 未監査（境界部分監査のみ） |
-| `anchor-2` | `8660000–8680000 ms` | `02:24:20.000〜02:24:40.000` | 未監査（境界部分監査のみ） |
-| `anchor-3` | `8680000–8710000 ms` | `02:24:40.000〜02:25:10.000` | 未監査（境界部分監査のみ） |
-| `anchor-4` | `8710000–8730000 ms` | `02:25:10.000〜02:25:30.000` | 未監査（境界部分監査のみ） |
+| `anchor-1` | `8640000–8660000 ms` | `02:24:00.000〜02:24:20.000` | unapproved |
+| `anchor-2` | `8660000–8680000 ms` | `02:24:20.000〜02:24:40.000` | unapproved |
+| `anchor-3` | `8680000–8710000 ms` | `02:24:40.000〜02:25:10.000` | unapproved |
+| `anchor-4` | `8710000–8730000 ms` | `02:25:10.000〜02:25:30.000` | unapproved |
 
-## 将来の full-gold 監査に使う返答フォーマット
+### Boundary/editorial dimension
 
-今回の部分監査は下の形式による transcript / glossary / cue anchor の full-gold 承認ではありません。将来この範囲を監査する場合だけ、case ごとに4回返してください。
-
-```text
-case ID: lb4-clip002-short-proper-nouns
-transcript: 承認 / 訂正文
-glossary: 承認 / 訂正
-cue anchor: 承認 / 訂正
-監査者:
-監査日: YYYY-MM-DD
-```
-
-訂正時は、transcript は訂正後の全文、glossary は用語ごとの期待表記、cue anchor は `anchor-ID: 絶対 range / ラベル` の形式で返してください。4 case 全件の3項目がそろうまで gold は未監査のままです。
+`preserved_partial_boundary_audit`。開始境界・発話連続性の所見は [`s9-1-boundary-audit.json`](./s9-1-boundary-audit.json) のまま保持します。境界の自動採用はせず human review を必須にします。
 
 ## 今回の監査記録と次手順
 
-1. 今回は boundary / speech continuity の partial audit として記録しました。transcript 全文、glossary、cue anchor exact times の audit_status は変更しません。
-2. 将来 transcript / glossary / cue anchor を監査する場合も、訂正は `s9-1-cases.json` の gold へ人手の結果だけを反映します。音声 path、bytes、SHA-256、video ID、absolute range は固定したままにします。
-3. full-gold 監査がそろった後だけ fixture fingerprint を再計算し、boundary audit の独立 fingerprint と base fixture fingerprint の関係を記録します。今回の境界 artifact は base fixture fingerprint に含めず、既存 fixture identity を保持しています。
-4. [`s9-1-protocol.md`](./s9-1-protocol.md) の同じ cold / warm 手順で、固定した4 case と候補2モデルを再測定します。gold だけを更新し、音声 span や評価 gate を都合よく変更しません。
-5. paired median CER 相対改善、glossary exact match 非悪化、cue 欠落・重複率、cold / warm wall time、peak memory、gold audit 必須条件を同じ gate で判定します。今回の部分監査だけでは adopted model を決めません。
-
-今回の境界監査 artifact、benchmark report、S9-1 の進捗は、正式 gold 未完了・No-Go・S9-2 以降停止のままです。
+1. ユーザー原文を改変せず、固定4 caseへ statement scope と表示順を対応付けました。
+2. displayed transcript content の operational reference と、glossary / character / punctuation / cue / boundary の状態を別 dimension に保存しました。
+3. `s9-1-cases.json` の gold status、音声 path、bytes、SHA-256、video ID、absolute range は変更していません。
+4. 同じ cold / warm 手順で q5 / turbo を再測定し、numeric gate、operational reference gate、tie-break を canonical report へ固定します。
+5. A で Go になっても boundary の自動採用はせず、人の preview と区間確認を downstream の必須条件として維持します。
 
 ## 関連証跡
 
 - [`s9-1-cases.json`](./s9-1-cases.json): 固定 fixture と provisional gold の正本
+- [`s9-1-human-audit-v2.json`](./s9-1-human-audit-v2.json): 自然文監査の strict artifact と fingerprint
 - [`s9-1-boundary-audit.json`](./s9-1-boundary-audit.json): 境界・発話連続性だけの strict audit artifact
 - [`s9-1-protocol.md`](./s9-1-protocol.md): 同じ評価契約・gate・再現手順
-- [`s9-1-report.md`](./s9-1-report.md): 現在の provisional 指標と No-Go
+- [`s9-1-report.md`](./s9-1-report.md): operational transcript reference の canonical decision（q5採用）。exact dimension は未承認、boundary automation は不採用
 - [`s9-1-report.json`](./s9-1-report.json): 機械可読な現在の gate status

@@ -1,0 +1,139 @@
+{
+  "schema": "s9-1-human-audit-v2",
+  "benchmark_id": "s9-1-20260803",
+  "audit_date": "2026-08-03",
+  "auditor": "user",
+  "source": {
+    "kind": "user_natural_language",
+    "exact_quote": "4本とも文字起こしは概ね問題なし",
+    "review_context": "2026-08-03に4本のProvisional gold transcriptを開いて確認した後のユーザー所見。"
+  },
+  "base_fixture_fingerprint": "6dae657f2b803c54c6af1afe4ed54ad4f447324c32802e1943dc5711a9bf1718",
+  "boundary_audit_fingerprint": "0af9f5ce7888eabcc67fbe767db25c2e4da97c823ea76781eb9aeb25991fd9a1",
+  "review_policy": {
+    "mode": "operational_transcript_reference",
+    "displayed_transcript_content": {
+      "status": "human_reviewed_no_material_issue_reported",
+      "acceptance": "operational_benchmark_reference"
+    },
+    "glossary": {
+      "status": "not_explicitly_audited"
+    },
+    "character_punctuation_exactness": {
+      "status": "not_claimed"
+    },
+    "cue_anchor_exact_ms": {
+      "status": "unapproved"
+    },
+    "boundary_editorial": {
+      "status": "preserved_partial_boundary_audit"
+    },
+    "boundary_auto_adoption": "prohibited",
+    "human_boundary_review": "required"
+  },
+  "previous_display_order": [
+    {
+      "display_order": 1,
+      "case_id": "lb4-clip002-short-proper-nouns"
+    },
+    {
+      "display_order": 2,
+      "case_id": "hpe-audio-variation"
+    },
+    {
+      "display_order": 3,
+      "case_id": "cgal-proper-nouns"
+    },
+    {
+      "display_order": 4,
+      "case_id": "mkw-long-local-asr"
+    }
+  ],
+  "cases": [
+    {
+      "case_id": "lb4-clip002-short-proper-nouns",
+      "display_order": 1,
+      "statement_scope": "all_four_cases_same_user_statement",
+      "displayed_transcript_content": {
+        "status": "human_reviewed_no_material_issue_reported",
+        "acceptance": "operational_benchmark_reference"
+      },
+      "glossary": {
+        "status": "not_explicitly_audited"
+      },
+      "character_punctuation_exactness": {
+        "status": "not_claimed"
+      },
+      "cue_anchor_exact_ms": {
+        "status": "unapproved"
+      },
+      "boundary_editorial": {
+        "status": "preserved_partial_boundary_audit"
+      }
+    },
+    {
+      "case_id": "hpe-audio-variation",
+      "display_order": 2,
+      "statement_scope": "all_four_cases_same_user_statement",
+      "displayed_transcript_content": {
+        "status": "human_reviewed_no_material_issue_reported",
+        "acceptance": "operational_benchmark_reference"
+      },
+      "glossary": {
+        "status": "not_explicitly_audited"
+      },
+      "character_punctuation_exactness": {
+        "status": "not_claimed"
+      },
+      "cue_anchor_exact_ms": {
+        "status": "unapproved"
+      },
+      "boundary_editorial": {
+        "status": "preserved_partial_boundary_audit"
+      }
+    },
+    {
+      "case_id": "cgal-proper-nouns",
+      "display_order": 3,
+      "statement_scope": "all_four_cases_same_user_statement",
+      "displayed_transcript_content": {
+        "status": "human_reviewed_no_material_issue_reported",
+        "acceptance": "operational_benchmark_reference"
+      },
+      "glossary": {
+        "status": "not_explicitly_audited"
+      },
+      "character_punctuation_exactness": {
+        "status": "not_claimed"
+      },
+      "cue_anchor_exact_ms": {
+        "status": "unapproved"
+      },
+      "boundary_editorial": {
+        "status": "preserved_partial_boundary_audit"
+      }
+    },
+    {
+      "case_id": "mkw-long-local-asr",
+      "display_order": 4,
+      "statement_scope": "all_four_cases_same_user_statement",
+      "displayed_transcript_content": {
+        "status": "human_reviewed_no_material_issue_reported",
+        "acceptance": "operational_benchmark_reference"
+      },
+      "glossary": {
+        "status": "not_explicitly_audited"
+      },
+      "character_punctuation_exactness": {
+        "status": "not_claimed"
+      },
+      "cue_anchor_exact_ms": {
+        "status": "unapproved"
+      },
+      "boundary_editorial": {
+        "status": "preserved_partial_boundary_audit"
+      }
+    }
+  ],
+  "audit_fingerprint": "9c1fdca9e1c5b70bd40d84a219a81dedca976e70447d42e2523e2fc4b16cc263"
+}

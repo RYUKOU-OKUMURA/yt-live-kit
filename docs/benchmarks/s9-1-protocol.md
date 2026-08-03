@@ -8,7 +8,9 @@
 
 YouTube VTT を baseline とし、同じ音声 span を whisper.cpp 1.9.1 の日本語モデルで処理して比較する。S9-1 は production code、既存 `data`、既存 `subtitles/ja.vtt`、既存 mp4 を変更しない。
 
-今回の repository 上には、音声を人が直接聴取して確認した gold transcript の full audit 証跡がない。そのため fixture の gold は既存 transcript / VTT / ASS / cutplan と文脈から手作業で整えた「未監査の仮 gold」とし、実行結果の数値は provisional と記録する。今回追加した [`s9-1-boundary-audit.json`](./s9-1-boundary-audit.json) は、ユーザーが直接聴いた開始境界・発話連続性だけの部分監査であり、transcript 全文、glossary、cue anchor の正確な時刻を audited にはしない。full gold audit が完了しない限り Go にはしない。これは VTT をそのまま正解にする評価リークと、根拠のない採用判定を防ぐための fail-closed 条件である。
+今回の repository 上の fixture gold は、既存 transcript / VTT / ASS / cutplan と文脈から手作業で整えた固定 reference であり、文字単位・句読点単位・cue anchor の正確なミリ秒までの full exact gold ではない。ユーザーは 2026-08-03 に4本の provisional gold transcript を開いて確認した後、「4本とも文字起こしは概ね問題なし」と明示した。この自然文は [`s9-1-human-audit-v2.json`](./s9-1-human-audit-v2.json) へ原文のまま4 caseに対応付けるが、character / punctuation exactness、glossary 個別 exact approval、cue anchor exact milliseconds へは昇格させない。
+
+この S9-1-AUDIT-APPLY では、要件との齟齬を A として解消する。すなわち displayed transcript content だけを operational transcript reference として採用し、CER は固定 reference に対する比較指標として残す。NFR-11 のローカル whisper.cpp と FR-36 の選択区間・人確認の契約は変えず、AC-37 の numeric gate 閾値も変えない。exact gold 不足を隠す変更ではなく、exact gold の状態と operational reference の採否を別 dimension にした明示的な decision mode である。boundary の自動採用、Whisper timestamp 単独の境界確定、無確認の downstream 進行は認めない。
 
 ## 代表素材と固定 span
 
@@ -46,9 +48,10 @@ S9-4 / S9-6 はこの evidence を親候補の固定 span の品質承認へ昇�
 
 ### Gold と正規化
 
-- gold は fixture の `gold.text` と `gold.glossary` を使う。gold の `audit_status` は全 case で `unverified_provisional` とする。
+- gold は fixture の `gold.text` と `gold.glossary` を使う。`s9-1-cases.json` の `gold.audit_status` は全 case で `unverified_provisional` のまま維持する。別 artifact の displayed transcript content だけを operational reference として受け入れる。
 - gold は VTT を無条件に正解扱いしない。既存 `transcript/full.txt`、`prompt_chapters.txt`、既存 ASS、cutplan の文脈を参照し、固有名詞と明らかな誤認識を手修正した候補である。
-- 直接音声を人が確認していない箇所は未監査として扱う。数値は「仮 gold に対する provisional 指標」であり、Go 判定の根拠に昇格させない。
+- ユーザーの自然文は「4本とも文字起こしは概ね問題なし」であり、4 case の表示 transcript content に対する human reviewed / no material issue reported の証跡である。文字単位・句読点単位の exactness、glossary 個別 exact approval、cue anchor exact milliseconds は未監査・未承認のままにする。
+- CER、glossary、cue の数値は固定 reference に対する指標として扱う。数値は exact human truth の証明ではないが、事前宣言 gate の閾値と同じ条件でモデル間比較に使う。
 - テキストは Unicode NFKC、前後空白除去、連続空白の除去を行う。比較用の空白は無視するが、句読点は既定では保持する。VTT/ASS の HTML・karaoke tag と純粋な `[音楽]`、`[笑い]`、`[拍手]`、`[鼻息]`、`[咳払い]` のみ除外する。
 - CER は正規化済み Unicode codepoint 列の Levenshtein 距離を gold 文字数で割る。gold が空の場合は不正とする。
 - glossary は case ごとの canonical surface を固定し、gold text から自動生成しない。term ごとの exact found / missing を記録し、alias を正解として黙って加点しない。
@@ -73,11 +76,31 @@ S9-4 / S9-6 はこの evidence を親候補の固定 span の品質承認へ昇�
 | cue | candidate の missing + duplicate rate が VTT baseline + 5 percentage points 以下 | No-Go |
 | wall time | 各 case の cold run 180 秒以下、warm/reuse run 120 秒以下 | No-Go |
 | peak memory | 各 run 8 GiB 以下 | No-Go |
-| gold 独立性 | 全 case の gold が人手音声監査済みであること | 未監査の間は必ず No-Go |
+| transcript operational reference | 4 case の displayed transcript content が自然文監査で human reviewed / no material issue reported と対応付けられていること | 未達なら No-Go |
 
-全 gate が閾値内でも、gold audit が `unverified_provisional` の間は採用モデルを決定しない。No-Go の場合は後続 S9 実装を高精度経路として進めず、既存 YouTube VTT を fallback-only とする。
+既存の numeric gate（CER 10％、glossary 非悪化、cue baseline +5 percentage points、wall time、peak memory）は変更しない。旧 protocol の「full exact gold が無ければ必ず No-Go」という条件は、ユーザーの自然文を exact approval に偽装しないために、A の decision mode では「exact gold は未主張のまま、displayed transcript content の operational reference gate を別に評価する」契約へ明示的に分離した。これにより `s9-1-cases.json` の provisional status を audited へ書き換えず、NFR-11 のローカル運用、FR-36 の選択区間と人確認、AC-37 の閾値を弱めない。
 
-境界部分監査の expected editorial outcome が4 caseすべて機械検証できても、full transcript / glossary gold 未完了と既存 cue proxy の盲点があるため、S9-1 は No-Go のままにする。S9-2 以降を開始可能にはしない。
+全 numeric gate と operational transcript reference gate が通過した場合だけ、S9-3 が参照するモデルを決める。文字・句読点 exactness、glossary 個別 exact approval、cue anchor exact milliseconds は adopted model の根拠ではなく、report では `not_claimed` / `not_explicitly_audited` / `unapproved` と固定する。No-Go の場合は後続 S9 実装を高精度経路として進めず、既存 YouTube VTT を明示的な fallback とする。
+
+canonical report の status は次の意味に分ける。`gold_audit_status` は fixture の `unverified_provisional` を維持し、`transcript_reference_status` だけを `accepted_operational_benchmark_reference` とする。`decision.go` は operational transcript reference の採否範囲に限る。`decision.boundary_decision.status` は `no_go`、`automation_adopted` は false、human review は required のままであり、`decision.s9_2_start_allowed` は TranscriptArtifact / resolver の着手を表すだけで境界自動化を解禁しない。
+
+境界部分監査の expected editorial outcome は既存 artifact のまま保持する。A で Go になっても、これは境界自動化の採用を意味しない。Whisper timestamp 単独の確定、約6秒・約2〜26秒の普遍的閾値、無確認の cutplan / downstream は禁止し、人の audio preview と区間確認を必須にする。
+
+### 候補が複数通過した場合の tie-break
+
+この順序は今回の audit-apply 再計測 command と canonical report の生成より前に固定した運用規則である。ただし final3 の q5 / turbo の provisional 結果は既に既知だったため、「全結果を見る前に宣言した」とは主張しない。根拠はユーザーが以前から重視している待ち時間、ローカル運用、memory、model size、case 別品質であり、今回の audit-apply 実測結果に合わせた後付けの規則ではない。pass 閾値の変更ではない。従量課金 API を使わず、ローカル絶対 path の whisper-cli と手動 cache model を使う候補だけを eligible とする。eligible 候補を次の lexicographic key の昇順で並べる。
+
+1. local absolute runtime / model path を満たすこと
+2. case ごとの cold / warm wall time median の最大値が小さいこと（worst-case 待ち時間）
+3. 全 cold / warm run の median wall time が短いこと
+4. 全 run の最大 wall time が短いこと
+5. 全 run の最大 peak memory が小さいこと
+6. model file bytes が小さいこと
+7. case 別 CER 相対改善の最小値が大きいこと
+8. paired median CER 相対改善が大きいこと
+9. model name の昇順
+
+q5 と turbo は全 numeric gate を通過したためこの規則を適用し、待ち時間・memory・model bytes・worst case quality の観点で q5 を採用する。turbo の paired median が高いことは report に残すが、結果を見て規則を後付けしない。
 
 ## 実行条件
 
@@ -89,7 +112,7 @@ S9-4 / S9-6 はこの evidence を親候補の固定 span の品質承認へ昇�
 - audio: 16 kHz / mono / PCM WAV、固定 range、同じ source span を全 model で再利用
 - initial prompt: fixture に固定した日本語・固有名詞 prompt。候補間で同一
 - decode: temperature 0、beam size 5、best-of 5、threads 8、processors 1、flash attention default、VAD disabled、whisper.cpp full JSON schema
-- cache policy: model / audio を手動で cache。各 case/model の最初の process を `cold`、直後の同条件再実行を `warm` と記録する。OS page cache を完全に消去した cold ではないため、その限界を report に明記する
+- cache policy: model / audio を手動で cache。各 case/model の最初の process を `cold`、同じ audio / model / settings の別 process invocation を `warm` と記録する。OS page cache を完全に消去した cold ではなく、永続 artifact cache hit も計測していないため、warm を cache hit の証明とは扱わない
 - model download: production から自動取得しない。モデルは `/Users/ryukouokumura/Library/Caches/whisper.cpp/models/` に手動保存し URL / bytes / SHA-256 を report へ記録する
 - benchmark audio cache: `/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/`
 - extraction tool: `/opt/homebrew/Cellar/ffmpeg-full/8.1.2_2/bin/ffmpeg` (Homebrew `/opt/homebrew/bin/ffmpeg` はこの環境では libvpx 不足で使用不可)。公開 YouTube の mKwn / CGal / hPe は `yt-dlp 2026.07.04` で音声 span のみ取得し、hPe は android_vr client fallback を使った。取得失敗・client 差異は残余リスクとして記録し、音声 fixture の SHA-256 を固定する。
@@ -109,11 +132,11 @@ schema-check の構造確認後、実測前に production parser と benchmark d
 - cue anchor は最初の overlap ではなく、最大 overlap、同率なら最も早い開始時刻で対応付ける実装と unit test に固定した。
 - `whisper-cli-json-full-v1` は実際の whisper.cpp 1.9.1 output にある `systeminfo`、`model`、`params`、`result`、`transcription` と型を必須化した。実データ full JSON 16件の再読に成功した。
 
-上記修正後の final3 は q5 / turbo の cold・warm 各4 caseを再実行し、全16 run が成功した。final3 の raw report と統合 report だけを判定証跡として採用する。
+上記修正後の audit-apply rerun は q5 / turbo の cold・warm 各4 caseを再実行し、全16 run が成功した。audit-apply の raw report と統合 report だけを今回の判定証跡として採用する。
 
 ## 再現性と報告
 
-report には、manifest / fixture fingerprint、source file hash、audio hash、model hash / size / URL、whisper-cli / ffmpeg / yt-dlp 実体、固定 argv、case range、gold audit status、baseline / model の全文出力 fingerprint、CER、glossary、cue、cold/warm wall time、peak RSS、gate の個別結果、Go / No-Go、残余リスクを保存する。fixture fingerprint は canonical JSON の SHA-256 とし、path や mtime だけに依存しない。
+report には、source fixture / model-specific run manifest fingerprint、source file hash、audio hash、model hash / size / URL、whisper-cli / ffmpeg / yt-dlp 実体、固定 argv、case range、gold audit status、baseline / model の全文出力 fingerprint、CER、glossary、cue、cold/warm wall time、peak RSS、raw report の model / input / runtime / range / run-kind identity、cold/warm output SHA equality、gate の個別結果、Go / No-Go、残余リスクを保存する。fixture fingerprint は canonical JSON の SHA-256 とし、path や mtime だけに依存しない。既存 numeric threshold は変更しない。
 
 実行 command（model と cache kind ごとに同じ 4 case を実行）:
 
@@ -121,11 +144,11 @@ report には、manifest / fixture fingerprint、source file hash、audio hash�
 uv run python benchmarks/s9_benchmark.py run \
   --manifest docs/benchmarks/s9-1-cases.json \
   --model-name ggml-large-v3-turbo-q5_0 \
-  --output-dir /Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/cold-final3 \
-  --report /Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/cold-final3/report.json \
+  --output-dir /Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/cold-audit-apply \
+  --report /Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/cold-audit-apply/report.json \
   --execute-whisper --run-kind cold
 
 # 同じ command を q5 / turbo と cold / warm の各組み合わせで実行する。
 ```
 
-実際の harness の help と report に残った command を正本とし、上記は固定入力・出力先を示す実測再現 command である。比較 report は `benchmarks/s9_compare.py` で4実行結果を model ごとに統合し、cold / warm の全 wall time と peak RSS、および cold / warm output SHA equality を保持する。
+実際の harness の help と report に残った command を正本とし、上記は固定入力・出力先を示す実測再現 command である。比較 report は `benchmarks/s9_compare.py` で q5 / turbo × cold / warm の4 command（各 command は固定4 case、合計16 case runs）を統合し、cold / warm の全 wall time と peak RSS、raw identity、および cold / warm output SHA equality を保持する。output stability は再現性の integrity check であり、numeric pass threshold の変更ではない。
