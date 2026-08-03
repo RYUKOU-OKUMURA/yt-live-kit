@@ -302,6 +302,8 @@
       "unicode": "NFKC"
     },
     "raw_report_identity": {
+      "all_models_metrics_recomputed_from_artifacts": true,
+      "all_models_output_fingerprints_verified": true,
       "all_models_share_input_fingerprints": true,
       "all_models_share_runtime_identity": true,
       "all_ranges_match_fixture": true,
@@ -311,6 +313,77 @@
         "ggml-large-v3-turbo-q5_0": "a25d0fbc8233a1db7f0c2ecbb332781b19e5fd5b31260a5b0b2d03be7270de5e"
       },
       "source_fixture_fingerprint": "6dae657f2b803c54c6af1afe4ed54ad4f447324c32802e1943dc5711a9bf1718"
+    },
+    "vtt_progressive_parity_gate": {
+      "benchmark_identity_verified": true,
+      "case_count": 4,
+      "cases": [
+        {
+          "benchmark_dedup_cues": 1434,
+          "benchmark_raw_cues": 1434,
+          "benchmark_text_sha256": "ceb4ac2ac3b008150e68db31d52c25e2a98c21578cc5fadf694e766c292fb647",
+          "case_id": "lb4-clip002-short-proper-nouns",
+          "production_dedup_cues": 1434,
+          "production_raw_cues": 1434,
+          "production_text_sha256": "ceb4ac2ac3b008150e68db31d52c25e2a98c21578cc5fadf694e766c292fb647",
+          "source_vtt": {
+            "bytes": 353340,
+            "path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/LB4px1wRFnY/subtitles/ja.vtt",
+            "sha256": "cc6d7fe8f89ffe3ae22f411ece80dcba7c9ab48f96b90b13fa21e7b4216c3fb2"
+          },
+          "text_sequence_equal": true
+        },
+        {
+          "benchmark_dedup_cues": 1422,
+          "benchmark_raw_cues": 1422,
+          "benchmark_text_sha256": "bdf7ed501c5ceeb530a90dd7343ef09ea59f9d2536cd7e519cc43ba6a1f6f097",
+          "case_id": "mkw-long-local-asr",
+          "production_dedup_cues": 1422,
+          "production_raw_cues": 1422,
+          "production_text_sha256": "bdf7ed501c5ceeb530a90dd7343ef09ea59f9d2536cd7e519cc43ba6a1f6f097",
+          "source_vtt": {
+            "bytes": 334317,
+            "path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/mKwn-93gg90/subtitles/ja.vtt",
+            "sha256": "402f98815be4a087802b3a6314c19a37660392a63cc1611ab0f2eb71e953971c"
+          },
+          "text_sequence_equal": true
+        },
+        {
+          "benchmark_dedup_cues": 2581,
+          "benchmark_raw_cues": 2581,
+          "benchmark_text_sha256": "166c22f9c8f063f9ecb0d7be50f4747eeade7dc07f8e66522d2fbf9facf56b00",
+          "case_id": "cgal-proper-nouns",
+          "production_dedup_cues": 2581,
+          "production_raw_cues": 2581,
+          "production_text_sha256": "166c22f9c8f063f9ecb0d7be50f4747eeade7dc07f8e66522d2fbf9facf56b00",
+          "source_vtt": {
+            "bytes": 586766,
+            "path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/CGalA8SISPE/subtitles/ja.vtt",
+            "sha256": "0d5a200a43a5325dc4799a45f4c23fc6580a140e5d56f2f188e542f72b269676"
+          },
+          "text_sequence_equal": true
+        },
+        {
+          "benchmark_dedup_cues": 3568,
+          "benchmark_raw_cues": 3568,
+          "benchmark_text_sha256": "a7d09096f87edee90325bbf1f8240ad0391775edc0f704f404563a1a5a61be6f",
+          "case_id": "hpe-audio-variation",
+          "production_dedup_cues": 3568,
+          "production_raw_cues": 3568,
+          "production_text_sha256": "a7d09096f87edee90325bbf1f8240ad0391775edc0f704f404563a1a5a61be6f",
+          "source_vtt": {
+            "bytes": 852527,
+            "path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/hPeRSA9YVIM/subtitles/ja.vtt",
+            "sha256": "d9baff5fff1d4851584d5c2526a85efc6a35e2ac8a5639f5e897028aab45b7fd"
+          },
+          "text_sequence_equal": true
+        }
+      ],
+      "fixture_identity_verified": true,
+      "passed": true,
+      "schema_verified": true,
+      "source_hashes_verified": true,
+      "text_sequence_equal_verified": true
     }
   },
   "fixture_fingerprint": "6dae657f2b803c54c6af1afe4ed54ad4f447324c32802e1943dc5711a9bf1718",
@@ -550,6 +623,12 @@
             "value": 0.7869427067818489
           }
         },
+        "raw_evidence": {
+          "argv_and_output_schema_verified": true,
+          "definition": "raw baseline VTT and candidate full JSON are rehashed/reparsed and CER, glossary, cue, text, range, argv, run-kind and output schema are recomputed or matched",
+          "metrics_recomputed_from_artifacts": true,
+          "passed": true
+        },
         "reasons": [],
         "reproducibility": {
           "cold_warm_output_sha_equal": true,
@@ -574,6 +653,11 @@
           "definition": "all four displayed provisional transcripts were human reviewed with no material issue reported; this is operational evidence, not exact gold",
           "passed": true,
           "status": "accepted_operational_benchmark_reference"
+        },
+        "vtt_progressive_parity": {
+          "case_count": 4,
+          "passed": true,
+          "text_sequence_equal_verified": true
         },
         "wall_time": {
           "checks": [
@@ -1989,7 +2073,143 @@
           },
           "schema": "s9-1-benchmark-report-v1"
         },
+        "evidence": {
+          "cold": [
+            {
+              "argv_verified": true,
+              "candidate_cue_fingerprint": {
+                "bytes": 1230,
+                "sha256": "976b31d5b466247a2a6ef27d341b2df2171c14972708867f9dd36215f546187e"
+              },
+              "case_id": "lb4-clip002-short-proper-nouns",
+              "measurement_verified": true,
+              "metrics_verified": true,
+              "output_fingerprint": {
+                "bytes": 59029,
+                "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/cold-audit-apply/whisper/lb4-clip002-short-proper-nouns/cold.json",
+                "sha256": "c81341873032e831e19d78831dcdefa6f207a7e792b386f057e1e92d0081a62d"
+              },
+              "output_schema_verified": true
+            },
+            {
+              "argv_verified": true,
+              "candidate_cue_fingerprint": {
+                "bytes": 2732,
+                "sha256": "1a3357910afb81b0600bd0cf19a17dda726b26f6fcfc1b543f9b963f01485018"
+              },
+              "case_id": "mkw-long-local-asr",
+              "measurement_verified": true,
+              "metrics_verified": true,
+              "output_fingerprint": {
+                "bytes": 90420,
+                "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/cold-audit-apply/whisper/mkw-long-local-asr/cold.json",
+                "sha256": "ac420f3efa30a4446de6e36c99ec86230b40a3a63a38f80a0e2d5429963a44b0"
+              },
+              "output_schema_verified": true
+            },
+            {
+              "argv_verified": true,
+              "candidate_cue_fingerprint": {
+                "bytes": 2137,
+                "sha256": "54811715c9a781639c2a22c27c8e4785cc22a155a2ec57bf4bc14b3104913cf7"
+              },
+              "case_id": "cgal-proper-nouns",
+              "measurement_verified": true,
+              "metrics_verified": true,
+              "output_fingerprint": {
+                "bytes": 97304,
+                "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/cold-audit-apply/whisper/cgal-proper-nouns/cold.json",
+                "sha256": "de267dee31466642360c4072cb7227b578f6fbb41353547862d3391239294e5b"
+              },
+              "output_schema_verified": true
+            },
+            {
+              "argv_verified": true,
+              "candidate_cue_fingerprint": {
+                "bytes": 933,
+                "sha256": "2852161be9b71aa488a6bb69e47ba4ac69607ea9743e44d248ae6b6884912d0b"
+              },
+              "case_id": "hpe-audio-variation",
+              "measurement_verified": true,
+              "metrics_verified": true,
+              "output_fingerprint": {
+                "bytes": 44577,
+                "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/cold-audit-apply/whisper/hpe-audio-variation/cold.json",
+                "sha256": "168e3a22ec89d5e3e8e0e9039c3f5a99c3a5f6d6939c96f76c238ea3a8394562"
+              },
+              "output_schema_verified": true
+            }
+          ],
+          "warm": [
+            {
+              "argv_verified": true,
+              "candidate_cue_fingerprint": {
+                "bytes": 1230,
+                "sha256": "976b31d5b466247a2a6ef27d341b2df2171c14972708867f9dd36215f546187e"
+              },
+              "case_id": "lb4-clip002-short-proper-nouns",
+              "measurement_verified": true,
+              "metrics_verified": true,
+              "output_fingerprint": {
+                "bytes": 59029,
+                "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/warm-audit-apply/whisper/lb4-clip002-short-proper-nouns/warm.json",
+                "sha256": "c81341873032e831e19d78831dcdefa6f207a7e792b386f057e1e92d0081a62d"
+              },
+              "output_schema_verified": true
+            },
+            {
+              "argv_verified": true,
+              "candidate_cue_fingerprint": {
+                "bytes": 2732,
+                "sha256": "1a3357910afb81b0600bd0cf19a17dda726b26f6fcfc1b543f9b963f01485018"
+              },
+              "case_id": "mkw-long-local-asr",
+              "measurement_verified": true,
+              "metrics_verified": true,
+              "output_fingerprint": {
+                "bytes": 90420,
+                "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/warm-audit-apply/whisper/mkw-long-local-asr/warm.json",
+                "sha256": "ac420f3efa30a4446de6e36c99ec86230b40a3a63a38f80a0e2d5429963a44b0"
+              },
+              "output_schema_verified": true
+            },
+            {
+              "argv_verified": true,
+              "candidate_cue_fingerprint": {
+                "bytes": 2137,
+                "sha256": "54811715c9a781639c2a22c27c8e4785cc22a155a2ec57bf4bc14b3104913cf7"
+              },
+              "case_id": "cgal-proper-nouns",
+              "measurement_verified": true,
+              "metrics_verified": true,
+              "output_fingerprint": {
+                "bytes": 97304,
+                "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/warm-audit-apply/whisper/cgal-proper-nouns/warm.json",
+                "sha256": "de267dee31466642360c4072cb7227b578f6fbb41353547862d3391239294e5b"
+              },
+              "output_schema_verified": true
+            },
+            {
+              "argv_verified": true,
+              "candidate_cue_fingerprint": {
+                "bytes": 933,
+                "sha256": "2852161be9b71aa488a6bb69e47ba4ac69607ea9743e44d248ae6b6884912d0b"
+              },
+              "case_id": "hpe-audio-variation",
+              "measurement_verified": true,
+              "metrics_verified": true,
+              "output_fingerprint": {
+                "bytes": 44577,
+                "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/warm-audit-apply/whisper/hpe-audio-variation/warm.json",
+                "sha256": "168e3a22ec89d5e3e8e0e9039c3f5a99c3a5f6d6939c96f76c238ea3a8394562"
+              },
+              "output_schema_verified": true
+            }
+          ]
+        },
         "input_fingerprints_equal": true,
+        "metrics_verified": true,
+        "output_fingerprints_verified": true,
         "run_manifest_fingerprint_equal": true,
         "runtime_identity_equal": true,
         "warm": {
@@ -2938,6 +3158,12 @@
             "value": 0.8084599344652964
           }
         },
+        "raw_evidence": {
+          "argv_and_output_schema_verified": true,
+          "definition": "raw baseline VTT and candidate full JSON are rehashed/reparsed and CER, glossary, cue, text, range, argv, run-kind and output schema are recomputed or matched",
+          "metrics_recomputed_from_artifacts": true,
+          "passed": true
+        },
         "reasons": [],
         "reproducibility": {
           "cold_warm_output_sha_equal": true,
@@ -2962,6 +3188,11 @@
           "definition": "all four displayed provisional transcripts were human reviewed with no material issue reported; this is operational evidence, not exact gold",
           "passed": true,
           "status": "accepted_operational_benchmark_reference"
+        },
+        "vtt_progressive_parity": {
+          "case_count": 4,
+          "passed": true,
+          "text_sequence_equal_verified": true
         },
         "wall_time": {
           "checks": [
@@ -4377,7 +4608,143 @@
           },
           "schema": "s9-1-benchmark-report-v1"
         },
+        "evidence": {
+          "cold": [
+            {
+              "argv_verified": true,
+              "candidate_cue_fingerprint": {
+                "bytes": 1172,
+                "sha256": "578a49764c00051cf52a7496ce4209952082a4504c21faf3f647d8fab3d865c6"
+              },
+              "case_id": "lb4-clip002-short-proper-nouns",
+              "measurement_verified": true,
+              "metrics_verified": true,
+              "output_fingerprint": {
+                "bytes": 57432,
+                "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/turbo/cold-audit-apply/whisper/lb4-clip002-short-proper-nouns/cold.json",
+                "sha256": "0413a091d3ba834d89834ffdbb0b64d0707ced9f27a2fef9f99d86e273d24a7f"
+              },
+              "output_schema_verified": true
+            },
+            {
+              "argv_verified": true,
+              "candidate_cue_fingerprint": {
+                "bytes": 2707,
+                "sha256": "6e5d21dd8b967ebc537a9e2ea710ab34922b72a2f9db8419f3a8432c2ecbbd95"
+              },
+              "case_id": "mkw-long-local-asr",
+              "measurement_verified": true,
+              "metrics_verified": true,
+              "output_fingerprint": {
+                "bytes": 94909,
+                "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/turbo/cold-audit-apply/whisper/mkw-long-local-asr/cold.json",
+                "sha256": "f7deda132b560285c965edb2c21433c7aa7f8deca2b0163b8b75e5c5e19dfe52"
+              },
+              "output_schema_verified": true
+            },
+            {
+              "argv_verified": true,
+              "candidate_cue_fingerprint": {
+                "bytes": 2119,
+                "sha256": "0de4cf5c02e695fe504438e33e9678ae600ffd2e9f1b9afd82833280b9714844"
+              },
+              "case_id": "cgal-proper-nouns",
+              "measurement_verified": true,
+              "metrics_verified": true,
+              "output_fingerprint": {
+                "bytes": 95849,
+                "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/turbo/cold-audit-apply/whisper/cgal-proper-nouns/cold.json",
+                "sha256": "cb986db8877001cece2a179d988e763057a47eeac2061a44d369ed497d38a17b"
+              },
+              "output_schema_verified": true
+            },
+            {
+              "argv_verified": true,
+              "candidate_cue_fingerprint": {
+                "bytes": 918,
+                "sha256": "5b3d26d674e26a9e969de15b65281d0534ede36a595bb1307e06dbced9f72967"
+              },
+              "case_id": "hpe-audio-variation",
+              "measurement_verified": true,
+              "metrics_verified": true,
+              "output_fingerprint": {
+                "bytes": 43815,
+                "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/turbo/cold-audit-apply/whisper/hpe-audio-variation/cold.json",
+                "sha256": "09daf1eda5997b1f9c1ba42fcb4cc00a5d0708ee44b236824c0bdf54663b26b1"
+              },
+              "output_schema_verified": true
+            }
+          ],
+          "warm": [
+            {
+              "argv_verified": true,
+              "candidate_cue_fingerprint": {
+                "bytes": 1172,
+                "sha256": "578a49764c00051cf52a7496ce4209952082a4504c21faf3f647d8fab3d865c6"
+              },
+              "case_id": "lb4-clip002-short-proper-nouns",
+              "measurement_verified": true,
+              "metrics_verified": true,
+              "output_fingerprint": {
+                "bytes": 57432,
+                "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/turbo/warm-audit-apply/whisper/lb4-clip002-short-proper-nouns/warm.json",
+                "sha256": "0413a091d3ba834d89834ffdbb0b64d0707ced9f27a2fef9f99d86e273d24a7f"
+              },
+              "output_schema_verified": true
+            },
+            {
+              "argv_verified": true,
+              "candidate_cue_fingerprint": {
+                "bytes": 2707,
+                "sha256": "6e5d21dd8b967ebc537a9e2ea710ab34922b72a2f9db8419f3a8432c2ecbbd95"
+              },
+              "case_id": "mkw-long-local-asr",
+              "measurement_verified": true,
+              "metrics_verified": true,
+              "output_fingerprint": {
+                "bytes": 94909,
+                "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/turbo/warm-audit-apply/whisper/mkw-long-local-asr/warm.json",
+                "sha256": "f7deda132b560285c965edb2c21433c7aa7f8deca2b0163b8b75e5c5e19dfe52"
+              },
+              "output_schema_verified": true
+            },
+            {
+              "argv_verified": true,
+              "candidate_cue_fingerprint": {
+                "bytes": 2119,
+                "sha256": "0de4cf5c02e695fe504438e33e9678ae600ffd2e9f1b9afd82833280b9714844"
+              },
+              "case_id": "cgal-proper-nouns",
+              "measurement_verified": true,
+              "metrics_verified": true,
+              "output_fingerprint": {
+                "bytes": 95849,
+                "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/turbo/warm-audit-apply/whisper/cgal-proper-nouns/warm.json",
+                "sha256": "cb986db8877001cece2a179d988e763057a47eeac2061a44d369ed497d38a17b"
+              },
+              "output_schema_verified": true
+            },
+            {
+              "argv_verified": true,
+              "candidate_cue_fingerprint": {
+                "bytes": 918,
+                "sha256": "5b3d26d674e26a9e969de15b65281d0534ede36a595bb1307e06dbced9f72967"
+              },
+              "case_id": "hpe-audio-variation",
+              "measurement_verified": true,
+              "metrics_verified": true,
+              "output_fingerprint": {
+                "bytes": 43815,
+                "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/turbo/warm-audit-apply/whisper/hpe-audio-variation/warm.json",
+                "sha256": "09daf1eda5997b1f9c1ba42fcb4cc00a5d0708ee44b236824c0bdf54663b26b1"
+              },
+              "output_schema_verified": true
+            }
+          ]
+        },
         "input_fingerprints_equal": true,
+        "metrics_verified": true,
+        "output_fingerprints_verified": true,
         "run_manifest_fingerprint_equal": true,
         "runtime_identity_equal": true,
         "warm": {
@@ -5356,12 +5723,44 @@
         "sha256": "402f98815be4a087802b3a6314c19a37660392a63cc1611ab0f2eb71e953971c"
       }
     },
+    "scope": {
+      "exact_file_set": true,
+      "expected_file_count": 15,
+      "expected_relative_files": [
+        "CGalA8SISPE/clips/candidates.json",
+        "CGalA8SISPE/meta.json",
+        "CGalA8SISPE/subtitles/ja.vtt",
+        "LB4px1wRFnY/clips/candidates.json",
+        "LB4px1wRFnY/clips/source/LB4px1wRFnY.mp4",
+        "LB4px1wRFnY/meta.json",
+        "LB4px1wRFnY/shorts/cutplan/cut_clip_002.json",
+        "LB4px1wRFnY/shorts/cutplan/cut_clip_003.json",
+        "LB4px1wRFnY/subtitles/ja.vtt",
+        "hPeRSA9YVIM/clips/candidates.json",
+        "hPeRSA9YVIM/meta.json",
+        "hPeRSA9YVIM/subtitles/ja.vtt",
+        "mKwn-93gg90/clips/candidates.json",
+        "mKwn-93gg90/meta.json",
+        "mKwn-93gg90/subtitles/ja.vtt"
+      ],
+      "fixture_source_file_count": 14,
+      "path_validation": {
+        "path_traversal_rejected": true,
+        "root_matches_fixture": true,
+        "symlink_escape_rejected": true
+      },
+      "protected_file_count": 1,
+      "root": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data"
+    },
     "unchanged": true
   },
   "raw_report_identity": {
     "all_case_runs_ok": true,
+    "argv_verified": true,
     "case_run_count": 16,
     "input_fingerprints_verified": true,
+    "metrics_recomputed_from_artifacts": true,
+    "output_fingerprints_verified": true,
     "run_manifest_fingerprints": {
       "ggml-large-v3-turbo": "9e8e71a6f02f57572ef65c127cf2fa5dfcaa6a7c55c7acf6791ea93d7d3c5ee6",
       "ggml-large-v3-turbo-q5_0": "a25d0fbc8233a1db7f0c2ecbb332781b19e5fd5b31260a5b0b2d03be7270de5e"
@@ -5643,7 +6042,7 @@
       "version": "2026.07.04"
     }
   },
-  "schema": "s9-1-comparison-report-v5",
+  "schema": "s9-1-comparison-report-v6",
   "source_fingerprints": [
     {
       "bytes": 353340,
@@ -5716,7 +6115,11 @@
         "production_dedup_cues": 1434,
         "production_raw_cues": 1434,
         "production_text_sha256": "ceb4ac2ac3b008150e68db31d52c25e2a98c21578cc5fadf694e766c292fb647",
-        "source_vtt_sha256": "cc6d7fe8f89ffe3ae22f411ece80dcba7c9ab48f96b90b13fa21e7b4216c3fb2",
+        "source_vtt": {
+          "bytes": 353340,
+          "path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/LB4px1wRFnY/subtitles/ja.vtt",
+          "sha256": "cc6d7fe8f89ffe3ae22f411ece80dcba7c9ab48f96b90b13fa21e7b4216c3fb2"
+        },
         "text_sequence_equal": true
       },
       {
@@ -5727,7 +6130,11 @@
         "production_dedup_cues": 1422,
         "production_raw_cues": 1422,
         "production_text_sha256": "bdf7ed501c5ceeb530a90dd7343ef09ea59f9d2536cd7e519cc43ba6a1f6f097",
-        "source_vtt_sha256": "402f98815be4a087802b3a6314c19a37660392a63cc1611ab0f2eb71e953971c",
+        "source_vtt": {
+          "bytes": 334317,
+          "path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/mKwn-93gg90/subtitles/ja.vtt",
+          "sha256": "402f98815be4a087802b3a6314c19a37660392a63cc1611ab0f2eb71e953971c"
+        },
         "text_sequence_equal": true
       },
       {
@@ -5738,7 +6145,11 @@
         "production_dedup_cues": 2581,
         "production_raw_cues": 2581,
         "production_text_sha256": "166c22f9c8f063f9ecb0d7be50f4747eeade7dc07f8e66522d2fbf9facf56b00",
-        "source_vtt_sha256": "0d5a200a43a5325dc4799a45f4c23fc6580a140e5d56f2f188e542f72b269676",
+        "source_vtt": {
+          "bytes": 586766,
+          "path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/CGalA8SISPE/subtitles/ja.vtt",
+          "sha256": "0d5a200a43a5325dc4799a45f4c23fc6580a140e5d56f2f188e542f72b269676"
+        },
         "text_sequence_equal": true
       },
       {
@@ -5749,9 +6160,84 @@
         "production_dedup_cues": 3568,
         "production_raw_cues": 3568,
         "production_text_sha256": "a7d09096f87edee90325bbf1f8240ad0391775edc0f704f404563a1a5a61be6f",
-        "source_vtt_sha256": "d9baff5fff1d4851584d5c2526a85efc6a35e2ac8a5639f5e897028aab45b7fd",
+        "source_vtt": {
+          "bytes": 852527,
+          "path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/hPeRSA9YVIM/subtitles/ja.vtt",
+          "sha256": "d9baff5fff1d4851584d5c2526a85efc6a35e2ac8a5639f5e897028aab45b7fd"
+        },
         "text_sequence_equal": true
       }
-    ]
+    ],
+    "validation": {
+      "benchmark_identity_verified": true,
+      "case_count": 4,
+      "cases": [
+        {
+          "benchmark_dedup_cues": 1434,
+          "benchmark_raw_cues": 1434,
+          "benchmark_text_sha256": "ceb4ac2ac3b008150e68db31d52c25e2a98c21578cc5fadf694e766c292fb647",
+          "case_id": "lb4-clip002-short-proper-nouns",
+          "production_dedup_cues": 1434,
+          "production_raw_cues": 1434,
+          "production_text_sha256": "ceb4ac2ac3b008150e68db31d52c25e2a98c21578cc5fadf694e766c292fb647",
+          "source_vtt": {
+            "bytes": 353340,
+            "path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/LB4px1wRFnY/subtitles/ja.vtt",
+            "sha256": "cc6d7fe8f89ffe3ae22f411ece80dcba7c9ab48f96b90b13fa21e7b4216c3fb2"
+          },
+          "text_sequence_equal": true
+        },
+        {
+          "benchmark_dedup_cues": 1422,
+          "benchmark_raw_cues": 1422,
+          "benchmark_text_sha256": "bdf7ed501c5ceeb530a90dd7343ef09ea59f9d2536cd7e519cc43ba6a1f6f097",
+          "case_id": "mkw-long-local-asr",
+          "production_dedup_cues": 1422,
+          "production_raw_cues": 1422,
+          "production_text_sha256": "bdf7ed501c5ceeb530a90dd7343ef09ea59f9d2536cd7e519cc43ba6a1f6f097",
+          "source_vtt": {
+            "bytes": 334317,
+            "path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/mKwn-93gg90/subtitles/ja.vtt",
+            "sha256": "402f98815be4a087802b3a6314c19a37660392a63cc1611ab0f2eb71e953971c"
+          },
+          "text_sequence_equal": true
+        },
+        {
+          "benchmark_dedup_cues": 2581,
+          "benchmark_raw_cues": 2581,
+          "benchmark_text_sha256": "166c22f9c8f063f9ecb0d7be50f4747eeade7dc07f8e66522d2fbf9facf56b00",
+          "case_id": "cgal-proper-nouns",
+          "production_dedup_cues": 2581,
+          "production_raw_cues": 2581,
+          "production_text_sha256": "166c22f9c8f063f9ecb0d7be50f4747eeade7dc07f8e66522d2fbf9facf56b00",
+          "source_vtt": {
+            "bytes": 586766,
+            "path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/CGalA8SISPE/subtitles/ja.vtt",
+            "sha256": "0d5a200a43a5325dc4799a45f4c23fc6580a140e5d56f2f188e542f72b269676"
+          },
+          "text_sequence_equal": true
+        },
+        {
+          "benchmark_dedup_cues": 3568,
+          "benchmark_raw_cues": 3568,
+          "benchmark_text_sha256": "a7d09096f87edee90325bbf1f8240ad0391775edc0f704f404563a1a5a61be6f",
+          "case_id": "hpe-audio-variation",
+          "production_dedup_cues": 3568,
+          "production_raw_cues": 3568,
+          "production_text_sha256": "a7d09096f87edee90325bbf1f8240ad0391775edc0f704f404563a1a5a61be6f",
+          "source_vtt": {
+            "bytes": 852527,
+            "path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/hPeRSA9YVIM/subtitles/ja.vtt",
+            "sha256": "d9baff5fff1d4851584d5c2526a85efc6a35e2ac8a5639f5e897028aab45b7fd"
+          },
+          "text_sequence_equal": true
+        }
+      ],
+      "fixture_identity_verified": true,
+      "passed": true,
+      "schema_verified": true,
+      "source_hashes_verified": true,
+      "text_sequence_equal_verified": true
+    }
   }
 }

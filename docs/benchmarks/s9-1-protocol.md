@@ -62,6 +62,7 @@ S9-4 / S9-6 はこの evidence を親候補の固定 span の品質承認へ昇�
 - baseline の dedupe は production `src/yt_live_kit/services/vtt_parser.py::deduplicate_progressive` と同じ順序意味論に固定する。全 VTT を range filter より先に処理し、`text == prev_text` は skip、`text.startswith(prev_text)` は新しい差分だけを残し、`prev_text in text` は最初の一致部分を除いた差分だけを残し、それ以外は cue 本文を残す。各 raw cue の本文を次の比較用 `prev_text` に更新する。実データで見える 10 ms 境界はこの rolling VTT の一形態であり、duration だけで cue を削除する規則ではない。
 - dedupe 後の cue は元の絶対時刻を保持し、target range との overlap を再度適用する。benchmark harness の parity test は production parser と同じ入力の text 列が一致することを検証する。
 - 4 本の production VTT を全編で比較した parity 結果は [`s9-1-vtt-progressive-parity.json`](./s9-1-vtt-progressive-parity.json) に保存し、4/4 case で raw cue 数・dedup 後 cue 数・dedup 済み text sequence SHA-256 が一致した。
+- canonical compare は parity artifact v2 の schema、benchmark / fixture identity、固定4 case順、source VTT bytes / SHA-256、raw / dedup count、text sequence SHA-256 を実体から再計算する。空配列、missing / unknown case、case swap、source hash drift、`text_sequence_equal=false` は fail closed とし、strict parity 4/4 を effective Go gate に含める。
 - Whisper candidate の JSON cue は rolling VTT ではないため、candidate 側には progressive dedupe を適用しない。identical / contained cue は raw のまま残し、cue inclusion の duplicate と CER の反復として測定する。marker token の除外と target overlap だけを共通化する。
 - 純粋な非音声 marker は fixture の `normalization.exclude_text_tokens` に列挙した完全一致だけを除外する。話者の発話中に含まれる文字列は勝手に削らない。
 - 視聴者挨拶は未監査 gold から自動分類しない。明示的な人手注記がない限り raw cue に残し、挨拶を除外したかのような評価上の加点は行わない。

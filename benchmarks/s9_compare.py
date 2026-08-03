@@ -9,8 +9,11 @@ raw report・固定 fixture・production hash 証跡だけを読み、JSON と M
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import os
 from pathlib import Path
+import re
 from statistics import median
 import sys
 from typing import Any, Mapping
@@ -20,8 +23,20 @@ from typing import Any, Mapping
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from benchmarks.s9_benchmark import (
+    CueAnchor,
+    NormalizationConfig,
+    TimeRange,
+    WhisperSettings,
+    _case_metrics,
+    _exclude_marker_cues,
+    build_whisper_argv,
+    deduplicate_progressive_timed,
     evaluate_boundary_audit,
+    file_fingerprint,
     manifest_fingerprint,
+    parse_vtt_file,
+    parse_whisper_json,
+    _parse_peak_rss,
     sha256_file,
 )
 from benchmarks.s9_human_audit import HumanAuditError, validate_human_audit
@@ -35,6 +50,14 @@ CASE_IDS = (
 )
 MODEL_NAMES = ("ggml-large-v3-turbo-q5_0", "ggml-large-v3-turbo")
 OPERATIONAL_REFERENCE_MODE = "operational_transcript_reference"
+COMPARISON_REPORT_SCHEMA = "s9-1-comparison-report-v6"
+RAW_REPORT_SCHEMA = "s9-1-benchmark-report-v1"
+PARITY_SCHEMA = "s9-1-vtt-progressive-parity-v2"
+EXPECTED_TIMEOUT_SEC = 180.0
+REAL_TIME_TOLERANCE_MS = 25
+PROTECTED_PRODUCTION_RELATIVE_PATHS = frozenset(
+    {"LB4px1wRFnY/shorts/cutplan/cut_clip_003.json"}
+)
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -44,21 +67,122 @@ def _read_json(path: Path) -> dict[str, Any]:
     return value
 
 
-def _validate_production_hash_artifact(path: Path) -> dict[str, Any]:
-    """Re-read every recorded production file; artifact equality alone is insufficient."""
+def _flatten_source_files(fixture: Mapping[str, Any]) -> list[Path]:
+    values: list[Path] = []
+    for case in fixture.get("cases", []):
+        source_files = case.get("source_files") if isinstance(case, Mapping) else None
+        if not isinstance(source_files, Mapping):
+            raise ValueError("fixture case の source_files がありません")
+        for value in source_files.values():
+            entries = value if isinstance(value, list) else [value]
+            for entry in entries:
+                if not isinstance(entry, str) or not entry:
+                    raise ValueError("fixture source_files の path が不正です")
+                candidate = Path(entry)
+                if not candidate.is_absolute() or ".." in candidate.parts:
+                    raise ValueError(f"fixture source_files は絶対canonical pathが必要です: {entry}")
+                values.append(candidate)
+    unique = list(dict.fromkeys(values))
+    if not unique:
+        raise ValueError("fixture source_files が空です")
+    return unique
+
+
+def _path_has_symlink(path: Path, *, root: Path) -> bool:
+    if root.is_symlink():
+        return True
+    current = root
+    try:
+        relative = path.relative_to(root)
+    except ValueError:
+        return True
+    for part in relative.parts:
+        current = current / part
+        if current.is_symlink():
+            return True
+    return False
+
+
+def _derive_production_scope(fixture: Mapping[str, Any]) -> dict[str, Any]:
+    source_paths = _flatten_source_files(fixture)
+    try:
+        root = Path(os.path.commonpath([str(path) for path in source_paths]))
+    except ValueError as exc:
+        raise ValueError("fixture source_files から production root を導出できません") from exc
+    if not root.is_absolute() or root.is_symlink():
+        raise ValueError(f"production root が不正です: {root}")
+    expected_paths: dict[str, Path] = {}
+    for source_path in source_paths:
+        try:
+            relative = source_path.relative_to(root)
+        except ValueError as exc:
+            raise ValueError(f"fixture source file が production root 外です: {source_path}") from exc
+        relative_text = relative.as_posix()
+        if not relative_text or relative.is_absolute() or ".." in relative.parts:
+            raise ValueError(f"fixture source file の relative path が不正です: {relative_text}")
+        expected_paths[relative_text] = source_path
+    for relative_text in PROTECTED_PRODUCTION_RELATIVE_PATHS:
+        protected_path = root / relative_text
+        if not protected_path.is_file():
+            raise ValueError(f"固定保護対象 production file がありません: {protected_path}")
+        expected_paths[relative_text] = protected_path
+    if len(source_paths) != 14 or len(expected_paths) != 15:
+        raise ValueError(
+            f"production scope の固定件数が不正です: source={len(source_paths)} expected={len(expected_paths)}"
+        )
+    return {
+        "root": root,
+        "source_paths": expected_paths,
+        "expected_relative_paths": frozenset(expected_paths),
+        "fixture_source_file_count": len(source_paths),
+        "protected_file_count": len(PROTECTED_PRODUCTION_RELATIVE_PATHS),
+    }
+
+
+def _validate_relative_path(relative_path: str) -> None:
+    if not relative_path or Path(relative_path).is_absolute():
+        raise ValueError(f"production hash artifact の relative path が不正です: {relative_path}")
+    candidate = Path(relative_path)
+    if relative_path != candidate.as_posix() or ".." in candidate.parts or "." in candidate.parts:
+        raise ValueError(f"production hash artifact の relative path がcanonicalではありません: {relative_path}")
+
+
+def _validate_production_hash_artifact(path: Path, *, expected_scope: Mapping[str, Any]) -> dict[str, Any]:
+    """Validate exact fixture scope and re-read every production file."""
 
     report = _read_json(path)
     root = report.get("root")
     files = report.get("files")
     if not isinstance(root, str) or not isinstance(files, Mapping) or not files:
         raise ValueError(f"production hash artifact の schema が不正です: {path}")
+    expected_root = Path(str(expected_scope["root"]))
+    if Path(root) != expected_root:
+        raise ValueError(f"production hash artifact の root が fixture scope と一致しません: {path}")
+    expected_relative_paths = set(expected_scope["expected_relative_paths"])
+    actual_relative_paths = set(files)
+    if actual_relative_paths != expected_relative_paths:
+        raise ValueError(f"production hash artifact の file set が fixture scope と一致しません: {path}")
     actual_files: dict[str, dict[str, Any]] = {}
     for relative_path, expected in files.items():
         if not isinstance(relative_path, str) or not isinstance(expected, Mapping):
             raise ValueError(f"production hash artifact の file entry が不正です: {path}")
+        _validate_relative_path(relative_path)
+        if set(expected) != {"bytes", "sha256"}:
+            raise ValueError(f"production hash artifact の file entry schema が不正です: {path} / {relative_path}")
         target = Path(root) / relative_path
-        if not target.is_file():
+        resolved_root = expected_root.resolve(strict=True)
+        if _path_has_symlink(target, root=expected_root):
+            raise ValueError(f"production hash artifact の symlink/root escape を拒否しました: {target}")
+        try:
+            target.resolve(strict=True).relative_to(resolved_root)
+        except (FileNotFoundError, ValueError) as exc:
+            raise ValueError(f"production hash artifact の symlink/root escape を拒否しました: {target}") from exc
+        if not target.is_file() or target.is_symlink():
             raise ValueError(f"production hash artifact の対象ファイルがありません: {target}")
+        if isinstance(expected.get("bytes"), bool) or not isinstance(expected.get("bytes"), int) or expected["bytes"] < 0:
+            raise ValueError(f"production hash artifact の bytes が不正です: {target}")
+        if not isinstance(expected.get("sha256"), str) or len(expected["sha256"]) != 64:
+            raise ValueError(f"production hash artifact の sha256 が不正です: {target}")
         actual = {"bytes": target.stat().st_size, "sha256": sha256_file(target)}
         if actual != {"bytes": expected.get("bytes"), "sha256": expected.get("sha256")}:
             raise ValueError(f"production file hash が artifact と一致しません: {target}")
@@ -66,6 +190,15 @@ def _validate_production_hash_artifact(path: Path) -> dict[str, Any]:
     result = dict(report)
     result["actual_recheck"] = True
     result["actual_files"] = actual_files
+    result["scope_validation"] = {
+        "root_matches_fixture": True,
+        "exact_file_set": True,
+        "path_traversal_rejected": True,
+        "symlink_escape_rejected": True,
+        "expected_file_count": len(expected_relative_paths),
+        "fixture_source_file_count": expected_scope["fixture_source_file_count"],
+        "protected_file_count": expected_scope["protected_file_count"],
+    }
     return result
 
 
@@ -126,6 +259,319 @@ def _expected_case_identity(fixture: Mapping[str, Any], case_id: str) -> tuple[d
     return {"start_ms": start_ms, "end_ms": end_ms}, anchors
 
 
+def _expected_whisper_settings(fixture: Mapping[str, Any]) -> dict[str, Any]:
+    whisper = fixture["whisper"]
+    decode = dict(whisper["decode"])
+    padding_ms = decode.pop("padding_ms", 0)
+    decode.update({"threads": whisper["threads"], "processors": whisper["processors"]})
+    return {
+        "language": whisper["language"],
+        "initial_prompt": whisper["initial_prompt"],
+        "padding_ms": padding_ms,
+        "decode": decode,
+        "output_schema": whisper["output_schema"],
+    }
+
+
+def _expected_runtime_identity(fixture: Mapping[str, Any], binary_fingerprint: Mapping[str, Any]) -> dict[str, Any]:
+    whisper = fixture["whisper"]
+    return {
+        "binary_path": whisper["binary"],
+        "binary_fingerprint": dict(binary_fingerprint),
+        "version": whisper["version"],
+        "settings": _expected_whisper_settings(fixture),
+        "timeout_sec": float(whisper.get("timeout_sec", EXPECTED_TIMEOUT_SEC)),
+        "output_schema": whisper["output_schema"],
+    }
+
+
+def _normalization_config(fixture: Mapping[str, Any]) -> NormalizationConfig:
+    value = fixture.get("normalization", {})
+    if not isinstance(value, Mapping):
+        raise ValueError("fixture normalization が不正です")
+    if "unicode_form" in value:
+        return NormalizationConfig.from_mapping(value)
+    return NormalizationConfig.from_mapping(
+        {
+            "unicode_form": value.get("unicode", "NFKC"),
+            "remove_whitespace": value.get("strip_whitespace", True),
+            "ignore_punctuation": value.get("ignore_punctuation", False),
+        }
+    )
+
+
+def _expected_source_inputs(
+    fixture: Mapping[str, Any],
+    *,
+    production_scope: Mapping[str, Any],
+) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]], dict[str, Path]]:
+    inputs: list[dict[str, Any]] = []
+    expected_vtt_inputs: dict[str, dict[str, Any]] = {}
+    vtt_paths: dict[str, Path] = {}
+    audio_root = Path(str(fixture["audio_cache_root"]))
+    for case in fixture["cases"]:
+        case_id = case["id"]
+        source_path = Path(str(case["source_files"]["vtt"]))
+        relative = source_path.relative_to(Path(str(production_scope["root"]))).as_posix()
+        vtt_path = Path(str(production_scope["source_paths"][relative]))
+        vtt_fingerprint = file_fingerprint(vtt_path)
+        expected_vtt_inputs[case_id] = vtt_fingerprint
+        vtt_paths[case_id] = vtt_path
+        inputs.append({"kind": "baseline_vtt", "case_id": case_id, **vtt_fingerprint})
+        audio_path = audio_root / str(case["audio_fixture"])
+        audio_fingerprint = file_fingerprint(
+            audio_path,
+            expected_sha256=case["audio_sha256"],
+            expected_bytes=case["audio_bytes"],
+        )
+        inputs.append({"kind": "audio", "case_id": case_id, **audio_fingerprint})
+    return inputs, expected_vtt_inputs, vtt_paths
+
+
+def _cue_sequence_fingerprint(cues: list[Mapping[str, Any]]) -> dict[str, Any]:
+    payload = json.dumps(cues, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return {"bytes": len(payload), "sha256": hashlib.sha256(payload).hexdigest()}
+
+
+def _text_sequence_sha256(texts: list[str]) -> str:
+    return hashlib.sha256("\n".join(texts).encode("utf-8")).hexdigest()
+
+
+def _parse_real_time_ms(stderr: str) -> int | None:
+    """Parse macOS ``/usr/bin/time -l``'s displayed real seconds."""
+
+    matches = re.findall(r"(?m)^\s*([0-9]+(?:\.[0-9]+)?)\s+real\b", stderr)
+    if len(matches) != 1:
+        return None
+    return round(float(matches[0]) * 1000)
+
+
+def _validate_vtt_parity_artifact(
+    path: Path,
+    *,
+    fixture: Mapping[str, Any],
+    expected_vtt_inputs: Mapping[str, Mapping[str, Any]],
+    expected_vtt_paths: Mapping[str, Path],
+) -> dict[str, Any]:
+    """Recompute production/benchmark VTT parity and reject fail-open artifacts."""
+
+    from yt_live_kit.services.vtt_parser import deduplicate_progressive, parse_vtt
+
+    artifact = _read_json(path)
+    expected_top = {"schema", "benchmark_id", "fixture_fingerprint", "production_function", "benchmark_function", "cases"}
+    if set(artifact) != expected_top:
+        raise ValueError(f"VTT parity artifact のschemaが不正です: {path}")
+    if artifact.get("schema") != PARITY_SCHEMA:
+        raise ValueError(f"VTT parity artifact のschemaが固定値と異なります: {path}")
+    if artifact.get("benchmark_id") != fixture["benchmark_id"] or artifact.get("fixture_fingerprint") != manifest_fingerprint(fixture):
+        raise ValueError(f"VTT parity artifact のfixture identityが不正です: {path}")
+    if artifact.get("production_function") != "yt_live_kit.services.vtt_parser.deduplicate_progressive":
+        raise ValueError(f"VTT parity artifact のproduction functionが不正です: {path}")
+    if artifact.get("benchmark_function") != "benchmarks.s9_benchmark.deduplicate_progressive_timed":
+        raise ValueError(f"VTT parity artifact のbenchmark functionが不正です: {path}")
+    cases = artifact.get("cases")
+    if not isinstance(cases, list) or len(cases) != len(CASE_IDS):
+        raise ValueError(f"VTT parity artifact のcasesが固定4件ではありません: {path}")
+    if [case.get("case_id") for case in cases if isinstance(case, Mapping)] != list(CASE_IDS):
+        raise ValueError(f"VTT parity artifact のcase順が固定値と異なります: {path}")
+    expected_case_fields = {
+        "case_id",
+        "source_vtt_bytes",
+        "source_vtt_sha256",
+        "production_raw_cues",
+        "benchmark_raw_cues",
+        "production_dedup_cues",
+        "benchmark_dedup_cues",
+        "production_text_sha256",
+        "benchmark_text_sha256",
+        "text_sequence_equal",
+    }
+    validated_cases: list[dict[str, Any]] = []
+    for raw_case in cases:
+        if not isinstance(raw_case, Mapping) or set(raw_case) != expected_case_fields:
+            raise ValueError(f"VTT parity artifact のcase schemaが不正です: {path}")
+        case_id = raw_case["case_id"]
+        if case_id not in CASE_IDS:
+            raise ValueError(f"VTT parity artifact にunknown caseがあります: {case_id}")
+        source_path = expected_vtt_paths[case_id]
+        actual_source = file_fingerprint(source_path)
+        if raw_case["source_vtt_bytes"] != actual_source["bytes"] or raw_case["source_vtt_sha256"] != actual_source["sha256"]:
+            raise ValueError(f"VTT parity artifact のsource VTT hashが実体と一致しません: {case_id}")
+        expected_source = expected_vtt_inputs[case_id]
+        if actual_source != expected_source:
+            raise ValueError(f"VTT parity artifact のsource VTT identityがproduction hashと一致しません: {case_id}")
+        content = source_path.read_text(encoding="utf-8")
+        production_raw = parse_vtt(content)
+        benchmark_raw = parse_vtt_file(source_path)
+        production_dedup = deduplicate_progressive(production_raw)
+        benchmark_dedup = deduplicate_progressive_timed(benchmark_raw)
+        production_text = [cue.text for cue in production_dedup]
+        benchmark_text = [cue.text for cue in benchmark_dedup]
+        expected_values = {
+            "production_raw_cues": len(production_raw),
+            "benchmark_raw_cues": len(benchmark_raw),
+            "production_dedup_cues": len(production_dedup),
+            "benchmark_dedup_cues": len(benchmark_dedup),
+            "production_text_sha256": _text_sequence_sha256(production_text),
+            "benchmark_text_sha256": _text_sequence_sha256(benchmark_text),
+            "text_sequence_equal": production_text == benchmark_text,
+        }
+        if expected_values["text_sequence_equal"] is not True or raw_case["text_sequence_equal"] is not True:
+            raise ValueError(f"VTT parity artifact のtext_sequence_equalがtrueではありません: {case_id}")
+        for key, expected_value in expected_values.items():
+            if raw_case[key] != expected_value:
+                raise ValueError(f"VTT parity artifact の再計算値が一致しません: {case_id} / {key}")
+        for key in ("production_raw_cues", "benchmark_raw_cues", "production_dedup_cues", "benchmark_dedup_cues"):
+            if isinstance(raw_case[key], bool) or not isinstance(raw_case[key], int) or raw_case[key] <= 0:
+                raise ValueError(f"VTT parity artifact のcue countが不正です: {case_id} / {key}")
+        validated_cases.append({"case_id": case_id, **expected_values, "source_vtt": actual_source})
+    return {
+        "passed": True,
+        "schema_verified": True,
+        "benchmark_identity_verified": True,
+        "fixture_identity_verified": True,
+        "source_hashes_verified": True,
+        "text_sequence_equal_verified": True,
+        "case_count": len(validated_cases),
+        "cases": validated_cases,
+    }
+
+
+def _validate_raw_case_evidence(
+    *,
+    raw_case: Mapping[str, Any],
+    fixture: Mapping[str, Any],
+    case_id: str,
+    expected_run_kind: str,
+    expected_model_path: Path,
+    expected_audio_path: Path,
+    expected_vtt_path: Path,
+    expected_settings: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Reparse output artifacts and recompute all transcript-related metrics."""
+
+    expected_range, expected_anchors = _expected_case_identity(fixture, case_id)
+    target = TimeRange.from_value(expected_range)
+    fixture_case = next(case for case in fixture["cases"] if case["id"] == case_id)
+    normalization = _normalization_config(fixture)
+    anchors = [CueAnchor.from_value(anchor, index) for index, anchor in enumerate(expected_anchors)]
+    glossary = fixture_case["gold"]["glossary"]
+    gold_text = fixture_case["gold"]["text"]
+    candidate = raw_case.get("candidate")
+    if not isinstance(candidate, Mapping):
+        raise ValueError(f"raw report の candidate がありません: {case_id}")
+    execution = candidate.get("execution")
+    if not isinstance(execution, Mapping):
+        raise ValueError(f"raw report の execution がありません: {case_id}")
+    output_paths = execution.get("output_paths")
+    if not isinstance(output_paths, list) or len(output_paths) != 1 or not isinstance(output_paths[0], str):
+        raise ValueError(f"raw report の output_paths が不正です: {case_id}")
+    output_path = Path(output_paths[0])
+    if raw_case.get("candidate_output_path") != str(output_path):
+        raise ValueError(f"raw report の candidate_output_path が execution と一致しません: {case_id}")
+    if not output_path.is_file() or output_path.is_symlink():
+        raise ValueError(f"raw report の candidate output artifact がありません: {output_path}")
+    output_fingerprint = file_fingerprint(output_path)
+    output_payload = _read_json(output_path)
+    params = output_payload.get("params")
+    if not isinstance(params, Mapping) or params.get("model") != str(expected_model_path) or params.get("language") != fixture["whisper"]["language"]:
+        raise ValueError(f"candidate output の model/language identity が不正です: {output_path}")
+    actual_cues = parse_whisper_json(
+        output_payload,
+        absolute_start_ms=target.start_ms,
+        expected_schema=fixture["whisper"]["output_schema"],
+    )
+    actual_cue_dicts = [cue.to_dict() for cue in actual_cues]
+    if execution.get("cues") != actual_cue_dicts:
+        raise ValueError(f"raw report の candidate text/timestamp が output artifact と一致しません: {case_id}")
+    argv = execution.get("argv")
+    expected_argv = build_whisper_argv(
+        binary_path=fixture["whisper"]["binary"],
+        model_path=expected_model_path,
+        audio_path=expected_audio_path,
+        output_json_path=output_path,
+        settings=WhisperSettings.from_mapping(expected_settings),
+        target_range=target,
+    )
+    if argv != expected_argv:
+        raise ValueError(f"raw report の execution argv が fixture と一致しません: {case_id}")
+    measured_argv = execution.get("measured_argv")
+    allowed_measured = (expected_argv, ["/usr/bin/time", "-l", *expected_argv])
+    if measured_argv not in allowed_measured:
+        raise ValueError(f"raw report の measured_argv が固定argvと一致しません: {case_id}")
+    if execution.get("status") != "ok" or execution.get("returncode") != 0 or execution.get("run_kind") != expected_run_kind:
+        raise ValueError(f"raw report の execution status が不正です: {case_id}")
+    if execution.get("output_paths") != [str(output_path)]:
+        raise ValueError(f"raw report の output path identity が不正です: {case_id}")
+    if execution.get("error") is not None:
+        raise ValueError(f"raw report の成功 execution に error があります: {case_id}")
+    measured_real_ms = _parse_real_time_ms(str(execution.get("stderr", "")))
+    measured_peak_bytes = _parse_peak_rss(str(execution.get("stderr", "")))
+    if measured_real_ms is None:
+        raise ValueError(f"raw report の execution.stderr に real time がありません: {case_id}")
+    if measured_peak_bytes is None:
+        raise ValueError(f"raw report の execution.stderr に peak memory がありません: {case_id}")
+    duration_ms = execution.get("duration_ms")
+    peak_memory_bytes = execution.get("peak_memory_bytes")
+    if isinstance(duration_ms, bool) or not isinstance(duration_ms, (int, float)) or duration_ms < 0:
+        raise ValueError(f"raw report の duration_ms が不正です: {case_id}")
+    if abs(float(duration_ms) - measured_real_ms) > REAL_TIME_TOLERANCE_MS:
+        raise ValueError(f"raw report の duration_ms がstderr real timeと一致しません: {case_id}")
+    if peak_memory_bytes != measured_peak_bytes:
+        raise ValueError(f"raw report の peak memory がstderr実測値と一致しません: {case_id}")
+    if candidate.get("wall_time_ms") != execution.get("duration_ms"):
+        raise ValueError(f"raw report の wall time が execution と一致しません: {case_id}")
+    if candidate.get("peak_memory_bytes") != execution.get("peak_memory_bytes"):
+        raise ValueError(f"raw report の peak memory が execution と一致しません: {case_id}")
+    if candidate.get("run_kind") != execution.get("run_kind") or candidate.get("cache_hit") != execution.get("cache_hit"):
+        raise ValueError(f"raw report の candidate execution metadata が一致しません: {case_id}")
+
+    baseline_cues = deduplicate_progressive_timed(parse_vtt_file(expected_vtt_path))
+    baseline_cues = _exclude_marker_cues(
+        baseline_cues,
+        fixture["normalization"].get("exclude_text_tokens", []),
+        normalization,
+    )
+    expected_baseline = _case_metrics(
+        gold_text=gold_text,
+        cues=baseline_cues,
+        gold_anchors=anchors,
+        target=target,
+        glossary=glossary,
+        normalization=normalization,
+        wall_time_ms=None,
+        peak_memory_bytes=None,
+        run_kind=None,
+        cache_hit=None,
+    )
+    if raw_case.get("baseline") != expected_baseline:
+        raise ValueError(f"raw report の baseline metrics が実VTTからの再計算値と一致しません: {case_id}")
+    expected_candidate = _case_metrics(
+        gold_text=gold_text,
+        cues=actual_cues,
+        gold_anchors=anchors,
+        target=target,
+        glossary=glossary,
+        normalization=normalization,
+        wall_time_ms=execution.get("duration_ms"),
+        peak_memory_bytes=execution.get("peak_memory_bytes"),
+        run_kind=expected_run_kind,
+        cache_hit=execution.get("cache_hit"),
+    )
+    candidate_without_execution = {key: value for key, value in candidate.items() if key != "execution"}
+    if candidate_without_execution != expected_candidate:
+        raise ValueError(f"raw report の candidate metrics がoutput artifactからの再計算値と一致しません: {case_id}")
+    return {
+        "case_id": case_id,
+        "output_fingerprint": output_fingerprint,
+        "candidate_cue_fingerprint": _cue_sequence_fingerprint(actual_cue_dicts),
+        "metrics_verified": True,
+        "argv_verified": True,
+        "output_schema_verified": True,
+        "measurement_verified": True,
+    }
+
+
 def _validate_raw_report_identity(
     path: Path,
     *,
@@ -135,12 +581,13 @@ def _validate_raw_report_identity(
     expected_manifest_fingerprint: str | None = None,
     expected_inputs: list[Mapping[str, Any]] | None = None,
     expected_vtt_inputs: Mapping[str, Mapping[str, Any]] | None = None,
+    expected_model_fingerprint: Mapping[str, Any] | None = None,
     expected_runtime_identity: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Fail closed if one raw report is not the fixed benchmark invocation."""
 
     report = _read_json(path)
-    if report.get("schema") != "s9-1-benchmark-report-v1":
+    if report.get("schema") != RAW_REPORT_SCHEMA:
         raise ValueError(f"raw report schema が固定値と異なります: {path}")
     if report.get("benchmark_id") != fixture["benchmark_id"]:
         raise ValueError(f"raw report benchmark_id が固定値と異なります: {path}")
@@ -159,6 +606,8 @@ def _validate_raw_report_identity(
     for field in ("path", "bytes", "sha256"):
         if raw_model.get(field) != expected_model[field]:
             raise ValueError(f"raw report の model {field} が fixture と一致しません: {path}")
+    if expected_model_fingerprint is not None and dict(raw_model) != dict(expected_model_fingerprint):
+        raise ValueError(f"raw report の model fingerprint が実model fileと一致しません: {path}")
 
     inputs = report.get("fingerprints", {}).get("inputs")
     if not isinstance(inputs, list) or not inputs:
@@ -196,20 +645,13 @@ def _validate_raw_report_identity(
         "output_schema": runtime.get("output_schema"),
     }
     whisper = fixture["whisper"]
-    expected_decode = dict(whisper["decode"])
-    padding_ms = expected_decode.pop("padding_ms", 0)
-    expected_decode.update({"threads": whisper["threads"], "processors": whisper["processors"]})
-    expected_settings = {
-        "language": whisper["language"],
-        "initial_prompt": whisper["initial_prompt"],
-        "padding_ms": padding_ms,
-        "decode": expected_decode,
-        "output_schema": whisper["output_schema"],
-    }
+    expected_settings = _expected_whisper_settings(fixture)
     if runtime_identity["binary_path"] != whisper["binary"]:
         raise ValueError(f"raw report の whisper binary が fixture と一致しません: {path}")
     if runtime_identity["version"] != whisper["version"] or runtime_identity["settings"] != expected_settings:
         raise ValueError(f"raw report の whisper settings が fixture と一致しません: {path}")
+    if runtime_identity["timeout_sec"] != float(whisper.get("timeout_sec", EXPECTED_TIMEOUT_SEC)):
+        raise ValueError(f"raw report の whisper timeout がfixtureと一致しません: {path}")
     if runtime_identity["output_schema"] != whisper["output_schema"]:
         raise ValueError(f"raw report の output schema が fixture と一致しません: {path}")
     if expected_runtime_identity is not None and runtime_identity != expected_runtime_identity:
@@ -310,13 +752,21 @@ def _model_report(
     cold_path: Path,
     warm_path: Path,
     transcript_audit: Mapping[str, Any],
+    expected_inputs: list[Mapping[str, Any]],
     expected_vtt_inputs: Mapping[str, Mapping[str, Any]],
+    expected_vtt_paths: Mapping[str, Path],
+    expected_model_fingerprint: Mapping[str, Any],
+    expected_runtime_identity: Mapping[str, Any],
+    parity_validation: Mapping[str, Any],
     shared_raw_identity: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     cold_report = _read_json(cold_path)
     warm_report = _read_json(warm_path)
-    expected_inputs = shared_raw_identity.get("inputs") if shared_raw_identity is not None else None
-    expected_runtime_identity = shared_raw_identity.get("runtime_identity") if shared_raw_identity is not None else None
+    if shared_raw_identity is not None:
+        if shared_raw_identity.get("inputs") != expected_inputs:
+            raise ValueError("model間のraw input identityが実fixtureと一致しません")
+        if shared_raw_identity.get("runtime_identity") != expected_runtime_identity:
+            raise ValueError("model間のraw runtime identityが実fixtureと一致しません")
     cold_identity = _validate_raw_report_identity(
         cold_path,
         fixture=fixture,
@@ -324,6 +774,7 @@ def _model_report(
         expected_run_kind="cold",
         expected_inputs=expected_inputs,
         expected_vtt_inputs=expected_vtt_inputs,
+        expected_model_fingerprint=expected_model_fingerprint,
         expected_runtime_identity=expected_runtime_identity,
     )
     warm_identity = _validate_raw_report_identity(
@@ -334,10 +785,37 @@ def _model_report(
         expected_manifest_fingerprint=cold_identity["run_manifest_fingerprint"],
         expected_inputs=cold_identity["inputs"],
         expected_vtt_inputs=expected_vtt_inputs,
+        expected_model_fingerprint=expected_model_fingerprint,
         expected_runtime_identity=cold_identity["runtime_identity"],
     )
     cold_cases = _case_map(cold_report)
     warm_cases = _case_map(warm_report)
+    cold_evidence = [
+        _validate_raw_case_evidence(
+            raw_case=cold_cases[case_id],
+            fixture=fixture,
+            case_id=case_id,
+            expected_run_kind="cold",
+            expected_model_path=Path(str(expected_model_fingerprint["path"])),
+            expected_audio_path=Path(str(next(item for item in expected_inputs if item["kind"] == "audio" and item["case_id"] == case_id)["path"])),
+            expected_vtt_path=expected_vtt_paths[case_id],
+            expected_settings=expected_runtime_identity["settings"],
+        )
+        for case_id in CASE_IDS
+    ]
+    warm_evidence = [
+        _validate_raw_case_evidence(
+            raw_case=warm_cases[case_id],
+            fixture=fixture,
+            case_id=case_id,
+            expected_run_kind="warm",
+            expected_model_path=Path(str(expected_model_fingerprint["path"])),
+            expected_audio_path=Path(str(next(item for item in expected_inputs if item["kind"] == "audio" and item["case_id"] == case_id)["path"])),
+            expected_vtt_path=expected_vtt_paths[case_id],
+            expected_settings=expected_runtime_identity["settings"],
+        )
+        for case_id in CASE_IDS
+    ]
     cases = [_run_case(case_id, cold_cases[case_id], warm_cases[case_id]) for case_id in CASE_IDS]
     relative_values = [case["relative_cer_improvement"] for case in cases]
     baseline_cases = [case["baseline"] for case in cases]
@@ -383,7 +861,15 @@ def _model_report(
     )
     raw_runs_ok = cold_identity["all_case_runs_ok"] and warm_identity["all_case_runs_ok"]
     reproducibility_passed = raw_runs_ok and output_stable
-    technical_passed = cer_passed and glossary_passed and cue_passed and wall_passed and peak_passed and reproducibility_passed
+    evidence_passed = all(
+        item["metrics_verified"]
+        and item["argv_verified"]
+        and item["output_schema_verified"]
+        and item["measurement_verified"]
+        for item in cold_evidence + warm_evidence
+    )
+    parity_passed = parity_validation.get("passed") is True
+    technical_passed = cer_passed and glossary_passed and cue_passed and wall_passed and peak_passed and reproducibility_passed and evidence_passed and parity_passed
     model_meta = next(model for model in fixture["models"] if model["name"] == name)
     return {
         "name": name,
@@ -424,6 +910,9 @@ def _model_report(
             "run_manifest_fingerprint_equal": cold_identity["run_manifest_fingerprint"] == warm_identity["run_manifest_fingerprint"],
             "input_fingerprints_equal": cold_identity["inputs"] == warm_identity["inputs"],
             "runtime_identity_equal": cold_identity["runtime_identity"] == warm_identity["runtime_identity"],
+            "evidence": {"cold": cold_evidence, "warm": warm_evidence},
+            "metrics_verified": evidence_passed,
+            "output_fingerprints_verified": all(item["output_fingerprint"] for item in cold_evidence + warm_evidence),
             "all_case_runs_ok": raw_runs_ok,
         },
         "gates": {
@@ -440,6 +929,17 @@ def _model_report(
                 "passed": reproducibility_passed,
                 "numeric_threshold_changed": False,
                 "definition": "raw case runs must succeed and cold/warm JSON output SHA-256 must match; this is an integrity check, not a numeric threshold",
+            },
+            "raw_evidence": {
+                "passed": evidence_passed,
+                "metrics_recomputed_from_artifacts": evidence_passed,
+                "argv_and_output_schema_verified": evidence_passed,
+                "definition": "raw baseline VTT and candidate full JSON are rehashed/reparsed and CER, glossary, cue, text, range, argv, run-kind and output schema are recomputed or matched",
+            },
+            "vtt_progressive_parity": {
+                "passed": parity_passed,
+                "case_count": parity_validation.get("case_count"),
+                "text_sequence_equal_verified": parity_validation.get("text_sequence_equal_verified") is True,
             },
             "gold_audit": {
                 "status": "not_claimed",
@@ -624,42 +1124,55 @@ def build_comparison(
     if transcript_audit_path is None:
         raise ValueError("transcript audit artifact is required for the operational S9-1 comparison report")
     transcript_audit = _load_transcript_audit(transcript_audit_path, fixture, boundary_audit)
-    before = _validate_production_hash_artifact(production_before)
-    after = _validate_production_hash_artifact(production_after)
-    production_root = Path(str(before["root"]))
-    expected_vtt_inputs: dict[str, Mapping[str, Any]] = {}
-    for fixture_case in fixture["cases"]:
-        vtt_path = Path(str(fixture_case["source_files"]["vtt"]))
-        try:
-            relative_vtt = vtt_path.relative_to(production_root).as_posix()
-        except ValueError as exc:
-            raise ValueError(f"fixture の baseline VTT が production root 外です: {vtt_path}") from exc
-        expected_vtt = before["files"].get(relative_vtt)
-        if not isinstance(expected_vtt, Mapping):
-            raise ValueError(f"production hash artifact に baseline VTT がありません: {relative_vtt}")
-        expected_vtt_inputs[fixture_case["id"]] = expected_vtt
+    production_scope = _derive_production_scope(fixture)
+    before = _validate_production_hash_artifact(production_before, expected_scope=production_scope)
+    after = _validate_production_hash_artifact(production_after, expected_scope=production_scope)
+    expected_inputs, expected_vtt_inputs, expected_vtt_paths = _expected_source_inputs(
+        fixture,
+        production_scope=production_scope,
+    )
+    parity_validation = _validate_vtt_parity_artifact(
+        parity_path,
+        fixture=fixture,
+        expected_vtt_inputs=expected_vtt_inputs,
+        expected_vtt_paths=expected_vtt_paths,
+    )
+    binary_path = Path(str(fixture["whisper"]["binary"]))
+    binary_fingerprint = file_fingerprint(binary_path)
+    expected_runtime_identity = _expected_runtime_identity(fixture, binary_fingerprint)
     models: list[dict[str, Any]] = []
     shared_raw_identity: Mapping[str, Any] | None = None
     for name in MODEL_NAMES:
+        model_fixture = next(model for model in fixture["models"] if model["name"] == name)
+        model_path = Path(str(model_fixture["path"]))
+        model_fingerprint = file_fingerprint(
+            model_path,
+            expected_sha256=model_fixture["sha256"],
+            expected_bytes=model_fixture["bytes"],
+        )
         model_report = _model_report(
             name=name,
             fixture=fixture,
             cold_path=run_paths[name]["cold"],
             warm_path=run_paths[name]["warm"],
             transcript_audit=transcript_audit,
+            expected_inputs=expected_inputs,
             expected_vtt_inputs=expected_vtt_inputs,
+            expected_vtt_paths=expected_vtt_paths,
+            expected_model_fingerprint=model_fingerprint,
+            expected_runtime_identity=expected_runtime_identity,
+            parity_validation=parity_validation,
             shared_raw_identity=shared_raw_identity,
         )
         if shared_raw_identity is None:
             shared_raw_identity = model_report["raw_identity"]["cold"]
         models.append(model_report)
-    parity = _read_json(parity_path)
     if shared_raw_identity is None:
         raise ValueError("raw report identity がありません")
-    source_inputs = shared_raw_identity["inputs"]
+    source_inputs = expected_inputs
     medians = {model["name"]: model["quality"]["paired_median_relative_cer_improvement"] for model in models}
     runtime_report = shared_raw_identity["runtime_report"]
-    runtime_identity = shared_raw_identity["runtime_identity"]
+    shared_runtime_identity = shared_raw_identity["runtime_identity"]
     evaluation = fixture["gates"]
     adopted_model, model_selection = _select_adopted_model(models)
     all_effective_gates_passed = adopted_model is not None
@@ -688,7 +1201,7 @@ def build_comparison(
         ]
     )
     report = {
-        "schema": "s9-1-comparison-report-v5",
+        "schema": COMPARISON_REPORT_SCHEMA,
         "benchmark_id": fixture["benchmark_id"],
         "measurement_date": fixture["measurement_date"],
         "fixture_fingerprint": manifest_fingerprint(fixture),
@@ -770,9 +1283,15 @@ def build_comparison(
                     model["raw_identity"]["cold"]["inputs"] == source_inputs for model in models
                 ),
                 "all_models_share_runtime_identity": all(
-                    model["raw_identity"]["cold"]["runtime_identity"] == runtime_identity for model in models
+                    model["raw_identity"]["cold"]["runtime_identity"] == shared_runtime_identity for model in models
                 ),
                 "all_ranges_match_fixture": True,
+                "all_models_metrics_recomputed_from_artifacts": all(
+                    model["raw_identity"]["metrics_verified"] for model in models
+                ),
+                "all_models_output_fingerprints_verified": all(
+                    model["raw_identity"]["output_fingerprints_verified"] for model in models
+                ),
                 "case_run_count": sum(
                     len(model["runs"][run_kind]["cases"])
                     for model in models
@@ -780,6 +1299,7 @@ def build_comparison(
                 ),
             },
             "boundary_policy": boundary_audit["policy"],
+            "vtt_progressive_parity_gate": parity_validation,
         },
         "human_audit": transcript_audit,
         "model_selection": model_selection,
@@ -793,12 +1313,26 @@ def build_comparison(
             "actual_recheck": before["actual_recheck"] and after["actual_recheck"],
             "unchanged": before["files"] == after["files"] and before["actual_files"] == after["actual_files"],
             "files": before["files"],
+            "scope": {
+                "root": str(production_scope["root"]),
+                "expected_relative_files": sorted(production_scope["expected_relative_paths"]),
+                "fixture_source_file_count": production_scope["fixture_source_file_count"],
+                "protected_file_count": production_scope["protected_file_count"],
+                "expected_file_count": len(production_scope["expected_relative_paths"]),
+                "exact_file_set": before["scope_validation"]["exact_file_set"] and after["scope_validation"]["exact_file_set"],
+                "path_validation": {
+                    "root_matches_fixture": before["scope_validation"]["root_matches_fixture"] and after["scope_validation"]["root_matches_fixture"],
+                    "path_traversal_rejected": True,
+                    "symlink_escape_rejected": True,
+                },
+            },
         },
         "vtt_progressive_parity": {
             "artifact": str(parity_path),
-            "case_count": len(parity["cases"]),
-            "all_text_sequence_equal": all(case["text_sequence_equal"] for case in parity["cases"]),
-            "cases": parity["cases"],
+            "case_count": parity_validation["case_count"],
+            "all_text_sequence_equal": parity_validation["text_sequence_equal_verified"],
+            "validation": parity_validation,
+            "cases": parity_validation["cases"],
         },
         "runtime": {
             "host": {"cpu": "Apple M4 Pro", "memory_bytes": 68719476736, "arch": "arm64"},
@@ -818,9 +1352,19 @@ def build_comparison(
                 and model["raw_identity"]["warm"]["inputs"] == source_inputs
                 for model in models
             ),
-                "runtime_identity_verified": all(
-                model["raw_identity"]["cold"]["runtime_identity"] == runtime_identity
-                and model["raw_identity"]["warm"]["runtime_identity"] == runtime_identity
+            "runtime_identity_verified": all(
+                model["raw_identity"]["cold"]["runtime_identity"] == shared_runtime_identity
+                and model["raw_identity"]["warm"]["runtime_identity"] == shared_runtime_identity
+                for model in models
+            ),
+            "metrics_recomputed_from_artifacts": all(
+                model["raw_identity"]["metrics_verified"] for model in models
+            ),
+            "output_fingerprints_verified": all(
+                model["raw_identity"]["output_fingerprints_verified"] for model in models
+            ),
+            "argv_verified": all(
+                all(item["argv_verified"] for kind in ("cold", "warm") for item in model["raw_identity"]["evidence"][kind])
                 for model in models
             ),
             "all_case_runs_ok": all(model["raw_identity"]["all_case_runs_ok"] for model in models),
@@ -955,12 +1499,12 @@ def markdown_report(report: Mapping[str, Any]) -> str:
         "- model cache: `/Users/ryukouokumura/Library/Caches/whisper.cpp/models/`",
         "- audio cache: `/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/`",
         "- baseline: production progressive dedupe parity 4/4。candidate: raw cue のまま評価",
-        "- production data hash: before / after は一致。対象 15 ファイル、既存 `ja.vtt` と mp4 は非変更。",
-        f"- raw identity: source fixture / model-specific run manifest、audio / VTT hash、range、runtime / settings、run-kind を4 raw reportで照合。case runs は {report['reproduction']['successful_case_runs']} / {report['reproduction']['run_count']} 成功。",
+        "- production hash scope: fixture source_files 14件 + protected cut_clip_003 1件 = exact 15件。root、relative path、完全な file set、path traversal、symlink escape、実ファイル bytes / SHA-256 を before / after とも fail-closed に再検証し、既存 `ja.vtt` と mp4 は非変更。",
+        f"- raw evidence: model / audio / baseline VTT / whisper-cli の実体 bytes / SHA-256、full JSON の再parse、CER / glossary / cue 指標の再計算、argv / range / run-kind / output schema / candidate text / output fingerprint、stderr の real time / peak RSS を再検証。case runs は {report['reproduction']['successful_case_runs']} / {report['reproduction']['run_count']} 成功。",
         "- cold / warm output SHA equality は全 case で確認済み。warm は別 process invocation の再利用観測で、永続 artifact cache hit は計測・主張していない。",
         "- tie-break metadata: audit-apply 再計測前に固定。prior provisional results known。policy basis は user_wait_time_and_local_constraints。全結果を見る前に宣言したとは主張せず、pass 閾値の変更でもない。",
         f"- selected model: `{selected_name}`。tie-break は local-only、worst-case 待ち時間、全体待ち時間、peak memory、model bytes、per-case quality の lexicographic rule。",
-        "- VTT progressive parity: [s9-1-vtt-progressive-parity.json](./s9-1-vtt-progressive-parity.json) で 4/4 case 一致。",
+        "- VTT progressive parity: strict v2 artifactを benchmark / fixture identity、固定4 case順、source VTT bytes / SHA-256、raw / dedup count、text sequence SHA-256から再計算し、4/4 case `text_sequence_equal=true` を effective Go gateへ含めた。",
         "",
         "## 再現 command",
         "",

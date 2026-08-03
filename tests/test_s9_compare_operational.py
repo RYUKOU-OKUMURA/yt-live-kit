@@ -7,12 +7,29 @@ from pathlib import Path
 import pytest
 
 from benchmarks.s9_compare import (
+    _derive_production_scope,
+    _normalization_config,
+    _parse_real_time_ms,
+    _expected_runtime_identity,
+    _expected_whisper_settings,
     _load_transcript_audit,
     _select_adopted_model,
+    _validate_raw_case_evidence,
     _validate_production_hash_artifact,
     _validate_raw_report_identity,
+    _validate_vtt_parity_artifact,
 )
-from benchmarks.s9_benchmark import manifest_fingerprint
+from benchmarks.s9_benchmark import (
+    CueAnchor,
+    TimeRange,
+    _case_metrics,
+    _exclude_marker_cues,
+    build_whisper_argv,
+    deduplicate_progressive_timed,
+    file_fingerprint,
+    manifest_fingerprint,
+    parse_vtt_file,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -22,6 +39,7 @@ AUDIT_PATH = ROOT / "docs/benchmarks/s9-1-human-audit-v2.json"
 REPORT_PATH = ROOT / "docs/benchmarks/s9-1-report.json"
 PACKET_PATH = ROOT / "docs/benchmarks/s9-1-human-audit.md"
 PROTOCOL_PATH = ROOT / "docs/benchmarks/s9-1-protocol.md"
+PARITY_FIXTURE_PATH = ROOT / "tests/fixtures/s9_vtt_parity.vtt"
 
 
 def _minimal_raw_report(*, model_name: str = "ggml-large-v3-turbo-q5_0", run_kind: str = "cold") -> dict:
@@ -59,6 +77,152 @@ def _minimal_raw_report(*, model_name: str = "ggml-large-v3-turbo-q5_0", run_kin
         "gold_audit_status": "provisional",
         "metrics_status": "provisional",
         "cases": cases,
+    }
+
+
+def _local_raw_evidence_fixture(tmp_path: Path) -> tuple[dict, dict, dict]:
+    """Build a complete four-case raw artifact without model/audio cache access."""
+
+    manifest = deepcopy(json.loads(MANIFEST_PATH.read_text(encoding="utf-8")))
+    model_path = tmp_path / "model.bin"
+    binary_path = tmp_path / "whisper-cli"
+    model_path.write_bytes(b"local model fixture")
+    binary_path.write_bytes(b"local whisper binary fixture")
+    manifest["whisper"]["binary"] = str(binary_path)
+    manifest["whisper"]["timeout_sec"] = 180.0
+    model_fixture = next(item for item in manifest["models"] if item["name"] == "ggml-large-v3-turbo-q5_0")
+    model_fixture.update(file_fingerprint(model_path))
+    audio_root = tmp_path / "audio"
+    audio_root.mkdir()
+    expected_vtt = file_fingerprint(PARITY_FIXTURE_PATH)
+    expected_inputs: list[dict] = []
+    cases: list[dict] = []
+    runtime_identity = _expected_runtime_identity(manifest, file_fingerprint(binary_path))
+    settings = _expected_whisper_settings(manifest)
+    normalization = _normalization_config(manifest)
+    for fixture_case in manifest["cases"]:
+        case_id = fixture_case["id"]
+        audio_path = audio_root / f"{case_id}.wav"
+        audio_path.write_bytes(f"audio:{case_id}".encode())
+        audio_fingerprint = file_fingerprint(audio_path)
+        fixture_case["audio_cache_root"] = str(audio_root)
+        fixture_case["audio_fixture"] = audio_path.name
+        fixture_case["audio_bytes"] = audio_fingerprint["bytes"]
+        fixture_case["audio_sha256"] = audio_fingerprint["sha256"]
+        fixture_case["source_files"]["vtt"] = str(PARITY_FIXTURE_PATH)
+        expected_inputs.extend(
+            [
+                {"kind": "baseline_vtt", "case_id": case_id, **expected_vtt},
+                {"kind": "audio", "case_id": case_id, **audio_fingerprint},
+            ]
+        )
+        start_ms, end_ms = fixture_case["range_ms"]
+        anchors = [
+            {"anchor_id": f"anchor-{index}", "start_ms": values[0], "end_ms": values[1]}
+            for index, values in enumerate(fixture_case["gold"]["cue_anchors_ms"], 1)
+        ]
+        output_path = tmp_path / "outputs" / case_id / "cold.json"
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "systeminfo": "fixture",
+            "model": {},
+            "params": {"model": str(model_path), "language": "ja"},
+            "result": {},
+            "transcription": [
+                {
+                    "timestamps": {"from": "00:00:00,000", "to": "00:00:01,000"},
+                    "offsets": {"from": 0, "to": 1000},
+                    "text": "fixture candidate",
+                }
+            ],
+        }
+        output_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        cue = {"start_ms": start_ms, "end_ms": start_ms + 1000, "text": "fixture candidate"}
+        argv = build_whisper_argv(
+            binary_path=binary_path,
+            model_path=model_path,
+            audio_path=audio_path,
+            output_json_path=output_path,
+            settings=settings,
+            target_range=TimeRange(start_ms, end_ms),
+        )
+        execution = {
+            "status": "ok",
+            "argv": argv,
+            "measured_argv": argv,
+            "stdout": "",
+            "stderr": "        0.12 real         0.01 user         0.01 sys\n           456 maximum resident set size\n",
+            "returncode": 0,
+            "duration_ms": 123,
+            "peak_memory_bytes": 456,
+            "output_paths": [str(output_path)],
+            "run_kind": "cold",
+            "cache_hit": False,
+            "cues": [cue],
+            "error": None,
+        }
+        target = TimeRange(start_ms, end_ms)
+        from benchmarks.s9_benchmark import VttCue
+
+        actual_cues = [VttCue(**cue)]
+        anchors_objects = [CueAnchor.from_value(anchor, index) for index, anchor in enumerate(anchors)]
+        baseline_cues = _exclude_marker_cues(
+            deduplicate_progressive_timed(parse_vtt_file(PARITY_FIXTURE_PATH)),
+            manifest["normalization"].get("exclude_text_tokens", []),
+            normalization,
+        )
+        baseline_metric = _case_metrics(
+            gold_text=fixture_case["gold"]["text"],
+            cues=baseline_cues,
+            gold_anchors=anchors_objects,
+            target=target,
+            glossary=fixture_case["gold"]["glossary"],
+            normalization=normalization,
+            wall_time_ms=None,
+            peak_memory_bytes=None,
+            run_kind=None,
+            cache_hit=None,
+        )
+        candidate_metric = _case_metrics(
+            gold_text=fixture_case["gold"]["text"],
+            cues=actual_cues,
+            gold_anchors=anchors_objects,
+            target=target,
+            glossary=fixture_case["gold"]["glossary"],
+            normalization=normalization,
+            wall_time_ms=123,
+            peak_memory_bytes=456,
+            run_kind="cold",
+            cache_hit=False,
+        )
+        candidate_metric["execution"] = execution
+        cases.append(
+            {
+                "case_id": case_id,
+                "target_range": {"start_ms": start_ms, "end_ms": end_ms},
+                "gold_cue_anchors": anchors,
+                "gold_cue_anchor_source": "fixture",
+                "baseline": baseline_metric,
+                "candidate": candidate_metric,
+                "candidate_output_path": str(output_path),
+            }
+        )
+    raw = {
+        "schema": "s9-1-benchmark-report-v1",
+        "benchmark_id": manifest["benchmark_id"],
+        "manifest_fingerprint": manifest_fingerprint(manifest),
+        "fingerprints": {"model": file_fingerprint(model_path), "inputs": expected_inputs},
+        "whisper_runtime": runtime_identity,
+        "gold_audit_status": "provisional",
+        "metrics_status": "provisional",
+        "cases": cases,
+    }
+    return manifest, raw, {
+        "model_path": model_path,
+        "binary_path": binary_path,
+        "expected_inputs": expected_inputs,
+        "expected_vtt": {case["id"]: expected_vtt for case in manifest["cases"]},
+        "expected_runtime": runtime_identity,
     }
 
 
@@ -146,7 +310,7 @@ def test_transcript_audit_is_bound_to_base_and_boundary_fingerprints() -> None:
 
 def test_canonical_report_contains_sixteen_runs_and_separate_statuses() -> None:
     report = json.loads(REPORT_PATH.read_text(encoding="utf-8"))
-    assert report["schema"] == "s9-1-comparison-report-v5"
+    assert report["schema"] == "s9-1-comparison-report-v6"
     assert report["decision"]["go"] is True
     assert report["decision"]["s9_3_reference"] == "ggml-large-v3-turbo-q5_0"
     assert report["decision"]["boundary_automation"] == "not_adopted_human_review_required"
@@ -156,8 +320,16 @@ def test_canonical_report_contains_sixteen_runs_and_separate_statuses() -> None:
     assert report["transcript_reference_status"] == "accepted_operational_benchmark_reference"
     assert report["human_audit"]["review_policy"]["displayed_transcript_content"]["acceptance"] == "operational_benchmark_reference"
     assert report["evaluation_contract"]["raw_report_identity"]["all_models_share_runtime_identity"] is True
+    shared_runtime_identity = report["models"][0]["raw_identity"]["cold"]["runtime_identity"]
+    assert all(
+        model["raw_identity"]["cold"]["runtime_identity"] == shared_runtime_identity
+        for model in report["models"]
+    )
     assert report["raw_report_identity"]["runtime_identity_verified"] is True
     assert report["raw_report_identity"]["input_fingerprints_verified"] is True
+    assert report["raw_report_identity"]["metrics_recomputed_from_artifacts"] is True
+    assert report["raw_report_identity"]["output_fingerprints_verified"] is True
+    assert report["evaluation_contract"]["vtt_progressive_parity_gate"]["passed"] is True
     assert report["reproduction"]["run_count"] == 16
     assert report["reproduction"]["successful_case_runs"] == 16
     assert "declared_before_results" not in report["comparison"]["model_selection_contract"]["rule"]
@@ -175,34 +347,322 @@ def test_canonical_report_contains_sixteen_runs_and_separate_statuses() -> None:
         assert model["gates"]["transcript_operational_reference"]["passed"] is True
         assert model["gates"]["gold_audit"]["passed"] is False
         assert model["gates"]["gold_audit"]["required_for_selected_mode"] is False
+        assert model["gates"]["vtt_progressive_parity"]["passed"] is True
         run_count += len(model["runs"]["cold"]["cases"])
         run_count += len(model["runs"]["warm"]["cases"])
     assert run_count == 16
     assert report["production_integrity"]["unchanged"] is True
+    assert report["production_integrity"]["scope"]["expected_file_count"] == 15
+    assert report["production_integrity"]["scope"]["fixture_source_file_count"] == 14
+    assert report["production_integrity"]["scope"]["protected_file_count"] == 1
+
+
+def test_production_scope_is_fixture_14_plus_protected_1() -> None:
+    manifest = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
+    scope = _derive_production_scope(manifest)
+
+    assert scope["fixture_source_file_count"] == 14
+    assert scope["protected_file_count"] == 1
+    assert len(scope["expected_relative_paths"]) == 15
+    assert "LB4px1wRFnY/shorts/cutplan/cut_clip_003.json" in scope["expected_relative_paths"]
 
 
 def test_production_hash_artifact_rechecks_actual_files(tmp_path: Path) -> None:
-    target = tmp_path / "production.txt"
-    target.write_text("unchanged", encoding="utf-8")
-    import hashlib
-
+    root = tmp_path / "production"
+    (root / "nested").mkdir(parents=True)
+    (root / "alpha.txt").write_text("alpha", encoding="utf-8")
+    (root / "nested" / "beta.txt").write_text("beta", encoding="utf-8")
+    scope = {
+        "root": root,
+        "expected_relative_paths": frozenset({"alpha.txt", "nested/beta.txt"}),
+        "fixture_source_file_count": 2,
+        "protected_file_count": 0,
+    }
     artifact = {
-        "root": str(tmp_path),
+        "root": str(root),
         "files": {
-            "production.txt": {
-                "bytes": target.stat().st_size,
-                "sha256": hashlib.sha256(target.read_bytes()).hexdigest(),
-            }
+            relative: file_fingerprint(root / relative)
+            for relative in ("alpha.txt", "nested/beta.txt")
         },
+    }
+    artifact["files"] = {
+        relative: {"bytes": value["bytes"], "sha256": value["sha256"]}
+        for relative, value in artifact["files"].items()
     }
     artifact_path = tmp_path / "hash.json"
     artifact_path.write_text(json.dumps(artifact), encoding="utf-8")
-    checked = _validate_production_hash_artifact(artifact_path)
+    checked = _validate_production_hash_artifact(artifact_path, expected_scope=scope)
     assert checked["actual_recheck"] is True
+    assert checked["scope_validation"]["exact_file_set"] is True
 
-    target.write_text("changed", encoding="utf-8")
+    (root / "alpha.txt").write_text("changed", encoding="utf-8")
     with pytest.raises(ValueError, match="production file hash"):
-        _validate_production_hash_artifact(artifact_path)
+        _validate_production_hash_artifact(artifact_path, expected_scope=scope)
+
+
+@pytest.mark.parametrize("mutation", [
+    lambda artifact: artifact["files"].pop("alpha.txt"),
+    lambda artifact: artifact["files"].update({"extra.txt": {"bytes": 0, "sha256": "0" * 64}}),
+    lambda artifact: artifact.update(root="/wrong/root"),
+    lambda artifact: artifact["files"].update({"../alpha.txt": artifact["files"].pop("alpha.txt")}),
+    lambda artifact: artifact["files"].update({"/absolute.txt": artifact["files"].pop("alpha.txt")}),
+])
+def test_production_hash_scope_mutations_fail_closed(tmp_path: Path, mutation) -> None:
+    root = tmp_path / "production"
+    root.mkdir()
+    (root / "alpha.txt").write_text("alpha", encoding="utf-8")
+    scope = {
+        "root": root,
+        "expected_relative_paths": frozenset({"alpha.txt"}),
+        "fixture_source_file_count": 1,
+        "protected_file_count": 0,
+    }
+    artifact = {
+        "root": str(root),
+        "files": {"alpha.txt": {"bytes": 5, "sha256": file_fingerprint(root / "alpha.txt")["sha256"]}},
+    }
+    mutation(artifact)
+    artifact_path = tmp_path / "hash.json"
+    artifact_path.write_text(json.dumps(artifact), encoding="utf-8")
+    with pytest.raises((ValueError, KeyError)):
+        _validate_production_hash_artifact(artifact_path, expected_scope=scope)
+
+
+def test_production_hash_scope_rejects_file_and_directory_symlink(tmp_path: Path) -> None:
+    root = tmp_path / "production"
+    root.mkdir()
+    outside = tmp_path / "outside.txt"
+    outside.write_text("outside", encoding="utf-8")
+    (root / "link.txt").symlink_to(outside)
+    scope = {
+        "root": root,
+        "expected_relative_paths": frozenset({"link.txt"}),
+        "fixture_source_file_count": 1,
+        "protected_file_count": 0,
+    }
+    artifact = {"root": str(root), "files": {"link.txt": {"bytes": 7, "sha256": file_fingerprint(outside)["sha256"]}}}
+    artifact_path = tmp_path / "hash.json"
+    artifact_path.write_text(json.dumps(artifact), encoding="utf-8")
+    with pytest.raises(ValueError):
+        _validate_production_hash_artifact(artifact_path, expected_scope=scope)
+
+    outside_dir = tmp_path / "outside-dir"
+    outside_dir.mkdir()
+    (outside_dir / "escape.txt").write_text("escape", encoding="utf-8")
+    (root / "linkdir").symlink_to(outside_dir, target_is_directory=True)
+    directory_scope = {
+        "root": root,
+        "expected_relative_paths": frozenset({"linkdir/escape.txt"}),
+        "fixture_source_file_count": 1,
+        "protected_file_count": 0,
+    }
+    directory_artifact = {
+        "root": str(root),
+        "files": {
+            "linkdir/escape.txt": {
+                "bytes": 6,
+                "sha256": file_fingerprint(outside_dir / "escape.txt")["sha256"],
+            }
+        },
+    }
+    directory_path = tmp_path / "directory-hash.json"
+    directory_path.write_text(json.dumps(directory_artifact), encoding="utf-8")
+    with pytest.raises(ValueError):
+        _validate_production_hash_artifact(directory_path, expected_scope=directory_scope)
+
+
+def _valid_parity_artifact(manifest: dict) -> tuple[dict, dict[str, dict[str, int | str]]]:
+    import hashlib
+
+    source = file_fingerprint(PARITY_FIXTURE_PATH)
+    text_sha = hashlib.sha256("alpha\nbeta".encode()).hexdigest()
+    cases = [
+        {
+            "case_id": case["id"],
+            "source_vtt_bytes": source["bytes"],
+            "source_vtt_sha256": source["sha256"],
+            "production_raw_cues": 2,
+            "benchmark_raw_cues": 2,
+            "production_dedup_cues": 2,
+            "benchmark_dedup_cues": 2,
+            "production_text_sha256": text_sha,
+            "benchmark_text_sha256": text_sha,
+            "text_sequence_equal": True,
+        }
+        for case in manifest["cases"]
+    ]
+    expected_inputs = {case["id"]: source for case in manifest["cases"]}
+    return {
+        "schema": "s9-1-vtt-progressive-parity-v2",
+        "benchmark_id": manifest["benchmark_id"],
+        "fixture_fingerprint": manifest_fingerprint(manifest),
+        "production_function": "yt_live_kit.services.vtt_parser.deduplicate_progressive",
+        "benchmark_function": "benchmarks.s9_benchmark.deduplicate_progressive_timed",
+        "cases": cases,
+    }, expected_inputs
+
+
+def test_vtt_parity_is_strict_and_is_a_canonical_gate(tmp_path: Path) -> None:
+    manifest = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
+    artifact, expected_inputs = _valid_parity_artifact(manifest)
+    expected_paths = {case["id"]: PARITY_FIXTURE_PATH for case in manifest["cases"]}
+    path = tmp_path / "parity.json"
+    path.write_text(json.dumps(artifact, ensure_ascii=False), encoding="utf-8")
+    result = _validate_vtt_parity_artifact(
+        path,
+        fixture=manifest,
+        expected_vtt_inputs=expected_inputs,
+        expected_vtt_paths=expected_paths,
+    )
+    assert result["passed"] is True
+    assert result["case_count"] == 4
+
+
+@pytest.mark.parametrize("mutation", [
+    lambda value: value["cases"].pop(),
+    lambda value: value["cases"].__setitem__(0, {**value["cases"][0], "case_id": "unknown-case"}),
+    lambda value: value["cases"].reverse(),
+    lambda value: value["cases"][0].pop("source_vtt_sha256"),
+    lambda value: value["cases"][0].update(source_vtt_sha256="0" * 64),
+    lambda value: value["cases"][0].update(text_sequence_equal=False),
+    lambda value: value.update(cases=[]),
+    lambda value: value.update(benchmark_id="other"),
+    lambda value: value.update(unknown="field"),
+])
+def test_vtt_parity_mutations_fail_closed(tmp_path: Path, mutation) -> None:
+    manifest = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
+    artifact, expected_inputs = _valid_parity_artifact(manifest)
+    mutation(artifact)
+    path = tmp_path / "parity.json"
+    path.write_text(json.dumps(artifact, ensure_ascii=False), encoding="utf-8")
+    expected_paths = {case["id"]: PARITY_FIXTURE_PATH for case in manifest["cases"]}
+    with pytest.raises(ValueError):
+        _validate_vtt_parity_artifact(
+            path,
+            fixture=manifest,
+            expected_vtt_inputs=expected_inputs,
+            expected_vtt_paths=expected_paths,
+        )
+
+
+def test_raw_evidence_rehashes_and_recomputes_metrics_without_external_cache(tmp_path: Path) -> None:
+    manifest, raw, details = _local_raw_evidence_fixture(tmp_path)
+    raw_path = tmp_path / "raw.json"
+    raw_path.write_text(json.dumps(raw, ensure_ascii=False), encoding="utf-8")
+    identity = _validate_raw_report_identity(
+        raw_path,
+        fixture=manifest,
+        expected_model_name="ggml-large-v3-turbo-q5_0",
+        expected_run_kind="cold",
+        expected_inputs=details["expected_inputs"],
+        expected_vtt_inputs=details["expected_vtt"],
+        expected_model_fingerprint=file_fingerprint(details["model_path"]),
+        expected_runtime_identity=details["expected_runtime"],
+    )
+    assert identity["all_case_runs_ok"] is True
+    for case in raw["cases"]:
+        case_id = case["case_id"]
+        audio_path = next(
+            Path(item["path"])
+            for item in details["expected_inputs"]
+            if item["kind"] == "audio" and item["case_id"] == case_id
+        )
+        evidence = _validate_raw_case_evidence(
+            raw_case=case,
+            fixture=manifest,
+            case_id=case_id,
+            expected_run_kind="cold",
+            expected_model_path=details["model_path"],
+            expected_audio_path=audio_path,
+            expected_vtt_path=PARITY_FIXTURE_PATH,
+            expected_settings=details["expected_runtime"]["settings"],
+        )
+        assert evidence["metrics_verified"] is True
+        assert evidence["output_schema_verified"] is True
+
+
+@pytest.mark.parametrize("mutation", [
+    lambda case: case["candidate"].update(cer=0.0),
+    lambda case: case["baseline"].update(cer=0.0),
+    lambda case: case["candidate"]["execution"]["cues"][0].update(text="tampered"),
+    lambda case: case["candidate"]["execution"]["argv"].__setitem__(0, "/wrong/whisper-cli"),
+    lambda case: case["candidate"].update(run_kind="warm"),
+    lambda case: case["candidate"]["execution"].update(duration_ms=1),
+    lambda case: case["candidate"]["execution"].update(peak_memory_bytes=1),
+])
+def test_raw_evidence_metric_text_and_argv_mutations_fail_closed(tmp_path: Path, mutation) -> None:
+    manifest, raw, details = _local_raw_evidence_fixture(tmp_path)
+    changed = deepcopy(raw["cases"][0])
+    mutation(changed)
+    case_id = changed["case_id"]
+    audio_path = next(
+        Path(item["path"])
+        for item in details["expected_inputs"]
+        if item["kind"] == "audio" and item["case_id"] == case_id
+    )
+    with pytest.raises(ValueError):
+        _validate_raw_case_evidence(
+            raw_case=changed,
+            fixture=manifest,
+            case_id=case_id,
+            expected_run_kind="cold",
+            expected_model_path=details["model_path"],
+            expected_audio_path=audio_path,
+            expected_vtt_path=PARITY_FIXTURE_PATH,
+            expected_settings=details["expected_runtime"]["settings"],
+        )
+
+
+def test_raw_evidence_output_artifact_mutation_fails_closed(tmp_path: Path) -> None:
+    manifest, raw, details = _local_raw_evidence_fixture(tmp_path)
+    output_path = Path(raw["cases"][0]["candidate_output_path"])
+    payload = json.loads(output_path.read_text(encoding="utf-8"))
+    payload["transcription"][0]["text"] = "tampered output"
+    output_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    case = raw["cases"][0]
+    case_id = case["case_id"]
+    audio_path = next(
+        Path(item["path"])
+        for item in details["expected_inputs"]
+        if item["kind"] == "audio" and item["case_id"] == case_id
+    )
+    with pytest.raises(ValueError):
+        _validate_raw_case_evidence(
+            raw_case=case,
+            fixture=manifest,
+            case_id=case_id,
+            expected_run_kind="cold",
+            expected_model_path=details["model_path"],
+            expected_audio_path=audio_path,
+            expected_vtt_path=PARITY_FIXTURE_PATH,
+            expected_settings=details["expected_runtime"]["settings"],
+        )
+
+
+def test_real_time_parser_and_q5_speedup_forgery_fail_closed(tmp_path: Path) -> None:
+    assert _parse_real_time_ms("        2.25 real         0.74 user         0.21 sys\n") == 2250
+    assert _parse_real_time_ms("no time evidence") is None
+    manifest, raw, details = _local_raw_evidence_fixture(tmp_path)
+    changed = deepcopy(raw["cases"][0])
+    # A forged q5 wall value that could win the tie-break must not pass stderr evidence.
+    changed["candidate"]["wall_time_ms"] = 1
+    changed["candidate"]["execution"]["duration_ms"] = 1
+    audio_path = next(
+        Path(item["path"])
+        for item in details["expected_inputs"]
+        if item["kind"] == "audio" and item["case_id"] == changed["case_id"]
+    )
+    with pytest.raises(ValueError, match="real time"):
+        _validate_raw_case_evidence(
+            raw_case=changed,
+            fixture=manifest,
+            case_id=changed["case_id"],
+            expected_run_kind="cold",
+            expected_model_path=details["model_path"],
+            expected_audio_path=audio_path,
+            expected_vtt_path=PARITY_FIXTURE_PATH,
+            expected_settings=details["expected_runtime"]["settings"],
+        )
 
 
 @pytest.mark.parametrize(
