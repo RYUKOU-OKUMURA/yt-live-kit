@@ -1790,18 +1790,18 @@ data/{video_id}/ ...
 
 **作業:**
 
-- [ ] P6-2-1. テンプレートが無い場合だけ、必須 placeholder 3 種と固定 CTA 文「チャンネル登録は動画下のチャンネル名からお願いします。」を含む既定テンプレートを lock + atomic write で初回作成する。既存ファイルは bytes を含めて変更しない
-- [ ] P6-2-2. 生成説明、元動画タイトル、開始秒付き元動画 URL、固定 CTA 文の完全一致、template bytes fingerprint、`meta.json` fingerprint を不変の要件 object に構造化し、合成結果と最終編集済み本文を同じ純粋 validator で検証できる service API を追加する
-- [ ] P6-2-3. 必須 placeholder / 解決後項目の欠落、壊れた meta、半角山カッコ、5000 bytes、同名競合、atomic write 失敗を不足箇所が分かる日本語エラーで fail closed にする
-- [ ] P6-2-4. P4 の非投稿 fallback と長尺用 `description_template.txt` の動作を維持し、投稿ゲートは P6-4 から明示的に呼べる後方互換 API とする
+- [x] P6-2-1. テンプレートが無い場合だけ、必須 placeholder 3 種と固定 CTA 文「チャンネル登録は動画下のチャンネル名からお願いします。」を含む既定テンプレートを lock + atomic write で初回作成する。既存ファイルは bytes を含めて変更しない
+- [x] P6-2-2. 生成説明、元動画タイトル、開始秒付き元動画 URL、固定 CTA 文の完全一致、template bytes fingerprint、`meta.json` fingerprint を不変の要件 object に構造化し、合成結果と最終編集済み本文を同じ純粋 validator で検証できる service API を追加する
+- [x] P6-2-3. 必須 placeholder / 解決後項目の欠落、壊れた meta、半角山カッコ、5000 bytes、同名競合、atomic write 失敗を不足箇所が分かる日本語エラーで fail closed にする
+- [x] P6-2-4. P4 の非投稿 fallback と長尺用 `description_template.txt` の動作を維持し、投稿ゲートは P6-4 から明示的に呼べる後方互換 API とする
 
 **Done 条件:**
 
-- [ ] 初回作成、既存保持、同時作成、失敗時の部分ファイル非残存が自動テストされる
-- [ ] 合成直後と最終編集後に同じ不変要件 object で必須項目を検証でき、日本語エラーが安定している。mutable な template / meta の再読込を confirm 境界へ要求しない
-- [ ] P4 fallback、開始秒 URL、長尺概要欄、5000 bytes、半角山カッコの既存テストに回帰が無い
-- [ ] `uv run pytest tests/test_description.py` と全件 `uv run pytest` が通る
-- [ ] 独立レビューで P0 / P1 finding がなく、main に `P6-2` commit として統合される
+- [x] 初回作成、既存保持、同時作成、失敗時の部分ファイル非残存が自動テストされる
+- [x] 合成直後と最終編集後に同じ不変要件 object で必須項目を検証でき、日本語エラーが安定している。mutable な template / meta の再読込を confirm 境界へ要求しない
+- [x] P4 fallback、開始秒 URL、長尺概要欄、5000 bytes、半角山カッコの既存テストに回帰が無い
+- [x] `uv run pytest tests/test_description.py` と全件 `uv run pytest` が通る（対象 30 passed、全件 1330 passed / 2 skipped）
+- [x] 独立レビューで P0 / P1 finding がなく、main に `P6-2` commit `1a70646` / `18a811b` として統合される
 
 **コミット境界:** description service と専用テストだけを `P6-2` として commit する。UI / schedule への接続は P6-4 へ分離する。
 
