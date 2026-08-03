@@ -50,12 +50,12 @@
 | S9-6 | A/B 受け入れ・回帰・フェーズ判定 | [ ] 未着手 |
 | S9 | 選択親候補区間のローカル Whisper 精査（実装） | [~] 進行中 |
 | P6-PLAN | Shorts 投稿メタデータ品質ゲート計画（docs-only） | [x] 完了 |
-| P6-1 | タイトル 3 方向生成・検証 | [ ] 未着手 |
-| P6-2 | 概要欄必須構成・投稿前再検証 service | [ ] 未着手 |
-| P6-3 | 関連動画の Studio 手動確認・永続状態 | [ ] 未着手 |
+| P6-1 | タイトル 3 方向生成・検証 | [x] 完了 |
+| P6-2 | 概要欄必須構成・投稿前再検証 service | [x] 完了 |
+| P6-3 | 関連動画の Studio 手動確認・永続状態 | [x] 完了 |
 | P6-4 | 投稿 UI 統合・確認ダイアログ | [x] 完了 |
-| P6-5 | P6 統合受け入れ・回帰 | [ ] 未着手 |
-| P6 | Shorts 投稿メタデータ品質ゲート + 関連動画確認追跡 | [~] 進行中 |
+| P6-5 | P6 統合受け入れ・回帰 | [x] 完了 |
+| P6 | Shorts 投稿メタデータ品質ゲート + 関連動画確認追跡 | [x] 完了 |
 
 **状態の書き方:** `[ ] 未着手` / `[~] 進行中` / `[x] 完了`
 
@@ -71,7 +71,7 @@
 | M14 | 予約投稿が実際に公開される（v3 完了・P3 完了） | [x] |
 | M15 | 毎日 3 本のショート生産ラインが確立する（S8 → U6 → P5 完了、実機でライン 3 周） | [x] |
 | M16 | 親候補探索は VTT、選択区間は provenance 付き Whisper artifact で精査できる | [ ] |
-| M17 | 投稿前のタイトル・概要欄と、アップロード後の関連動画設定を人が保証できる（P6 完了） | [ ] |
+| M17 | 投稿前のタイトル・概要欄と、アップロード後の関連動画設定を人が保証できる（P6 完了） | [x] |
 
 ---
 
@@ -1869,17 +1869,19 @@ data/{video_id}/ ...
 
 **作業:**
 
-- [ ] P6-5-1. AC-38 / AC-39 の全境界を API mock と一時 data dir で確認し、実 YouTube upload・公開データ変更が無いことを記録する
-- [ ] P6-5-2. 半角山カッコ、100 文字タイトル、5000 bytes 説明文、500 文字タグ、日本語エラー、confirmation race、legacy queue / telop / template の後方互換を欠陥優先で再確認する
-- [ ] P6-5-3. `uv run pytest`、変更範囲 diff、P6-1 main 統合が S9-4 より先であることを確認する
-- [ ] P6-5-4. 独立最終レビューの指摘を同じ実装セッションへ戻して修正し、再レビュー PASS 後だけ AC と進捗を完了へ更新する
+- [x] P6-5-1. AC-38 / AC-39 の全境界を API mock と一時 data dir で確認し、実 YouTube upload・公開データ変更が無いことを記録する
+- [x] P6-5-2. 半角山カッコ、100 文字タイトル、5000 bytes 説明文、500 文字タグ、日本語エラー、confirmation race、legacy queue / telop / template の後方互換を欠陥優先で再確認する
+- [x] P6-5-3. `uv run pytest`、変更範囲 diff、P6-1 main 統合が S9-4 より先であることを確認する
+- [x] P6-5-4. 独立最終レビューの指摘を同じ実装セッションへ戻して修正し、再レビュー PASS 後だけ AC と進捗を完了へ更新する
 
 **Done 条件:**
 
-- [ ] AC-38 / AC-39 がすべて `[x]` で、証跡がテスト名・件数・commit hash に結び付く
-- [ ] P6 scope 外の Studio 自動操作・関連動画 API write・実 upload・新規依存が無い
-- [ ] 全件テストと独立最終レビューが PASS する
-- [ ] P6-1〜P6-5 と P6 の進捗が完了し、未コミットの学習ログと S9-1 監査節が変更されていない
+- [x] AC-38 / AC-39 がすべて `[x]` で、証跡がテスト名・件数・commit hash に結び付く
+- [x] P6 scope 外の Studio 自動操作・関連動画 API write・実 upload・新規依存が無い
+- [x] 全件テストと独立最終レビューが PASS する
+- [x] P6-1〜P6-5 と P6 の進捗が完了し、未コミットの学習ログと S9-1 監査節が変更されていない
+
+**P6-5 最終受け入れ証跡（2026-08-03）:** P6 境界 6 ファイルの 410 件と全件 1,380 件（skip 2 件）が main `99bfc9c` で通過し、`git diff --check` も通過した。代表テストは `test_generation_invokes_codex_once_and_saves_valid_document`、`test_quality_gate_creates_default_template_and_freezes_requirements`、`test_confirmed_preview_description_reaches_worker_and_insert_body_unchanged`、`test_job_target_description_gate_fails_operation_before_api_attempt_or_report`、`test_related_video_confirmation_requires_both_canonical_ids_and_is_idempotency_safe`、`test_upload_section_keeps_global_related_pending_reachable_without_latest_manifest`、`test_metadata_boundaries`。P6 の main 統合は `410e99a` / `0202eb6`（計画）、`96aa302` / `0e03a23` / `665ba2f`（P6-1）、`1a70646` / `18a811b` / `4e6b274`（P6-2）、`1ab7658` / `9af5a4e`（P6-3）、`aaa89cf` / `99bfc9c`（P6-4）。テストは YouTube API をモックし、実 upload、公開データ変更、Studio 自動操作、関連動画 API write、追加 Codex 呼び出しを行っていない。P6-1 は S9-4 より先に main へ統合済みで、S9-4 commit はまだ存在しない。P6 開始前後で S9-1 監査節の SHA-256 は `7872b8aa5425087ee4d0a31e754a27a6f6ee3ec207899dfaf12018354c87e5ef` のまま一致し、`.codex/learning/user-decisions.md` の既存未コミット変更は P6 commit に含めていない。実装セッション内再レビュー、P6-4 独立レビュー、P6-5 独立最終レビューはすべて APPROVE（残存 P0 / P1 なし）。
 
 **P6 のコミット順:** `P6-PLAN` → `P6-1` / `P6-2` / `P6-3`（分離 worktree、個別レビュー後に順次 main 統合。P6-1 を最優先）→ `P6-4` → `P6-5`。main への統合はオーケストレーターだけが行う。
 
@@ -2230,8 +2232,8 @@ S9 初版で実装するのは、既存 YouTube `video_id` の良好な VTT を�
 10. **S9-0**（既存 VTT 互換・非上書き保存契約）を先頭に着手する。再取得時の `ja.vtt` bytes 保持、source VTT の immutable 保存、失敗時非変更を閉じる
 11. **S9-1**（代表素材 benchmark・モデル決定）を続けて着手する。production 非変更で VTT と whisper.cpp 1.9.1 の精度・固有名詞・時間・cache 根拠を取り、Go / No-Go を記録する
 12. **S9-2 → S9-3 → S9-4 → S9-5 → S9-6** の順に進める。各タスク完了時に当該チェックとコミットを閉じ、S9-6 の A/B 受け入れまで S9 を完了にしない
-13. **P6-PLAN を S9-1 の人手 gold 監査と並行して docs-only で閉じる。** 独立レビュー後の plan commit から P6 worktree を作る
-14. **P6-1 / P6-2 / P6-3 を分離 worktree で並行実装し、個別レビュー後に main へ統合する。** P6-1 の統合完了を依存元へ報告してから S9-4 を許可し、3 件統合後に P6-4 → P6-5 を直列で閉じる
+13. ~~**P6-PLAN を S9-1 の人手 gold 監査と並行して docs-only で閉じる。**~~ 完了。独立レビュー済み plan commit から分離 worktree を作成した
+14. ~~**P6-1 / P6-2 / P6-3 を分離 worktree で並行実装し、個別レビュー後に main へ統合する。**~~ 完了。P6-1 を S9-4 より先に統合・依存元へ報告し、P6-4 → P6-5 まで独立レビュー後に閉じた
 
 ---
 
@@ -2239,6 +2241,7 @@ S9 初版で実装するのは、既存 YouTube `video_id` の良好な VTT を�
 
 | 日付 | 内容 |
 |------|------|
+| 2026-08-03 | **P6 完了。** タイトル固定 3 方向、ショート概要欄の生成説明・元動画タイトル・開始秒付き URL・チャンネル登録 CTA の不変要件 gate、YouTube Studio 関連動画確認の永続追跡を統合した。明示編集本文の黙った差し戻しを独立レビューで検出・修正後、P6 境界 410 件、全体 `1380 passed, 2 skipped`、diff-check、実 YouTube / Studio write なしを確認。AC-38 / AC-39 と M17 を完了した。 |
 | 2026-08-03 | **P6-PLAN を開始。** タイトルを検索明快型・仕事影響型・好奇心型の固定 3 方向で生成し、概要欄の生成説明・チャンネル登録 CTA・元動画タイトル・開始秒付き URL を投稿前に二重再検証し、関連動画は API 自動設定せず YouTube Studio の手動確認状態を upload operation に永続化する FR-37 / FR-38 と AC-38 / AC-39 を追加。P6-1〜P6-3 の分離 worktree、P6-4 の単一 UI writer、P6-1 を S9-4 より先に main 統合する依存、S9-1 監査節と学習ログの保護を固定した |
 | 2026-08-03 | **S9-PLAN を確定。** S9 を S9-0 既存 VTT 非上書き契約 → S9-1 benchmark → S9-2 TranscriptArtifact / resolver / fingerprint / persistent cache → S9-3 whisper.cpp runtime / 音声区間 → S9-4 short_cut / telop / queue / line 再利用 → S9-5 UI / 進捗 / 失効 → S9-6 A/B 受け入れの依存順へ分割。各タスクの目的・前提・変更範囲・テスト・Done・コミット境界、候補 lineage、cache identity 分離、gold / glossary / 評価 gate、`ja.vtt` 非破壊、使用範囲 cue digest の fail closed、全編 Whisper / local video / asset ID の将来分離を固定した |
 | 2026-08-03 | **U8 完了。** job error を動画 ID / job ID / 処理種別 / 1 行要約 / 技術詳細 / 発生日時へ構造化し、動画別直近 3 件と上限付き global 要約を session state で分離した。ページ先頭は要約と対象動画導線だけにし、技術ログは現在動画の「詳細・再生成」内の bounded なスクロール領域へ集約。親レビューで初回描画時 consume によりリンクが消える P0 を検出・修正後、U8 対象 159 件、全体 `1266 passed, 2 skipped`、diff-check、43 KiB の疑似 ffmpeg log を使う実ブラウザ確認を通過。独立最終レビューは Finding なし（P0 / P1 なし）。残余 P2 は孤児復元ログの state 上限統一、敵対的 symlink 交換時の TOCTOU、batch 部分失敗を構造化通知へ含める場合の仕様拡張。 |

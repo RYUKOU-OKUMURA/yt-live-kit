@@ -728,23 +728,23 @@ Streamlit は、エントリスクリプト（[`src/yt_live_kit/ui/app.py`](../s
 
 ### AC-38: タイトル 3 方向と概要欄必須構成（FR-37 / P6）
 
-- [ ] 新規テロップ台本生成 1 回の出力に、固定順の検索明快型・仕事影響型・好奇心型のタイトル候補がちょうど 3 件含まれ、非空・重複・100 文字・半角山カッコの境界がテストされている
-- [ ] 日本語タイトル 18〜32 文字の範囲外は警告されるが保存可能で、既存の 1〜2 件候補を持つ台本は読み込める。新規生成では不足を成功扱いにせず、再生成または手動補完を日本語で案内する
-- [ ] ショート専用テンプレートが無い場合だけ、`{{description}}`、`{{source_title}}`、`{{source_url}}` と固定 CTA 文「チャンネル登録は動画下のチャンネル名からお願いします。」を含む既定テンプレートが原子的に作成され、既存テンプレートは自動上書きされない
-- [ ] 合成済み説明文が生成説明、元動画タイトル、開始秒付き元動画 URL、固定 CTA 文の完全一致を含み、1 項目でも欠ける場合は不足箇所を示す日本語エラーで preview / operation / job / API 開始前に拒否される
-- [ ] ユーザーが確認画面で最終説明文を編集して必須項目を削除した場合、投稿確認ダイアログを開く直前と確定後の両方で再検証され、古い fingerprint・snapshot・本文を再利用しない
-- [ ] 期待する 4 項目、template bytes fingerprint、`meta.json` fingerprint が preview / content snapshot / fingerprint に不変 snapshot として保存され、確定後は template / meta を再読込せず同じ snapshot で再検証する。変更を反映する場合は preview から作り直す
-- [ ] 確認ダイアログの最終本文、content snapshot、`videos.insert` の `snippet.description` が同一で、半角山カッコ・5000 bytes・100 文字タイトル・500 文字タグの既存安全契約と後方互換テストが通る
-- [ ] P6 の自動テストは YouTube API をモックし、実 upload・実公開データ変更・追加の Codex 呼び出しを行わない
+- [x] 新規テロップ台本生成 1 回の出力に、固定順の検索明快型・仕事影響型・好奇心型のタイトル候補がちょうど 3 件含まれ、非空・重複・100 文字・半角山カッコの境界がテストされている
+- [x] 日本語タイトル 18〜32 文字の範囲外は警告されるが保存可能で、既存の 1〜2 件候補を持つ台本は読み込める。新規生成では不足を成功扱いにせず、再生成または手動補完を日本語で案内する
+- [x] ショート専用テンプレートが無い場合だけ、`{{description}}`、`{{source_title}}`、`{{source_url}}` と固定 CTA 文「チャンネル登録は動画下のチャンネル名からお願いします。」を含む既定テンプレートが原子的に作成され、既存テンプレートは自動上書きされない
+- [x] 合成済み説明文が生成説明、元動画タイトル、開始秒付き元動画 URL、固定 CTA 文の完全一致を含み、1 項目でも欠ける場合は不足箇所を示す日本語エラーで preview / operation / job / API 開始前に拒否される
+- [x] ユーザーが確認画面で最終説明文を編集して必須項目を削除した場合、投稿確認ダイアログを開く直前と確定後の両方で再検証され、古い fingerprint・snapshot・本文を再利用しない
+- [x] 期待する 4 項目、template bytes fingerprint、`meta.json` fingerprint が preview / content snapshot / fingerprint に不変 snapshot として保存され、確定後は template / meta を再読込せず同じ snapshot で再検証する。変更を反映する場合は preview から作り直す
+- [x] 確認ダイアログの最終本文、content snapshot、`videos.insert` の `snippet.description` が同一で、半角山カッコ・5000 bytes・100 文字タイトル・500 文字タグの既存安全契約と後方互換テストが通る
+- [x] P6 の自動テストは YouTube API をモックし、実 upload・実公開データ変更・追加の Codex 呼び出しを行わない
 
 ### AC-39: 関連動画の Studio 手動確認（FR-38 / P6）
 
-- [ ] upload operation が後方互換な `related_video_status` と `related_video_confirmed_at` を持ち、`not_ready` / `pending` / `confirmed` と確認時刻を lock + atomic write で永続化する。対象 ID は既存 `source_video_id` / `video_id` を唯一の正本として再利用し、重複 field を追加しない
-- [ ] upload 成功前は `not_ready`、成功後は `pending` となる。legacy の欠落 field は `state=uploaded` かつ `video_id` ありだけ `pending`、それ以外は `not_ready` に移行し、再起動復元から `confirmed` を推測しない
-- [ ] UI に Shorts の Studio 編集先、設定対象の元動画、手順が日本語で表示され、対象 2 ID を示す確認ダイアログの確定時だけローカル状態が `confirmed` になる
-- [ ] `confirmed` への更新は YouTube API、ブラウザ自動操作、upload を呼ばず、二重クリック・壊れた queue・対象 ID 不一致を fail closed にする
-- [ ] 未確認件数と operation ごとの状態が再起動後も復元され、既存 queue JSON・既存投稿・publication poll・予約枠・attempt 台帳に回帰が無い
-- [ ] `pending` は要対応として表示するが、既存 `publishAt` を取消・延期・変更せず、未確認を理由に publication poll や予定公開を技術的に停止しない
+- [x] upload operation が後方互換な `related_video_status` と `related_video_confirmed_at` を持ち、`not_ready` / `pending` / `confirmed` と確認時刻を lock + atomic write で永続化する。対象 ID は既存 `source_video_id` / `video_id` を唯一の正本として再利用し、重複 field を追加しない
+- [x] upload 成功前は `not_ready`、成功後は `pending` となる。legacy の欠落 field は `state=uploaded` かつ `video_id` ありだけ `pending`、それ以外は `not_ready` に移行し、再起動復元から `confirmed` を推測しない
+- [x] UI に Shorts の Studio 編集先、設定対象の元動画、手順が日本語で表示され、対象 2 ID を示す確認ダイアログの確定時だけローカル状態が `confirmed` になる
+- [x] `confirmed` への更新は YouTube API、ブラウザ自動操作、upload を呼ばず、二重クリック・壊れた queue・対象 ID 不一致を fail closed にする
+- [x] 未確認件数と operation ごとの状態が再起動後も復元され、既存 queue JSON・既存投稿・publication poll・予約枠・attempt 台帳に回帰が無い
+- [x] `pending` は要対応として表示するが、既存 `publishAt` を取消・延期・変更せず、未確認を理由に publication poll や予定公開を技術的に停止しない
 
 ### AC-36: 投稿枠の複数化と既定値設定（FR-28 v3.2 / FR-20 v3.2 / P5）
 
