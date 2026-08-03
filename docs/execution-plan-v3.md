@@ -1,7 +1,7 @@
 # yt-live-kit 実行計画書 v3
 
 **バージョン:** v3（ショート量産・投稿）
-**最終更新:** 2026-08-03
+**最終更新:** 2026-08-04
 **実装開始予定:** 2026-08-02
 **関連:** [要件定義書 v3](./requirements-v3.md) / [v2 実行計画](./execution-plan-v2.md) / [v3 エージェント指示](./v3-agent-prompts.md) / [AGENTS.md](../AGENTS.md)
 
@@ -46,8 +46,8 @@
 | S9-2 | TranscriptArtifact / resolver / fingerprint / persistent cache | [x] 完了 |
 | S9-3 | whisper.cpp runtime・capability・音声区間準備 | [x] 完了 |
 | S9-4 | 親候補区間 Whisper 精査 → short_cut / telop / line 再利用 | [x] 完了 |
-| S9-5 | UI 設定・進捗・エラー・失効表示 | [~] 進行中 |
-| S9-6 | A/B 受け入れ・回帰・フェーズ判定 | [ ] 未着手 |
+| S9-5 | UI 設定・進捗・エラー・失効表示 | [x] 完了 |
+| S9-6 | A/B 受け入れ・回帰・フェーズ判定 | [~] 進行中 |
 | S9 | 選択親候補区間のローカル Whisper 精査（実装） | [~] 進行中 |
 | P6-PLAN | Shorts 投稿メタデータ品質ゲート計画（docs-only） | [x] 完了 |
 | P6-1 | タイトル 3 方向生成・検証 | [x] 完了 |
@@ -1695,11 +1695,13 @@ data/{video_id}/ ...
 **テスト:** settings capability 表示、CTA の明示 submit、通常 rerun で subprocess 非実行、single-job busy / 二重クリック、progress の job ID / range 分離、動画 A / B の状態分離、partial range の status と retry 表示、候補 card / cutplan panel / telop editor / final review banner の provenance 表示、構造化エラーの日本語要約、coarse fallback 表示、in-range / out-of-range 失効、再起動後の fail closed line state、既存確認 dialog の非回帰。
 
 **Done 条件:**
-- [ ] 非エンジニアが「どの候補区間を、どのモデルで、どこまで処理したか」を確認でき、失敗時に次の操作が分かる
-- [ ] 高精度 artifact を使ったと表示する条件と coarse fallback の表示が一致し、1 ジョブ制約・既存の破壊操作確認・U6 のゲートを壊さない
-- [ ] candidate card、cutplan、telop、final review の各画面が同じ artifact reference / digest と status を表示し、partial / failed を高精度成功と誤表示しない
+- [x] 非エンジニアが「どの候補区間を、どのモデルで、どこまで処理したか」を確認でき、失敗時に次の操作が分かる
+- [x] 高精度 artifact を使ったと表示する条件と coarse fallback の表示が一致し、1 ジョブ制約・既存の破壊操作確認・U6 のゲートを壊さない
+- [x] candidate card、cutplan、telop、final review の各画面が同じ artifact reference / digest と status を表示し、partial / failed を高精度成功と誤表示しない
 
 **S9-5 実装・検証実績（2026-08-04、実装ワーカー）:** 設定ページへ S9-1 の immutable contract と S9-3 の preflight capability を使った runtime / model / language / fingerprint / timeout / cache の読み取り専用表示を追加した。工程 2 は対象区間・固定 padding・音声のみの予想処理・既存成果物を上書きしない条件を preview し、`st.form` の明示 submit だけが既存 S9-4 `start_job` を起動する。通常 rerun は submit 前に service を呼ばず、busy 中は CTA を無効化し、既存の `JobBusyError` 競合処理を維持した。進捗は既存 job report bridge で job ID、stage、range、cache、per-range status を UI thread に渡し、worker thread から `st.*` を呼ばない。構造化 error は既存成果物維持・retry 可否・次操作を日本語で表示し、partial / fallback は区間単位で扱う。candidate card、cutplan、telop editor、final review は既存 artifact provenance / digest を再計算せず同じ lineage と失効理由を表示する。focused UI tests は 154 passed、全体は 1572 passed / 2 skipped、`uv lock --check`、`git diff --check`、`uv run python -m compileall -q src` も通過した。S9-5 Done 条件、S9-6、S9 全体、AC-35 / AC-37 の受け入れ判定は未完了のまま残す。
+
+**S9-5 独立レビュー・main 統合実績（2026-08-04）:** 初回独立レビューで高精度化失敗時の未 import `ShortCutError` により構造化日本語 error が `NameError` へ上書きされる P1 を検出した。follow-up `c566111` で import と timeout 失敗経路の回帰 test を追加し、再レビューは APPROVE（P0 / P1 なし）。main は実装 `27e4021`、follow-up `c6c481c` の順に統合し、main 上で focused 154 passed、全体 1572 passed / 2 skipped、lock / diff / compile を再確認した。S9-5 Done 条件は完了とし、S9-6 と S9 全体、AC-35 / AC-37 の受け入れ判定は未完了を維持する。
 
 **コミット境界:** UI / component / UI test を `S9-5` 単位でコミットする。設定・進捗・エラー表示だけを変更し、S9-4 の service 契約を UI に複製しない。
 
