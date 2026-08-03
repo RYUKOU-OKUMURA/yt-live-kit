@@ -1550,6 +1550,8 @@ data/{video_id}/ ...
 
 **S9-1 実測証跡（2026-08-03、正式 Done 未達）:** 4 case（`LB4px1wRFnY` 2853160–2910000、`mKwn-93gg90` 1120000–1300000、`CGalA8SISPE` 4220000–4340000、`hPeRSA9YVIM` 8640000–8730000）を固定し、fixture fingerprint `6dae657f2b803c54c6af1afe4ed54ad4f447324c32802e1943dc5711a9bf1718` に結び付けた。q5 は paired median 78.69％、turbo は 80.85％。技術 gate は両候補で通過したが、全 gold が `unverified_provisional` のため No-Go、正式な採用モデルなし、既存 VTT fallback-only とした。モデル SHA、設定、cold / warm、full JSON、baseline parity、production hash unchanged、raw report は [`docs/benchmarks/s9-1-report.md`](./benchmarks/s9-1-report.md) と [`docs/benchmarks/s9-1-report.json`](./benchmarks/s9-1-report.json) に固定した。独立 review と修正後 re-review は [`docs/benchmarks/s9-1-review.md`](./benchmarks/s9-1-review.md) に記録する。正式 Done 条件は未達のまま維持する。
 
+**S9-1-AUDIT-PACK 準備済み（2026-08-03、監査前）:** 4 case の固定 range、16,000 Hz mono WAV の絶対 path・bytes・SHA-256、provisional gold transcript 全文、glossary、cue anchor、最小返答形式を [`docs/benchmarks/s9-1-human-audit.md`](./benchmarks/s9-1-human-audit.md) にまとめた。`benchmarks/s9_audit_packet.py check` は `s9-1-cases.json` と音声 cache の実体を読み取り、文書の転記一致を再検査する。ユーザーの音声確認前のため、S9-1 の進捗、Done 条件、gold audit status、採用モデル判定は変更していない。
+
 **次アクション:** gold の独立音声監査が完了するまで、S9-2 以降を高精度モデル採用経路として進めない。監査後に同じ fixture と gate で再判定するか、fallback-only を維持する。
 
 **コミット境界:** `docs/benchmarks/` と harness / fixture の production 非変更コミット。メッセージに `S9-1` を含める。S9-1 の計測証跡だけで S9 フェーズ完了にはしない。
