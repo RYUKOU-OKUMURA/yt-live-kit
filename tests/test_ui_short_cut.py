@@ -10,8 +10,13 @@ from yt_live_kit.config import Settings
 from yt_live_kit.models.clips import ClipCandidate
 from yt_live_kit.models.highlights import HighlightSegment
 from yt_live_kit.models.short_cut import ShortCutDocument
+from yt_live_kit.models.transcript import TranscriptCue, TranscriptRange
 from yt_live_kit.services.short_cut import validate_short_cut_selection
 from yt_live_kit.services.subtitle_burn import TimedCue, parse_vtt_with_end
+from yt_live_kit.services.transcript_artifact import (
+    TranscriptArtifactStore,
+    build_transcript_artifact,
+)
 from yt_live_kit.ui.components.short_cut import (
     LAYOUT_BLUR_LABEL,
     LAYOUT_CROP_LABEL,
@@ -25,6 +30,7 @@ from yt_live_kit.ui.components.short_cut import (
     format_total_ms,
     layout_from_label,
     load_transcript_cues,
+    load_transcript_cues_for_document,
     parse_cut_timestamp,
     resolve_transcript_bounds,
     render_short_cut_section,
@@ -76,6 +82,21 @@ def _document() -> ShortCutDocument:
                 reason="理由 2",
             ),
         ],
+    )
+
+
+def _high_precision_artifact(video_id: str = "video-1", *, suffix: str = "one"):
+    return build_transcript_artifact(
+        video_id=video_id,
+        source_kind="whisper_cpp",
+        source_ref=f"transcripts/audio/{suffix}.wav",
+        language="ja",
+        ranges=[TranscriptRange(start_ms=10_000, end_ms=20_000)],
+        cues=[TranscriptCue(start_ms=11_000, end_ms=12_000, text="artifact cue")],
+        audio_bytes=f"audio-{suffix}".encode(),
+        model={"name": "fixed-model", "fingerprint": "a" * 64},
+        runtime={"version": "1.9.1", "fingerprint": "b" * 64},
+        settings={"language": "ja", "padding_ms": 0},
     )
 
 
@@ -234,6 +255,93 @@ def test_load_transcript_cues_parses_once_per_video_across_reruns(
     assert first[1] is None
     parse.assert_called_once()
     load_transcript_cues.clear()
+
+
+def test_load_transcript_cues_for_document_uses_same_artifact_without_vtt(
+    tmp_path: Path,
+) -> None:
+    settings = Settings(data_dir=tmp_path)
+    artifact = _high_precision_artifact()
+    store = TranscriptArtifactStore("video-1", settings)
+    store.save(artifact)
+    reference = store.artifact_ref(artifact)
+    document = _document().model_copy(
+        update={
+            "artifact_ref": reference,
+            "artifact_fingerprint": artifact.artifact_fingerprint,
+            "used_range_cue_digests": artifact.used_range_cue_digests,
+        }
+    )
+
+    with patch(
+        "yt_live_kit.ui.components.short_cut.load_transcript_cues",
+        side_effect=AssertionError("high precision path must not read ja.vtt"),
+    ):
+        cues, notice = load_transcript_cues_for_document("video-1", document, settings)
+
+    assert cues == (TimedCue(11.0, 12.0, "artifact cue"),)
+    assert notice is None
+
+
+def test_load_transcript_cues_for_document_missing_artifact_fails_closed_without_vtt(
+    tmp_path: Path,
+) -> None:
+    settings = Settings(data_dir=tmp_path)
+    artifact = _high_precision_artifact()
+    store = TranscriptArtifactStore("video-1", settings)
+    store.save(artifact)
+    reference = store.artifact_ref(artifact)
+    document = _document().model_copy(
+        update={
+            "artifact_ref": reference,
+            "artifact_fingerprint": artifact.artifact_fingerprint,
+            "used_range_cue_digests": artifact.used_range_cue_digests,
+        }
+    )
+    store._artifact_path(artifact.artifact_fingerprint).unlink()
+
+    with patch(
+        "yt_live_kit.ui.components.short_cut.load_transcript_cues",
+        side_effect=AssertionError("artifact failure must not fall back to ja.vtt"),
+    ):
+        cues, notice = load_transcript_cues_for_document("video-1", document, settings)
+
+    assert cues == ()
+    assert notice is not None
+    assert "表示を停止" in notice
+
+
+def test_load_transcript_cues_for_document_mismatched_artifact_fails_closed_without_vtt(
+    tmp_path: Path,
+) -> None:
+    settings = Settings(data_dir=tmp_path)
+    artifact = _high_precision_artifact()
+    other = _high_precision_artifact(suffix="two")
+    store = TranscriptArtifactStore("video-1", settings)
+    store.save(artifact)
+    store.save(other)
+    reference = store.artifact_ref(artifact)
+    document = _document().model_copy(
+        update={
+            "artifact_ref": reference,
+            "artifact_fingerprint": artifact.artifact_fingerprint,
+            "used_range_cue_digests": artifact.used_range_cue_digests,
+        }
+    )
+    store._artifact_path(artifact.artifact_fingerprint).write_text(
+        other.model_dump_json(),
+        encoding="utf-8",
+    )
+
+    with patch(
+        "yt_live_kit.ui.components.short_cut.load_transcript_cues",
+        side_effect=AssertionError("artifact mismatch must not fall back to ja.vtt"),
+    ):
+        cues, notice = load_transcript_cues_for_document("video-1", document, settings)
+
+    assert cues == ()
+    assert notice is not None
+    assert "表示を停止" in notice
 
 
 def test_format_total_ms() -> None:

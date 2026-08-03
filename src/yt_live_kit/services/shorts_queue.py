@@ -748,8 +748,18 @@ def make_shorts_queue_fingerprint(
     layout: str,
     preset: str,
     hook_preset: str,
+    artifact_ref: TranscriptArtifactRef | None = None,
+    artifact_fingerprint: str | None = None,
+    used_range_cue_digests: Sequence[str] = (),
 ) -> str:
-    """選択 snapshot の全入力から安定した SHA-256 を返す."""
+    """選択 snapshot の material input だけから安定した SHA-256 を返す.
+
+    artifact lineage は immutable input fingerprint の対象であり、既存 queue
+    snapshot fingerprint の対象ではない。引数を受け取るのは lineage-aware な
+    呼び出し側でも、同じ queue snapshot を再計算できることを明示するためで、
+    この fingerprint payload には決して含めない。
+    """
+    _ = (artifact_ref, artifact_fingerprint, used_range_cue_digests)
     payload = {
         "video_id": _require_string(video_id, "動画 ID"),
         "source": source,
@@ -975,14 +985,23 @@ def _validate_spec_artifact_lineage(
     if spec.artifact_fingerprint is None:
         raise ShortsQueueError("queue spec の artifact lineage が不完全です。")
     try:
-        artifact = TranscriptArtifactStore(video_id, settings).load_artifact(
-            spec.artifact_fingerprint
-        )
-        actual_ref = TranscriptArtifactStore(video_id, settings).artifact_ref(artifact)
-    except TranscriptArtifactError as exc:
+        store = TranscriptArtifactStore(video_id, settings)
+        artifact = store.load_artifact(spec.artifact_fingerprint)
+        actual_ref = store.artifact_ref(artifact)
+    except (TranscriptArtifactError, OSError, ValueError) as exc:
         raise ShortsQueueError(
             "queue spec の字幕 artifact を確認できません。古い結果は再利用せず、明示的に再確認してください。"
         ) from exc
+    if (
+        artifact.source_kind.value != "whisper_cpp"
+        or artifact.status.value != "success"
+        or not artifact.is_high_precision
+        or any(item.status.value != "success" for item in artifact.ranges)
+    ):
+        raise ShortsQueueError(
+            "queue spec の字幕 artifact は高精度成功結果ではありません。"
+            "既存 VTT fallback を明示的に選ぶか、処理を停止してください。"
+        )
     if (
         actual_ref != spec.artifact_ref
         or artifact.artifact_fingerprint != spec.artifact_fingerprint

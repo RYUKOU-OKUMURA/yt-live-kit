@@ -9,7 +9,7 @@ import threading
 import uuid
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from pathlib import Path
 from typing import Iterator, Literal
@@ -126,6 +126,8 @@ def _validate_artifact_lineage(
         return None, None, ()
     if artifact_fingerprint is None:
         raise LineStateError("artifact lineage に fingerprint がありません。")
+    if not used_range_cue_digests:
+        raise LineStateError("artifact lineage には used_range_cue_digest が 1 件以上必要です。")
     fingerprint = _validate_digest(artifact_fingerprint, "artifact fingerprint")
     if fingerprint != artifact_ref.artifact_fingerprint:
         raise LineStateError("artifact fingerprint が artifact reference と一致しません。")
@@ -261,6 +263,8 @@ class LineState(_FrozenModel):
         if self.artifact_ref is not None:
             if self.artifact_fingerprint != self.artifact_ref.artifact_fingerprint:
                 raise ValueError("artifact fingerprint が artifact reference と一致しません。")
+            if not self.used_range_cue_digests:
+                raise ValueError("artifact lineage には used_range_cue_digest が 1 件以上必要です。")
             for digest in self.used_range_cue_digests:
                 if not isinstance(digest, str) or len(digest) != 64:
                     raise ValueError("used_range_cue_digest が正しくありません。")
@@ -612,8 +616,12 @@ def _replace_state(state: LineState, **updates: object) -> LineState:
 
 def _invalidate_transcript_lineage(state: LineState) -> LineState:
     """artifact 欠損・内容不一致時に人確認と出力の再利用を止める."""
+    updated_at = datetime.now(timezone.utc)
+    if updated_at <= state.updated_at:
+        updated_at = state.updated_at + timedelta(microseconds=1)
     return state.model_copy(
         update={
+            "schema_version": _SCHEMA_VERSION,
             "review_fingerprint": None,
             "review_confirmed_fingerprint": None,
             "review_confirmed_at": None,
@@ -624,6 +632,7 @@ def _invalidate_transcript_lineage(state: LineState) -> LineState:
             "preview_confirmed_at": None,
             "upload_operation_id": None,
             "current_stage": LineStage.TELOP_REVIEW,
+            "updated_at": updated_at,
         }
     )
 
@@ -1045,6 +1054,86 @@ def _line_lock(video_id: str, settings: Settings) -> Iterator[None]:
             ) from exc
 
 
+def _read_line_state(path: Path, video_id: str, clip_id: str) -> LineState | None:
+    """lock 内で既存 state を一度だけ parse する."""
+    if not path.exists():
+        return None
+    try:
+        state = LineState.model_validate_json(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, ValidationError) as exc:
+        raise LineStateError(
+            "ショート生産ラインの状態が壊れているため安全に復元できません。"
+        ) from exc
+    if state.video_id != video_id or state.clip_id != clip_id:
+        raise LineStateError(
+            "ショート生産ラインの対象が保存先と一致しないため復元できません。"
+        )
+    return state
+
+
+def _artifact_lineage_is_current(
+    state: LineState,
+    settings: Settings,
+) -> bool:
+    """保存済み immutable artifact が高精度 lineage と一致するか確認する."""
+    if state.artifact_ref is None or state.artifact_fingerprint is None:
+        return state.artifact_ref is None
+    try:
+        store = TranscriptArtifactStore(state.video_id, settings)
+        artifact = store.load_artifact(state.artifact_fingerprint)
+        actual_ref = store.artifact_ref(artifact)
+    except (TranscriptArtifactError, OSError, ValueError):
+        return False
+    return (
+        actual_ref == state.artifact_ref
+        and artifact.video_id == state.video_id
+        and artifact.artifact_fingerprint == state.artifact_fingerprint
+        and tuple(artifact.used_range_cue_digests)
+        == tuple(state.used_range_cue_digests)
+        and artifact.is_high_precision
+    )
+
+
+def _line_state_needs_invalidation(state: LineState, settings: Settings) -> bool:
+    return state.schema_version == 1 or (
+        state.artifact_ref is not None and not _artifact_lineage_is_current(state, settings)
+    )
+
+
+def _lineage_is_already_invalidated(state: LineState) -> bool:
+    return (
+        state.schema_version == _SCHEMA_VERSION
+        and state.review_confirmed_fingerprint is None
+        and state.review_confirmed_at is None
+        and state.generation_spec_json is None
+        and state.generation_spec_fingerprint is None
+        and state.output_fingerprint is None
+        and state.preview_confirmed_fingerprint is None
+        and state.preview_confirmed_at is None
+        and state.upload_operation_id is None
+        and state.current_stage == LineStage.TELOP_REVIEW
+    )
+
+
+def _load_line_state_locked(
+    video_id: str,
+    clip_id: str,
+    settings: Settings,
+) -> LineState | None:
+    """同一動画 lock 保持中の復元。失効は atomic に永続化する."""
+    path = line_state_path(video_id, clip_id, settings)
+    state = _read_line_state(path, video_id, clip_id)
+    if state is None:
+        return None
+    if _line_state_needs_invalidation(state, settings):
+        if _lineage_is_already_invalidated(state):
+            return state
+        invalidated = _invalidate_transcript_lineage(state)
+        _atomic_write(path, invalidated.model_dump(mode="json"))
+        return invalidated
+    return state
+
+
 def save_line_state(
     state: LineState,
     settings: Settings,
@@ -1056,7 +1145,7 @@ def save_line_state(
         raise LineStateError("保存するライン状態が正しくありません。")
     path = line_state_path(state.video_id, state.clip_id, settings)
     with _line_lock(state.video_id, settings):
-        persisted = load_line_state(state.video_id, state.clip_id, settings)
+        persisted = _load_line_state_locked(state.video_id, state.clip_id, settings)
         if expected_state is not None and persisted != expected_state:
             raise LineStateError(
                 "ライン状態が別の操作で更新されました。最新状態を読み直してください。"
@@ -1083,52 +1172,11 @@ def load_line_state(
 ) -> LineState | None:
     """欠落は None、破損・identity 不一致は fail closed error にする。"""
     path = line_state_path(video_id, clip_id, settings)
-    if not path.exists():
-        return None
-    try:
-        state = LineState.model_validate_json(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, ValidationError) as exc:
-        raise LineStateError(
-            "ショート生産ラインの状態が壊れているため安全に復元できません。"
-        ) from exc
-    if state.video_id != video_id or state.clip_id != clip_id:
-        raise LineStateError(
-            "ショート生産ラインの対象が保存先と一致しないため復元できません。"
-        )
-    if state.schema_version == 1:
-        # lineage のない旧 state の人確認・出力・予約証跡は再利用しない。
-        # 既存 JSON は壊さず読み込み、次回保存時に schema 2 へ昇格する。
-        state = state.model_copy(
-            update={
-                "schema_version": _SCHEMA_VERSION,
-                "review_fingerprint": None,
-                "review_confirmed_fingerprint": None,
-                "review_confirmed_at": None,
-                "generation_spec_json": None,
-                "generation_spec_fingerprint": None,
-                "output_fingerprint": None,
-                "preview_confirmed_fingerprint": None,
-                "preview_confirmed_at": None,
-                "upload_operation_id": None,
-                "current_stage": LineStage.TELOP_REVIEW,
-            }
-        )
-    elif state.artifact_ref is not None:
-        try:
-            artifact = TranscriptArtifactStore(video_id, settings).load_artifact(
-                state.artifact_fingerprint or ""
-            )
-            actual_ref = TranscriptArtifactStore(video_id, settings).artifact_ref(artifact)
-            if (
-                actual_ref != state.artifact_ref
-                or artifact.artifact_fingerprint != state.artifact_fingerprint
-                or tuple(artifact.used_range_cue_digests)
-                != tuple(state.used_range_cue_digests)
-            ):
-                state = _invalidate_transcript_lineage(state)
-        except (TranscriptArtifactError, OSError, ValueError):
-            state = _invalidate_transcript_lineage(state)
-    return state
+    state = _read_line_state(path, video_id, clip_id)
+    if state is None or not _line_state_needs_invalidation(state, settings):
+        return state
+    with _line_lock(video_id, settings):
+        return _load_line_state_locked(video_id, clip_id, settings)
 
 
 def save_active_line(
@@ -1142,7 +1190,7 @@ def save_active_line(
     pointer = ActiveLinePointer(clip_id=clip_id, updated_at=_timestamp(now, "選択更新日時"))
     path = _active_line_path(video_id, settings)
     with _line_lock(video_id, settings):
-        state = load_line_state(video_id, clip_id, settings)
+        state = _load_line_state_locked(video_id, clip_id, settings)
         if state is None:
             raise LineStateError("選択するショート生産ラインが保存されていません。")
         if state.current_stage == LineStage.RESERVED:
@@ -1179,7 +1227,7 @@ def abandon_line_state(state: LineState, settings: Settings) -> Path:
     except PathConfinementError as exc:
         raise LineStateError(str(exc)) from exc
     with _line_lock(state.video_id, settings):
-        persisted = load_line_state(state.video_id, state.clip_id, settings)
+        persisted = _load_line_state_locked(state.video_id, state.clip_id, settings)
         if persisted != state:
             raise LineStateError(
                 "ライン状態が別の操作で更新されました。最新状態を読み直してください。"
@@ -1210,7 +1258,7 @@ def run_line_reservation_transaction(
     if not callable(start_upload):
         raise LineStateError("投稿開始 callback が正しくありません。")
     with _line_lock(video_id, settings):
-        state = load_line_state(video_id, clip_id, settings)
+        state = _load_line_state_locked(video_id, clip_id, settings)
         if state is None:
             return start_upload()
         if state.generation_spec_fingerprint is None:

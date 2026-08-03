@@ -12,7 +12,8 @@ import pytest
 
 from yt_live_kit.config import Settings
 from yt_live_kit.models.highlights import HighlightSegment
-from yt_live_kit.models.transcript import TranscriptCue, TranscriptRange
+from yt_live_kit.models.telop import TelopScriptDocument
+from yt_live_kit.models.transcript import TranscriptArtifactRef, TranscriptCue, TranscriptRange
 from yt_live_kit.services.ai_prompt import AiPromptError, CodexNotFoundError
 from yt_live_kit.services.subtitle_burn import parse_vtt_with_end
 from yt_live_kit.services.telop import (
@@ -143,6 +144,42 @@ def _high_precision_artifact(video_id: str = "video123"):
         runtime={"version": "1.9.1", "fingerprint": "b" * 64},
         settings={"language": "ja", "padding_ms": 0},
     )
+
+
+def test_telop_document_is_strict_and_lineage_digest_is_non_empty():
+    assert TelopScriptDocument.model_validate(_valid_document()).artifact_ref is None
+    with pytest.raises(ValueError):
+        TelopScriptDocument.model_validate({**_valid_document(), "unknown": True})
+    nested_unknown = _valid_document()
+    nested_unknown["segments"][0]["lines"][0]["unknown"] = True
+    with pytest.raises(ValueError):
+        TelopScriptDocument.model_validate(nested_unknown)
+
+    fingerprint = "c" * 64
+    reference = TranscriptArtifactRef(
+        video_id="video123",
+        artifact_fingerprint=fingerprint,
+        source_kind="whisper_cpp",
+        path=f"transcripts/artifacts/{fingerprint}.json",
+    )
+    with pytest.raises(ValueError):
+        TelopScriptDocument.model_validate(
+            {
+                **_valid_document(),
+                "artifact_ref": reference,
+                "artifact_fingerprint": fingerprint,
+                "used_range_cue_digests": [],
+            }
+        )
+    with pytest.raises(ValueError):
+        TelopScriptDocument.model_validate(
+            {
+                **_valid_document(),
+                "artifact_ref": reference,
+                "artifact_fingerprint": fingerprint,
+                "used_range_cue_digests": ["g" * 64],
+            }
+        )
 
 
 def test_save_confirmed_telop_script_returns_path_and_normalized_document(

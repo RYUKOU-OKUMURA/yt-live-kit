@@ -9,6 +9,7 @@ import pytest
 from yt_live_kit.config import Settings
 from yt_live_kit.models.clips import ClipCandidate
 from yt_live_kit.models.highlights import HighlightSegment
+from yt_live_kit.models.short_cut import ShortCutDocument
 from yt_live_kit.services.ai_prompt import CodexNotFoundError
 from yt_live_kit.services.short_cut import (
     CODEX_INSTALL_HINT,
@@ -29,7 +30,7 @@ from yt_live_kit.services.short_cut import (
     validate_short_cut_selection,
 )
 from yt_live_kit.services.transcript_artifact import build_transcript_artifact
-from yt_live_kit.models.transcript import TranscriptCue, TranscriptRange
+from yt_live_kit.models.transcript import TranscriptArtifactRef, TranscriptCue, TranscriptRange
 
 _VTT = """WEBVTT
 
@@ -115,6 +116,52 @@ def _high_precision_artifact(video_id: str = "video-1"):
         runtime={"version": "1.9.1", "fingerprint": "b" * 64},
         settings={"language": "ja", "padding_ms": 0},
     )
+
+
+def test_short_cut_document_is_strict_and_lineage_digest_is_non_empty():
+    payload = {
+        "parent_id": "clip_002",
+        "parent_start_ms": 2_340_000,
+        "parent_end_ms": 3_000_000,
+        "candidates": [_cut(1, start="00:39:10", end="00:40:00", duration_sec=50)],
+    }
+    # 既存の粗い VTT cutplan は正規 field だけなら読み込める。
+    assert ShortCutDocument.model_validate(payload).artifact_ref is None
+    with pytest.raises(ValueError):
+        ShortCutDocument.model_validate({**payload, "unknown": True})
+    with pytest.raises(ValueError):
+        ShortCutDocument.model_validate(
+            {
+                **payload,
+                "candidates": [{**payload["candidates"][0], "unknown": True}],
+            }
+        )
+
+    fingerprint = "c" * 64
+    reference = TranscriptArtifactRef(
+        video_id="video-1",
+        artifact_fingerprint=fingerprint,
+        source_kind="whisper_cpp",
+        path=f"transcripts/artifacts/{fingerprint}.json",
+    )
+    with pytest.raises(ValueError):
+        ShortCutDocument.model_validate(
+            {
+                **payload,
+                "artifact_ref": reference,
+                "artifact_fingerprint": fingerprint,
+                "used_range_cue_digests": [],
+            }
+        )
+    with pytest.raises(ValueError):
+        ShortCutDocument.model_validate(
+            {
+                **payload,
+                "artifact_ref": reference,
+                "artifact_fingerprint": fingerprint,
+                "used_range_cue_digests": ["g" * 64],
+            }
+        )
 
 
 def test_needs_short_cut_only_for_long_candidates():

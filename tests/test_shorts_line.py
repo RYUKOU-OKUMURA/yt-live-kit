@@ -17,7 +17,11 @@ from yt_live_kit.models.telop import (
     TelopScriptDocument,
     TelopSegmentScript,
 )
-from yt_live_kit.models.transcript import TranscriptArtifactRef
+from yt_live_kit.models.transcript import (
+    TranscriptArtifactRef,
+    TranscriptCue,
+    TranscriptRange,
+)
 from yt_live_kit.models.upload import (
     UploadChannel,
     UploadContentSnapshot,
@@ -50,6 +54,10 @@ from yt_live_kit.services.shorts_line import (
     set_review_fingerprint,
     set_generation_spec,
     summarize_daily_lines,
+)
+from yt_live_kit.services.transcript_artifact import (
+    TranscriptArtifactStore,
+    build_transcript_artifact,
 )
 
 
@@ -127,6 +135,21 @@ def _lineage() -> tuple[TranscriptArtifactRef, str, tuple[str, ...]]:
         path=f"transcripts/artifacts/{fingerprint}.json",
     )
     return reference, fingerprint, ("d" * 64,)
+
+
+def _stored_high_precision_artifact():
+    return build_transcript_artifact(
+        video_id="video-1",
+        source_kind="whisper_cpp",
+        source_ref="transcripts/audio/range.wav",
+        language="ja",
+        ranges=[TranscriptRange(start_ms=10_000, end_ms=20_000)],
+        cues=[TranscriptCue(start_ms=11_000, end_ms=12_000, text="artifact cue")],
+        audio_bytes=b"lineage-audio",
+        model={"name": "fixed-model", "fingerprint": "a" * 64},
+        runtime={"version": "1.9.1", "fingerprint": "b" * 64},
+        settings={"language": "ja", "padding_ms": 0},
+    )
 
 
 def _generation_spec(*, layout: str = "blur", preset: str = "default") -> dict[str, object]:
@@ -645,6 +668,77 @@ def test_missing_artifact_invalidates_line_confirmations_without_resolver(tmp_pa
     assert restored.review_confirmed_fingerprint is None
     assert restored.output_fingerprint is None
     assert restored.current_stage == LineStage.TELOP_REVIEW
+
+
+def test_lineage_invalidation_is_persisted_and_not_revived_after_artifact_restore(
+    tmp_path: Path,
+) -> None:
+    settings = _settings(tmp_path)
+    artifact = _stored_high_precision_artifact()
+    store = TranscriptArtifactStore("video-1", settings)
+    store.save(artifact)
+    reference = store.artifact_ref(artifact)
+    fingerprint = artifact.artifact_fingerprint
+    digests = artifact.used_range_cue_digests
+    document = _document().model_copy(
+        update={
+            "artifact_ref": reference,
+            "artifact_fingerprint": fingerprint,
+            "used_range_cue_digests": digests,
+        }
+    )
+    review = _review_fingerprint(document)
+    state = create_line_state(
+        "video-1",
+        "clip-1",
+        QUEUE_FP,
+        review_fingerprint=review,
+        artifact_ref=reference,
+        artifact_fingerprint=fingerprint,
+        used_range_cue_digests=digests,
+        now=NOW,
+    )
+    state = confirm_review(state, review, now=NOW + timedelta(seconds=1))
+    state = set_generation_spec(
+        state,
+        review,
+        {
+            **_generation_spec(),
+            "artifact_ref": reference.model_dump(mode="json"),
+            "artifact_fingerprint": fingerprint,
+            "used_range_cue_digests": list(digests),
+        },
+        now=NOW + timedelta(seconds=2),
+    )
+    output = _output(tmp_path)
+    state = record_output(state, output, now=NOW + timedelta(seconds=3))
+    state = confirm_preview(state, output, now=NOW + timedelta(seconds=4))
+    save_line_state(state, settings)
+
+    artifact_path = store._artifact_path(fingerprint)
+    original_artifact_bytes = artifact_path.read_bytes()
+    artifact_path.unlink()
+
+    invalidated = load_line_state("video-1", "clip-1", settings)
+
+    assert invalidated is not None
+    assert invalidated.updated_at > state.updated_at
+    assert invalidated.review_confirmed_fingerprint is None
+    assert invalidated.output_fingerprint is None
+    assert invalidated.preview_confirmed_fingerprint is None
+    assert load_line_state("video-1", "clip-1", settings) == invalidated
+    persisted_after_invalidation = json.loads(
+        line_state_path("video-1", "clip-1", settings).read_text(encoding="utf-8")
+    )
+    assert persisted_after_invalidation["review_confirmed_fingerprint"] is None
+
+    # artifact bytes を元に戻しても、永続化済みの人確認は復活しない。
+    artifact_path.write_bytes(original_artifact_bytes)
+    restored = load_line_state("video-1", "clip-1", settings)
+    assert restored == invalidated
+    assert restored is not None
+    assert restored.review_confirmed_fingerprint is None
+    assert restored.preview_confirmed_fingerprint is None
 
 
 def test_stale_confirmed_snapshot_cannot_restore_newer_invalidation(tmp_path: Path) -> None:

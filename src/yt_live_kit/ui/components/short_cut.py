@@ -38,6 +38,10 @@ from yt_live_kit.services.subtitle_burn import (
     parse_vtt_with_end,
 )
 from yt_live_kit.services.telop import make_clip_id
+from yt_live_kit.services.transcript_artifact import (
+    TranscriptArtifactError,
+    TranscriptArtifactStore,
+)
 from yt_live_kit.ui.state import set_active_job_id
 
 _BUSY_MESSAGE = "他の処理が実行中です。完了までお待ちください。"
@@ -211,6 +215,47 @@ def load_transcript_cues(
     if not cues:
         return (), "文字起こしに表示できる内容がありません。"
     return tuple(cues), None
+
+
+def load_transcript_cues_for_document(
+    video_id: str,
+    document: ShortCutDocument,
+    settings: Settings,
+) -> tuple[tuple[TimedCue, ...], str | None]:
+    """cutplan の artifact ref があれば同じ absolute cue だけを表示する."""
+    if document.artifact_ref is None:
+        return load_transcript_cues(video_id, settings.data_dir)
+    reference = document.artifact_ref
+    if reference.video_id != video_id:
+        return (), "高精度字幕 artifact の動画 ID が一致しないため表示を停止しました。"
+    if reference.source_kind.value != "whisper_cpp":
+        return (), "高精度化済み cutplan が Whisper artifact ではないため表示を停止しました。"
+    if document.artifact_fingerprint is None or not document.used_range_cue_digests:
+        return (), "高精度字幕 artifact lineage が不完全なため表示を停止しました。"
+    try:
+        store = TranscriptArtifactStore(video_id, settings)
+        artifact = store.load_artifact(document.artifact_fingerprint)
+        actual_ref = store.artifact_ref(artifact)
+    except (TranscriptArtifactError, OSError, ValueError):
+        return (), "保存済み高精度字幕 artifact を読み込めないため表示を停止しました。"
+    if (
+        actual_ref != reference
+        or artifact.artifact_fingerprint != document.artifact_fingerprint
+        or tuple(artifact.used_range_cue_digests)
+        != tuple(document.used_range_cue_digests)
+        or not artifact.is_high_precision
+    ):
+        return (), (
+            "保存済み高精度字幕 artifact が cutplan の lineage と一致しないため、"
+            "表示を停止しました。既存 VTT へ自動差替えしません。"
+        )
+    cues = tuple(
+        TimedCue(cue.start_ms / 1000, cue.end_ms / 1000, cue.text)
+        for cue in artifact.cues
+    )
+    if not cues:
+        return (), "高精度字幕 artifact に表示できる cue がないため表示を停止しました。"
+    return cues, None
 
 
 def format_total_ms(total_ms: int) -> str:
@@ -540,9 +585,16 @@ def _render_plan(
     ) = None,
 ) -> None:
     st.markdown("**提案された区間**（採用するものにチェックし、必要なら時刻を調整）")
-    cues, transcript_notice = load_transcript_cues(video_id, settings.data_dir)
+    cues, transcript_notice = load_transcript_cues_for_document(
+        video_id,
+        document,
+        settings,
+    )
     if transcript_notice:
-        st.info(transcript_notice)
+        if document.artifact_ref is not None:
+            st.error(transcript_notice)
+        else:
+            st.info(transcript_notice)
 
     for candidate in document.candidates:
         candidate_start_key = start_key(video_id, candidate.id)
@@ -602,14 +654,13 @@ def _render_plan(
     )
 
     disabled_message = build_disabled_message(validation, parse_errors)
+    if document.artifact_ref is not None and transcript_notice:
+        disabled_message = transcript_notice
     if disabled_message:
         st.warning(disabled_message)
 
     busy = is_busy(settings)
-    is_high_precision = (
-        document.artifact_ref is not None
-        and document.artifact_ref.source_kind.value == "whisper_cpp"
-    )
+    is_high_precision = document.artifact_ref is not None and transcript_notice is None
     if is_high_precision:
         st.success("選択区間の高精度字幕 artifact を固定済みです。")
     else:

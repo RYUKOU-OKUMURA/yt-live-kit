@@ -1,6 +1,8 @@
 """ショート用サブ区間（カットプラン）モデル."""
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from collections.abc import Mapping
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from yt_live_kit.models.highlights import HighlightSegment
 from yt_live_kit.models.transcript import TranscriptArtifactRef
@@ -8,6 +10,8 @@ from yt_live_kit.models.transcript import TranscriptArtifactRef
 
 class ShortCutDocument(BaseModel):
     """cut_{parent_id}.json のルートオブジェクト."""
+
+    model_config = ConfigDict(extra="forbid")
 
     parent_id: str = Field(description="親候補の ID（例: clip_002）")
     parent_start_ms: int = Field(description="親区間の開始（整数ミリ秒）")
@@ -20,6 +24,16 @@ class ShortCutDocument(BaseModel):
     artifact_ref: TranscriptArtifactRef | None = None
     artifact_fingerprint: str | None = Field(default=None, min_length=64, max_length=64)
     used_range_cue_digests: tuple[str, ...] = ()
+
+    @field_validator("candidates", mode="before")
+    @classmethod
+    def _reject_unknown_candidate_fields(cls, value: object) -> object:
+        if isinstance(value, (list, tuple)):
+            expected = {"id", "title", "start", "end", "duration_sec", "reason"}
+            for item in value:
+                if isinstance(item, Mapping) and set(item) - expected:
+                    raise ValueError("cutplan 区間に未定義の field があります。")
+        return value
 
     @field_validator("used_range_cue_digests", mode="before")
     @classmethod
@@ -41,6 +55,8 @@ class ShortCutDocument(BaseModel):
             return self
         if self.artifact_ref is None or self.artifact_fingerprint is None:
             raise ValueError("artifact lineage は ref/fingerprint/digest を一組で保存してください。")
+        if not self.used_range_cue_digests:
+            raise ValueError("artifact lineage には used_range_cue_digest が 1 件以上必要です。")
         if self.artifact_fingerprint != self.artifact_ref.artifact_fingerprint:
             raise ValueError("artifact fingerprint が artifact ref と一致しません。")
         for digest in self.used_range_cue_digests:

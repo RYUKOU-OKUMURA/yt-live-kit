@@ -15,9 +15,13 @@ from yt_live_kit.config import Settings
 from yt_live_kit.models.clips import ClipCandidate
 from yt_live_kit.models.highlights import HighlightSegment
 from yt_live_kit.models.telop import TelopScriptDocument
-from yt_live_kit.models.transcript import TranscriptArtifactRef
+from yt_live_kit.models.transcript import TranscriptArtifactRef, TranscriptCue, TranscriptRange
 from yt_live_kit.services.shorts import ShortResult, ShortsError
 from yt_live_kit.services.telop import make_clip_id
+from yt_live_kit.services.transcript_artifact import (
+    TranscriptArtifactStore,
+    build_transcript_artifact,
+)
 from yt_live_kit.services.shorts_queue import (
     LEGACY_SCHEMA_VERSION,
     SCHEMA_VERSION,
@@ -33,6 +37,7 @@ from yt_live_kit.services.shorts_queue import (
     load_shorts_queue_result,
     make_shorts_queue_clip_spec,
     make_shorts_queue_fingerprint,
+    make_shorts_queue_input_fingerprint,
     reusable_shorts_queue_items,
     normalize_queue_candidates,
     run_shorts_queue,
@@ -105,6 +110,22 @@ def _specs(count: int = 2) -> tuple[ShortsQueueClipSpec, ...]:
     )
 
 
+def _artifact_for_status(video_id: str, status: str):
+    return build_transcript_artifact(
+        video_id=video_id,
+        source_kind="whisper_cpp",
+        source_ref=f"transcripts/audio/{status}.wav",
+        language="ja",
+        ranges=[TranscriptRange(start_ms=10_000, end_ms=20_000)],
+        cues=[TranscriptCue(start_ms=11_000, end_ms=12_000, text="artifact cue")],
+        status=status,
+        audio_bytes=f"audio-{status}".encode(),
+        model={"name": "fixed-model", "fingerprint": "a" * 64},
+        runtime={"version": "1.9.1", "fingerprint": "b" * 64},
+        settings={"language": "ja", "padding_ms": 0},
+    )
+
+
 def test_queue_spec_keeps_artifact_lineage_without_changing_queue_fingerprint():
     candidate = _clip(1, 0, 20)
     segments = normalize_queue_candidates([candidate], source="clips")
@@ -135,6 +156,64 @@ def test_queue_spec_keeps_artifact_lineage_without_changing_queue_fingerprint():
     restored = ShortsQueueClipSpec.from_dict(payload)
     assert restored.artifact_ref == reference
     assert restored.used_range_cue_digests == ("d" * 64,)
+    base = dict(
+        video_id="video-1",
+        source="clips",
+        mode="individual",
+        original_candidates=(candidate,),
+        segments=segments,
+        layout="blur",
+        preset="default",
+        hook_preset="hook",
+    )
+    assert make_shorts_queue_fingerprint(**base) == make_shorts_queue_fingerprint(
+        **base,
+        artifact_ref=reference,
+        artifact_fingerprint=reference.artifact_fingerprint,
+        used_range_cue_digests=("d" * 64,),
+    )
+    plain_spec = make_shorts_queue_clip_spec(
+        target,
+        _document(target),
+        layout="blur",
+        preset="default",
+        hook_preset="hook",
+    )
+    assert make_shorts_queue_input_fingerprint("video-1", plain_spec) != make_shorts_queue_input_fingerprint(
+        "video-1", spec
+    )
+
+
+@pytest.mark.parametrize("status", ["fallback", "partial", "failed"])
+def test_queue_preflight_rejects_saved_non_high_precision_artifact(
+    tmp_path: Path,
+    status: str,
+):
+    settings = Settings(data_dir=tmp_path)
+    artifact = _artifact_for_status("video-1", status)
+    store = TranscriptArtifactStore("video-1", settings)
+    store.save(artifact)
+    reference = store.artifact_ref(artifact)
+    candidate = _clip(1, 0, 20)
+    segments = normalize_queue_candidates([candidate], source="clips")
+    target = build_shorts_queue_targets(segments, mode="individual")[0]
+    document = _document(target).model_copy(
+        update={
+            "artifact_ref": reference,
+            "artifact_fingerprint": artifact.artifact_fingerprint,
+            "used_range_cue_digests": artifact.used_range_cue_digests,
+        }
+    )
+    spec = make_shorts_queue_clip_spec(
+        target,
+        document,
+        layout="blur",
+        preset="default",
+        hook_preset="hook",
+    )
+
+    with pytest.raises(ShortsQueueError, match="高精度成功結果"):
+        run_shorts_queue("video-1", (spec,), settings, job_id=f"job-{status}")
 
 
 def _spec_payload_for_duration(duration_ms: int) -> dict[str, object]:

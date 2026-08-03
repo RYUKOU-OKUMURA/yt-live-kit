@@ -1,12 +1,14 @@
 """ショート動画用テロップ台本モデル."""
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from yt_live_kit.models.transcript import TranscriptArtifactRef
 
 
 class TelopLine(BaseModel):
     """テロップ 1 行と元動画基準の絶対時刻."""
+
+    model_config = ConfigDict(extra="forbid")
 
     text: str = Field(description="テロップ本文")
     start_sec: float = Field(description="元動画基準の開始秒")
@@ -17,6 +19,8 @@ class TelopLine(BaseModel):
 class TelopSegmentScript(BaseModel):
     """選択区間 1 件分のテロップ台本."""
 
+    model_config = ConfigDict(extra="forbid")
+
     start_sec: float = Field(description="元動画基準の区間開始秒")
     end_sec: float = Field(description="元動画基準の区間終了秒")
     lines: list[TelopLine] = Field(description="区間内のテロップ行")
@@ -24,6 +28,8 @@ class TelopSegmentScript(BaseModel):
 
 class TelopScriptDocument(BaseModel):
     """テロップ台本とショート動画用メタデータ."""
+
+    model_config = ConfigDict(extra="forbid")
 
     hook_text: str = Field(description="冒頭フック文言")
     title_candidates: list[str] = Field(description="タイトル案")
@@ -54,6 +60,8 @@ class TelopScriptDocument(BaseModel):
             return self
         if self.artifact_ref is None or self.artifact_fingerprint is None:
             raise ValueError("artifact lineage は ref/fingerprint/digest を一組で保存してください。")
+        if not self.used_range_cue_digests:
+            raise ValueError("artifact lineage には used_range_cue_digest が 1 件以上必要です。")
         if self.artifact_fingerprint != self.artifact_ref.artifact_fingerprint:
             raise ValueError("artifact fingerprint が artifact ref と一致しません。")
         for digest in self.used_range_cue_digests:
