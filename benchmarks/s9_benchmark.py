@@ -150,26 +150,34 @@ BOUNDARY_AUDIT_EXPECTED_OUTCOMES = {
 BOUNDARY_AUDIT_EXPECTED_CASES = {
     "lb4-clip002-short-proper-nouns": {
         "display_order": 1,
+        "source_feedback": "前回表示順 case 1（lb4-clip002-short-proper-nouns）は「ほぼ問題ない」。",
         "opening_signal": "no_material_issue_observed",
         "internal_continuity": "not_audited",
+        "approximate_timing_note": "開始境界はほぼ問題ないという所見。正確な onset は記録しない。",
         "expected_editorial_outcome": "pass",
     },
     "hpe-audio-variation": {
         "display_order": 2,
+        "source_feedback": "前回表示順 case 2（hpe-audio-variation）は開始から約6秒まで意味ある発話がなく、ショート開始として不利、開始境界NG。",
         "opening_signal": "no_meaningful_speech_at_opening",
         "internal_continuity": "not_audited",
+        "approximate_timing_note": "開始から約6秒まで意味ある発話がないという観察。約値を production 閾値にはしない。",
         "expected_editorial_outcome": "opening_trim_or_review_required",
     },
     "cgal-proper-nouns": {
         "display_order": 3,
+        "source_feedback": "前回表示順 case 3（cgal-proper-nouns）も開始から約6秒まで意味ある発話がなく、開始境界NG。背景音があっても意味ある発話がなければ編集上の無発話として扱う。",
         "opening_signal": "background_audio_without_meaningful_speech_at_opening",
         "internal_continuity": "not_audited",
+        "approximate_timing_note": "開始から約6秒まで意味ある発話がないという観察。背景音は意味ある発話として数えない。約値を production 閾値にはしない。",
         "expected_editorial_outcome": "opening_trim_or_review_required",
     },
     "mkw-long-local-asr": {
         "display_order": 4,
+        "source_feedback": "前回表示順 case 4（mkw-long-local-asr）は開始直後に発話はあるが、約2秒から26秒までほぼ発話がなく、ショートとして致命的。",
         "opening_signal": "meaningful_speech_present_at_opening",
         "internal_continuity": "long_internal_speech_gap",
+        "approximate_timing_note": "開始直後に発話はあるが、約2秒から26秒までほぼ発話がないという観察。約値を production 閾値にはしない。",
         "expected_editorial_outcome": "internal_gap_removal_or_review_required",
     },
 }
@@ -375,6 +383,16 @@ def _require_string(value: Any, *, label: str, pattern: str | None = None) -> st
     return value
 
 
+def _require_enum(value: Any, *, label: str, allowed: set[str]) -> str:
+    text = _require_string(value, label=label)
+    if text not in allowed:
+        raise BoundaryAuditError(
+            f"{label} が固定 enum と一致しません。",
+            details={"allowed": sorted(allowed), "actual": text},
+        )
+    return text
+
+
 def validate_boundary_audit(
     value: Mapping[str, Any],
     *,
@@ -553,25 +571,48 @@ def validate_boundary_audit(
         expected_case = BOUNDARY_AUDIT_EXPECTED_CASES.get(case_id)
         if expected_case is None:
             raise BoundaryAuditError("boundary audit case ID が固定所見にありません。", details={"case_id": case_id})
-        _require_string(case["source_feedback"], label=f"{case_id}.source_feedback")
-        _require_string(case["approximate_timing_note"], label=f"{case_id}.approximate_timing_note")
-        if case["opening_signal"] not in expected_opening:
-            raise BoundaryAuditError("opening_signal が不正です。", details={"case_id": case_id})
-        if case["internal_continuity"] not in expected_continuity:
-            raise BoundaryAuditError("internal_continuity が不正です。", details={"case_id": case_id})
-        outcome = case["expected_editorial_outcome"]
-        if outcome not in expected_outcomes:
-            raise BoundaryAuditError("expected_editorial_outcome が不正です。", details={"case_id": case_id})
+        source_feedback = _require_string(case["source_feedback"], label=f"{case_id}.source_feedback")
+        timing_note = _require_string(case["approximate_timing_note"], label=f"{case_id}.approximate_timing_note")
+        if source_feedback != expected_case["source_feedback"]:
+            raise BoundaryAuditError(
+                "source_feedback が case ID ごとの canonical 所見と一致しません。",
+                details={"case_id": case_id},
+            )
+        if timing_note != expected_case["approximate_timing_note"]:
+            raise BoundaryAuditError(
+                "approximate_timing_note が case ID ごとの canonical 観察メモと一致しません。",
+                details={"case_id": case_id},
+            )
+        opening_signal = _require_enum(case["opening_signal"], label=f"{case_id}.opening_signal", allowed=expected_opening)
+        internal_continuity = _require_enum(
+            case["internal_continuity"],
+            label=f"{case_id}.internal_continuity",
+            allowed=expected_continuity,
+        )
+        outcome = _require_enum(
+            case["expected_editorial_outcome"],
+            label=f"{case_id}.expected_editorial_outcome",
+            allowed=expected_outcomes,
+        )
         actual_contract = {
             "display_order": order,
-            "opening_signal": case["opening_signal"],
-            "internal_continuity": case["internal_continuity"],
+            "opening_signal": opening_signal,
+            "internal_continuity": internal_continuity,
             "expected_editorial_outcome": outcome,
         }
-        if actual_contract != expected_case:
+        expected_contract = {
+            key: expected_case[key]
+            for key in (
+                "display_order",
+                "opening_signal",
+                "internal_continuity",
+                "expected_editorial_outcome",
+            )
+        }
+        if actual_contract != expected_contract:
             raise BoundaryAuditError(
                 "case の display_order / opening_signal / internal_continuity / expected_editorial_outcome が固定所見と一致しません。",
-                details={"case_id": case_id, "expected": expected_case, "actual": actual_contract},
+                details={"case_id": case_id, "expected": expected_contract, "actual": actual_contract},
             )
     decision = root["decision"]
     if not isinstance(decision, Mapping):

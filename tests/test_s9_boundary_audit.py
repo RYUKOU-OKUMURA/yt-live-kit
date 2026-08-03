@@ -79,6 +79,53 @@ def test_boundary_audit_rejects_case_contract_drift(field: str, value: object) -
         validate_boundary_audit(changed)
 
 
+@pytest.mark.parametrize("field", ["opening_signal", "internal_continuity", "expected_editorial_outcome"])
+@pytest.mark.parametrize("bad_value", [[], {}, True, None, "unknown_enum_value"])
+def test_boundary_audit_enum_fields_reject_non_string_and_unknown_values(
+    field: str,
+    bad_value: object,
+) -> None:
+    _, audit = _load_fixture_and_audit()
+    changed = deepcopy(audit)
+    changed["cases"][0][field] = bad_value
+
+    with pytest.raises(BoundaryAuditError) as exc_info:
+        validate_boundary_audit(changed)
+    assert field in str(exc_info.value) or "固定 enum" in str(exc_info.value)
+
+
+@pytest.mark.parametrize("field", ["source_feedback", "approximate_timing_note"])
+@pytest.mark.parametrize("case_index", range(4))
+def test_boundary_audit_rejects_canonical_text_changes(field: str, case_index: int) -> None:
+    _, audit = _load_fixture_and_audit()
+    changed = deepcopy(audit)
+    changed["cases"][case_index][field] = f"{changed['cases'][case_index][field]} 改変"
+
+    with pytest.raises(BoundaryAuditError, match="canonical"):
+        validate_boundary_audit(changed)
+
+
+@pytest.mark.parametrize("field", ["source_feedback", "approximate_timing_note"])
+def test_boundary_audit_rejects_canonical_text_swaps_between_cases(field: str) -> None:
+    _, audit = _load_fixture_and_audit()
+    changed = deepcopy(audit)
+    changed["cases"][0][field] = changed["cases"][1][field]
+
+    with pytest.raises(BoundaryAuditError, match="canonical"):
+        validate_boundary_audit(changed)
+
+
+def test_boundary_audit_loader_rejects_canonical_text_change(tmp_path: Path) -> None:
+    manifest, audit = _load_fixture_and_audit()
+    changed = deepcopy(audit)
+    changed["cases"][2]["approximate_timing_note"] = "6秒を production 閾値にする。"
+    changed_path = tmp_path / "boundary-audit.json"
+    changed_path.write_text(json.dumps(changed, ensure_ascii=False), encoding="utf-8")
+
+    with pytest.raises(AuditPacketError, match="canonical"):
+        load_boundary_audit(changed_path, manifest)
+
+
 def test_boundary_audit_rejects_case_id_date_and_markdown_table_corruption() -> None:
     _, audit = _load_fixture_and_audit()
 
