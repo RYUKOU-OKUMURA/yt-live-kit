@@ -106,6 +106,28 @@ class UploadAttempt(BaseModel):
         return self
 
 
+class RelatedVideoSummary(BaseModel):
+    """lock 下で取得した関連動画確認待ち operation の集計."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    pending_count: int = Field(ge=0)
+    operations: tuple[UploadOperation, ...]
+
+    @model_validator(mode="after")
+    def _count_matches_operations(self) -> RelatedVideoSummary:
+        if self.pending_count != len(self.operations):
+            raise ValueError("関連動画確認待ち件数と operation 一覧が一致しません。")
+        if any(item.related_video_status != "pending" for item in self.operations):
+            raise ValueError("関連動画確認待ち一覧に未確認 operation 以外が含まれています。")
+        return self
+
+    @property
+    def pending_operations(self) -> tuple[UploadOperation, ...]:
+        """UI 側が状態名に依存せず対象一覧を読むための互換 accessor."""
+        return self.operations
+
+
 def _utc_timestamp(value: datetime | None, label: str) -> datetime:
     timestamp = value or datetime.now(timezone.utc)
     if timestamp.tzinfo is None or timestamp.utcoffset() is None:
@@ -286,15 +308,27 @@ def _read_operations_unlocked(settings: Settings) -> list[UploadOperation]:
     raw = value.get("operations")
     if not isinstance(raw, list):
         raise UploadQueueError("投稿キューの operation 一覧が正しくありません。")
+    migrated = False
     try:
-        operations = [UploadOperation.model_validate(item) for item in raw]
-        for operation in operations:
+        operations = []
+        for item in raw:
+            if isinstance(item, dict):
+                migrated = migrated or (
+                    "related_video_status" not in item
+                    or "related_video_confirmed_at" not in item
+                )
+            operation = UploadOperation.model_validate(item)
             _validate_operation_paths(operation, settings)
+            operations.append(operation)
     except ValidationError as exc:
         raise UploadQueueError(f"投稿キューの内容が正しくありません: {exc}") from exc
     identifiers = [item.operation_id for item in operations]
     if len(identifiers) != len(set(identifiers)):
         raise UploadQueueError("投稿キューに重複した operation ID があります。")
+    if migrated:
+        # legacy queue を次回再起動でも同じ状態で読めるように、読み込み時に
+        # 正規化済み operation 全件を既存 queue のまま atomic に置き換える。
+        _write_operations_unlocked(settings, operations)
     return operations
 
 
@@ -347,6 +381,27 @@ def list_operations(settings: Settings) -> tuple[UploadOperation, ...]:
         return tuple(_read_operations_unlocked(settings))
 
 
+def get_related_video_summary(settings: Settings) -> RelatedVideoSummary:
+    """lock 付き queue 読み出しから関連動画確認待ちを集計する.
+
+    queue が壊れている場合は `UploadQueueError` をそのまま返し、壊れた queue
+    を空として扱わない。pending は表示・追跡用であり、upload / publication の
+    hard gate には使わない。
+    """
+    with schedule_lock(settings):
+        pending = tuple(
+            item
+            for item in _read_operations_unlocked(settings)
+            if item.related_video_status == "pending"
+        )
+        return RelatedVideoSummary(pending_count=len(pending), operations=pending)
+
+
+def list_pending_related_videos(settings: Settings) -> RelatedVideoSummary:
+    """関連動画確認待ち一覧を取得する公開 API の別名."""
+    return get_related_video_summary(settings)
+
+
 def load_operation(operation_id: str, settings: Settings) -> UploadOperation:
     _safe_identifier(operation_id, "投稿 operation ID")
     with schedule_lock(settings):
@@ -357,6 +412,61 @@ def load_operation(operation_id: str, settings: Settings) -> UploadOperation:
     if len(matches) != 1:
         raise UploadQueueError("指定された投稿 operation が見つかりません。")
     return matches[0]
+
+
+def confirm_related_video(
+    operation_id: str,
+    source_video_id: str,
+    video_id: str,
+    settings: Settings,
+    *,
+    now: datetime | None = None,
+) -> UploadOperation:
+    """Studio での関連動画設定済み確認を local queue へ原子的に記録する.
+
+    YouTube API やブラウザは呼ばず、queue の正本である
+    `source_video_id` / `video_id` と明示入力された 2 ID が一致した場合だけ
+    `pending` から `confirmed` へ遷移する。公開予定・poll 履歴・公開可否は
+    変更しない。
+    """
+    _safe_identifier(operation_id, "投稿 operation ID")
+    _safe_video_identifier(source_video_id, "元動画 ID")
+    _safe_video_identifier(video_id, "Shorts 動画 ID")
+    timestamp = _utc_timestamp(now, "関連動画確認日時")
+    with schedule_lock(settings):
+        operations = _read_operations_unlocked(settings)
+        matches = [item for item in operations if item.operation_id == operation_id]
+        if len(matches) != 1:
+            raise UploadQueueError("関連動画を確認する投稿 operation が見つかりません。")
+        current = matches[0]
+        if current.state != "uploaded" or not current.video_id:
+            raise UploadQueueError(
+                "関連動画の確認はアップロード済み operation にだけ実行できます。"
+            )
+        if current.related_video_status == "confirmed":
+            raise UploadQueueError("この operation の関連動画は既に確認済みです。")
+        if current.related_video_status != "pending":
+            raise UploadQueueError("この operation は関連動画の確認待ち状態ではありません。")
+        if current.source_video_id != source_video_id or current.video_id != video_id:
+            raise UploadQueueError(
+                "関連動画の確認対象 ID が operation の正本と一致しません。"
+            )
+        if timestamp < current.updated_at:
+            raise UploadQueueError("関連動画確認日時を operation 更新日時より過去に戻せません。")
+        values = current.model_dump()
+        values.update(
+            related_video_status="confirmed",
+            related_video_confirmed_at=timestamp,
+            updated_at=timestamp,
+        )
+        try:
+            replacement = UploadOperation.model_validate(values)
+        except ValidationError as exc:
+            raise UploadQueueError(f"関連動画確認状態を保存できませんでした: {exc}") from exc
+        index = operations.index(current)
+        operations[index] = replacement
+        _write_operations_unlocked(settings, operations)
+        return replacement
 
 
 def save_reserved_operation(operation: UploadOperation, settings: Settings) -> None:
@@ -394,6 +504,7 @@ def create_reserved_operation(
         content=content, state="reserved", job_id=job_id, video_id=None,
         created_at=created, updated_at=created, started_at=None, finished_at=None,
         error=None, poll_history=(), publication_eligibility="unknown",
+        related_video_status="not_ready", related_video_confirmed_at=None,
     )
     save_reserved_operation(operation, settings)
     return operation
@@ -441,6 +552,11 @@ def transition_operation(
             video_id=video_id or current.video_id,
             error=error,
         )
+        if new_state == "uploaded":
+            values.update(
+                related_video_status="pending",
+                related_video_confirmed_at=None,
+            )
         try:
             replacement = UploadOperation.model_validate(values)
         except ValidationError as exc:

@@ -40,6 +40,7 @@ PublicationEligibility = Literal[
     "no_private_lock",
     "published",
 ]
+RelatedVideoStatus = Literal["not_ready", "pending", "confirmed"]
 
 
 def _utc(value: datetime, label: str) -> datetime:
@@ -188,6 +189,25 @@ class UploadOperation(_FrozenModel):
     error: str | None
     poll_history: tuple[UploadStatusObservation, ...]
     publication_eligibility: PublicationEligibility
+    related_video_status: RelatedVideoStatus = "not_ready"
+    related_video_confirmed_at: datetime | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_related_video_fields(cls, value: Any) -> Any:
+        """旧 queue の欠落 field を状態から安全側へ移行する."""
+        if not isinstance(value, Mapping):
+            return value
+        migrated = dict(value)
+        if "related_video_status" not in migrated:
+            migrated["related_video_status"] = (
+                "pending"
+                if migrated.get("state") == "uploaded" and migrated.get("video_id")
+                else "not_ready"
+            )
+        if "related_video_confirmed_at" not in migrated:
+            migrated["related_video_confirmed_at"] = None
+        return migrated
 
     @field_validator("video_path")
     @classmethod
@@ -196,7 +216,13 @@ class UploadOperation(_FrozenModel):
             raise ValueError("動画ファイルは絶対パスで指定してください。")
         return value
 
-    @field_validator("created_at", "updated_at", "started_at", "finished_at")
+    @field_validator(
+        "created_at",
+        "updated_at",
+        "started_at",
+        "finished_at",
+        "related_video_confirmed_at",
+    )
     @classmethod
     def _operation_utc(cls, value: datetime | None, info) -> datetime | None:
         return None if value is None else _utc(value, info.field_name)
@@ -246,6 +272,28 @@ class UploadOperation(_FrozenModel):
             raise ValueError("公開可否はアップロード済み operation にだけ設定できます。")
         if self.poll_history and self.state != "uploaded":
             raise ValueError("poll 履歴はアップロード済み operation にだけ設定できます。")
+        if self.related_video_status == "not_ready":
+            if self.state == "uploaded":
+                raise ValueError("アップロード済み operation は関連動画確認待ちにしてください。")
+            if self.related_video_confirmed_at is not None:
+                raise ValueError("未準備の関連動画に確認日時は設定できません。")
+        elif self.related_video_status == "pending":
+            if self.state != "uploaded" or not self.video_id:
+                raise ValueError("関連動画確認待ちはアップロード済み operation にだけ設定できます。")
+            if self.related_video_confirmed_at is not None:
+                raise ValueError("関連動画確認待ちに確認日時は設定できません。")
+        elif self.related_video_status == "confirmed":
+            if self.state != "uploaded" or not self.video_id:
+                raise ValueError("関連動画確認済みはアップロード済み operation にだけ設定できます。")
+            if self.related_video_confirmed_at is None:
+                raise ValueError("関連動画確認済み operation には確認日時が必要です。")
+            if (
+                self.finished_at is not None
+                and self.related_video_confirmed_at < self.finished_at
+            ):
+                raise ValueError("関連動画確認日時が upload 完了日時より前です。")
+            if self.related_video_confirmed_at > self.updated_at:
+                raise ValueError("関連動画確認日時が operation 更新日時より後です。")
         times = [item.polled_at for item in self.poll_history]
         if times != sorted(times):
             raise ValueError("poll 履歴は取得時刻順にしてください。")

@@ -22,8 +22,11 @@ from yt_live_kit.models.upload import (
 from yt_live_kit.services.upload_queue import (
     UploadQueueError,
     append_poll_observation,
+    confirm_related_video,
     count_upload_attempts,
     create_reserved_operation,
+    get_related_video_summary,
+    list_pending_related_videos,
     list_operations,
     list_upload_attempts,
     publication_poll_job_target,
@@ -252,6 +255,260 @@ def test_queue_is_single_full_operation_record_and_atomic_temp_is_removed(tmp_pa
     payload = json.loads((tmp_path / "_schedule" / "queue.json").read_text(encoding="utf-8"))
     assert payload["operations"][0]["operation_id"] == operation.operation_id
     assert payload["operations"][0]["content"]["channel"]["channel_id"] == "UC123"
+    assert not list((tmp_path / "_schedule").glob("*.tmp"))
+
+
+def test_related_video_state_is_not_ready_before_upload_and_pending_after_success(
+    tmp_path: Path,
+) -> None:
+    settings, reserved = _reserved(tmp_path)
+    assert reserved.related_video_status == "not_ready"
+    assert reserved.related_video_confirmed_at is None
+
+    settings, uploaded = _uploaded(
+        tmp_path,
+        publish_at=datetime(2026, 8, 2, tzinfo=timezone.utc),
+        operation_id="uploaded-op",
+        job_id="uploaded-job",
+    )
+    assert uploaded.related_video_status == "pending"
+    assert uploaded.related_video_confirmed_at is None
+    restored = {item.operation_id: item for item in list_operations(settings)}
+    assert restored[uploaded.operation_id].related_video_status == "pending"
+
+
+@pytest.mark.parametrize(
+    "updates",
+    [
+        {"related_video_status": "unknown"},
+        {
+            "related_video_status": "not_ready",
+            "related_video_confirmed_at": datetime(2026, 8, 1, tzinfo=timezone.utc),
+        },
+        {"related_video_status": "pending"},
+        {"related_video_status": "confirmed"},
+    ],
+)
+def test_related_video_model_rejects_unknown_or_inconsistent_fields(
+    tmp_path: Path, updates: dict[str, object]
+) -> None:
+    _settings, operation = _reserved(tmp_path)
+    values = operation.model_dump()
+    values.update(updates)
+    with pytest.raises(ValidationError):
+        UploadOperation.model_validate(values)
+
+
+def test_uploaded_operation_rejects_explicit_not_ready_status(tmp_path: Path) -> None:
+    settings, uploaded = _uploaded(
+        tmp_path,
+        publish_at=datetime(2026, 8, 2, tzinfo=timezone.utc),
+    )
+    values = uploaded.model_dump()
+    values["related_video_status"] = "not_ready"
+    with pytest.raises(ValidationError, match="確認待ち"):
+        UploadOperation.model_validate(values)
+    assert list_operations(settings)[0].related_video_status == "pending"
+
+
+def test_related_video_confirmation_requires_both_canonical_ids_and_is_idempotency_safe(
+    tmp_path: Path,
+) -> None:
+    publish_at = datetime(2026, 8, 2, tzinfo=timezone.utc)
+    settings, uploaded = _uploaded(tmp_path, publish_at=publish_at)
+    before = list_operations(settings)[0]
+    confirmed_at = datetime.now(timezone(timedelta(hours=9))) + timedelta(days=1)
+
+    with pytest.raises(UploadQueueError, match="正本と一致"):
+        confirm_related_video(
+            uploaded.operation_id,
+            "wrong-source",
+            uploaded.video_id or "",
+            settings,
+            now=confirmed_at,
+        )
+    assert list_operations(settings)[0] == before
+
+    confirmed = confirm_related_video(
+        uploaded.operation_id,
+        uploaded.source_video_id,
+        uploaded.video_id or "",
+        settings,
+        now=confirmed_at,
+    )
+    assert confirmed.related_video_status == "confirmed"
+    assert confirmed.related_video_confirmed_at == confirmed_at.astimezone(timezone.utc)
+    assert confirmed.content.publish_at == before.content.publish_at
+    assert confirmed.publication_eligibility == before.publication_eligibility
+    assert confirmed.poll_history == before.poll_history
+
+    with pytest.raises(UploadQueueError, match="既に確認済み"):
+        confirm_related_video(
+            uploaded.operation_id,
+            uploaded.source_video_id,
+            uploaded.video_id or "",
+            settings,
+            now=confirmed_at + timedelta(hours=1),
+        )
+    assert list_operations(settings)[0] == confirmed
+
+
+def test_related_video_confirmation_before_upload_is_rejected(tmp_path: Path) -> None:
+    settings, operation = _reserved(tmp_path)
+    with pytest.raises(UploadQueueError, match="アップロード済み"):
+        confirm_related_video(
+            operation.operation_id,
+            operation.source_video_id,
+            "youtube-id",
+            settings,
+            now=datetime(2026, 8, 1, tzinfo=timezone.utc),
+        )
+    assert list_operations(settings)[0].related_video_status == "not_ready"
+
+
+def test_legacy_queue_related_fields_migrate_without_inferring_confirmed(
+    tmp_path: Path,
+) -> None:
+    settings, uploaded = _uploaded(
+        tmp_path,
+        publish_at=datetime(2026, 8, 2, tzinfo=timezone.utc),
+    )
+    queue_path = tmp_path / "_schedule" / "queue.json"
+    payload = json.loads(queue_path.read_text(encoding="utf-8"))
+    payload["operations"][0].pop("related_video_status")
+    payload["operations"][0].pop("related_video_confirmed_at")
+    queue_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    restored = list_operations(settings)[0]
+    assert restored.related_video_status == "pending"
+    assert restored.related_video_confirmed_at is None
+    migrated = json.loads(queue_path.read_text(encoding="utf-8"))["operations"][0]
+    assert migrated["related_video_status"] == "pending"
+    assert migrated["related_video_confirmed_at"] is None
+
+    reserved_root = tmp_path / "reserved"
+    reserved_root.mkdir()
+    reserved_settings, reserved = _reserved(reserved_root)
+    reserved_payload_path = reserved_settings.data_dir / "_schedule" / "queue.json"
+    reserved_payload = json.loads(reserved_payload_path.read_text(encoding="utf-8"))
+    reserved_payload["operations"][0].pop("related_video_status")
+    reserved_payload["operations"][0].pop("related_video_confirmed_at")
+    reserved_payload_path.write_text(json.dumps(reserved_payload), encoding="utf-8")
+    assert list_operations(reserved_settings)[0].related_video_status == "not_ready"
+    assert reserved.related_video_confirmed_at is None
+
+
+def test_related_video_summary_is_lock_backed_and_does_not_treat_broken_queue_as_empty(
+    tmp_path: Path,
+) -> None:
+    settings, uploaded = _uploaded(
+        tmp_path,
+        publish_at=datetime(2026, 8, 2, tzinfo=timezone.utc),
+    )
+    summary = get_related_video_summary(settings)
+    assert summary.pending_count == 1
+    assert summary.operations == (uploaded,)
+    assert summary.pending_operations == summary.operations
+    assert list_pending_related_videos(settings) == summary
+
+    queue_path = tmp_path / "_schedule" / "queue.json"
+    queue_path.write_text("{broken", encoding="utf-8")
+    with pytest.raises(UploadQueueError, match="投稿キュー"):
+        get_related_video_summary(settings)
+
+
+def test_legacy_related_video_migration_atomic_failure_preserves_legacy_queue(
+    tmp_path: Path,
+) -> None:
+    settings, _uploaded_operation = _uploaded(
+        tmp_path,
+        publish_at=datetime(2026, 8, 2, tzinfo=timezone.utc),
+    )
+    queue_path = tmp_path / "_schedule" / "queue.json"
+    payload = json.loads(queue_path.read_text(encoding="utf-8"))
+    payload["operations"][0].pop("related_video_status")
+    payload["operations"][0].pop("related_video_confirmed_at")
+    queue_path.write_text(json.dumps(payload), encoding="utf-8")
+    before = queue_path.read_bytes()
+    real_replace = os.replace
+
+    def fail_queue_replace(source, destination):
+        if Path(destination) == queue_path:
+            raise OSError("legacy migration atomic fault")
+        return real_replace(source, destination)
+
+    with patch("yt_live_kit.services.upload_queue.os.replace", side_effect=fail_queue_replace):
+        with pytest.raises(UploadQueueError, match="安全に保存"):
+            list_operations(settings)
+    assert queue_path.read_bytes() == before
+    assert not list((tmp_path / "_schedule").glob("*.tmp"))
+
+
+def test_pending_related_video_does_not_stop_publication_poll_or_change_slot_data(
+    tmp_path: Path,
+) -> None:
+    publish_at = datetime(2026, 8, 2, tzinfo=timezone.utc)
+    settings, uploaded = _uploaded(tmp_path, publish_at=publish_at)
+    before = list_operations(settings)[0]
+    attempts_before = list_upload_attempts(settings)
+    service = _StatusService(
+        [
+            {
+                "items": [
+                    {
+                        "status": {"privacyStatus": "public"},
+                        "processingDetails": {"processingStatus": "succeeded"},
+                    }
+                ]
+            }
+        ]
+    )
+
+    with patch("yt_live_kit.services.jobs.update_job"):
+        publication_poll_job_target(
+            report=MagicMock(),
+            settings=settings,
+            job_id="publication-job-pending-related",
+            operation_id=uploaded.operation_id,
+            service=service,
+            clock=lambda: datetime(2026, 8, 2, 0, 1, tzinfo=timezone.utc),
+        )
+
+    restored = list_operations(settings)[0]
+    assert restored.related_video_status == "pending"
+    assert restored.content.publish_at == before.content.publish_at
+    assert restored.publication_eligibility == "published"
+    assert list_upload_attempts(settings) == attempts_before
+    assert service.calls == 1
+
+
+def test_related_video_atomic_confirmation_failure_preserves_existing_operation(
+    tmp_path: Path,
+) -> None:
+    settings, uploaded = _uploaded(
+        tmp_path,
+        publish_at=datetime(2026, 8, 2, tzinfo=timezone.utc),
+    )
+    queue_path = tmp_path / "_schedule" / "queue.json"
+    before = queue_path.read_bytes()
+    real_replace = os.replace
+
+    def fail_queue_replace(source, destination):
+        if Path(destination) == queue_path:
+            raise OSError("related video atomic fault")
+        return real_replace(source, destination)
+
+    with patch("yt_live_kit.services.upload_queue.os.replace", side_effect=fail_queue_replace):
+        with pytest.raises(UploadQueueError, match="安全に保存"):
+            confirm_related_video(
+                uploaded.operation_id,
+                uploaded.source_video_id,
+                uploaded.video_id or "",
+                settings,
+                now=datetime.now(timezone.utc) + timedelta(days=1),
+            )
+    assert queue_path.read_bytes() == before
+    assert list_operations(settings)[0].related_video_status == "pending"
     assert not list((tmp_path / "_schedule").glob("*.tmp"))
 
 
