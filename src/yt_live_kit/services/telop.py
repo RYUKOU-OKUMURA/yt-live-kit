@@ -38,6 +38,9 @@ TITLE_DIRECTIONS = ("検索明快型", "仕事影響型", "好奇心型")
 TITLE_MAX_LENGTH = 100
 TITLE_RECOMMENDED_MIN_LENGTH = 18
 TITLE_RECOMMENDED_MAX_LENGTH = 32
+TITLE_COUNT_RECOVERY_HINT = (
+    "再生成するか、不足案を手動補完し、余分な案は整理してください。"
+)
 
 CODEX_INSTALL_HINT = """\
 Codex CLI が見つかりません。テロップ台本の自動生成には Codex CLI が必要です。
@@ -357,6 +360,7 @@ def validate_telop_script(
             direction_hint = (
                 "新規生成では検索明快型・仕事影響型・好奇心型のタイトル案を"
                 "固定順で 3 件返してください。"
+                + TITLE_COUNT_RECOVERY_HINT
             )
         return TelopValidationResult(
             ok=False,
@@ -387,6 +391,7 @@ def validate_telop_script(
             errors.append(
                 "新規生成のタイトル案は、検索明快型・仕事影響型・好奇心型を"
                 "固定順でちょうど 3 件必要です。"
+                + TITLE_COUNT_RECOVERY_HINT
             )
         else:
             errors.append("タイトル案は 1 件以上必要です。")
@@ -396,7 +401,8 @@ def validate_telop_script(
         errors.append(
             "新規生成のタイトル案は、検索明快型・仕事影響型・好奇心型を"
             f"固定順でちょうど {len(TITLE_DIRECTIONS)} 件必要です。"
-            f"（現在 {len(data.title_candidates)} 件）"
+            f"（現在 {len(data.title_candidates)} 件）。"
+            f"{TITLE_COUNT_RECOVERY_HINT}"
         )
     titles = [
         clean_required(

@@ -234,6 +234,8 @@ def test_validate_new_generation_requires_three_title_directions():
         assert "仕事影響型" in message
         assert "好奇心型" in message
         assert "ちょうど 3 件" in message
+        assert "再生成" in message
+        assert "手動補完" in message
 
 
 def test_validate_new_generation_reports_duplicate_extra_titles_without_crashing():
@@ -266,6 +268,8 @@ def test_validate_new_generation_schema_error_mentions_title_directions():
     assert "仕事影響型" in message
     assert "好奇心型" in message
     assert "JSON 形式が想定と異なります" in message
+    assert "再生成" in message
+    assert "手動補完" in message
 
 
 def test_validate_new_generation_strips_titles_and_warns_outside_recommended_length():
@@ -610,9 +614,12 @@ def test_generation_with_legacy_title_count_fails_at_new_generation_boundary(
     with (
         patch("yt_live_kit.services.telop.is_codex_available", return_value=True),
         patch("yt_live_kit.services.telop.invoke_codex", return_value=raw) as invoke,
-        pytest.raises(TelopValidationError, match="検索明快型"),
     ):
-        generate_telop_script("video123", _segments(), settings)
+        with pytest.raises(TelopValidationError, match="検索明快型") as error:
+            generate_telop_script("video123", _segments(), settings)
+    message = str(error.value)
+    assert "再生成" in message
+    assert "手動補完" in message
     invoke.assert_called_once()
 
 
