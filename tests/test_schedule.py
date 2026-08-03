@@ -7,14 +7,20 @@ import stat
 import threading
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 from zoneinfo import ZoneInfo
 
 import pytest
 from pydantic import ValidationError
 
 from yt_live_kit.config import Settings
-from yt_live_kit.models.upload import UploadChannel, UploadContentSnapshot
+from yt_live_kit.models.upload import (
+    UploadChannel,
+    UploadContentSnapshot,
+    UploadDescriptionRequirementsSnapshot,
+    UploadResult,
+)
+from yt_live_kit.services.description import SHORTS_DESCRIPTION_CTA
 from yt_live_kit.services.schedule import (
     ScheduleError,
     SchedulePolicy,
@@ -38,6 +44,7 @@ from yt_live_kit.services.upload_queue import (
     record_upload_attempt,
     recover_upload_operations,
     transition_operation,
+    upload_job_target,
 )
 from yt_live_kit.services.youtube_api import build_upload_snapshot
 
@@ -62,14 +69,34 @@ def _video(tmp_path: Path, name: str = "short_a.mp4") -> Path:
 
 
 def _preview(tmp_path: Path, settings: Settings, **overrides):
+    generated_description = "説明文"
+    source_title = "元動画タイトル"
+    source_url = "https://example.com/source?t=0s"
+    description = (
+        f"{generated_description}\n{source_title}\n{source_url}\n"
+        f"{SHORTS_DESCRIPTION_CTA}"
+    )
+    requirements = UploadDescriptionRequirementsSnapshot(
+        generated_description=generated_description,
+        source_title=source_title,
+        source_url=source_url,
+        fixed_cta=SHORTS_DESCRIPTION_CTA,
+        template_bytes_fingerprint="a" * 64,
+        meta_json_fingerprint="b" * 64,
+        generated_description_occurrences=1,
+        source_title_occurrences=1,
+        source_url_occurrences=1,
+        fixed_cta_line_occurrences=1,
+    )
     values = {
         "source_video_id": "source-1",
         "source_kind": "shorts_queue",
         "clip_id": "clip-1",
         "video_path": _video(tmp_path),
         "title": "予約タイトル",
-        "description": "説明文",
+        "description": description,
         "tags": ("タグ1", "タグ2"),
+        "requirements": requirements,
         "settings": settings,
         "now": NOW,
     }
@@ -99,6 +126,7 @@ def _content_from_preview(preview) -> UploadContentSnapshot:
         contains_synthetic_media=False,
         community_guidelines_confirmed=True,
         community_guidelines_confirmed_at=NOW,
+        requirements=preview.requirements,
     )
 
 
@@ -582,12 +610,224 @@ def test_preview_contains_all_read_only_fields_and_no_queue_side_effect(tmp_path
     assert preview.file_size == 5
     assert preview.duration_sec == 30
     assert preview.title == "予約タイトル"
-    assert preview.description == "説明文"
+    assert preview.description.startswith("説明文\n元動画タイトル")
     assert preview.tags == ("タグ1", "タグ2")
     assert preview.privacy_status == "private"
     assert preview.notify_subscribers is False
     assert preview.publish_at_utc_z.endswith("Z")
     assert preview.attempt_count_la == 0
+    assert list_operations(settings) == ()
+    assert count_upload_attempts(settings, now=NOW) == 0
+
+
+def test_p6_description_requirements_round_trip_and_fingerprint_tracks_inputs(
+    tmp_path: Path,
+) -> None:
+    settings = _settings(tmp_path)
+    preview = _preview(tmp_path, settings)
+
+    restored_preview = type(preview).model_validate_json(preview.model_dump_json())
+    assert restored_preview.requirements == preview.requirements
+    assert restored_preview.fingerprint == preview.fingerprint
+    assert restored_preview.requirements is not None
+    assert restored_preview.requirements.template_bytes_fingerprint == "a" * 64
+    assert restored_preview.requirements.meta_json_fingerprint == "b" * 64
+
+    content = _content_from_preview(preview)
+    restored_content = UploadContentSnapshot.model_validate_json(
+        content.model_dump_json()
+    )
+    assert restored_content == content
+    assert restored_content.requirements == preview.requirements
+
+    legacy_preview_payload = json.loads(preview.model_dump_json())
+    legacy_preview_payload.pop("requirements")
+    legacy_preview = type(preview).model_validate(legacy_preview_payload)
+    assert legacy_preview.requirements is None
+
+    changed_template_requirements = preview.requirements.model_copy(
+        update={"template_bytes_fingerprint": "c" * 64}
+    )
+    changed_template = _preview(
+        tmp_path,
+        settings,
+        requirements=changed_template_requirements,
+    )
+    changed_meta_requirements = preview.requirements.model_copy(
+        update={"meta_json_fingerprint": "d" * 64}
+    )
+    changed_meta = _preview(
+        tmp_path,
+        settings,
+        requirements=changed_meta_requirements,
+    )
+
+    assert changed_template.description == preview.description
+    assert changed_meta.description == preview.description
+    assert changed_template.fingerprint != preview.fingerprint
+    assert changed_meta.fingerprint != preview.fingerprint
+    assert make_content_fingerprint(_content_from_preview(changed_template)) != (
+        make_content_fingerprint(content)
+    )
+    assert make_content_fingerprint(_content_from_preview(changed_meta)) != (
+        make_content_fingerprint(content)
+    )
+
+
+def test_p6_requirements_model_is_strict_and_service_rejects_changed_fixed_cta(
+    tmp_path: Path,
+) -> None:
+    settings = _settings(tmp_path)
+    preview = _preview(tmp_path, settings)
+    values = preview.requirements.model_dump()
+    values["template_bytes_fingerprint"] = "not-a-sha256"
+    with pytest.raises(ValidationError):
+        UploadDescriptionRequirementsSnapshot.model_validate(values)
+
+    invalid_cta = preview.requirements.model_copy(update={"fixed_cta": "別の CTA"})
+    with (
+        patch("yt_live_kit.services.schedule.fetch_mine_channel") as fetch,
+        pytest.raises(ScheduleError, match="固定 CTA"),
+    ):
+        build_upload_preview(
+            source_video_id=preview.source_video_id,
+            source_kind=preview.source_kind,
+            clip_id=preview.clip_id,
+            video_path=preview.video_path,
+            title=preview.title,
+            description=preview.description,
+            tags=preview.tags,
+            settings=settings,
+            now=NOW,
+            requirements=invalid_cta,
+        )
+    fetch.assert_not_called()
+
+
+def test_build_preview_description_gate_stops_before_queue_attempt_job_or_api(
+    tmp_path: Path,
+) -> None:
+    settings = _settings(tmp_path)
+    preview = _preview(tmp_path, settings)
+    broken_description = preview.description.replace(SHORTS_DESCRIPTION_CTA, "")
+    with (
+        patch("yt_live_kit.services.schedule.fetch_mine_channel") as fetch,
+        patch("yt_live_kit.services.schedule.list_operations") as queue,
+        patch("yt_live_kit.services.schedule.count_upload_attempts") as attempts,
+        patch("yt_live_kit.services.schedule.create_reserved_operation") as create,
+        patch("yt_live_kit.services.schedule.start_job") as start_job,
+        patch("yt_live_kit.services.schedule.build_upload_snapshot") as api_snapshot,
+        pytest.raises(ScheduleError, match="チャンネル登録 CTA"),
+    ):
+        build_upload_preview(
+            source_video_id=preview.source_video_id,
+            source_kind=preview.source_kind,
+            clip_id=preview.clip_id,
+            video_path=preview.video_path,
+            title=preview.title,
+            description=broken_description,
+            tags=preview.tags,
+            settings=settings,
+            now=NOW,
+            requirements=preview.requirements,
+        )
+    fetch.assert_not_called()
+    queue.assert_not_called()
+    attempts.assert_not_called()
+    create.assert_not_called()
+    start_job.assert_not_called()
+    api_snapshot.assert_not_called()
+
+
+def test_confirm_description_mutation_stops_before_operation_job_or_api(
+    tmp_path: Path,
+) -> None:
+    settings = _settings(tmp_path)
+    original = _preview(tmp_path, settings)
+    preview = original.model_copy(
+        update={"description": original.description.replace(SHORTS_DESCRIPTION_CTA, "")}
+    )
+    start_job = MagicMock()
+    with (
+        patch("yt_live_kit.services.schedule.fetch_mine_channel") as fetch,
+        patch("yt_live_kit.services.schedule.create_reserved_operation") as create,
+        patch("yt_live_kit.services.schedule.build_upload_snapshot") as api_snapshot,
+        pytest.raises(ScheduleError, match="チャンネル登録 CTA"),
+    ):
+        confirm_and_start_upload(
+            preview,
+            self_declared_made_for_kids=False,
+            contains_synthetic_media=False,
+            community_guidelines_confirmed=True,
+            settings=settings,
+            now=NOW,
+            start_job_fn=start_job,
+        )
+    fetch.assert_not_called()
+    create.assert_not_called()
+    api_snapshot.assert_not_called()
+    start_job.assert_not_called()
+    assert list_operations(settings) == ()
+    assert count_upload_attempts(settings, now=NOW) == 0
+
+
+def test_confirm_uses_frozen_description_requirements_without_rereading_template_or_meta(
+    tmp_path: Path,
+) -> None:
+    settings = _settings(tmp_path)
+    preview = _preview(tmp_path, settings)
+    with (
+        patch("yt_live_kit.services.schedule.fetch_mine_channel", return_value=CHANNEL),
+        patch("yt_live_kit.services.youtube_api.probe_duration", return_value=30.0),
+        patch(
+            "yt_live_kit.services.description._read_shorts_template_bytes",
+            side_effect=AssertionError("template must remain frozen"),
+        ),
+        patch(
+            "yt_live_kit.services.description._load_video_meta_with_fingerprint",
+            side_effect=AssertionError("meta must remain frozen"),
+        ),
+    ):
+        operation = confirm_and_start_upload(
+            preview,
+            self_declared_made_for_kids=False,
+            contains_synthetic_media=False,
+            community_guidelines_confirmed=True,
+            settings=settings,
+            now=NOW,
+            operation_id_factory=lambda: "frozen-operation",
+            job_id_factory=lambda: "frozen-job",
+            start_job_fn=lambda *args, **kwargs: kwargs["requested_job_id"],
+        )
+
+    assert operation.content.description == preview.description
+    assert operation.content.requirements == preview.requirements
+    assert list_operations(settings)[0].content.description == preview.description
+
+
+def test_confirm_rejects_legacy_preview_before_channel_queue_or_job_reads(
+    tmp_path: Path,
+) -> None:
+    settings = _settings(tmp_path)
+    preview = _preview(tmp_path, settings).model_copy(update={"requirements": None})
+    start_job = MagicMock()
+    with (
+        patch("yt_live_kit.services.schedule.fetch_mine_channel") as fetch,
+        patch("yt_live_kit.services.schedule.create_reserved_operation") as create,
+        pytest.raises(ScheduleError, match="旧形式.*新しいプレビュー"),
+    ):
+        confirm_and_start_upload(
+            preview,
+            self_declared_made_for_kids=False,
+            contains_synthetic_media=False,
+            community_guidelines_confirmed=True,
+            settings=settings,
+            now=NOW,
+            start_job_fn=start_job,
+        )
+    fetch.assert_not_called()
+    create.assert_not_called()
+    start_job.assert_not_called()
     assert list_operations(settings) == ()
     assert count_upload_attempts(settings, now=NOW) == 0
 
@@ -652,6 +892,69 @@ def test_confirm_saves_single_record_then_starts_same_ids(tmp_path: Path) -> Non
     assert calls[0][1]["requested_job_id"] == "job-1"
     assert calls[0][1]["operation_id"] == "operation-1"
     assert count_upload_attempts(settings, now=NOW) == 0
+
+
+def test_confirmed_preview_description_reaches_worker_and_insert_body_unchanged(
+    tmp_path: Path,
+) -> None:
+    settings = _settings(tmp_path)
+    preview = _preview(tmp_path, settings)
+    with (
+        patch("yt_live_kit.services.schedule.fetch_mine_channel", return_value=CHANNEL),
+        patch("yt_live_kit.services.youtube_api.probe_duration", return_value=30.0),
+    ):
+        operation = confirm_and_start_upload(
+            preview,
+            self_declared_made_for_kids=False,
+            contains_synthetic_media=False,
+            community_guidelines_confirmed=True,
+            settings=settings,
+            now=NOW,
+            operation_id_factory=lambda: "worker-operation",
+            job_id_factory=lambda: "worker-job",
+            start_job_fn=lambda *args, **kwargs: kwargs["requested_job_id"],
+        )
+
+    persisted = list_operations(settings)[0]
+    assert persisted.content.description == preview.description
+
+    insert_bodies: list[dict[str, object]] = []
+
+    def fake_body(snapshot):
+        body = {"snippet": {"description": snapshot.description}}
+        insert_bodies.append(body)
+        return body
+
+    upload_result = UploadResult(state="uploaded", video_id="youtube-worker", error=None)
+    with (
+        patch(
+            "yt_live_kit.services.upload_queue.fetch_mine_channel",
+            return_value=persisted.content.channel,
+        ),
+        patch("yt_live_kit.services.upload_queue.validate_snapshot_identity"),
+        patch(
+            "yt_live_kit.services.upload_queue.build_upload_body",
+            side_effect=fake_body,
+        ) as build_body,
+        patch(
+            "yt_live_kit.services.upload_queue.upload_video_resumable",
+            return_value=upload_result,
+        ) as upload,
+        patch("yt_live_kit.services.upload_queue.poll_processing_status", return_value=()),
+        patch("yt_live_kit.services.jobs.update_job"),
+    ):
+        upload_job_target(
+            report=MagicMock(),
+            settings=settings,
+            job_id=operation.job_id,
+            operation_id=operation.operation_id,
+        )
+
+    worker_snapshot = upload.call_args.args[0]
+    insert_body = insert_bodies[0]
+    build_body.assert_called_once_with(persisted.content)
+    assert worker_snapshot.description == preview.description
+    assert insert_body["snippet"]["description"] == preview.description
 
 
 def test_confirm_preserves_manual_publish_at_through_operation_and_job_start(
@@ -902,6 +1205,7 @@ def test_attempt_race_is_independent_from_publish_date(tmp_path: Path) -> None:
             tags=preview.tags,
             settings=settings,
             now=NOW,
+            requirements=preview.requirements,
         )
         with pytest.raises(ScheduleError, match="試行上限"):
             confirm_and_start_upload(

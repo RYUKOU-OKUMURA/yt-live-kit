@@ -17,16 +17,43 @@ from yt_live_kit.models.upload import (
     UploadOperation,
     UploadStatusObservation,
 )
+from yt_live_kit.services.description import (
+    SHORTS_DESCRIPTION_CTA,
+    ShortsDescriptionBuild,
+    ShortsDescriptionRequirements,
+)
 from yt_live_kit.services.schedule import (
     SchedulePolicy,
     UploadPreview,
     save_schedule_policy,
 )
-from yt_live_kit.services.upload_queue import UploadQueueError
+from yt_live_kit.services.upload_queue import (
+    RelatedVideoSummary,
+    UploadQueueError,
+    save_reserved_operation,
+)
 from yt_live_kit.ui.components import upload
 
 
 NOW = datetime(2026, 8, 1, tzinfo=timezone.utc)
+
+
+def _quality_build(description: str = "説明文\n元動画\nhttps://example.com/source\n" + SHORTS_DESCRIPTION_CTA) -> ShortsDescriptionBuild:
+    return ShortsDescriptionBuild(
+        description=description,
+        requirements=ShortsDescriptionRequirements(
+            generated_description="説明文",
+            source_title="元動画",
+            source_url="https://example.com/source",
+            fixed_cta=SHORTS_DESCRIPTION_CTA,
+            template_bytes_fingerprint="a" * 64,
+            meta_json_fingerprint="b" * 64,
+            generated_description_occurrences=1,
+            source_title_occurrences=1,
+            source_url_occurrences=1,
+            fixed_cta_line_occurrences=1,
+        ),
+    )
 
 
 def _preview(tmp_path: Path) -> UploadPreview:
@@ -160,6 +187,7 @@ def test_dialog_confirm_passes_explicit_choices_and_stores_operation(tmp_path: P
     assert confirm.call_args.kwargs["self_declared_made_for_kids"] is True
     assert confirm.call_args.kwargs["contains_synthetic_media"] is False
     assert confirm.call_args.kwargs["community_guidelines_confirmed"] is True
+    assert confirm.call_args.args[0].description == preview.description
     store.assert_called_once_with("source-1", "operation-1")
     set_job.assert_called_once_with("job-1")
 
@@ -356,11 +384,12 @@ def test_metadata_editor_supports_title_candidates_free_edit_and_native_tags() -
         tags=("既存 1", "既存 2"),
     )
     with (
-        patch.object(upload.st, "selectbox", return_value="候補 2") as selectbox,
+        patch.object(upload.st, "selectbox", return_value=1) as selectbox,
         patch.object(upload.st, "text_input", return_value="自由編集タイトル") as text_input,
         patch.object(upload.st, "text_area", return_value="編集後の説明文") as text_area,
         patch.object(upload.st, "multiselect", return_value=["既存 2", "追加タグ"]) as multiselect,
         patch.object(upload.st, "caption"),
+        patch.object(upload.st, "warning") as warning,
     ):
         edited = upload._render_upload_metadata_editor(
             item,
@@ -369,12 +398,132 @@ def test_metadata_editor_supports_title_candidates_free_edit_and_native_tags() -
         )
 
     assert edited == ("自由編集タイトル", "編集後の説明文", ("既存 2", "追加タグ"))
-    assert selectbox.call_args.args[1] == ("候補 1", "候補 2")
+    assert selectbox.call_args.args[1] == (0, 1, 2)
+    assert selectbox.call_args.kwargs["format_func"](0) == "検索明快型: 候補 1"
+    assert selectbox.call_args.kwargs["format_func"](1) == "仕事影響型: 候補 2"
+    assert selectbox.call_args.kwargs["format_func"](2) == "好奇心型: 候補 2"
     assert text_input.call_args.kwargs["value"] == "候補 2"
     assert text_input.call_args.kwargs["max_chars"] == 100
     assert text_area.call_args.kwargs["value"] == "合成済みの説明文"
     assert multiselect.call_args.kwargs["default"] == ["既存 1", "既存 2"]
     assert multiselect.call_args.kwargs["accept_new_options"] is True
+    assert any("重複" in item.args[0] for item in warning.call_args_list)
+
+
+def test_title_direction_renderer_shows_fixed_labels_length_warning_and_legacy_guidance() -> None:
+    item = MagicMock(title_candidates=("短", "二つ目の候補"))
+    with (
+        patch.object(upload.st, "markdown") as markdown,
+        patch.object(upload.st, "write"),
+        patch.object(upload.st, "warning") as warning,
+        patch.object(upload.st, "info") as info,
+    ):
+        upload._render_title_candidate_directions(item)
+
+    rendered = "\n".join(str(item.args[0]) for item in markdown.call_args_list)
+    assert "検索明快型" in rendered
+    assert "仕事影響型" in rendered
+    assert "好奇心型" in rendered
+    warning_text = "\n".join(str(item.args[0]) for item in warning.call_args_list)
+    assert "18〜32" in warning_text
+    assert "保存は可能" in warning_text
+    assert "手動補完" in warning_text
+    assert "再生成" in info.call_args.args[0]
+
+
+def test_title_length_warning_does_not_block_p6_preview(tmp_path: Path) -> None:
+    path = (tmp_path / "short.mp4").resolve()
+    path.write_bytes(b"video")
+    item = MagicMock(
+        output_path=path,
+        target_id="clip-1",
+        title_candidates=("短", "二つ目の候補", "三つ目の候補"),
+        description="説明文",
+        tags=(),
+    )
+    preview = _preview(tmp_path)
+    with (
+        patch.object(upload, "build_shorts_description_for_upload", return_value=_quality_build()),
+        patch.object(upload, "build_upload_preview", return_value=preview) as build,
+        patch.object(upload, "upload_preview_dialog") as dialog,
+    ):
+        upload._open_preview(
+            "source-1",
+            item,
+            Settings(data_dir=tmp_path),
+            title="短",
+            p6_quality_gate=True,
+        )
+
+    assert build.call_args.kwargs["title"] == "短"
+    dialog.assert_called_once()
+
+
+def test_legacy_title_candidates_can_open_preview_after_manual_completion(
+    tmp_path: Path,
+) -> None:
+    path = (tmp_path / "short.mp4").resolve()
+    path.write_bytes(b"video")
+    item = MagicMock(
+        output_path=path,
+        target_id="clip-1",
+        title_candidates=("legacy候補1", "legacy候補2"),
+        description="説明文",
+        tags=(),
+    )
+    preview = _preview(tmp_path)
+    with (
+        patch.object(upload, "build_shorts_description_for_upload", return_value=_quality_build()),
+        patch.object(upload, "build_upload_preview", return_value=preview) as build,
+        patch.object(upload, "upload_preview_dialog") as dialog,
+    ):
+        upload._open_preview(
+            "source-1",
+            item,
+            Settings(data_dir=tmp_path),
+            title="手動補完した最終タイトル",
+            p6_quality_gate=True,
+        )
+
+    assert build.call_args.kwargs["title"] == "手動補完した最終タイトル"
+    assert build.call_args.kwargs["requirements"] is not None
+    dialog.assert_called_once()
+
+
+def test_p6_editor_text_equal_to_base_description_is_validated_not_replaced(
+    tmp_path: Path,
+) -> None:
+    path = (tmp_path / "short.mp4").resolve()
+    path.write_bytes(b"video")
+    item = MagicMock(
+        output_path=path,
+        target_id="clip-1",
+        title_candidates=("検索明快なタイトル", "仕事影響のタイトル", "好奇心のタイトル"),
+        description="説明文",
+        tags=(),
+    )
+    with (
+        patch.object(upload, "build_shorts_description_for_upload", return_value=_quality_build()),
+        patch.object(upload, "build_upload_preview") as build,
+        patch.object(upload, "upload_preview_dialog") as dialog,
+        patch.object(upload.st, "error") as error,
+    ):
+        upload._open_preview(
+            "source-1",
+            item,
+            Settings(data_dir=tmp_path),
+            title="検索明快なタイトル",
+            description=item.description,
+            p6_quality_gate=True,
+        )
+
+    build.assert_not_called()
+    dialog.assert_not_called()
+    error.assert_called_once()
+    error_message = error.call_args.args[0]
+    assert "元動画タイトル" in error_message
+    assert "開始秒付き元動画 URL" in error_message
+    assert "チャンネル登録 CTA" in error_message
 
 
 def test_schedule_editor_uses_native_date_time_and_job_item_unique_keys() -> None:
@@ -692,12 +841,16 @@ def test_upload_section_passes_first_segment_start_to_preview(tmp_path: Path) ->
         patch.object(upload, "load_latest_shorts_queue_result", return_value=result),
         patch.object(upload, "get_next_upload_slot", return_value=(policy, requested)),
         patch.object(upload, "_resolve_operation", return_value=None),
-        patch.object(upload, "build_shorts_description", return_value="合成済み説明文"),
+        patch.object(
+            upload,
+            "build_shorts_description_for_upload",
+            return_value=_quality_build(),
+        ) as quality_build,
         patch.object(
             upload,
             "_render_upload_metadata_editor",
             return_value=("自由編集タイトル", "編集後の説明文", ("編集タグ",)),
-        ),
+        ) as editor,
         patch.object(
             upload,
             "_render_upload_schedule_editor",
@@ -718,7 +871,110 @@ def test_upload_section_passes_first_segment_start_to_preview(tmp_path: Path) ->
     assert open_preview.call_args.kwargs["description"] == "編集後の説明文"
     assert open_preview.call_args.kwargs["tags"] == ("編集タグ",)
     assert open_preview.call_args.kwargs["requested_publish_at"] == requested
+    quality_build.assert_called_once_with(
+        item.description,
+        video_id="source-1",
+        start_ms=90_000,
+        settings=settings,
+    )
+    assert editor.call_args.kwargs["initial_description"] == quality_build.return_value.description
     assert "shorts_description_template.txt" in info.call_args.args[0]
+
+
+def test_related_video_ui_remains_visible_before_publish_at(tmp_path: Path) -> None:
+    operation = _operation(tmp_path, state="uploaded")
+    content = operation.content.model_copy(
+        update={"publish_at": NOW + timedelta(days=2)}
+    )
+    operation = operation.model_copy(update={"content": content})
+    settings = Settings(data_dir=tmp_path)
+    with (
+        patch.object(upload, "datetime") as datetime_cls,
+        patch.object(upload.st, "container", side_effect=_container),
+        patch.object(upload.st, "warning"),
+        patch.object(upload.st, "markdown"),
+        patch.object(upload.st, "caption"),
+        patch.object(upload.st, "write") as write,
+        patch.object(upload.st, "button", return_value=False),
+        patch.object(upload, "start_publication_poll") as start_poll,
+    ):
+        datetime_cls.now.return_value = NOW
+        upload.render_upload_operation(operation, settings=settings)
+
+    start_poll.assert_not_called()
+    rendered = "\n".join(str(call_item.args[0]) for call_item in write.call_args_list)
+    assert "設定対象の元動画 ID: source-1" in rendered
+    assert "対象 Shorts video ID: youtube-1" in rendered
+
+
+def test_related_video_ui_remains_visible_after_terminal_publication_poll(
+    tmp_path: Path,
+) -> None:
+    base = _operation(tmp_path, state="uploaded")
+    observation = UploadStatusObservation(
+        polled_at=NOW + timedelta(minutes=1),
+        phase="publication",
+        status={},
+        processing_details={},
+        classification="published",
+        error=None,
+    )
+    operation = base.model_copy(
+        update={
+            "content": base.content.model_copy(
+                update={"publish_at": NOW - timedelta(minutes=1)}
+            ),
+            "poll_history": (observation,),
+        }
+    )
+    settings = Settings(data_dir=tmp_path)
+    with (
+        patch.object(upload, "datetime") as datetime_cls,
+        patch.object(upload.st, "container", side_effect=_container),
+        patch.object(upload.st, "warning"),
+        patch.object(upload.st, "markdown"),
+        patch.object(upload.st, "caption") as caption,
+        patch.object(upload.st, "write"),
+        patch.object(upload.st, "button", return_value=False),
+        patch.object(upload, "start_publication_poll") as start_poll,
+    ):
+        datetime_cls.now.return_value = NOW
+        upload.render_upload_operation(operation, settings=settings)
+
+    start_poll.assert_not_called()
+    assert any("terminal 判定済み" in item.args[0] for item in caption.call_args_list)
+
+
+def test_related_video_dialog_requires_explicit_confirmation_and_uses_both_canonical_ids(
+    tmp_path: Path,
+) -> None:
+    settings = Settings(data_dir=tmp_path)
+    with (
+        patch.object(upload.st, "warning"),
+        patch.object(upload.st, "container", side_effect=_container),
+        patch.object(upload.st, "write"),
+        patch.object(upload.st, "markdown"),
+        patch.object(upload.st, "checkbox", return_value=True) as checkbox,
+        patch.object(upload.st, "button", return_value=True),
+        patch.object(upload.st, "success"),
+        patch.object(upload.st, "rerun"),
+        patch.object(upload, "confirm_related_video") as confirm,
+    ):
+        upload.related_video_confirm_dialog.__wrapped__(
+            "operation-1",
+            "source-1",
+            "youtube-1",
+            settings,
+            "dialog-1",
+        )
+
+    assert checkbox.call_args.kwargs["value"] is False
+    assert confirm.call_args.args[:4] == (
+        "operation-1",
+        "source-1",
+        "youtube-1",
+        settings,
+    )
 
 
 def test_upload_section_blocks_partial_running_manifest(tmp_path: Path) -> None:
@@ -749,6 +1005,90 @@ def test_upload_section_blocks_partial_running_manifest(tmp_path: Path) -> None:
     assert "生成が完了していない" in info.call_args.args[0]
     next_slot.assert_not_called()
     button.assert_not_called()
+
+
+@pytest.mark.parametrize("manifest_kind", ["none", "interrupted", "done-empty"])
+def test_upload_section_keeps_global_related_pending_reachable_without_latest_manifest(
+    tmp_path: Path, manifest_kind: str
+) -> None:
+    settings = Settings(data_dir=tmp_path)
+    operation = _operation(tmp_path, state="uploaded")
+    summary = RelatedVideoSummary(pending_count=1, operations=(operation,))
+    if manifest_kind == "none":
+        result = None
+    elif manifest_kind == "interrupted":
+        result = MagicMock(
+            status="interrupted",
+            items=(),
+            job_id="interrupted-job",
+        )
+    else:
+        result = MagicMock(status="done", items=(), job_id="stale-job")
+    with (
+        patch.object(upload, "load_latest_shorts_queue_result", return_value=result),
+        patch.object(upload, "get_related_video_summary", return_value=summary) as get_summary,
+        patch.object(upload, "related_video_confirm_dialog") as dialog,
+        patch.object(upload.st, "container", side_effect=_container),
+        patch.object(upload.st, "caption"),
+        patch.object(upload.st, "markdown"),
+        patch.object(upload.st, "write") as write,
+        patch.object(upload.st, "button", return_value=True),
+        patch.object(upload.st, "info"),
+        patch.object(upload.st, "error"),
+        patch.object(upload, "_open_preview") as open_preview,
+    ):
+        upload.render_upload_section("source-1", settings)
+
+    get_summary.assert_called_once_with(settings)
+    dialog.assert_called_once_with(
+        operation.operation_id,
+        operation.source_video_id,
+        operation.video_id,
+        settings,
+        dialog.call_args.args[4],
+    )
+    open_preview.assert_not_called()
+    rendered = "\n".join(str(item.args[0]) for item in write.call_args_list)
+    assert "設定対象の元動画 ID: source-1" in rendered
+    assert "対象 Shorts video ID: youtube-1" in rendered
+
+
+@pytest.mark.parametrize("output_kind", ["none", "missing"])
+def test_upload_section_restores_uploaded_operation_before_output_gate(
+    tmp_path: Path, output_kind: str
+) -> None:
+    operation = _operation(tmp_path, state="uploaded")
+    output_path = None if output_kind == "none" else tmp_path / "moved.mp4"
+    item = MagicMock(
+        status="succeeded",
+        output_path=output_path,
+        title_candidates=("検索明快なタイトル", "仕事影響のタイトル", "好奇心のタイトル"),
+        target_id="clip-1",
+    )
+    result = MagicMock(status="done", items=(item,), job_id="shorts-job", clip_specs=())
+    settings = Settings(data_dir=tmp_path)
+    policy = SchedulePolicy(daily_times=["09:00"])
+    requested = datetime(2026, 8, 5, 15, 45, tzinfo=ZoneInfo(policy.timezone))
+    with (
+        patch.object(upload, "load_latest_shorts_queue_result", return_value=result),
+        patch.object(upload, "get_next_upload_slot", return_value=(policy, requested)),
+        patch.object(upload, "_render_related_video_summary_panel"),
+        patch.object(upload, "_resolve_operation", return_value=operation) as resolve,
+        patch.object(upload, "render_upload_operation") as render_operation,
+        patch.object(upload, "_open_preview") as open_preview,
+        patch.object(upload.st, "container", side_effect=_container),
+        patch.object(upload.st, "caption"),
+        patch.object(upload.st, "markdown"),
+        patch.object(upload.st, "warning") as warning,
+        patch.object(upload.st, "button") as button,
+    ):
+        upload.render_upload_section("source-1", settings)
+
+    resolve.assert_called_once_with("source-1", "clip-1", settings)
+    render_operation.assert_called_once_with(operation, settings=settings)
+    open_preview.assert_not_called()
+    button.assert_not_called()
+    assert any("予約投稿せず" in call.args[0] for call in warning.call_args_list)
 
 
 def test_upload_section_blocks_interrupted_manifest_with_recovery_guidance(
@@ -791,7 +1131,7 @@ def test_upload_section_blocks_missing_output_before_reservation_controls(
     with (
         patch.object(upload, "load_latest_shorts_queue_result", return_value=result),
         patch.object(upload, "get_next_upload_slot", return_value=(policy, requested)),
-        patch.object(upload, "_resolve_operation") as resolve,
+        patch.object(upload, "_resolve_operation", return_value=None) as resolve,
         patch.object(upload.st, "container", side_effect=_container),
         patch.object(upload.st, "caption"),
         patch.object(upload.st, "markdown"),
@@ -801,7 +1141,7 @@ def test_upload_section_blocks_missing_output_before_reservation_controls(
     ):
         upload.render_upload_section("source-1", Settings(data_dir=tmp_path))
 
-    resolve.assert_not_called()
+    resolve.assert_called_once_with("source-1", "clip-1", Settings(data_dir=tmp_path))
     button.assert_not_called()
     assert any("予約投稿せず" in call.args[0] for call in warning.call_args_list)
 
@@ -833,7 +1173,7 @@ def test_upload_section_validates_legacy_manifest_before_reservation(
         patch.object(
             upload, "can_reserve_shorts_queue_item", return_value=False
         ) as reserve,
-        patch.object(upload, "_resolve_operation") as resolve,
+        patch.object(upload, "_resolve_operation", return_value=None) as resolve,
         patch.object(upload.st, "container", side_effect=_container),
         patch.object(upload.st, "caption"),
         patch.object(upload.st, "markdown"),
@@ -844,7 +1184,7 @@ def test_upload_section_validates_legacy_manifest_before_reservation(
         upload.render_upload_section("source-1", settings)
 
     reserve.assert_called_once_with(result, item, settings)
-    resolve.assert_not_called()
+    resolve.assert_called_once_with("source-1", "clip-1", settings)
     button.assert_not_called()
     assert any("予約投稿せず" in call.args[0] for call in warning.call_args_list)
 
@@ -869,7 +1209,11 @@ def test_invalid_schedule_or_unclicked_button_creates_no_preview_operation_or_jo
         patch.object(upload, "load_latest_shorts_queue_result", return_value=result),
         patch.object(upload, "get_next_upload_slot", return_value=(policy, initial)),
         patch.object(upload, "_resolve_operation", return_value=None),
-        patch.object(upload, "build_shorts_description", return_value="説明文"),
+        patch.object(
+            upload,
+            "build_shorts_description_for_upload",
+            return_value=_quality_build(),
+        ),
         patch.object(
             upload,
             "_render_upload_metadata_editor",
@@ -1032,14 +1376,20 @@ def test_uploaded_operation_does_not_offer_api_cta_before_publish_time(
 def test_operation_session_mapping_is_scoped_to_video_and_fallbacks_by_clip(tmp_path: Path) -> None:
     settings = Settings(data_dir=tmp_path)
     operation = _operation(tmp_path)
+    clip_two_operation = operation.model_copy(
+        update={"operation_id": "operation-2", "clip_id": "clip-2"}
+    )
+    save_reserved_operation(operation, settings)
+    save_reserved_operation(clip_two_operation, settings)
     with (
         patch.object(upload, "_operation_ids", return_value={"source-1": "operation-1"}),
-        patch.object(upload, "load_operation", return_value=operation) as load,
     ):
         assert upload._resolve_operation("source-1", "clip-1", settings) == operation
-        assert upload._resolve_operation("source-1", "clip-2", settings) is None
+        assert (
+            upload._resolve_operation("source-1", "clip-2", settings)
+            == clip_two_operation
+        )
         assert upload._resolve_operation("other-video", "clip-1", settings) is None
-    assert load.call_count == 2
 
     with (
         patch.object(upload, "_operation_ids", return_value={}),

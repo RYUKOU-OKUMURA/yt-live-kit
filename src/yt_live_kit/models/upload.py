@@ -78,6 +78,31 @@ class UploadChannel(_FrozenModel):
     title: str = Field(min_length=1)
 
 
+class UploadDescriptionRequirementsSnapshot(_FrozenModel):
+    """投稿用ショート概要欄の不変要件 snapshot.
+
+    ``services.description.ShortsDescriptionRequirements`` は純粋 validator
+    用の dataclass であり、永続層から service 層へ逆向き import しないため、
+    queue / preview にはこの Pydantic model を保存する。legacy queue では
+    field 自体が無いため、親 model 側で optional default を許容する。
+    """
+
+    generated_description: str
+    source_title: str
+    source_url: str
+    fixed_cta: str
+    template_bytes_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    meta_json_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    generated_description_occurrences: int = Field(ge=0)
+    source_title_occurrences: int = Field(ge=0)
+    source_url_occurrences: int = Field(ge=0)
+    fixed_cta_line_occurrences: int = Field(ge=0)
+
+
+# 呼び出し側が P6-2 の名称をそのまま参照できる互換 alias。
+ShortsDescriptionRequirementsSnapshot = UploadDescriptionRequirementsSnapshot
+
+
 class UploadContentSnapshot(_FrozenModel):
     """確認画面と API body を結ぶ不変スナップショット."""
 
@@ -96,6 +121,9 @@ class UploadContentSnapshot(_FrozenModel):
     contains_synthetic_media: StrictBool
     community_guidelines_confirmed: Literal[True]
     community_guidelines_confirmed_at: datetime
+    # P4 / P2 の legacy operation はこの field が無くても読み込める。
+    # P6 の新規 Shorts preview / confirm では schedule service が必須化する。
+    requirements: UploadDescriptionRequirementsSnapshot | None = None
 
     @field_validator("video_path")
     @classmethod

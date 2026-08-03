@@ -21,7 +21,17 @@ from pydantic import (
 )
 
 from yt_live_kit.config import Settings
-from yt_live_kit.models.upload import UploadChannel, UploadContentSnapshot, UploadOperation
+from yt_live_kit.models.upload import (
+    UploadChannel,
+    UploadContentSnapshot,
+    UploadDescriptionRequirementsSnapshot,
+    UploadOperation,
+)
+from yt_live_kit.services.description import (
+    DescriptionError,
+    ShortsDescriptionRequirements,
+    validate_shorts_description_snapshot,
+)
 from yt_live_kit.services.jobs import start_job
 from yt_live_kit.services._fsutil import write_text_atomically
 from yt_live_kit.services._paths import PathConfinementError, confined_path
@@ -128,6 +138,9 @@ class UploadPreview(BaseModel):
     title: str = Field(min_length=1, max_length=100)
     description: str
     tags: tuple[str, ...]
+    # legacy preview は field 無しでも読み込める。P6 UI で新規作成する
+    # Shorts preview は build_upload_preview に requirements を渡して凍結する。
+    requirements: UploadDescriptionRequirementsSnapshot | None = None
     policy: SchedulePolicy
     publish_at: datetime
     publish_at_utc_z: str
@@ -475,6 +488,56 @@ def make_content_fingerprint(snapshot: UploadContentSnapshot) -> str:
     return _canonical_fingerprint(snapshot.model_dump(mode="json"))
 
 
+_DESCRIPTION_REQUIREMENTS_FIELDS = (
+    "generated_description",
+    "source_title",
+    "source_url",
+    "fixed_cta",
+    "template_bytes_fingerprint",
+    "meta_json_fingerprint",
+    "generated_description_occurrences",
+    "source_title_occurrences",
+    "source_url_occurrences",
+    "fixed_cta_line_occurrences",
+)
+
+
+def make_description_requirements_snapshot(
+    requirements: ShortsDescriptionRequirements
+    | UploadDescriptionRequirementsSnapshot,
+) -> UploadDescriptionRequirementsSnapshot:
+    """P6-2 の service 要件を永続可能な canonical model へ変換する."""
+    if isinstance(requirements, UploadDescriptionRequirementsSnapshot):
+        return requirements
+    if not isinstance(requirements, ShortsDescriptionRequirements):
+        raise ScheduleError("概要欄要件 snapshot の形式が正しくありません。")
+    try:
+        return UploadDescriptionRequirementsSnapshot.model_validate(
+            {
+                field: getattr(requirements, field)
+                for field in _DESCRIPTION_REQUIREMENTS_FIELDS
+            }
+        )
+    except ValidationError as exc:
+        raise ScheduleError("概要欄要件 snapshot の形式が正しくありません。") from exc
+
+
+def validate_upload_description(
+    description: str,
+    requirements: ShortsDescriptionRequirements
+    | UploadDescriptionRequirementsSnapshot,
+) -> None:
+    """同じ immutable 要件 snapshot で投稿本文を純粋に再検証する."""
+    snapshot = make_description_requirements_snapshot(requirements)
+    try:
+        validate_shorts_description_snapshot(
+            description,
+            snapshot.model_dump(mode="python"),
+        )
+    except DescriptionError as exc:
+        raise ScheduleError(str(exc)) from exc
+
+
 def _preview_payload(preview: UploadPreview | None = None, **values: Any) -> dict[str, Any]:
     if preview is not None:
         values = {
@@ -489,6 +552,11 @@ def _preview_payload(preview: UploadPreview | None = None, **values: Any) -> dic
             "title": preview.title,
             "description": preview.description,
             "tags": list(preview.tags),
+            "requirements": (
+                preview.requirements.model_dump(mode="json")
+                if preview.requirements is not None
+                else None
+            ),
             "policy": preview.policy.model_dump(mode="json"),
             "publish_at": preview.publish_at.isoformat(),
             "publish_at_utc_z": preview.publish_at_utc_z,
@@ -512,11 +580,24 @@ def build_upload_preview(
     settings: Settings,
     now: datetime | None = None,
     requested_publish_at: datetime | None = None,
+    requirements: ShortsDescriptionRequirements
+    | UploadDescriptionRequirementsSnapshot
+    | None = None,
 ) -> UploadPreview:
     """自動または手動 slot で read-only な immutable preview を作る."""
     reference = now or datetime.now(timezone.utc)
     if reference.tzinfo is None or reference.utcoffset() is None:
         raise ScheduleError("現在日時はタイムゾーン付きで指定してください。")
+    requirements_snapshot = (
+        make_description_requirements_snapshot(requirements)
+        if requirements is not None
+        else None
+    )
+    # 概要欄 gate は channels.list、slot / attempt の読み出しより前に通す。
+    # confirm 境界でも同じ snapshot を渡すため、mutable な template / meta は
+    # ここでは再読込しない。
+    if requirements_snapshot is not None:
+        validate_upload_description(description, requirements_snapshot)
     try:
         policy = load_schedule_policy(settings)
         operations = list_operations(settings)
@@ -549,6 +630,10 @@ def build_upload_preview(
             settings=settings,
             now=reference,
         )
+        if requirements_snapshot is not None:
+            checked = checked.model_copy(
+                update={"requirements": requirements_snapshot}
+            )
         attempts = count_upload_attempts(settings, now=reference)
     except (UploadQueueError, YouTubeAPIError) as exc:
         raise ScheduleError(str(exc)) from exc
@@ -564,6 +649,11 @@ def build_upload_preview(
         "title": checked.title,
         "description": checked.description,
         "tags": list(checked.tags),
+        "requirements": (
+            requirements_snapshot.model_dump(mode="json")
+            if requirements_snapshot is not None
+            else None
+        ),
         "policy": policy.model_dump(mode="json"),
         "publish_at": slot.isoformat(),
         "publish_at_utc_z": to_utc_rfc3339_z(slot),
@@ -638,6 +728,11 @@ def confirm_and_start_upload(
     start_job_fn: Callable[..., str] | None = None,
 ) -> UploadOperation:
     """再検証、単一 record 保存、同一 ID の job 起動を順に行う."""
+    if preview.requirements is None:
+        raise ScheduleError(
+            "旧形式の投稿プレビューは再利用できません。"
+            "概要欄要件 snapshot を含む新しいプレビューを作成してください。"
+        )
     if type(self_declared_made_for_kids) is not bool:
         raise ScheduleError("子ども向けかどうかを「はい」または「いいえ」で選択してください。")
     if type(contains_synthetic_media) is not bool:
@@ -647,6 +742,9 @@ def confirm_and_start_upload(
     reference = now or datetime.now(timezone.utc)
     if reference.tzinfo is None or reference.utcoffset() is None:
         raise ScheduleError("現在日時はタイムゾーン付きで指定してください。")
+    # queue / channel / job / attempt の読み出し・保存より前に、confirm 時点の
+    # 同じ本文を同じ immutable requirements で再検証する。
+    validate_upload_description(preview.description, preview.requirements)
 
     with schedule_lock(settings):
         current = build_upload_preview(
@@ -660,6 +758,7 @@ def confirm_and_start_upload(
             settings=settings,
             now=reference,
             requested_publish_at=preview.publish_at,
+            requirements=preview.requirements,
         )
         if not _same_preview(preview, current):
             raise ScheduleError("確認後に投稿内容・予約枠・試行枠が変わりました。新しく確認してください。")
@@ -688,6 +787,10 @@ def confirm_and_start_upload(
                 settings=settings,
                 now=reference,
             )
+            if current.requirements is not None:
+                content = content.model_copy(
+                    update={"requirements": current.requirements}
+                )
         except YouTubeAPIError as exc:
             raise ScheduleError(str(exc)) from exc
         content_fingerprint = make_content_fingerprint(content)

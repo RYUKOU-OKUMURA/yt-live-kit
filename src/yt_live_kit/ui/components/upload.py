@@ -14,6 +14,7 @@ from yt_live_kit.models.upload import UploadOperation
 from yt_live_kit.services.description import (
     DescriptionError,
     build_shorts_description,
+    build_shorts_description_for_upload,
     get_shorts_template_path,
 )
 from yt_live_kit.services.schedule import (
@@ -25,6 +26,7 @@ from yt_live_kit.services.schedule import (
     get_next_upload_slot,
     latest_operation_for_source,
     make_requested_publish_at,
+    validate_upload_description,
 )
 from yt_live_kit.services.shorts_queue import (
     ShortsQueueError,
@@ -36,6 +38,8 @@ from yt_live_kit.services.shorts_queue import (
 from yt_live_kit.services.shorts_line import LineReservationStartedError, LineStateError
 from yt_live_kit.services.upload_queue import (
     UploadQueueError,
+    confirm_related_video,
+    get_related_video_summary,
     load_operation,
     start_publication_poll,
 )
@@ -76,6 +80,12 @@ _PUBLICATION_POLL_TERMINAL = frozenset(
         "publication_timeout",
     }
 )
+_TITLE_DIRECTIONS = ("検索明快型", "仕事影響型", "好奇心型")
+_RELATED_STATUS_LABELS = {
+    "not_ready": "まだ確認できません",
+    "pending": "Studio 設定の確認待ち",
+    "confirmed": "Studio 設定確認済み",
+}
 
 
 def _safe_text(value: object) -> str:
@@ -133,8 +143,165 @@ def _resolve_operation(
         operation = load_operation(operation_id, settings)
         if operation.source_video_id == video_id and operation.clip_id == clip_id:
             return operation
-        return None
+        # session map は元動画単位の legacy / rerun state のため、同じ元動画の
+        # 別 clip を指すことがある。対象 clip の永続 operation へ戻して、複数
+        # Shorts の pending 関連動画導線を隠さない。
+        return latest_operation_for_source(video_id, clip_id, settings)
     return latest_operation_for_source(video_id, clip_id, settings)
+
+
+def _studio_video_edit_url(video_id: str) -> str:
+    """関連動画設定を人が行う YouTube Studio の編集先."""
+    return f"https://studio.youtube.com/video/{video_id}/edit"
+
+
+@st.dialog("関連動画設定の確認", width="large")
+def related_video_confirm_dialog(
+    operation_id: str,
+    source_video_id: str,
+    video_id: str,
+    settings: Settings,
+    dialog_nonce: str,
+) -> None:
+    """Studio での人確認後だけ local queue の confirmed へ遷移する."""
+    st.warning(
+        "YouTube Studio の画面操作は自動化しません。"
+        "Studio で関連動画を設定した後、2つの正本 ID を確認して確定してください。"
+    )
+    with st.container(border=True):
+        st.write(f"投稿 operation: {_safe_text(operation_id)}")
+        st.write(f"設定対象の元動画 ID: {_safe_text(source_video_id)}")
+        st.write(f"対象 Shorts video ID: {_safe_text(video_id)}")
+        st.markdown(
+            f"[YouTube Studio の編集画面を開く]({_studio_video_edit_url(video_id)})"
+        )
+        st.write(
+            "手順: Studio の編集画面で関連動画に元動画 ID を設定し、"
+            "保存後にこの確認欄を明示的に確定してください。"
+        )
+    confirmed = st.checkbox(
+        "Studioで関連動画を設定済みです",
+        value=False,
+        key=f"related_video_confirmed_{dialog_nonce}",
+    )
+    if st.button(
+        "関連動画の設定済みを確定",
+        type="primary",
+        disabled=not confirmed,
+        key=f"related_video_confirm_{dialog_nonce}",
+    ):
+        try:
+            confirm_related_video(
+                operation_id,
+                source_video_id,
+                video_id,
+                settings,
+                now=datetime.now(timezone.utc),
+            )
+        except UploadQueueError as exc:
+            # queue service が race / ID 不一致 / 破損を fail closed で判定する。
+            st.error(_safe_text(exc))
+            return
+        st.success("関連動画の設定確認を記録しました。YouTube API は呼び出していません。")
+        st.rerun()
+
+
+def _render_related_video_status(
+    operation: UploadOperation,
+    settings: Settings,
+) -> None:
+    """P6-3 service の結果だけで関連動画の追跡 UI を描画する."""
+    with st.container(border=True):
+        st.markdown("**関連動画の Studio 手動確認**")
+        st.write(
+            "状態: "
+            + _RELATED_STATUS_LABELS.get(
+                operation.related_video_status,
+                _safe_text(operation.related_video_status),
+            )
+        )
+        if operation.related_video_confirmed_at is not None:
+            st.caption(
+                "確認日時: "
+                + operation.related_video_confirmed_at.isoformat()
+            )
+        if operation.state != "uploaded" or not operation.video_id:
+            st.caption("アップロード成功後に Studio の関連動画確認を行えます。")
+            return
+
+        st.write(f"設定対象の元動画 ID: {_safe_text(operation.source_video_id)}")
+        st.write(f"対象 Shorts video ID: {_safe_text(operation.video_id)}")
+        st.markdown(
+            f"[YouTube Studio の編集画面を開く]"
+            f"({_studio_video_edit_url(operation.video_id)})"
+        )
+        st.write(
+            "手順: Studio の編集画面で関連動画を設定し、保存後に"
+            "「Studioで関連動画を設定済み」と明示確定してください。"
+        )
+        if operation.related_video_status != "pending":
+            return
+        st.caption(
+            "確認待ち一覧と確定ボタンは、上部の「関連動画の Studio 手動確認"
+            "（全投稿）」パネルに表示しています。"
+        )
+
+
+def _render_related_video_summary_panel(settings: Settings) -> None:
+    """最新 shorts manifest に依存しない全体の確認待ち追跡パネル."""
+    try:
+        summary = get_related_video_summary(settings)
+    except UploadQueueError:
+        st.error(
+            "関連動画の確認待ち一覧を安全に読み込めないため、"
+            "確認操作を停止しました。投稿キューを手動修復してください。"
+        )
+        return
+    if summary.pending_count == 0:
+        return
+    with st.container(border=True):
+        st.markdown("**関連動画の Studio 手動確認（全投稿）**")
+        st.write(f"未確認件数: {summary.pending_count} 件")
+        for pending in summary.operations:
+            pending_video_id = pending.video_id or ""
+            st.write(
+                "状態: "
+                + _RELATED_STATUS_LABELS.get(
+                    pending.related_video_status,
+                    _safe_text(pending.related_video_status),
+                )
+            )
+            st.write(
+                f"operation {_safe_text(pending.operation_id)} / "
+                f"設定対象の元動画 ID: {_safe_text(pending.source_video_id)} / "
+                f"対象 Shorts video ID: {_safe_text(pending_video_id or '未取得')}"
+            )
+            if not pending_video_id:
+                st.warning(
+                    "関連動画確認対象の Shorts ID が不足しているため、"
+                    "確認操作を停止しました。投稿キューを手動修復してください。"
+                )
+                continue
+            st.markdown(
+                f"[YouTube Studio の編集画面を開く]"
+                f"({_studio_video_edit_url(pending_video_id)})"
+            )
+            st.write(
+                "手順: Studio の編集画面で関連動画に元動画 ID を設定し、"
+                "保存後にこの確認欄を明示的に確定してください。"
+            )
+            if st.button(
+                "Studioで関連動画を設定済みとして確認",
+                type="secondary",
+                key=f"related_video_open_global_{pending.operation_id}",
+            ):
+                related_video_confirm_dialog(
+                    pending.operation_id,
+                    pending.source_video_id,
+                    pending_video_id,
+                    settings,
+                    uuid.uuid4().hex,
+                )
 
 
 def render_upload_operation(
@@ -147,6 +314,11 @@ def render_upload_operation(
             f"operation {_safe_text(operation.operation_id)} / "
             f"job {_safe_text(operation.job_id)}"
         )
+        if operation.content.requirements is None:
+            st.warning(
+                "この投稿内容は legacy 形式で概要欄要件 snapshot がありません。"
+                "新しい投稿には再生成した preview を使用してください。"
+            )
         st.write(f"予約日時: {operation.content.publish_at.isoformat()}")
         st.write(
             "公開判定: "
@@ -180,31 +352,35 @@ def render_upload_operation(
                 None,
             )
             if latest_publication in _PUBLICATION_POLL_TERMINAL:
-                return
-            now = datetime.now(timezone.utc)
-            if now < operation.content.publish_at:
-                st.caption(
-                    "公開予定時刻までは公開状態を確認できません。"
-                    "予約時刻後にこの画面から確認してください。"
-                )
-                return
-            if st.button(
-                "公開状態を確認",
-                key=f"upload_publication_poll_{operation.operation_id}",
-                type="secondary",
-            ):
-                try:
-                    poll_job_id = start_publication_poll(
-                        operation.operation_id,
-                        settings,
-                        now=now,
+                st.caption("公開確認は terminal 判定済みです。")
+            else:
+                now = datetime.now(timezone.utc)
+                if now < operation.content.publish_at:
+                    st.caption(
+                        "公開予定時刻までは公開状態を確認できません。"
+                        "予約時刻後にこの画面から確認してください。"
                     )
-                except UploadQueueError as exc:
-                    st.error(_safe_text(exc))
-                    return
-                set_active_job_id(poll_job_id)
-                st.success("公開状態の確認ジョブを開始しました。")
-                st.rerun()
+                elif st.button(
+                    "公開状態を確認",
+                    key=f"upload_publication_poll_{operation.operation_id}",
+                    type="secondary",
+                ):
+                    try:
+                        poll_job_id = start_publication_poll(
+                            operation.operation_id,
+                            settings,
+                            now=now,
+                        )
+                    except UploadQueueError as exc:
+                        st.error(_safe_text(exc))
+                    else:
+                        set_active_job_id(poll_job_id)
+                        st.success("公開状態の確認ジョブを開始しました。")
+                        st.rerun()
+        # publication poll が terminal / publishAt 前でも、upload 後の関連動画
+        # 手動確認は追跡対象として常に残す。pending を hard gate にしない。
+        if settings is not None:
+            _render_related_video_status(operation, settings)
 
 
 def _selection_from_label(value: str | None) -> bool | None:
@@ -213,6 +389,59 @@ def _selection_from_label(value: str | None) -> bool | None:
     if value == "いいえ":
         return False
     return None
+
+
+def _candidate_values(item: ShortsQueueItemResult) -> tuple[str, ...]:
+    """manifest の候補を文字列として安全に扱う."""
+    raw = getattr(item, "title_candidates", ())
+    if not isinstance(raw, (tuple, list)):
+        return ()
+    return tuple(value for value in raw if isinstance(value, str))
+
+
+def _title_directions_are_complete(item: ShortsQueueItemResult) -> bool:
+    candidates = _candidate_values(item)
+    first_three = candidates[:3]
+    return (
+        len(first_three) == 3
+        and all(value.strip() for value in first_three)
+        and len(set(value.strip() for value in first_three)) == 3
+    )
+
+
+def _render_title_candidate_directions(item: ShortsQueueItemResult) -> None:
+    """先頭3件を固定順で表示し、長さと legacy 不足を日本語で案内する."""
+    candidates = _candidate_values(item)
+    st.markdown("**タイトル候補（固定3方向）**")
+    seen: set[str] = set()
+    for index, direction in enumerate(_TITLE_DIRECTIONS):
+        candidate = candidates[index] if index < len(candidates) else ""
+        st.markdown(f"**{direction}**")
+        if not candidate.strip():
+            st.warning(
+                f"{direction}のタイトル候補がありません。"
+                "再生成または最終タイトルを手動補完してください。"
+            )
+            continue
+        st.write(_safe_text(candidate))
+        length = len(candidate)
+        if not 18 <= length <= 32:
+            st.warning(
+                f"{direction}は18〜32文字推奨の範囲外です（現在 {length} 文字）。"
+                "保存は可能です。"
+            )
+        normalized = candidate.strip()
+        if normalized in seen:
+            st.warning(
+                f"{direction}のタイトル候補が他の方向と重複しています。"
+                "再生成または手動補完を検討してください。"
+            )
+        seen.add(normalized)
+    if not _title_directions_are_complete(item):
+        st.info(
+            "保存済みの legacy manifest ではタイトル候補が1〜2件の場合があります。"
+            "新しい3方向を使うには再生成するか、最終タイトルを手動補完してください。"
+        )
 
 
 @st.dialog("YouTube 予約投稿の確認", width="large")
@@ -378,6 +607,7 @@ def _open_preview(
     reservation_transaction: (
         Callable[[str, Path, Callable[[], UploadOperation]], UploadOperation] | None
     ) = None,
+    p6_quality_gate: bool = False,
 ) -> None:
     """現在の編集値だけから、新しい不変 preview を作って確認を開く."""
     if item.output_path is None:
@@ -389,10 +619,45 @@ def _open_preview(
         except LineStateError as exc:
             st.error(_safe_text(exc))
             return
-    upload_title = item.title_candidates[0] if title is None else title
+    candidates = _candidate_values(item)
+    upload_title = (candidates[0] if candidates else "") if title is None else title
     upload_tags = tuple(item.tags) if tags is None else tuple(tags)
     upload_description = description
-    if upload_description is None:
+    requirements = None
+    if p6_quality_gate:
+        if not _title_directions_are_complete(item) and (
+            not isinstance(upload_title, str)
+            or not upload_title.strip()
+            or upload_title.strip() in {value.strip() for value in candidates}
+        ):
+            st.error(
+                "タイトル候補の3方向が揃っていないため、新しい投稿を開始できません。"
+                "再生成または最終タイトルの手動補完を行ってください。"
+            )
+            return
+        try:
+            quality_build = build_shorts_description_for_upload(
+                item.description,
+                video_id=video_id,
+                start_ms=start_ms,
+                settings=settings,
+            )
+        except DescriptionError as exc:
+            st.error(_safe_text(exc))
+            return
+        requirements = quality_build.requirements
+        # editor を経由しない内部 caller だけは未指定時に canonical 本文を
+        # 初期値にできる。UI editor から渡された文字列は、元本文と同じでも
+        # 常にユーザーの最終編集値として immutable requirements で検証する。
+        if upload_description is None:
+            upload_description = quality_build.description
+        try:
+            validate_upload_description(upload_description, requirements)
+        except ScheduleError as exc:
+            st.error(_safe_text(exc))
+            return
+    elif upload_description is None:
+        # P4 の既存 fallback は、P6 gate を明示しない legacy 呼び出しで維持する。
         try:
             upload_description = build_shorts_description(
                 item.description,
@@ -415,6 +680,7 @@ def _open_preview(
             settings=settings,
             now=datetime.now(timezone.utc),
             requested_publish_at=requested_publish_at,
+            requirements=requirements,
         )
     except ScheduleError as exc:
         st.error(_safe_text(exc))
@@ -436,16 +702,33 @@ def _render_upload_metadata_editor(
     initial_description: str,
 ) -> tuple[str, str, tuple[str, ...]]:
     """候補を起点に、実送信 metadata の編集値だけを返す."""
-    candidates = tuple(dict.fromkeys(item.title_candidates))
-    selected_title = st.selectbox(
+    _render_title_candidate_directions(item)
+    direction_candidates = _candidate_values(item)
+    direction_options = (0, 1, 2)
+
+    def format_direction(index: int) -> str:
+        value = direction_candidates[index] if index < len(direction_candidates) else ""
+        label = value if value.strip() else "未設定"
+        return _safe_text(f"{_TITLE_DIRECTIONS[index]}: {label}")
+
+    selected_option = st.selectbox(
         "タイトル候補",
-        candidates,
-        format_func=_safe_text,
+        direction_options,
+        format_func=format_direction,
         key=f"upload_title_candidate_{job_id}_{item.target_id}",
     )
-    if selected_title not in candidates:
-        selected_title = candidates[0]
-    candidate_index = candidates.index(selected_title)
+    if isinstance(selected_option, int) and not isinstance(selected_option, bool):
+        candidate_index = selected_option if selected_option in direction_options else 0
+    elif selected_option in direction_candidates:
+        # テスト double / legacy caller が候補文字列を返す場合の互換処理。
+        candidate_index = direction_candidates.index(selected_option)
+    else:
+        candidate_index = 0
+    selected_title = (
+        direction_candidates[candidate_index]
+        if candidate_index < len(direction_candidates)
+        else ""
+    )
     title = st.text_input(
         "タイトル",
         value=selected_title,
@@ -524,6 +807,9 @@ def render_upload_section(
         "生成済みショートを private 固定・通知なしでアップロードし、"
         "次の空き枠へ予約します。"
     )
+    # これは最新 shorts manifest の存在・状態・成果物とは独立した P6-3 の
+    # 永続追跡入口。再起動後や過去 clip が manifest から消えた場合も残す。
+    _render_related_video_summary_panel(settings)
     try:
         result = load_latest_shorts_queue_result(video_id, settings)
     except ShortsQueueError as exc:
@@ -560,16 +846,28 @@ def render_upload_section(
     template_path = get_shorts_template_path(settings)
     if not template_path.is_file():
         st.info(
-            "ショート用の定型文が未設定です。"
-            f"{template_path} に定型文を置くと、"
-            "チャンネル URL や元配信リンクを概要欄へ差し込めます。"
-            "使えるプレースホルダーは "
-            "{{description}} / {{source_title}} / {{source_url}} です。"
+            "ショート用の定型文が未設定です。投稿フォームを開く前に、"
+            f"必須構成を含む既定テンプレートを {template_path} へ安全に作成します。"
         )
     for item in succeeded:
         with st.container(border=True):
-            st.markdown(f"**{_safe_text(item.title_candidates[0])}**")
+            candidates = _candidate_values(item)
+            st.markdown(
+                f"**{_safe_text(candidates[0] if candidates else 'タイトル未設定')}**"
+            )
             st.caption(_safe_text(item.target_id))
+            try:
+                operation = _resolve_operation(video_id, item.target_id, settings)
+            except UploadQueueError:
+                st.error(
+                    "投稿キューを安全に読み込めないため、予約投稿を停止しました。"
+                    "投稿キューを手動修復してください。"
+                )
+                continue
+            if operation is not None:
+                render_upload_operation(operation, settings=settings)
+            # 既存 operation の復元・関連動画追跡は、ローカル成果物の欠損や
+            # stale manifest に依存させない。ここから下は新規 preview 用の gate。
             if item.output_path is None:
                 st.warning(
                     "生成済みショート動画ファイルが manifest にありません。"
@@ -589,24 +887,14 @@ def render_upload_section(
                         "予約投稿せず、ショート生成を再実行してください。"
                     )
                     continue
-            try:
-                operation = _resolve_operation(video_id, item.target_id, settings)
-            except UploadQueueError:
-                st.error(
-                    "投稿キューを安全に読み込めないため、予約投稿を停止しました。"
-                    "投稿キューを手動修復してください。"
-                )
-                continue
-            if operation is not None:
-                render_upload_operation(operation, settings=settings)
             start_ms = _clip_start_ms(result, item.target_id)
             try:
-                initial_description = build_shorts_description(
+                initial_description = build_shorts_description_for_upload(
                     item.description,
                     video_id=video_id,
                     start_ms=start_ms,
                     settings=settings,
-                )
+                ).description
             except DescriptionError as exc:
                 st.error(_safe_text(exc))
                 continue
@@ -645,4 +933,5 @@ def render_upload_section(
                     before_confirm=before_confirm,
                     on_operation_started=on_operation_started,
                     reservation_transaction=reservation_transaction,
+                    p6_quality_gate=True,
                 )

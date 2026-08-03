@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import re
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -370,6 +370,32 @@ def require_valid_shorts_description(
     _raise_description_validation_error(
         validate_shorts_description(text, requirements)
     )
+
+
+def requirements_from_snapshot(
+    snapshot: Mapping[str, object],
+) -> ShortsDescriptionRequirements:
+    """永続 model の requirements を純粋 validator 用 dataclass へ変換する.
+
+    model 層から service 層への循環 import を避けるため、入力は mapping に
+    限定する。固定 CTA や出現回数は dataclass の既存契約で検証する。
+    """
+    if not isinstance(snapshot, Mapping):
+        raise DescriptionError("概要欄要件 snapshot の形式が正しくありません。")
+    try:
+        return ShortsDescriptionRequirements(**dict(snapshot))
+    except (TypeError, ValueError) as exc:
+        message = str(exc).strip() or "概要欄要件 snapshot の形式が正しくありません。"
+        raise DescriptionError(message) from exc
+
+
+def validate_shorts_description_snapshot(
+    text: str,
+    snapshot: Mapping[str, object],
+) -> None:
+    """mutable な template / meta を読まず、永続 requirements だけで再検証する."""
+    requirements = requirements_from_snapshot(snapshot)
+    require_valid_shorts_description(text, requirements)
 
 
 def _build_quality_gated_shorts_description(

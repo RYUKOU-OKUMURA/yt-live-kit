@@ -16,9 +16,12 @@ from yt_live_kit.config import Settings
 from yt_live_kit.models.upload import (
     UploadChannel,
     UploadContentSnapshot,
+    UploadDescriptionRequirementsSnapshot,
     UploadOperation,
     UploadStatusObservation,
 )
+from yt_live_kit.services.description import SHORTS_DESCRIPTION_CTA
+from yt_live_kit.services.schedule import SchedulePolicy, get_next_upload_slot, save_schedule_policy
 from yt_live_kit.services.upload_queue import (
     UploadQueueError,
     append_poll_observation,
@@ -46,6 +49,9 @@ def _snapshot(tmp_path: Path, *, publish_at: datetime | None = None) -> UploadCo
     video = (tmp_path / "short.mp4").resolve()
     video.write_bytes(b"video")
     stat = video.stat()
+    generated_description = "説明"
+    source_title = "テスト元動画"
+    source_url = "https://example.com/source?t=0s"
     return UploadContentSnapshot(
         channel=UploadChannel(channel_id="UC123", title="テストチャンネル"),
         video_path=video,
@@ -53,7 +59,10 @@ def _snapshot(tmp_path: Path, *, publish_at: datetime | None = None) -> UploadCo
         file_mtime_ns=stat.st_mtime_ns,
         duration_sec=30,
         title="タイトル",
-        description="説明",
+        description=(
+            f"{generated_description}\n{source_title}\n{source_url}\n"
+            f"{SHORTS_DESCRIPTION_CTA}"
+        ),
         tags=("タグ",),
         publish_at=publish_at or datetime(2026, 8, 2, tzinfo=timezone.utc),
         privacy_status="private",
@@ -62,6 +71,18 @@ def _snapshot(tmp_path: Path, *, publish_at: datetime | None = None) -> UploadCo
         contains_synthetic_media=True,
         community_guidelines_confirmed=True,
         community_guidelines_confirmed_at=datetime(2026, 8, 1, tzinfo=timezone.utc),
+        requirements=UploadDescriptionRequirementsSnapshot(
+            generated_description=generated_description,
+            source_title=source_title,
+            source_url=source_url,
+            fixed_cta=SHORTS_DESCRIPTION_CTA,
+            template_bytes_fingerprint="a" * 64,
+            meta_json_fingerprint="b" * 64,
+            generated_description_occurrences=1,
+            source_title_occurrences=1,
+            source_url_occurrences=1,
+            fixed_cta_line_occurrences=1,
+        ),
     )
 
 
@@ -256,6 +277,19 @@ def test_queue_is_single_full_operation_record_and_atomic_temp_is_removed(tmp_pa
     assert payload["operations"][0]["operation_id"] == operation.operation_id
     assert payload["operations"][0]["content"]["channel"]["channel_id"] == "UC123"
     assert not list((tmp_path / "_schedule").glob("*.tmp"))
+
+
+def test_p6_requirements_round_trip_through_persisted_queue(tmp_path: Path) -> None:
+    settings, operation = _reserved(tmp_path)
+    restored = list_operations(settings)[0]
+
+    assert restored.content.requirements == operation.content.requirements
+    assert restored.content.requirements is not None
+    assert restored.content.requirements.template_bytes_fingerprint == "a" * 64
+    assert restored.content.requirements.meta_json_fingerprint == "b" * 64
+    assert UploadContentSnapshot.model_validate_json(
+        restored.content.model_dump_json()
+    ) == restored.content
 
 
 def test_related_video_state_is_not_ready_before_upload_and_pending_after_success(
@@ -735,6 +769,97 @@ def test_job_target_preflight_failure_never_records_attempt_or_uploads(tmp_path:
     upload.assert_not_called()
     assert list_upload_attempts(settings) == ()
     assert list_operations(settings)[0].state == "failed"
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        ("legacy", "旧形式.*新しいプレビュー"),
+        ("description", "チャンネル登録 CTA"),
+    ],
+)
+def test_job_target_description_gate_fails_operation_before_api_attempt_or_report(
+    tmp_path: Path, mutation: str, message: str
+) -> None:
+    settings, operation = _reserved(tmp_path)
+    queue_path = tmp_path / "_schedule" / "queue.json"
+    payload = json.loads(queue_path.read_text(encoding="utf-8"))
+    content = payload["operations"][0]["content"]
+    if mutation == "legacy":
+        content.pop("requirements")
+    else:
+        content["description"] = content["description"].replace(
+            SHORTS_DESCRIPTION_CTA, ""
+        )
+    queue_path.write_text(json.dumps(payload), encoding="utf-8")
+    report = MagicMock()
+    save_schedule_policy(SchedulePolicy(daily_times=["09:00"]), settings)
+
+    with (
+        patch("yt_live_kit.services.upload_queue.fetch_mine_channel") as fetch,
+        patch("yt_live_kit.services.upload_queue.record_upload_attempt") as attempt,
+        patch("yt_live_kit.services.upload_queue.upload_video_resumable") as upload,
+        pytest.raises(UploadQueueError, match=message),
+    ):
+        upload_job_target(
+            report=report,
+            settings=settings,
+            job_id=operation.job_id,
+            operation_id=operation.operation_id,
+        )
+
+    report.assert_not_called()
+    fetch.assert_not_called()
+    attempt.assert_not_called()
+    upload.assert_not_called()
+    failed = list_operations(settings)[0]
+    assert failed.state == "failed"
+    assert failed.error is not None
+    assert list_upload_attempts(settings) == ()
+    # failed は slot holder から除外されるため、同じ予約枠を再利用できる。
+    _policy, next_slot = get_next_upload_slot(
+        settings,
+        now=datetime(2026, 7, 31, tzinfo=timezone.utc),
+    )
+    assert next_slot is not None
+
+
+def test_job_target_description_gate_transition_failure_is_fail_closed_without_retry(
+    tmp_path: Path,
+) -> None:
+    settings, operation = _reserved(tmp_path)
+    queue_path = tmp_path / "_schedule" / "queue.json"
+    payload = json.loads(queue_path.read_text(encoding="utf-8"))
+    payload["operations"][0]["content"]["description"] = payload["operations"][0][
+        "content"
+    ]["description"].replace(SHORTS_DESCRIPTION_CTA, "")
+    queue_path.write_text(json.dumps(payload), encoding="utf-8")
+    report = MagicMock()
+
+    with (
+        patch(
+            "yt_live_kit.services.upload_queue.transition_operation",
+            side_effect=UploadQueueError("write failed"),
+        ) as transition,
+        patch("yt_live_kit.services.upload_queue.fetch_mine_channel") as fetch,
+        patch("yt_live_kit.services.upload_queue.record_upload_attempt") as attempt,
+        patch("yt_live_kit.services.upload_queue.upload_video_resumable") as upload,
+        pytest.raises(UploadQueueError, match="手動修復"),
+    ):
+        upload_job_target(
+            report=report,
+            settings=settings,
+            job_id=operation.job_id,
+            operation_id=operation.operation_id,
+        )
+
+    transition.assert_called_once()
+    report.assert_not_called()
+    fetch.assert_not_called()
+    attempt.assert_not_called()
+    upload.assert_not_called()
+    assert list_operations(settings)[0].state == "reserved"
+    assert list_upload_attempts(settings) == ()
 
 
 def test_persisted_metadata_tamper_is_rejected_before_attempt(tmp_path: Path) -> None:

@@ -42,6 +42,10 @@ from yt_live_kit.services.youtube_api import (
     upload_video_resumable,
     validate_snapshot_identity,
 )
+from yt_live_kit.services.description import (
+    DescriptionError,
+    validate_shorts_description_snapshot,
+)
 from yt_live_kit.services._paths import (
     PathConfinementError,
     confined_path,
@@ -942,6 +946,38 @@ def upload_job_target(
         raise UploadQueueError(
             "この投稿 operation は既に開始済みです。自動再送せず状態を手動確認してください。"
         )
+
+    # operation 保存後の queue 改変・job 再起動境界でも、preview と同じ
+    # immutable requirements だけで本文を再検証する。legacy content は
+    # fetch_mine_channel、attempt 台帳、resumable session より前に停止する。
+    gate_error: str | None = None
+    if operation.content.requirements is None:
+        gate_error = (
+            "旧形式の投稿内容は再利用できません。"
+            "概要欄要件 snapshot を含む新しいプレビューを作成してください。"
+        )
+    else:
+        try:
+            validate_shorts_description_snapshot(
+                operation.content.description,
+                operation.content.requirements.model_dump(mode="python"),
+            )
+        except DescriptionError as exc:
+            gate_error = str(exc)
+    if gate_error is not None:
+        try:
+            transition_operation(
+                operation_id,
+                "failed",
+                settings,
+                error=gate_error,
+            )
+        except UploadQueueError as exc:
+            raise UploadQueueError(
+                "概要欄 gate の失敗を operation へ記録できません。"
+                "自動再送せず、投稿キューを手動修復してください。"
+            ) from exc
+        raise UploadQueueError(gate_error)
 
     report(stage="preflight", message="投稿内容を再確認しています")
     try:
