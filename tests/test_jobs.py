@@ -24,6 +24,8 @@ from yt_live_kit.services.jobs import (
     create_job,
     get_active_job,
     is_busy,
+    read_job_error_log,
+    read_job_log,
     read_current_job,
     read_job,
     start_job,
@@ -306,6 +308,36 @@ def test_read_job_returns_none_for_broken_json(tmp_path):
 def test_read_job_returns_none_for_missing_file(tmp_path):
     settings = Settings(data_dir=tmp_path)
     assert read_job("missing", settings) is None
+
+
+def test_read_job_error_log_reads_existing_log_without_creating_state(tmp_path):
+    settings = Settings(data_dir=tmp_path)
+    jobs_dir = tmp_path / "_jobs"
+    jobs_dir.mkdir(parents=True)
+    log_path = jobs_dir / "log-job.log"
+    log_path.write_text("traceback <raw>\n詳細", encoding="utf-8")
+
+    assert read_job_error_log("log-job", settings) == "traceback <raw>\n詳細"
+    assert read_job_log("log-job", settings) == "traceback <raw>\n詳細"
+    assert sorted(path.name for path in jobs_dir.iterdir()) == ["log-job.log"]
+
+
+def test_read_job_error_log_returns_none_for_missing_or_invalid_job(tmp_path):
+    settings = Settings(data_dir=tmp_path)
+
+    assert read_job_error_log("missing-log", settings) is None
+    assert read_job_error_log("../outside", settings) is None
+    assert read_job_error_log("job/escape", settings) is None
+
+
+def test_read_job_error_log_returns_none_when_log_exceeds_byte_limit(tmp_path):
+    settings = Settings(data_dir=tmp_path)
+    jobs_dir = tmp_path / "_jobs"
+    jobs_dir.mkdir(parents=True)
+    (jobs_dir / "large-log.log").write_bytes(b"12345")
+
+    assert read_job_error_log("large-log", settings, max_bytes=4) is None
+    assert read_job_error_log("large-log", settings, max_bytes=5) == "12345"
 
 
 def test_start_job_updates_state_via_report(tmp_path):

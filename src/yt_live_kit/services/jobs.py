@@ -48,6 +48,10 @@ _UNEXPECTED_ERROR_MESSAGE = (
 )
 _BUSY_MESSAGE = "別の処理が実行中です。完了してから再度お試しください。"
 
+# 技術ログは UI の詳細領域からだけ参照する。読み取り時にファイル全体を
+# 無制限にメモリへ載せないための上限であり、保存形式や worker の契約ではない。
+MAX_JOB_ERROR_LOG_BYTES = 256 * 1024
+
 # is_busy() のチェックと create_job() の間の競合を防ぐための process 内ロック。
 # 複数の Streamlit process 間は _job_store_lock() の advisory file lock で直列化する。
 _START_LOCK = threading.Lock()
@@ -204,6 +208,51 @@ def _job_log_path(settings: Settings, job_id: str) -> Path:
     return confined_path(
         settings.data_dir, "_jobs", f"{job_id}.log", label="ジョブログ保存先"
     )
+
+
+def read_job_error_log(
+    job_id: str,
+    settings: Settings | None = None,
+    *,
+    max_bytes: int | None = None,
+) -> str | None:
+    """ジョブの別ファイル技術ログを安全に読み込む。
+
+    この helper は job state の読み書き、ディレクトリ作成、cleanup を行わない。
+    job ID の検証と data root 内の path confinement を通し、欠損・壊れた path・
+    サイズ上限超過・UTF-8 でないログ・その他の読み取り失敗はすべて ``None``
+    に倒す。サイズ確認と読み込みの間にファイルが差し替わる競合にも備え、
+    上限を 1 byte 超えて読み込んだ時点で返さない。
+    """
+    settings = settings or get_settings()
+    requested_limit = MAX_JOB_ERROR_LOG_BYTES if max_bytes is None else max_bytes
+    if (
+        isinstance(requested_limit, bool)
+        or not isinstance(requested_limit, int)
+        or requested_limit < 0
+    ):
+        return None
+    limit = min(requested_limit, MAX_JOB_ERROR_LOG_BYTES)
+
+    try:
+        path = _job_log_path(settings, job_id)
+        with path.open("rb") as handle:
+            payload = handle.read(limit + 1)
+        if len(payload) > limit:
+            return None
+        return payload.decode("utf-8")
+    except (OSError, TypeError, UnicodeError, ValueError, OverflowError):
+        return None
+
+
+def read_job_log(
+    job_id: str,
+    settings: Settings | None = None,
+    *,
+    max_bytes: int | None = None,
+) -> str | None:
+    """``read_job_error_log`` の短い公開別名。"""
+    return read_job_error_log(job_id, settings, max_bytes=max_bytes)
 
 
 def _current_path(settings: Settings) -> Path:
