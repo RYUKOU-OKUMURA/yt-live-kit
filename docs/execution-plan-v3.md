@@ -44,7 +44,7 @@
 | S9-0 | 既存 VTT 互換・非上書き保存契約 | [x] 完了 |
 | S9-1 | 代表素材 benchmark・モデル決定 | [x] 完了 |
 | S9-2 | TranscriptArtifact / resolver / fingerprint / persistent cache | [x] 完了 |
-| S9-3 | whisper.cpp runtime・capability・音声区間準備 | [ ] 未着手 |
+| S9-3 | whisper.cpp runtime・capability・音声区間準備 | [x] 完了 |
 | S9-4 | 親候補区間 Whisper 精査 → short_cut / telop / line 再利用 | [ ] 未着手 |
 | S9-5 | UI 設定・進捗・エラー・失効表示 | [ ] 未着手 |
 | S9-6 | A/B 受け入れ・回帰・フェーズ判定 | [ ] 未着手 |
@@ -1620,20 +1620,22 @@ data/{video_id}/ ...
 
 **作業:**
 
-- [ ] S9-3-1. `whisper-cli` の path、version 1.9.1、JSON timestamp capability、言語 ja、モデル path / fingerprint、ffmpeg capability、timeout を preflight し、実行ファイル・モデルの自動取得や shell command の自由入力を許さない
-- [ ] S9-3-2. `ytdlp.py` に `bestaudio` 相当の音声のみ取得 helper を追加し、video ID、source metadata、実音声 bytes、sample rate、channel、codec、ffmpeg 変換設定から audio input fingerprint を作る。既存の動画 mp4 download を S9 の prerequisite にしない
-- [ ] S9-3-3. 選択親候補の absolute ranges を入力順の span manifest にし、padding / seek / 必要な VAD / cue inclusion rule を固定する。複数区間は 1 ジョブ内で serial に処理し、部分成功を resolver が高精度として返さない
-- [ ] S9-3-4. `whisper-cli` を `subprocess.run` 相当で呼び、stdout / stderr / exit code / timeout / version / build capability / model / language / initial prompt / decode settings / range を typed result にする。1.9.1 の JSON schema 以外は保存せず、日本語の診断へ変換する
-- [ ] S9-3-5. 相対 timestamp を元動画基準の絶対時刻へ変換し、S9-2 の artifact writer へ渡す。temporary span は成功・失敗後に既定で削除し、音声 cache と artifact は atomic に残す
-- [ ] S9-3-6. 区間ごとの `success` / `failed` / `partial` status、job ID、range index、retry 可否、cache hit / miss を typed error / progress contract にし、1 区間失敗時は artifact 全体を高精度成功として返さない
+- [x] S9-3-1. `whisper-cli` の path、version 1.9.1、JSON timestamp capability、言語 ja、モデル path / fingerprint、ffmpeg capability、timeout を preflight し、実行ファイル・モデルの自動取得や shell command の自由入力を許さない
+- [x] S9-3-2. `ytdlp.py` に `bestaudio` 相当の音声のみ取得 helper を追加し、video ID、source metadata、実音声 bytes、sample rate、channel、codec、ffmpeg 変換設定から audio input fingerprint を作る。既存の動画 mp4 download を S9 の prerequisite にしない
+- [x] S9-3-3. 選択親候補の absolute ranges を入力順の span manifest にし、padding / seek / 必要な VAD / cue inclusion rule を固定する。複数区間は 1 ジョブ内で serial に処理し、部分成功を resolver が高精度として返さない
+- [x] S9-3-4. `whisper-cli` を `subprocess.run` 相当で呼び、stdout / stderr / exit code / timeout / version / build capability / model / language / initial prompt / decode settings / range を typed result にする。1.9.1 の JSON schema 以外は保存せず、日本語の診断へ変換する
+- [x] S9-3-5. 相対 timestamp を元動画基準の絶対時刻へ変換し、S9-2 の artifact writer へ渡す。temporary span は成功・失敗後に既定で削除し、音声 cache と artifact は atomic に残す
+- [x] S9-3-6. 区間ごとの `success` / `failed` / `partial` status、job ID、range index、retry 可否、cache hit / miss を typed error / progress contract にし、1 区間失敗時は artifact 全体を高精度成功として返さない
 
 **テスト:** missing binary / wrong version / missing model / wrong model fingerprint、build capability 不足、audio-only ytdlp command と mp4 非取得、実音声 bytes / sample rate / channel / codec / ffmpeg 設定 fingerprint、複数 range の順序、padding と offset、timeout / non-zero / malformed JSON、job ID / range index / retry 可否付き partial failure、cache hit 時の subprocess 非実行、同時実行を拒否する 1 job gate。
 
 **Done 条件:**
-- [ ] 採用モデルで選択区間の artifact を再現可能に作れ、動画全体を取得せず、複数区間を 1 ジョブで処理できる
-- [ ] runtime 不備は既存 VTT を壊さず、エラー分類と fallback 情報を返す
-- [ ] audio helper が選択 range の音声のみを取得し、実体・変換条件を含む fingerprint と per-range status を S9-2 の artifact writer へ渡せる
-- [ ] timeout、malformed output、partial failure が job ID / range index / retry 可否付きの日本語エラーになり、古い高精度 artifact を黙って返さない
+- [x] 採用モデルで選択区間の artifact を再現可能に作れ、動画全体を取得せず、複数区間を 1 ジョブで処理できる
+- [x] runtime 不備は既存 VTT を壊さず、エラー分類と fallback 情報を返す
+- [x] audio helper が選択 range の音声のみを取得し、実体・変換条件を含む fingerprint と per-range status を S9-2 の artifact writer へ渡せる
+- [x] timeout、malformed output、partial failure が job ID / range index / retry 可否付きの日本語エラーになり、古い高精度 artifact を黙って返さない
+
+**S9-3 実装・検証実績（2026-08-03）:** 固定採用の q5 model / whisper-cli 1.9.1 / full JSON 設定を preflight し、選択区間の音声 only cache、入力順 serial 処理、相対 timestamp の絶対化、S9-2 artifact writer、atomic 保存、既存 YouTube VTT fallback を実装した。focused tests は 39 passed、mock / fixture 中心で missing capability、音声 only argv、cache hit / corruption miss、timeout、malformed / 範囲外 JSON、partial failure、1 job gate を確認した。ローカル固定 binary / model / ffmpeg と既存 benchmark audio の read-only smoke でも実 process と full JSON を確認したが、ネットワーク取得・YouTube write・production data は使用していない。S9-4 以降と S9 / AC-37 の受け入れ判定は未完了とする。
 
 **コミット境界:** runtime / audio preparation / unit test を `S9-3` 単位でコミットする。whisper-cli の実機 benchmark 証跡は S9-1 の commit に含め、ここでは production service のみを追加する。
 

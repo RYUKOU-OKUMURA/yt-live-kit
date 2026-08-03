@@ -10,10 +10,12 @@ import stat
 import shutil
 import subprocess
 import sys
+import tempfile
 import uuid
+import wave
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
@@ -82,6 +84,688 @@ class SubtitleNotFoundError(YtdlpError):
 
     def __init__(self, message: str = _SUBTITLE_FETCH_ERROR) -> None:
         super().__init__(message)
+
+
+class AudioSpanError(YtdlpError):
+    """選択区間の音声 span を安全に準備できないエラー."""
+
+
+_AUDIO_CACHE_SCHEMA = "s9-3-audio-cache-v1"
+_AUDIO_CACHE_DIR = "audio_cache"
+_AUDIO_FORMAT_SETTINGS: dict[str, Any] = {
+    "container": "wav",
+    "sample_rate": 16_000,
+    "channel": 1,
+    "codec": "pcm_s16le",
+    "selector": "bestaudio/best",
+    "seek": "yt-dlp-download-sections",
+    "cue_inclusion_rule": "half_open_overlap",
+}
+
+
+@dataclass(frozen=True)
+class AudioSpanRange:
+    """音声取得に使う元動画基準の整数 millisecond 区間."""
+
+    start_ms: int
+    end_ms: int
+    padding_before_ms: int = 0
+    padding_after_ms: int = 0
+    inclusion_rule: str = "half_open_overlap"
+
+    def __post_init__(self) -> None:
+        integer_fields = (
+            self.start_ms,
+            self.end_ms,
+            self.padding_before_ms,
+            self.padding_after_ms,
+        )
+        if any(isinstance(value, bool) or not isinstance(value, int) for value in integer_fields):
+            raise AudioSpanError("音声区間の時刻は整数ミリ秒で指定してください。")
+        if self.start_ms < 0 or self.end_ms <= self.start_ms:
+            raise AudioSpanError("音声区間の開始・終了時刻が正しくありません。")
+        if self.padding_before_ms < 0 or self.padding_after_ms < 0:
+            raise AudioSpanError("音声区間の padding は 0 以上で指定してください。")
+        if (
+            not isinstance(self.inclusion_rule, str)
+            or not self.inclusion_rule.strip()
+            or "<" in self.inclusion_rule
+            or ">" in self.inclusion_rule
+        ):
+            raise AudioSpanError("音声区間の cue inclusion rule が正しくありません。")
+        if self.inclusion_rule != "half_open_overlap":
+            raise AudioSpanError("未対応の cue inclusion rule です。")
+
+    @property
+    def requested_start_ms(self) -> int:
+        return max(0, self.start_ms - self.padding_before_ms)
+
+    @property
+    def requested_end_ms(self) -> int:
+        return self.end_ms + self.padding_after_ms
+
+    @property
+    def requested_duration_ms(self) -> int:
+        return self.requested_end_ms - self.requested_start_ms
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "start_ms": self.start_ms,
+            "end_ms": self.end_ms,
+            "padding_before_ms": self.padding_before_ms,
+            "padding_after_ms": self.padding_after_ms,
+            "requested_start_ms": self.requested_start_ms,
+            "requested_end_ms": self.requested_end_ms,
+            "inclusion_rule": self.inclusion_rule,
+        }
+
+
+@dataclass(frozen=True)
+class AudioSpanResult:
+    """音声 cache と実体 fingerprint を含む選択区間の結果."""
+
+    video_id: str
+    range: AudioSpanRange
+    path: Path
+    audio_bytes: bytes
+    audio_input_fingerprint: str
+    source_metadata: dict[str, Any]
+    sample_rate: int
+    channel: int
+    codec: str
+    ffmpeg_settings: dict[str, Any]
+    cache_hit: bool
+    request_fingerprint: str
+
+    @property
+    def source_ref(self) -> str:
+        """artifact の source_ref に使う相対パスを返す."""
+
+        return str(self.path)
+
+
+def _strict_audio_integer(value: Any, label: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise AudioSpanError(f"{label}は整数ミリ秒で指定してください。")
+    return value
+
+
+def normalize_audio_span_range(
+    value: AudioSpanRange | Any,
+    *,
+    padding_ms: int = 0,
+    inclusion_rule: str = "half_open_overlap",
+) -> AudioSpanRange:
+    """TranscriptRange / mapping / ``(start_ms, end_ms)`` を厳密に正規化する."""
+
+    if isinstance(value, AudioSpanRange):
+        return value
+    if hasattr(value, "start_ms") and hasattr(value, "end_ms"):
+        start_ms = getattr(value, "start_ms")
+        end_ms = getattr(value, "end_ms")
+        range_padding = getattr(value, "padding_ms", 0)
+        padding_before = getattr(value, "padding_before_ms", 0)
+        padding_after = getattr(value, "padding_after_ms", 0)
+        rule = getattr(value, "inclusion_rule", inclusion_rule)
+        if padding_before == 0 and padding_after == 0 and range_padding:
+            padding_before = range_padding
+            padding_after = range_padding
+        elif padding_ms and padding_before == 0 and padding_after == 0 and not range_padding:
+            padding_before = padding_ms
+            padding_after = padding_ms
+        return AudioSpanRange(
+            _strict_audio_integer(start_ms, "開始時刻"),
+            _strict_audio_integer(end_ms, "終了時刻"),
+            _strict_audio_integer(padding_before, "padding 前"),
+            _strict_audio_integer(padding_after, "padding 後"),
+            str(rule),
+        )
+    if isinstance(value, Mapping):
+        if "start_ms" not in value or "end_ms" not in value:
+            raise AudioSpanError("音声区間には start_ms と end_ms が必要です。")
+        range_padding = value.get("padding_ms", 0)
+        padding_before = value.get("padding_before_ms", range_padding)
+        padding_after = value.get("padding_after_ms", range_padding)
+        if padding_ms and "padding_ms" not in value and "padding_before_ms" not in value and "padding_after_ms" not in value:
+            padding_before = padding_ms
+            padding_after = padding_ms
+        return AudioSpanRange(
+            _strict_audio_integer(value["start_ms"], "開始時刻"),
+            _strict_audio_integer(value["end_ms"], "終了時刻"),
+            _strict_audio_integer(padding_before, "padding 前"),
+            _strict_audio_integer(padding_after, "padding 後"),
+            str(value.get("inclusion_rule", inclusion_rule)),
+        )
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        if len(value) != 2:
+            raise AudioSpanError("音声区間は start_ms / end_ms の2要素で指定してください。")
+        return AudioSpanRange(
+            _strict_audio_integer(value[0], "開始時刻"),
+            _strict_audio_integer(value[1], "終了時刻"),
+            _strict_audio_integer(padding_ms, "padding 前"),
+            _strict_audio_integer(padding_ms, "padding 後"),
+            inclusion_rule,
+        )
+    raise AudioSpanError("音声区間の形式が正しくありません。")
+
+
+def _audio_canonical_json(value: Any) -> bytes:
+    try:
+        return json.dumps(
+            value,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+    except (TypeError, ValueError) as exc:
+        raise AudioSpanError("音声 cache の fingerprint を計算できません。") from exc
+
+
+def make_audio_span_manifest(
+    video_id: str,
+    ranges: Sequence[AudioSpanRange | Any],
+    *,
+    padding_ms: int = 0,
+    inclusion_rule: str = "half_open_overlap",
+) -> tuple[AudioSpanRange, ...]:
+    """選択区間を入力順の immutable span manifest として正規化する."""
+
+    safe_video = _safe_identifier(video_id, "動画 ID")
+    if not ranges:
+        raise AudioSpanError("音声区間は1件以上必要です。")
+    normalized = tuple(
+        normalize_audio_span_range(
+            item,
+            padding_ms=padding_ms,
+            inclusion_rule=inclusion_rule,
+        )
+        for item in ranges
+    )
+    # 呼び出し側が入力順を意図しているため、重複除去・sort は行わない。
+    _ = safe_video
+    return normalized
+
+
+def _audio_request_fingerprint(
+    video_id: str,
+    item: AudioSpanRange,
+    *,
+    source_metadata: Mapping[str, Any],
+) -> str:
+    payload = {
+        "schema": _AUDIO_CACHE_SCHEMA,
+        "video_id": video_id,
+        "range": item.to_dict(),
+        "source_metadata": dict(source_metadata),
+        "format": _AUDIO_FORMAT_SETTINGS,
+    }
+    return hashlib.sha256(_audio_canonical_json(payload)).hexdigest()
+
+
+def _format_audio_seek_ms(value: int) -> str:
+    hours, remainder = divmod(value, 3_600_000)
+    minutes, remainder = divmod(remainder, 60_000)
+    seconds, milliseconds = divmod(remainder, 1_000)
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d}.{milliseconds:03d}"
+
+
+def _audio_cache_paths(
+    video_id: str,
+    request_fingerprint: str,
+    settings: Settings,
+) -> tuple[Path, Path, Path]:
+    try:
+        cache_dir = confined_video_path(
+            settings.data_dir,
+            video_id,
+            "transcripts",
+            _AUDIO_CACHE_DIR,
+            label="音声 cache 保存先",
+        )
+        audio_path = cache_dir / f"{request_fingerprint}.wav"
+        metadata_path = cache_dir / f"{request_fingerprint}.json"
+        _validate_confined_path(cache_dir, settings, "音声 cache 保存先")
+        _validate_confined_path(audio_path, settings, "音声 cache artifact")
+        _validate_confined_path(metadata_path, settings, "音声 cache metadata")
+        return cache_dir, audio_path, metadata_path
+    except PathConfinementError as exc:
+        raise AudioSpanError(str(exc)) from exc
+
+
+def _ensure_audio_cache_dir(path: Path, settings: Settings) -> None:
+    _ensure_directory(path, settings, "音声 cache 保存先")
+    _validate_directory_entries(path, settings, "音声 cache 保存先")
+
+
+def _audio_file_fingerprint(path: Path) -> tuple[bytes, str]:
+    _lstat_without_symlink(path, "音声 cache artifact")
+    try:
+        content = path.read_bytes()
+    except OSError as exc:
+        raise AudioSpanError("音声 cache artifact を読み取れません。") from exc
+    if not content:
+        raise AudioSpanError("音声 cache artifact が空です。")
+    return content, hashlib.sha256(content).hexdigest()
+
+
+def _inspect_wav_format(content: bytes) -> tuple[int, int, str] | None:
+    try:
+        import io
+
+        with wave.open(io.BytesIO(content), "rb") as wav:
+            channels = wav.getnchannels()
+            sample_rate = wav.getframerate()
+            sample_width = wav.getsampwidth()
+    except (EOFError, OSError, wave.Error):
+        return None
+    if channels <= 0 or sample_rate <= 0 or sample_width <= 0:
+        return None
+    return sample_rate, channels, f"pcm_s{sample_width * 8}le"
+
+
+def _atomic_write_audio_cache(
+    path: Path,
+    content: bytes,
+    settings: Settings,
+) -> None:
+    _validate_confined_path(path, settings, "音声 cache artifact")
+    parent = path.parent
+    _ensure_audio_cache_dir(parent, settings)
+    temporary_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="wb",
+            dir=parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as temporary:
+            temporary_path = Path(temporary.name)
+            temporary.write(content)
+            temporary.flush()
+            os.fsync(temporary.fileno())
+        os.replace(temporary_path, path)
+    except OSError as exc:
+        raise AudioSpanError("音声 cache artifact を原子的に保存できません。") from exc
+    finally:
+        if temporary_path is not None:
+            try:
+                temporary_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+
+def _audio_cache_metadata(
+    *,
+    video_id: str,
+    item: AudioSpanRange,
+    request_fingerprint: str,
+    content: bytes,
+    source_metadata: Mapping[str, Any],
+) -> dict[str, Any]:
+    return {
+        "schema": _AUDIO_CACHE_SCHEMA,
+        "video_id": video_id,
+        "range": item.to_dict(),
+        "request_fingerprint": request_fingerprint,
+        "audio": {
+            "bytes": len(content),
+            "sha256": hashlib.sha256(content).hexdigest(),
+            "sample_rate": _AUDIO_FORMAT_SETTINGS["sample_rate"],
+            "channel": _AUDIO_FORMAT_SETTINGS["channel"],
+            "codec": _AUDIO_FORMAT_SETTINGS["codec"],
+        },
+        "source_metadata": dict(source_metadata),
+        "ffmpeg": dict(_AUDIO_FORMAT_SETTINGS),
+    }
+
+
+def _read_audio_cache(
+    *,
+    video_id: str,
+    item: AudioSpanRange,
+    request_fingerprint: str,
+    audio_path: Path,
+    metadata_path: Path,
+    source_metadata: Mapping[str, Any],
+    settings: Settings,
+) -> AudioSpanResult | None:
+    audio_stat = _lstat_without_symlink(audio_path, "音声 cache artifact")
+    metadata_stat = _lstat_without_symlink(metadata_path, "音声 cache metadata")
+    if audio_stat is None or metadata_stat is None:
+        return None
+    try:
+        if not stat.S_ISREG(audio_stat.st_mode) or not stat.S_ISREG(metadata_stat.st_mode):
+            return None
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        expected_keys = {
+            "schema",
+            "video_id",
+            "range",
+            "request_fingerprint",
+            "audio",
+            "source_metadata",
+            "ffmpeg",
+        }
+        if not isinstance(metadata, dict) or set(metadata) != expected_keys:
+            return None
+        if (
+            metadata["schema"] != _AUDIO_CACHE_SCHEMA
+            or metadata["video_id"] != video_id
+            or metadata["range"] != item.to_dict()
+            or metadata["request_fingerprint"] != request_fingerprint
+            or metadata["source_metadata"] != dict(source_metadata)
+            or metadata["ffmpeg"] != dict(_AUDIO_FORMAT_SETTINGS)
+        ):
+            return None
+        audio_metadata = metadata["audio"]
+        if not isinstance(audio_metadata, dict) or set(audio_metadata) != {
+            "bytes",
+            "sha256",
+            "sample_rate",
+            "channel",
+            "codec",
+        }:
+            return None
+        content, digest = _audio_file_fingerprint(audio_path)
+        if (
+            audio_metadata["bytes"] != len(content)
+            or audio_metadata["sha256"] != digest
+            or audio_metadata["sample_rate"] != _AUDIO_FORMAT_SETTINGS["sample_rate"]
+            or audio_metadata["channel"] != _AUDIO_FORMAT_SETTINGS["channel"]
+            or audio_metadata["codec"] != _AUDIO_FORMAT_SETTINGS["codec"]
+        ):
+            return None
+        inspected = _inspect_wav_format(content)
+        if inspected is not None and inspected != (
+            _AUDIO_FORMAT_SETTINGS["sample_rate"],
+            _AUDIO_FORMAT_SETTINGS["channel"],
+            _AUDIO_FORMAT_SETTINGS["codec"],
+        ):
+            return None
+        return AudioSpanResult(
+            video_id=video_id,
+            range=item,
+            path=audio_path,
+            audio_bytes=content,
+            audio_input_fingerprint=digest,
+            source_metadata=dict(source_metadata),
+            sample_rate=int(_AUDIO_FORMAT_SETTINGS["sample_rate"]),
+            channel=int(_AUDIO_FORMAT_SETTINGS["channel"]),
+            codec=str(_AUDIO_FORMAT_SETTINGS["codec"]),
+            ffmpeg_settings=dict(_AUDIO_FORMAT_SETTINGS),
+            cache_hit=True,
+            request_fingerprint=request_fingerprint,
+        )
+    except (AudioSpanError, OSError, UnicodeError, TypeError, ValueError, json.JSONDecodeError):
+        # cache 破損は cache miss として安全に再取得する。壊れた bytes を
+        # Whisper へ渡したり、既存 artifact を高精度として返したりしない。
+        return None
+
+
+def _audio_download_argv(video_id: str, item: AudioSpanRange) -> list[str]:
+    url = f"https://www.youtube.com/watch?v={video_id}"
+    section = (
+        f"*{_format_audio_seek_ms(item.requested_start_ms)}-"
+        f"{_format_audio_seek_ms(item.requested_end_ms)}"
+    )
+    return [
+        "--no-playlist",
+        "--no-progress",
+        "--no-warnings",
+        "--no-part",
+        "--no-mtime",
+        "--no-write-info-json",
+        "--no-write-thumbnail",
+        "--restrict-filenames",
+        "--force-overwrites",
+        "-f",
+        str(_AUDIO_FORMAT_SETTINGS["selector"]),
+        "--download-sections",
+        section,
+        "--extract-audio",
+        "--audio-format",
+        "wav",
+        "--audio-quality",
+        "0",
+        "--postprocessor-args",
+        "ExtractAudio+ffmpeg:-ar 16000 -ac 1 -c:a pcm_s16le",
+        "-o",
+        "span.%(ext)s",
+        url,
+    ]
+
+
+def _find_audio_output(path: Path, settings: Settings) -> Path:
+    _validate_confined_path(path, settings, "音声一時保存先")
+    candidates: list[Path] = []
+    try:
+        for child in path.iterdir():
+            _lstat_without_symlink(child, "音声一時保存先")
+            if child.is_file() and child.suffix.lower() == ".wav":
+                candidates.append(child)
+    except OSError as exc:
+        raise AudioSpanError("音声一時保存先を確認できません。") from exc
+    if len(candidates) != 1:
+        raise AudioSpanError("選択区間の音声ファイルを一意に確認できません。")
+    return candidates[0]
+
+
+def prepare_audio_span(
+    video_id: str,
+    selected_range: AudioSpanRange | Any,
+    settings: Settings | None = None,
+    *,
+    source_metadata: Mapping[str, Any] | None = None,
+    padding_ms: int = 0,
+    inclusion_rule: str = "half_open_overlap",
+) -> AudioSpanResult:
+    """動画全体を取得せず、選択した絶対時刻 span だけを音声 cache 化する.
+
+    yt-dlp の argv はこの関数内で固定構築され、URL・format・output template を
+    呼び出し側から受け取らない。成功後は WAV bytes と変換条件を atomic に保存し、
+    span / metadata の破損は cache miss として再取得する。
+    """
+
+    settings = settings or get_settings()
+    video_id = _safe_identifier(video_id, "動画 ID")
+    item = normalize_audio_span_range(
+        selected_range,
+        padding_ms=padding_ms,
+        inclusion_rule=inclusion_rule,
+    )
+    merged_source_metadata: dict[str, Any] = {
+        "video_id": video_id,
+        "source_url": f"https://www.youtube.com/watch?v={video_id}",
+        "extractor": "yt-dlp",
+        "format_selector": _AUDIO_FORMAT_SETTINGS["selector"],
+        "seek": {
+            "method": _AUDIO_FORMAT_SETTINGS["seek"],
+            "start_ms": item.requested_start_ms,
+            "end_ms": item.requested_end_ms,
+        },
+        "padding": {
+            "before_ms": item.padding_before_ms,
+            "after_ms": item.padding_after_ms,
+        },
+        "cue_inclusion_rule": item.inclusion_rule,
+        "range_manifest": [item.to_dict()],
+    }
+    if source_metadata:
+        # 呼び出し側の metadata は title / extractor 実績などを追加できるが、
+        # 実際に取得した ID・range・変換契約は固定値を優先する。
+        merged_source_metadata.update(dict(source_metadata))
+        merged_source_metadata.update(
+            {
+                "video_id": video_id,
+                "source_url": f"https://www.youtube.com/watch?v={video_id}",
+                "format_selector": _AUDIO_FORMAT_SETTINGS["selector"],
+                "seek": {
+                    "method": _AUDIO_FORMAT_SETTINGS["seek"],
+                    "start_ms": item.requested_start_ms,
+                    "end_ms": item.requested_end_ms,
+                },
+                "padding": {
+                    "before_ms": item.padding_before_ms,
+                    "after_ms": item.padding_after_ms,
+                },
+                "cue_inclusion_rule": item.inclusion_rule,
+                "range_manifest": [item.to_dict()],
+            }
+        )
+    request_fingerprint = _audio_request_fingerprint(
+        video_id,
+        item,
+        source_metadata=merged_source_metadata,
+    )
+    cache_dir, audio_path, metadata_path = _audio_cache_paths(
+        video_id,
+        request_fingerprint,
+        settings,
+    )
+    _ensure_audio_cache_dir(cache_dir, settings)
+    cached = _read_audio_cache(
+        video_id=video_id,
+        item=item,
+        request_fingerprint=request_fingerprint,
+        audio_path=audio_path,
+        metadata_path=metadata_path,
+        source_metadata=merged_source_metadata,
+        settings=settings,
+    )
+    if cached is not None:
+        return cached
+
+    if shutil.which(settings.ytdlp_path) is None:
+        raise AudioSpanError(
+            f"yt-dlp が見つかりません（パス: {settings.ytdlp_path}）。"
+            "音声だけを取得するため、yt-dlp を導入して再試行してください。"
+        )
+
+    temporary_dir: Path | None = None
+    temporary_identity: os.stat_result | None = None
+    directory_descriptor = -1
+    try:
+        temporary_dir = Path(
+            tempfile.mkdtemp(prefix=".s9-audio-span-", dir=cache_dir)
+        )
+        _validate_confined_path(temporary_dir, settings, "音声一時保存先")
+        temporary_identity = _lstat_without_symlink(temporary_dir, "音声一時保存先")
+        if temporary_identity is None:
+            raise AudioSpanError("音声一時保存先を確認できません。")
+        directory_descriptor = os.open(
+            temporary_dir,
+            os.O_RDONLY
+            | getattr(os, "O_DIRECTORY", 0)
+            | getattr(os, "O_NOFOLLOW", 0),
+        )
+        result = _run_ytdlp(
+            _audio_download_argv(video_id, item),
+            settings,
+            timeout=settings.ytdlp_timeout,
+            pass_fds=(directory_descriptor,),
+            cwd_fd=directory_descriptor,
+        )
+        _assert_directory_identity(
+            temporary_dir,
+            temporary_identity,
+            label="音声一時保存先",
+        )
+        if result.returncode != 0:
+            detail = _sanitize_diagnostic(result.stderr or result.stdout)
+            raise AudioSpanError(
+                "選択区間の音声取得に失敗しました。"
+                + (f"（詳細: {detail}）" if detail else "")
+            )
+        output_path = _find_audio_output(temporary_dir, settings)
+        content, digest = _audio_file_fingerprint(output_path)
+        inspected = _inspect_wav_format(content)
+        if inspected is not None and inspected != (
+            _AUDIO_FORMAT_SETTINGS["sample_rate"],
+            _AUDIO_FORMAT_SETTINGS["channel"],
+            _AUDIO_FORMAT_SETTINGS["codec"],
+        ):
+            raise AudioSpanError("変換後の音声形式が S9 の設定と一致しません。")
+        metadata = _audio_cache_metadata(
+            video_id=video_id,
+            item=item,
+            request_fingerprint=request_fingerprint,
+            content=content,
+            source_metadata=merged_source_metadata,
+        )
+        _atomic_write_audio_cache(audio_path, content, settings)
+        write_text_atomically(
+            metadata_path,
+            json.dumps(metadata, ensure_ascii=False, sort_keys=True, indent=2),
+        )
+        return AudioSpanResult(
+            video_id=video_id,
+            range=item,
+            path=audio_path,
+            audio_bytes=content,
+            audio_input_fingerprint=digest,
+            source_metadata=merged_source_metadata,
+            sample_rate=int(_AUDIO_FORMAT_SETTINGS["sample_rate"]),
+            channel=int(_AUDIO_FORMAT_SETTINGS["channel"]),
+            codec=str(_AUDIO_FORMAT_SETTINGS["codec"]),
+            ffmpeg_settings=dict(_AUDIO_FORMAT_SETTINGS),
+            cache_hit=False,
+            request_fingerprint=request_fingerprint,
+        )
+    except AudioSpanError:
+        raise
+    except (OSError, ValueError, RuntimeError) as exc:
+        raise AudioSpanError("選択区間の音声準備に失敗しました。再試行してください。") from exc
+    finally:
+        if directory_descriptor != -1:
+            try:
+                os.close(directory_descriptor)
+            except OSError:
+                pass
+        if temporary_dir is not None:
+            cleanup_ok = _cleanup_incoming_directory(
+                temporary_dir,
+                expected_identity=temporary_identity,
+            )
+            if not cleanup_ok:
+                # 成果物 cache は既に atomic に確定していても、temporary span
+                # の差し替えを黙って削除しない。呼び出し側は日本語診断を受ける。
+                raise AudioSpanError("音声一時ファイルを安全に削除できません。")
+
+
+def prepare_audio_spans(
+    video_id: str,
+    ranges: Sequence[AudioSpanRange | Any],
+    settings: Settings | None = None,
+    *,
+    source_metadata: Mapping[str, Any] | None = None,
+    padding_ms: int = 0,
+    inclusion_rule: str = "half_open_overlap",
+) -> tuple[AudioSpanResult, ...]:
+    """複数音声 span を入力順に直列準備する."""
+
+    manifest = make_audio_span_manifest(
+        video_id,
+        ranges,
+        padding_ms=padding_ms,
+        inclusion_rule=inclusion_rule,
+    )
+    return tuple(
+        prepare_audio_span(
+            video_id,
+            item,
+            settings,
+            source_metadata=source_metadata,
+        )
+        for item in manifest
+    )
+
+
+# S9-3 の実装名を固定しつつ、呼び出し側の読みやすい別名も公開する。
+download_audio_span = prepare_audio_span
+prepare_audio_only_span = prepare_audio_span
+download_audio_spans = prepare_audio_spans
 
 
 def _sanitize_diagnostic(value: str) -> str:

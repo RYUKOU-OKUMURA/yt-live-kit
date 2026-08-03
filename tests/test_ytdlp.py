@@ -1,9 +1,12 @@
 """yt-dlp ラッパーのユニットテスト."""
 
 import hashlib
+import io
+import json
 import os
 import subprocess
 import sys
+import wave
 from unittest.mock import patch
 
 import pytest
@@ -11,6 +14,7 @@ import pytest
 from yt_live_kit.config import Settings
 from yt_live_kit.models.subtitle import SubtitleSourceMetadata
 from yt_live_kit.services.ytdlp import (
+    AudioSpanRange,
     MISSING_YTDLP_BINARY_IDENTITY,
     YtdlpError,
     _download_subtitles,
@@ -19,6 +23,7 @@ from yt_live_kit.services.ytdlp import (
     extract_video_id,
     fetch,
     get_ytdlp_binary_identity,
+    prepare_audio_span,
     make_subtitle_source_fingerprint,
 )
 
@@ -37,6 +42,16 @@ VTT_TWO = """WEBVTT
 00:00:01.000 --> 00:00:04.000
 再取得した字幕
 """
+
+
+def _wav_bytes(*, sample_rate: int = 16_000, channels: int = 1) -> bytes:
+    buffer = io.BytesIO()
+    with wave.open(buffer, "wb") as wav:
+        wav.setnchannels(channels)
+        wav.setsampwidth(2)
+        wav.setframerate(sample_rate)
+        wav.writeframes(b"\x00\x00" * channels * 160)
+    return buffer.getvalue()
 
 
 def _mock_fetch_dependencies(monkeypatch, metadata: dict) -> None:
@@ -505,3 +520,107 @@ def test_source_fingerprint_changes_with_content_and_provenance():
     assert first[0] != changed_content[0]
     assert first[0] != changed_provenance[0]
     assert first[1] == hashlib.sha256(b"same").hexdigest()
+
+
+def test_prepare_audio_span_uses_selected_audio_only_range_and_persistent_cache(
+    monkeypatch,
+    tmp_path,
+):
+    video_id = "IJvd6k6ZmUo"
+    settings = Settings(
+        data_dir=tmp_path,
+        ytdlp_path="yt-dlp-test",
+        ytdlp_timeout=17,
+    )
+    calls: list[list[str]] = []
+    content = _wav_bytes()
+
+    monkeypatch.setattr(
+        "yt_live_kit.services.ytdlp.shutil.which",
+        lambda value: "/usr/bin/yt-dlp" if value == "yt-dlp-test" else value,
+    )
+
+    def fake_run(args, _settings, *, timeout=None, pass_fds=(), cwd_fd=None):
+        calls.append(list(args))
+        assert timeout == 17
+        assert cwd_fd is not None
+        assert pass_fds == (cwd_fd,)
+        current_fd = os.open(".", os.O_RDONLY)
+        try:
+            os.fchdir(cwd_fd)
+            __import__("pathlib").Path("span.wav").write_bytes(content)
+        finally:
+            os.fchdir(current_fd)
+            os.close(current_fd)
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr("yt_live_kit.services.ytdlp._run_ytdlp", fake_run)
+
+    first = prepare_audio_span(
+        video_id,
+        AudioSpanRange(12_345, 23_456, padding_before_ms=250, padding_after_ms=500),
+        settings,
+        source_metadata={"title": "fixture"},
+    )
+
+    assert first.cache_hit is False
+    assert first.audio_bytes == content
+    assert first.sample_rate == 16_000
+    assert first.channel == 1
+    assert first.codec == "pcm_s16le"
+    assert first.range.requested_start_ms == 12_095
+    assert first.range.requested_end_ms == 23_956
+    assert len(calls) == 1
+    command = calls[0]
+    assert command[command.index("-f") + 1] == "bestaudio/best"
+    assert "--download-sections" in command
+    section = command[command.index("--download-sections") + 1]
+    assert section == "*00:00:12.095-00:00:23.956"
+    assert "bestvideo" not in " ".join(command)
+    assert ".mp4" not in " ".join(command)
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("cache hit では yt-dlp を再実行しない")
+
+    monkeypatch.setattr("yt_live_kit.services.ytdlp._run_ytdlp", fail_if_called)
+    second = prepare_audio_span(
+        video_id,
+        AudioSpanRange(12_345, 23_456, padding_before_ms=250, padding_after_ms=500),
+        settings,
+        source_metadata={"title": "fixture"},
+    )
+    assert second.cache_hit is True
+    assert second.audio_input_fingerprint == first.audio_input_fingerprint
+
+
+def test_prepare_audio_span_corrupt_cache_is_a_miss(monkeypatch, tmp_path):
+    settings = Settings(data_dir=tmp_path, ytdlp_path="yt-dlp-test")
+    monkeypatch.setattr(
+        "yt_live_kit.services.ytdlp.shutil.which",
+        lambda value: "/usr/bin/yt-dlp" if value == "yt-dlp-test" else value,
+    )
+    content = _wav_bytes()
+    calls = 0
+
+    def fake_run(args, _settings, *, timeout=None, pass_fds=(), cwd_fd=None):
+        nonlocal calls
+        calls += 1
+        current_fd = os.open(".", os.O_RDONLY)
+        try:
+            os.fchdir(cwd_fd)
+            __import__("pathlib").Path("span.wav").write_bytes(content)
+        finally:
+            os.fchdir(current_fd)
+            os.close(current_fd)
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr("yt_live_kit.services.ytdlp._run_ytdlp", fake_run)
+    first = prepare_audio_span("IJvd6k6ZmUo", (1_000, 2_000), settings)
+    metadata_path = first.path.with_suffix(".json")
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    metadata["audio"]["sha256"] = "0" * 64
+    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+
+    second = prepare_audio_span("IJvd6k6ZmUo", (1_000, 2_000), settings)
+    assert second.cache_hit is False
+    assert calls == 2
