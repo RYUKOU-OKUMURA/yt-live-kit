@@ -53,7 +53,7 @@
 | P6-1 | タイトル 3 方向生成・検証 | [ ] 未着手 |
 | P6-2 | 概要欄必須構成・投稿前再検証 service | [ ] 未着手 |
 | P6-3 | 関連動画の Studio 手動確認・永続状態 | [ ] 未着手 |
-| P6-4 | 投稿 UI 統合・確認ダイアログ | [ ] 未着手 |
+| P6-4 | 投稿 UI 統合・確認ダイアログ | [x] 完了 |
 | P6-5 | P6 統合受け入れ・回帰 | [ ] 未着手 |
 | P6 | Shorts 投稿メタデータ品質ゲート + 関連動画確認追跡 | [~] 進行中 |
 
@@ -1842,22 +1842,24 @@ data/{video_id}/ ...
 
 **作業:**
 
-- [ ] P6-4-1. タイトル 3 方向を固定順で表示し、18〜32 文字外の警告と legacy 不足案内を出す。最終タイトルの自由編集は維持する
-- [ ] P6-4-2. P6-2 の既定テンプレート確保と必須構成 validator を投稿フォームへ接続し、編集後・preview 作成前・確認確定後の service 境界で同じ不変要件 snapshot を再検証する。期待 4 項目と template / meta fingerprint を preview / content snapshot / fingerprint に凍結し、confirm 後に mutable file を再読込しない
-- [ ] P6-4-2a. content snapshot への概要欄要件 field は legacy operation を読める optional default とし、新しい P6 投稿 preview / confirm では必須にする。legacy record を自動で確認済みにせず、新しい preview の作り直しを日本語で案内する
-- [ ] P6-4-3. 必須項目欠落時は日本語で不足箇所を示し、確認 dialog、operation、job、upload attempt、API session を開始しない。確認 snapshot と送信 body の一致を維持する
-- [ ] P6-4-4. uploaded operation に Studio 編集先、対象元動画、手順、状態を表示し、P6-3 service から得た pending 総件数と対象一覧を表示する。対象 ID を含む `st.dialog` 確定後だけ local confirmed API を呼び、UI が queue JSON を直接集計しない
-- [ ] P6-4-5. rerun、再起動、二重クリック、legacy operation、publication poll、予約枠、投稿確認の既存導線を UI / service テストで回帰確認する
+- [x] P6-4-1. タイトル 3 方向を固定順で表示し、18〜32 文字外の警告と legacy 不足案内を出す。最終タイトルの自由編集は維持する
+- [x] P6-4-2. P6-2 の既定テンプレート確保と必須構成 validator を投稿フォームへ接続し、編集後・preview 作成前・確認確定後の service 境界で同じ不変要件 snapshot を再検証する。期待 4 項目と template / meta fingerprint を preview / content snapshot / fingerprint に凍結し、confirm 後に mutable file を再読込しない
+- [x] P6-4-2a. content snapshot への概要欄要件 field は legacy operation を読める optional default とし、新しい P6 投稿 preview / confirm では必須にする。legacy record を自動で確認済みにせず、新しい preview の作り直しを日本語で案内する
+- [x] P6-4-3. 必須項目欠落時は日本語で不足箇所を示し、確認 dialog、operation、job、upload attempt、API session を開始しない。確認 snapshot と送信 body の一致を維持する
+- [x] P6-4-4. uploaded operation に Studio 編集先、対象元動画、手順、状態を表示し、P6-3 service から得た pending 総件数と対象一覧を表示する。対象 ID を含む `st.dialog` 確定後だけ local confirmed API を呼び、UI が queue JSON を直接集計しない
+- [x] P6-4-5. rerun、再起動、二重クリック、legacy operation、publication poll、予約枠、投稿確認の既存導線を UI / service テストで回帰確認する
 
 **Done 条件:**
 
-- [ ] AC-38 / AC-39 の UI・service 接続がモックで通り、確定前に外部 write が無い
-- [ ] 概要欄を最終編集して必須項目を削除する race が preview 前と confirm 後の両方で止まる
-- [ ] legacy content snapshot は読み込めるが新しい P6 投稿には再利用されず、要件 snapshot を持つ新 preview が必須になる
-- [ ] 関連動画の確認は local queue だけを更新し、YouTube API / ブラウザを呼ばない
-- [ ] pending 表示・集計が既存 `publishAt` や publication poll を変更せず、予定公開の hard gate にならない
-- [ ] `uv run pytest tests/test_ui_upload.py tests/test_schedule.py` と全件 `uv run pytest` が通る
-- [ ] 独立レビューで P0 / P1 finding がなく、main に `P6-4` commit として統合される
+- [x] AC-38 / AC-39 の UI・service 接続がモックで通り、確定前に外部 write が無い
+- [x] 概要欄を最終編集して必須項目を削除する race が preview 前と confirm 後の両方で止まる
+- [x] legacy content snapshot は読み込めるが新しい P6 投稿には再利用されず、要件 snapshot を持つ新 preview が必須になる
+- [x] 関連動画の確認は local queue だけを更新し、YouTube API / ブラウザを呼ばない
+- [x] pending 表示・集計が既存 `publishAt` や publication poll を変更せず、予定公開の hard gate にならない
+- [x] `uv run pytest tests/test_ui_upload.py tests/test_schedule.py` と全件 `uv run pytest` が通る
+- [x] 独立レビューで P0 / P1 finding がなく、main に `P6-4` commit `aaa89cf` として統合される
+
+**P6-4 受け入れ証跡（2026-08-03）:** 対象 4 テスト群 235 件、全件 1,380 件（skip 2 件）が main で通過。実 YouTube / Studio write は行わず、API 境界はモックで検証した。実装セッション内レビューとオーケストレーター独立レビューはいずれも最終 APPROVE（残存 P0 / P1 なし）。
 
 **コミット境界:** 3 service の UI / schedule 接続と統合テストだけを `P6-4` として commit する。
 
