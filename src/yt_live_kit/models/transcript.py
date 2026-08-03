@@ -300,6 +300,17 @@ class TranscriptArtifact(_StrictFrozenModel):
             if not self.audio_input_fingerprint:
                 raise ValueError("Whisper success artifact には audio input fingerprint が必要です。")
 
+        # YouTube VTT の success は、永続 cache から再読込した時に元の
+        # bytes と照合できる provenance を必ず持つ。URL だけの参照は
+        # immutable source path として再検証できないため許可しない。
+        if self.source_kind == TranscriptSourceKind.YOUTUBE_VTT and self.status == TranscriptArtifactStatus.SUCCESS:
+            if self.source_ref.startswith(("http://", "https://")):
+                raise ValueError("YouTube VTT success artifact には source path が必要です。")
+            if not self.source_fingerprint:
+                raise ValueError("YouTube VTT success artifact には source fingerprint が必要です。")
+            if not self.source_content_sha256:
+                raise ValueError("YouTube VTT success artifact には VTT bytes fingerprint が必要です。")
+
         if self.status == TranscriptArtifactStatus.SUCCESS and any(
             item.status != TranscriptArtifactStatus.SUCCESS for item in self.ranges
         ):

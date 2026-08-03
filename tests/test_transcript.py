@@ -167,6 +167,47 @@ def test_whisper_success_builder_fails_closed_without_provenance():
         )
 
 
+def test_youtube_vtt_success_requires_persistent_provenance():
+    source = b"WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nsource\n"
+    artifact = build_transcript_artifact(
+        video_id="vid1234567",
+        source_kind="youtube_vtt",
+        source_ref="subtitles/ja.vtt",
+        language="ja",
+        ranges=[{"start_ms": 0, "end_ms": 2_000}],
+        cues=[{"start_ms": 1_000, "end_ms": 2_000, "text": "source"}],
+        source_bytes=source,
+    )
+    payload = artifact.model_dump(mode="json")
+
+    for field, value in (
+        ("source_ref", ""),
+        ("source_fingerprint", None),
+        ("source_content_sha256", None),
+    ):
+        with pytest.raises(ValueError, match="source|fingerprint|bytes"):
+            TranscriptArtifact.model_validate({**payload, field: value})
+
+    with pytest.raises(ValueError, match="source path"):
+        TranscriptArtifact.model_validate(
+            {**payload, "source_ref": "https://example.invalid/subtitle.vtt"}
+        )
+
+    malformed_source = (
+        source + b"\n00:00:03.000 -> 00:00:04.000\nmalformed\n"
+    )
+    with pytest.raises(TranscriptArtifactError, match="malformed timing"):
+        build_transcript_artifact(
+            video_id="vid1234567",
+            source_kind="youtube_vtt",
+            source_ref="subtitles/ja.vtt",
+            language="ja",
+            ranges=[{"start_ms": 0, "end_ms": 2_000}],
+            cues=[{"start_ms": 1_000, "end_ms": 2_000, "text": "source"}],
+            source_bytes=malformed_source,
+        )
+
+
 def test_malformed_vtt_timing_block_is_not_silently_ignored():
     malformed = (
         b"WEBVTT\n\n"
@@ -180,6 +221,37 @@ def test_malformed_vtt_timing_block_is_not_silently_ignored():
         parse_vtt_cues(
             b"WEBVTT\n\n00:00:02.000 --> 00:00:01.000\nreverse\n"
         )
+
+
+@pytest.mark.parametrize(
+    "malformed_timing",
+    (
+        "00:00:03.000 -> 00:00:04.000",
+        "00:00:03.000 00:00:04.000",
+    ),
+)
+def test_timestamp_like_malformed_vtt_block_is_rejected(malformed_timing):
+    content = (
+        "WEBVTT\n\n"
+        "00:00:00.000 --> 00:00:01.000\nvalid\n\n"
+        f"{malformed_timing}\ninvalid\n"
+    )
+    with pytest.raises(TranscriptArtifactError, match="malformed timing"):
+        parse_vtt_cues(content)
+
+
+def test_vtt_metadata_blocks_can_contain_timestamp_like_text():
+    content = (
+        "WEBVTT\n\n"
+        "NOTE\n00:00:03.000 -> 00:00:04.000\nnot a cue\n\n"
+        "STYLE\n00:00:05.000 missing arrow\n\n"
+        "REGION\n00:00:06.000 -> 00:00:07.000\n\n"
+        "00:00:00.000 --> 00:00:01.000\nvalid\n"
+    )
+    cues = parse_vtt_cues(content)
+    assert [(cue.start_ms, cue.end_ms, cue.text) for cue in cues] == [
+        (0, 1_000, "valid")
+    ]
 
 
 def test_cue_and_used_range_digest_are_order_absolute_and_rule_sensitive():
@@ -271,6 +343,71 @@ def test_vtt_cache_hit_is_persistent_and_never_writes_canonical_source(tmp_path)
     assert second.artifact_fingerprint == first.artifact_fingerprint
     assert source_path.read_bytes() == source_bytes
     assert store.lock_path.is_file()
+
+
+def test_content_only_vtt_fallback_is_not_persisted_without_a_source_path(tmp_path):
+    settings = Settings(data_dir=tmp_path)
+    content = b"WEBVTT\n\n00:00:01.000 --> 00:00:02.000\ntransient\n"
+    artifact, hit = TranscriptArtifactStore("vid1234567", settings).save_vtt(
+        content=content
+    )
+
+    assert artifact.source_content_sha256 is not None
+    assert hit is False
+    assert not (tmp_path / "vid1234567" / "transcripts" / "index.json").exists()
+
+
+def test_vtt_source_provenance_is_revalidated_and_stale_artifact_is_excluded(tmp_path):
+    settings = Settings(data_dir=tmp_path)
+    source_path = tmp_path / "vid1234567" / "subtitles" / "ja.vtt"
+    source_path.parent.mkdir(parents=True)
+    first_source = b"WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nfirst\n"
+    second_source = b"WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nsecond\n"
+    source_path.write_bytes(first_source)
+    store = TranscriptArtifactStore("vid1234567", settings)
+    first, _ = store.save_vtt()
+
+    source_path.write_bytes(second_source)
+    with pytest.raises(TranscriptCacheError, match="fingerprint"):
+        store.load_artifact(first.artifact_fingerprint)
+    assert all(
+        item.artifact_fingerprint != first.artifact_fingerprint
+        for item in store.list_artifacts()
+    )
+
+    second, hit = store.save_vtt(vtt_path=source_path)
+    assert hit is False
+    assert second.artifact_fingerprint != first.artifact_fingerprint
+
+
+def test_vtt_source_missing_fake_fingerprint_and_symlink_fail_closed(tmp_path):
+    settings = Settings(data_dir=tmp_path)
+    source_path = tmp_path / "vid1234567" / "subtitles" / "ja.vtt"
+    source_path.parent.mkdir(parents=True)
+    source_path.write_bytes(b"WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nsource\n")
+    store = TranscriptArtifactStore("vid1234567", settings)
+    artifact, _ = store.save_vtt()
+    artifact_path = (
+        tmp_path
+        / "vid1234567"
+        / "transcripts"
+        / "artifacts"
+        / f"{artifact.artifact_fingerprint}.json"
+    )
+
+    payload = json.loads(artifact_path.read_text(encoding="utf-8"))
+    payload["source_fingerprint"] = "b" * 64
+    artifact_path.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(TranscriptCacheError, match="source fingerprint"):
+        store.load_artifact(artifact.artifact_fingerprint)
+
+    artifact_path.write_text(json.dumps(artifact.model_dump(mode="json")), encoding="utf-8")
+    outside = tmp_path / "outside.vtt"
+    outside.write_bytes(source_path.read_bytes())
+    source_path.unlink()
+    source_path.symlink_to(outside)
+    with pytest.raises(TranscriptCacheError, match="シンボリックリンク"):
+        store.load_artifact(artifact.artifact_fingerprint)
 
 
 def test_corrupt_index_recovers_only_valid_artifacts_and_partial_is_not_resolved(tmp_path):
@@ -396,6 +533,8 @@ def test_selected_range_resolver_prefers_whisper_and_coarse_keeps_vtt(tmp_path):
         runtime=whisper.runtime,
         expected_settings=whisper.settings,
         audio_input_fingerprint=whisper.audio_input_fingerprint,
+        expected_cache_identity_value=whisper.cache_identity,
+        used_range_cue_digests=whisper.used_range_cue_digests,
     )
     assert selected.is_fallback is False
     assert selected.artifact is not None
@@ -425,6 +564,8 @@ def test_selected_range_requires_language_and_expected_whisper_provenance(tmp_pa
         runtime=whisper.runtime,
         expected_settings=whisper.settings,
         audio_input_fingerprint=whisper.audio_input_fingerprint,
+        expected_cache_identity_value=whisper.cache_identity,
+        used_range_cue_digests=whisper.used_range_cue_digests,
     )
     assert wrong_language.is_fallback is True
     assert wrong_language.artifact is not None
@@ -440,10 +581,58 @@ def test_selected_range_requires_language_and_expected_whisper_provenance(tmp_pa
         runtime=whisper.runtime,
         expected_settings=whisper.settings,
         audio_input_fingerprint=whisper.audio_input_fingerprint,
+        expected_cache_identity_value=whisper.cache_identity,
+        used_range_cue_digests=whisper.used_range_cue_digests,
     )
     assert wrong_model.is_fallback is True
     assert wrong_model.artifact is not None
     assert wrong_model.artifact.source_kind.value == "youtube_vtt"
+
+    missing_cache = resolve_selected_range(
+        "vid1234567",
+        settings,
+        ranges,
+        vtt_content=vtt,
+        language=whisper.language,
+        model=whisper.model,
+        runtime=whisper.runtime,
+        expected_settings=whisper.settings,
+        audio_input_fingerprint=whisper.audio_input_fingerprint,
+        used_range_cue_digests=whisper.used_range_cue_digests,
+    )
+    assert missing_cache.is_fallback is True
+    assert "cache identity" in (missing_cache.fallback_reason or "")
+
+    missing_used = resolve_selected_range(
+        "vid1234567",
+        settings,
+        ranges,
+        vtt_content=vtt,
+        language=whisper.language,
+        model=whisper.model,
+        runtime=whisper.runtime,
+        expected_settings=whisper.settings,
+        audio_input_fingerprint=whisper.audio_input_fingerprint,
+        expected_cache_identity_value=whisper.cache_identity,
+    )
+    assert missing_used.is_fallback is True
+    assert "used_range_cue_digests" in (missing_used.fallback_reason or "")
+
+    wrong_cache = resolve_selected_range(
+        "vid1234567",
+        settings,
+        ranges,
+        vtt_content=vtt,
+        language=whisper.language,
+        model=whisper.model,
+        runtime=whisper.runtime,
+        expected_settings=whisper.settings,
+        audio_input_fingerprint=whisper.audio_input_fingerprint,
+        expected_cache_identity_value="a" * 64,
+        used_range_cue_digests=whisper.used_range_cue_digests,
+    )
+    assert wrong_cache.is_fallback is True
+    assert wrong_cache.invalidated is True
 
 
 def test_vtt_path_and_content_must_match_when_both_are_provided(tmp_path):

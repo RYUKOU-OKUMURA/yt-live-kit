@@ -51,6 +51,9 @@ _VTT_TIMING_RE = re.compile(
     r"^\s*(?P<start>(?:\d{2}:)?\d{2}:\d{2}\.\d{3})\s+--\>\s+"
     r"(?P<end>(?:\d{2}:)?\d{2}:\d{2}\.\d{3})(?:\s+.*)?$"
 )
+_VTT_TIMESTAMP_LIKE_RE = re.compile(
+    r"^\s*\d{1,3}(?::\d{2}){1,2}\.\d{1,3}\b"
+)
 _ARTIFACT_FILENAME_RE = re.compile(r"^(?P<fingerprint>[0-9a-f]{64})\.json$")
 _INDEX_KEYS = frozenset({"schema_version", "video_id", "artifacts", "updated_at"})
 _INDEX_ENTRY_KEYS = frozenset(
@@ -582,17 +585,29 @@ def parse_vtt_cues(content: str | bytes) -> tuple[TranscriptCue, ...]:
     lines = content.replace("\r\n", "\n").replace("\r", "\n").split("\n")
     cues: list[TranscriptCue] = []
     index = 0
+    skip_block = False
     while index < len(lines):
         line = lines[index].strip()
         index += 1
-        if not line or line.startswith(("WEBVTT", "NOTE", "Kind:", "STYLE", "REGION")):
+        if skip_block:
+            if not line:
+                skip_block = False
+            continue
+        if not line:
+            continue
+        if line.startswith(("WEBVTT", "NOTE", "STYLE", "REGION")):
+            # NOTE / STYLE / REGION は空行までが metadata block。中身に
+            # timestamp-like な文字列があっても cue timing と解釈しない。
+            skip_block = True
+            continue
+        if line.startswith(("Kind:", "Language:")):
             continue
         if line.isdigit() and index < len(lines):
             line = lines[index].strip()
             index += 1
         match = _VTT_TIMING_RE.fullmatch(line)
         if match is None:
-            if "-->" in line:
+            if "-->" in line or _VTT_TIMESTAMP_LIKE_RE.match(line):
                 raise TranscriptArtifactError("VTT に malformed timing block があります。")
             continue
         start_ms = _parse_vtt_timestamp_ms(match.group("start"))
@@ -751,6 +766,11 @@ def build_transcript_artifact(
     if kind == SourceKind.YOUTUBE_VTT:
         if source_bytes is None:
             raise TranscriptArtifactError("YouTube VTT artifact には source bytes が必要です。")
+        # builder の直呼びでも malformed timing block を success artifact
+        # として固定できないよう、実 VTT の構造を先に検証する。失敗記録
+        # は診断用 bytes を保持できるよう parse を強制しない。
+        if artifact_status == TranscriptArtifactStatus.SUCCESS:
+            parse_vtt_cues(bytes(source_bytes))
         expected_source_fingerprint = _source_fingerprint(
             bytes(source_bytes),
             video_id=video_id,
@@ -1249,6 +1269,11 @@ class TranscriptArtifactStore:
             if item.used_range_cue_digest != expected:
                 raise TranscriptCacheError("字幕 artifact の区間 used digest が内容と一致しません。")
         self._validate_source_ref(artifact)
+        if (
+            artifact.source_kind == TranscriptSourceKind.YOUTUBE_VTT
+            and artifact.status == TranscriptArtifactStatus.SUCCESS
+        ):
+            self._validate_vtt_source(artifact)
         return artifact
 
     def _validate_source_ref(self, artifact: TranscriptArtifact) -> None:
@@ -1261,6 +1286,40 @@ class TranscriptArtifactStore:
         # symlink を含む全 source path は fail closed。VTT resolver は別途
         # 実体 bytes を再検証する。
         _lstat(source_path, "字幕 source")
+
+    def _validate_vtt_source(self, artifact: TranscriptArtifact) -> None:
+        """success VTT の永続 provenance を source 実体と照合する。"""
+
+        if artifact.source_ref.startswith(("http://", "https://")):
+            raise TranscriptCacheError("YouTube VTT artifact の source path がありません。")
+        source_path = _validate_video_path(
+            Settings(data_dir=self.data_dir), self.video_id, *Path(artifact.source_ref).parts
+        )
+        source_stat = _lstat(source_path, "字幕 source")
+        if source_stat is None:
+            raise TranscriptCacheError("YouTube VTT artifact の source path が見つかりません。")
+        if not stat.S_ISREG(source_stat.st_mode):
+            raise TranscriptCacheError("YouTube VTT artifact の source path が通常のファイルではありません。")
+        try:
+            source_bytes = source_path.read_bytes()
+        except (OSError, UnicodeError) as exc:
+            raise TranscriptCacheError("YouTube VTT artifact の source bytes を読み込めません。") from exc
+        try:
+            parse_vtt_cues(source_bytes)
+        except TranscriptArtifactError as exc:
+            raise TranscriptCacheError("YouTube VTT artifact の source が有効な VTT ではありません。") from exc
+        actual_content_sha256 = sha256_bytes(source_bytes)
+        if artifact.source_content_sha256 != actual_content_sha256:
+            raise TranscriptCacheError("YouTube VTT artifact の VTT bytes fingerprint が実体と一致しません。")
+        expected_source_fingerprint = _source_fingerprint(
+            source_bytes,
+            video_id=artifact.video_id,
+            language=artifact.language,
+            source_url=artifact.source_url,
+            source_metadata=artifact.source_metadata,
+        )
+        if artifact.source_fingerprint != expected_source_fingerprint:
+            raise TranscriptCacheError("YouTube VTT artifact の source fingerprint が実体と一致しません。")
 
     def _rebuild_index_unlocked(self) -> list[dict[str, Any]]:
         self._ensure_dirs()
@@ -1396,6 +1455,9 @@ class TranscriptArtifactStore:
         self._validate_artifact(artifact, path)
         payload = artifact.canonical_dict()
         with self._locked():
+            # source path は VTT の immutable input なので、外側の検証後に
+            # bytes が差し替わっていないことも writer lock 下で再確認する。
+            self._validate_artifact(artifact, path)
             existing = _lstat(path, "字幕 artifact")
             if existing is not None:
                 loaded = self._load_artifact_path(path)
@@ -1451,11 +1513,12 @@ class TranscriptArtifactStore:
         _check_no_symlink_path(self.data_dir, selected_path, "字幕 source")
         if content is not None and not isinstance(content, bytes):
             raise TranscriptCacheError("字幕 source content は bytes で指定してください。")
+        source_exists = _lstat(selected_path, "字幕 source") is not None
         # 明示 path と content の二重入力では、path の実体を必ず再読込して
         # 完全一致を確認する。canonical path がまだ無い content-only fallback
         # は後方互換のため許可するが、既存 path がある場合は同じ検証を行う。
         should_compare_content = content is not None and (
-            vtt_path is not None or selected_path.exists()
+            vtt_path is not None or source_exists
         )
         if should_compare_content:
             try:
@@ -1507,6 +1570,10 @@ class TranscriptArtifactStore:
             source_metadata=source_metadata,
             cache_identity_value=cache_fp,
         )
+        if not source_exists:
+            # content-only は既存 resolver の一時 fallback としてだけ返す。
+            # source path が無い success artifact は永続 cache に保存しない。
+            return artifact, False
         hit = bool(self.find_by_cache_identity(cache_fp))
         self.save(artifact)
         return artifact, hit
@@ -1568,6 +1635,7 @@ class TranscriptResolver:
         ranges: Iterable[TranscriptRange | Mapping[str, Any] | Sequence[Any]],
         *,
         cache_identity_value: str | None = None,
+        expected_cache_identity_value: str | None = None,
         used_range_cue_digests: Sequence[str] | None = None,
         model: Mapping[str, Any] | None = None,
         runtime: Mapping[str, Any] | None = None,
@@ -1587,6 +1655,12 @@ class TranscriptResolver:
                     "selected_range の expected settings が重複指定されています。"
                 )
             settings = expected_settings
+        if expected_cache_identity_value is not None:
+            if cache_identity_value is not None:
+                raise TranscriptResolutionError(
+                    "selected_range の expected cache identity が重複指定されています。"
+                )
+            cache_identity_value = expected_cache_identity_value
         expected_cache = (
             None
             if cache_identity_value is None
@@ -1621,6 +1695,11 @@ class TranscriptResolver:
                 expected_audio is not None,
             )
         )
+        identity_ready = (
+            expected_cache is not None
+            and expected_used is not None
+            and len(expected_used) == len(normalized_ranges)
+        )
         considered: list[str] = []
         valid: list[TranscriptArtifact] = []
         invalidated = False
@@ -1654,7 +1733,7 @@ class TranscriptResolver:
             if not artifact.is_high_precision:
                 invalidated = True
                 continue
-            if not provenance_ready or artifact.language != language:
+            if not provenance_ready or not identity_ready or artifact.language != language:
                 continue
             if expected_cache is not None and artifact.cache_identity != expected_cache:
                 invalidated = True
@@ -1696,6 +1775,8 @@ class TranscriptResolver:
             "selected_range の高精度解決には language、model、runtime、settings、"
             "audio input fingerprint の expected provenance が必要です。"
             if not provenance_ready
+            else "selected_range の高精度解決には expected cache identity と ordered used_range_cue_digests が必要です。"
+            if not identity_ready
             else "要求された全区間が success の Whisper artifact と一致しません。"
         )
         if coarse.artifact is None:
@@ -1804,6 +1885,7 @@ def resolve_selected_range(
     settings: Settings | Path,
     ranges: Iterable[TranscriptRange | Mapping[str, Any] | Sequence[Any]],
     *,
+    expected_cache_identity_value: str | None = None,
     expected_settings: Mapping[str, Any] | None = None,
     **kwargs: Any,
 ) -> TranscriptResolution:
@@ -1812,6 +1894,7 @@ def resolve_selected_range(
         settings,
         ResolverUse.SELECTED_RANGE,
         ranges=ranges,
+        expected_cache_identity_value=expected_cache_identity_value,
         expected_settings=expected_settings,
         **kwargs,
     )

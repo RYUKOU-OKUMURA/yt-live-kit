@@ -278,7 +278,7 @@ def test_coarse_candidate_lineage_round_trips_without_changing_display_order(tmp
         language="ja",
         ranges=[{"start_ms": 0, "end_ms": 3_000_000}],
         cues=[{"start_ms": 222_000, "end_ms": 223_000, "text": "候補"}],
-        source_bytes=b"WEBVTT\n",
+        source_bytes=b"WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nsource\n",
     )
     # build の VTT artifact は source bytes と cue 内容が一致する必要はなく、
     # 候補 lineage は artifact の検証済み digest だけを参照する。

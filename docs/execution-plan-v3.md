@@ -1599,6 +1599,8 @@ data/{video_id}/ ...
 
 **S9-2 follow-up（2026-08-03）:** Whisper success artifact の model / runtime / settings / audio input fingerprint を必須化し、`selected_range` は language と expected provenance が揃わない場合に高精度扱いせず明示 fallback とした。VTT の path + content は実体 bytes を比較し、malformed timing block は拒否する。focused tests は 38 passed、全体は 1,490 passed / 2 skipped。
 
+**S9-2 follow-up 2（2026-08-03）:** YouTube VTT success artifact に source path、source fingerprint、実 VTT bytes SHA-256 を必須化し、保存・再読込・resolver の各境界で confinement、symlink、実体 bytes、fingerprint、strict VTT 構造を再検証するようにした。canonical `ja.vtt` と `subtitles/sources/` の既存 path は維持し、path の無い content-only fallback は永続化しない。`selected_range` は expected cache identity と ordered `used_range_cue_digests` も必須一致とし、省略・不一致を coarse fallback へ落とす。focused tests は 45 passed、全体は 1,497 passed / 2 skipped。
+
 **Done 条件:**
 - [x] resolver が用途別に deterministic な artifact を返し、既存 VTT が untouched のまま、cache hit / miss と失効理由を検査可能である
 - [x] coarse candidate が VTT provenance と candidate fingerprint を保持し、既存 clips の候補探索・表示順・FR-31 引き継ぎを壊さない
