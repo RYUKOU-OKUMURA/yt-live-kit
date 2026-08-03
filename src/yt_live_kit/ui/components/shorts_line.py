@@ -62,7 +62,11 @@ from yt_live_kit.services.transcript_artifact import TranscriptArtifactError, Tr
 from yt_live_kit.services.short_cut import load_cut_plan
 from yt_live_kit.services.subtitle_burn import TELOP_PRESETS
 from yt_live_kit.services.upload_queue import UploadQueueError, list_operations
-from yt_live_kit.ui.components.short_cut import ParentOption, render_short_cut_section
+from yt_live_kit.ui.components.short_cut import (
+    ParentOption,
+    artifact_provenance_payload,
+    render_short_cut_section,
+)
 from yt_live_kit.ui.components.shorts_queue import (
     clear_line_confirmed_spec,
     clear_line_snapshot,
@@ -109,6 +113,57 @@ CandidateKey = tuple[Literal["clips", "highlights"], str]
 
 def _safe(value: object) -> str:
     return str(value).replace("<", "〈").replace(">", "〉")
+
+
+def _inspect_artifact_lineage(
+    state: LineState,
+    settings: Settings,
+) -> tuple[bool, str]:
+    """S9-4 store の検証結果だけを使い、対象範囲を保った失効理由を返す."""
+    if state.artifact_ref is None:
+        return True, "字幕 provenance: coarse VTT fallback。境界は人が確認してください。"
+    if state.artifact_fingerprint is None or not state.used_range_cue_digests:
+        return (
+            False,
+            "高精度字幕 artifact lineage が不完全です。"
+            f"対象 clip: {state.clip_id}。台本確認と最終確認だけを失効しました。"
+            "次 gate: 工程 3 の台本を再確認してください。",
+        )
+    try:
+        store = TranscriptArtifactStore(state.video_id, settings)
+        artifact = store.load_artifact(state.artifact_fingerprint)
+        actual_ref = store.artifact_ref(artifact)
+    except (TranscriptArtifactError, OSError, ValueError):
+        return (
+            False,
+            "保存済み高精度字幕 artifact を確認できないため失効しました。"
+            f"対象 clip: {state.clip_id}。使用区間外の候補や動画全体は削除していません。"
+            "次 gate: 工程 3 の台本を再確認してください。",
+        )
+    if (
+        actual_ref != state.artifact_ref
+        or artifact.video_id != state.video_id
+        or artifact.artifact_fingerprint != state.artifact_fingerprint
+        or tuple(artifact.used_range_cue_digests)
+        != tuple(state.used_range_cue_digests)
+        or not artifact.is_high_precision
+    ):
+        return (
+            False,
+            "高精度字幕 artifact と使用区間の証跡が一致しないため失効しました。"
+            f"対象 clip: {state.clip_id}。使用範囲外の変更でライン全体は失効していません。"
+            "次 gate: 工程 3 の台本を再確認してください。",
+        )
+    return True, "高精度 artifact lineage を確認済みです。"
+
+
+def _render_telop_provenance_header(draft: TelopScriptDocument) -> None:
+    payload = artifact_provenance_payload(draft)
+    if payload is None:
+        st.caption("telop editor provenance: coarse VTT fallback（高精度 artifact なし）")
+        return
+    st.caption("telop editor provenance: refined artifact（同一 ref / digest 配列）")
+    st.code(json.dumps(payload, ensure_ascii=False, indent=2))
 
 
 def stage_number(stage: LineStage) -> int:
@@ -981,6 +1036,15 @@ def render_shorts_line(
     context = _context(video_id)
     if state is not None and context is None:
         context = _restore_context(video_id, state, settings)
+    lineage_current = True
+    lineage_message = ""
+    if state is not None:
+        lineage_current, lineage_message = _inspect_artifact_lineage(state, settings)
+        if not lineage_current and context is not None:
+            context.pop("draft", None)
+            context.pop("confirmed_spec", None)
+            context["telop_error"] = lineage_message
+            _save_context(video_id, context)
 
     if state is None:
         render_stage_bar(LineStage.MATERIAL_SELECTION)
@@ -1108,6 +1172,12 @@ def render_shorts_line(
             retry_label="保存状態を再読み込み",
         )
         return
+    if not lineage_current:
+        target_ranges = "、".join(
+            f"{segment.id} {segment.start_ms / 1000:.3f} → {segment.end_ms / 1000:.3f}秒"
+            for segment in target.segments
+        ) or "不明"
+        st.error(f"{lineage_message} 対象 range: {target_ranges}。")
     st.caption(
         f"適用中: {'ぼかし背景' if defaults.layout == 'blur' else '中央クロップ'}"
         f"・{defaults.preset}・Hook {defaults.hook_preset}　設定で変更"
@@ -1129,6 +1199,7 @@ def render_shorts_line(
         )
         return
 
+    _render_telop_provenance_header(draft)
     edited = _editor_document(draft, video_id=video_id, clip_id=target.target_id)
     validation = validate_telop_script(
         edited,
@@ -1282,6 +1353,18 @@ def render_shorts_line(
         return
 
     st.subheader("完成動画を最終確認")
+    if not lineage_current:
+        st.error(
+            "最終確認 banner: 高精度字幕の失効理由を確認してください。"
+            f"対象 clip: {state.clip_id}。次 gate: 台本を再確認してください。"
+        )
+    elif state.artifact_ref is None:
+        st.warning(
+            "最終確認 banner: coarse VTT fallback です。"
+            "高精度成功とは表示せず、境界を人が確認してください。"
+        )
+    else:
+        st.info("最終確認 banner: refined artifact lineage を使用しています。")
     with st.container(width=360):
         st.video(output_path)
     preview_current = (

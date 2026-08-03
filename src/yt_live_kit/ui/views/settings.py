@@ -6,7 +6,7 @@ from collections.abc import Sequence
 
 import streamlit as st
 
-from yt_live_kit.config import Settings, get_settings
+from yt_live_kit.config import WHISPER_ADOPTED_CONTRACT, Settings, get_settings
 from yt_live_kit.services.ai_prompt import is_codex_available
 from yt_live_kit.services.ffmpeg import FfmpegError, diagnose_ffmpeg
 from yt_live_kit.services.schedule import (
@@ -18,6 +18,11 @@ from yt_live_kit.services.schedule import (
 )
 from yt_live_kit.services.subtitle_burn import TELOP_PRESETS
 from yt_live_kit.services.upload_queue import UploadQueueError, count_upload_attempts
+from yt_live_kit.services.whisper_runtime import (
+    WhisperRuntimeError,
+    WhisperSettingsContract,
+    preflight_whisper_runtime,
+)
 from yt_live_kit.ui.components.storage_manager import render_storage_manager
 from yt_live_kit.ui.views import _local_settings
 from yt_live_kit.ui.views._local_settings import (
@@ -121,6 +126,89 @@ def _render_environment_settings(settings: Settings) -> None:
         "YTLK_DATA_DIR=./data",
         language="dotenv",
     )
+
+
+def _render_whisper_settings(settings: Settings) -> None:
+    """S9 の固定 runtime / model contract を読み取り専用で表示する."""
+    st.subheader("高精度字幕 runtime")
+    st.caption(
+        "固定採用された runtime と model の現在値です。この画面から path・shell・"
+        "model の変更や自動ダウンロードはできません。"
+    )
+
+    contract = WhisperSettingsContract.from_settings(settings)
+    capability = None
+    preflight_error: WhisperRuntimeError | None = None
+    try:
+        capability = preflight_whisper_runtime(settings)
+    except WhisperRuntimeError as exc:
+        preflight_error = exc
+
+    if preflight_error is not None:
+        st.warning(
+            "固定 runtime の事前検査に失敗しました。高精度字幕は実行せず、"
+            f"既存 VTT を維持します。{preflight_error}"
+        )
+
+    capability_status = (
+        "利用可能"
+        if capability is not None and capability.json_timestamp_capability
+        else "利用不可（実体未検証）"
+    )
+    model_name = (
+        capability.model_name
+        if capability is not None
+        else WHISPER_ADOPTED_CONTRACT.model_name
+    )
+    model_fingerprint = (
+        capability.model_sha256
+        if capability is not None
+        else f"{WHISPER_ADOPTED_CONTRACT.model_sha256}（実体未検証）"
+    )
+    runtime_fingerprint = (
+        capability.runtime_fingerprint if capability is not None else "未確認"
+    )
+    binary_path = (
+        capability.binary_path
+        if capability is not None
+        else settings.whisper_binary_path
+    )
+    model_path = (
+        capability.model_path
+        if capability is not None
+        else settings.whisper_model_path
+    )
+    cache_path = settings.data_dir / "{video_id}" / "transcripts" / "audio_cache"
+    try:
+        cache_status = (
+            "保存先を利用可能（区間単位で検証）"
+            if settings.data_dir.is_dir()
+            else "未作成（高精度化の実行時に作成）"
+        )
+    except OSError:
+        cache_status = "保存先を確認できません"
+
+    with st.container(border=True):
+        st.markdown("**runtime capability（読み取り専用）**")
+        st.code(capability_status)
+        st.markdown("**固定選択 model**")
+        st.code(model_name)
+        st.markdown("**language**")
+        st.code(contract.language)
+        st.markdown("**model fingerprint**")
+        st.code(model_fingerprint)
+        st.markdown("**runtime fingerprint**")
+        st.code(runtime_fingerprint)
+        st.markdown("**timeout**")
+        st.code(f"{contract.timeout_sec} 秒")
+        st.markdown("**whisper-cli path（固定 location）**")
+        st.code(binary_path)
+        st.markdown("**model path（固定 location）**")
+        st.code(model_path)
+        st.markdown("**cache 場所**")
+        st.code(str(cache_path))
+        st.markdown("**cache 状態**")
+        st.code(cache_status)
 
 
 def _render_codex_status() -> None:
@@ -332,6 +420,7 @@ def render_settings_page() -> None:
 
     _render_channel_settings(settings)
     _render_environment_settings(settings)
+    _render_whisper_settings(settings)
     _render_codex_status()
     render_storage_manager(settings)
     _render_schedule_placeholder(settings)

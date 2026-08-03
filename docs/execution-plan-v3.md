@@ -1685,12 +1685,12 @@ data/{video_id}/ ...
 
 **作業:**
 
-- [ ] S9-5-1. 設定ページに runtime capability、選択済みモデル、言語 ja、model fingerprint、timeout、cache の場所 / 状態を読み取り専用で表示する。モデル path や shell command の自由入力、モデル自動ダウンロードは持たない
-- [ ] S9-5-2. 工程 2 に親候補区間の「高精度字幕を準備」CTA を置き、対象区間、padding、予想処理、上書き対象が無いことを preview してから明示 submit する。通常 rerun では再実行しない
-- [ ] S9-5-3. 進捗を job ID、段階（capability / audio / span / Whisper / artifact / resolver）、現在区間、range index、全区間数、cache hit / miss、per-range status で表示する。worker thread から `st.*` を呼ばず、既存 progress bridge を使う
-- [ ] S9-5-4. missing runtime、model mismatch、timeout、malformed output、cache corruption、in-range invalidation、coarse fallback、partial range failure を構造化 error として日本語表示する。各エラーに job ID、range index、retry 可否、既存成果物を維持したかを含める。既存候補・cutplan・telop・mp4 は確認なく削除・再生成しない
-- [ ] S9-5-5. artifact / cue digest 不一致時は台本確認または最終確認を証明できる状態だけ失効させる。使用区間外の変更でライン全体を失効させず、使用区間・対象 clip・次の gate を表示する
-- [ ] S9-5-6. 表示場所を固定する。候補カード header は coarse VTT provenance / candidate fingerprint、工程 2 の cutplan panel は refined / coarse fallback と対象 range、telop editor header は同じ artifact reference と digest 配列、最終確認 banner は invalidation / fallback 理由を示す。partial は区間ごとに表示し、全体を高精度成功と表示しない
+- [x] S9-5-1. 設定ページに runtime capability、選択済みモデル、言語 ja、model fingerprint、timeout、cache の場所 / 状態を読み取り専用で表示する。モデル path や shell command の自由入力、モデル自動ダウンロードは持たない
+- [x] S9-5-2. 工程 2 に親候補区間の「高精度字幕を準備」CTA を置き、対象区間、padding、予想処理、上書き対象が無いことを preview してから明示 submit する。通常 rerun では再実行しない
+- [x] S9-5-3. 進捗を job ID、段階（capability / audio / span / Whisper / artifact / resolver）、現在区間、range index、全区間数、cache hit / miss、per-range status で表示する。worker thread から `st.*` を呼ばず、既存 progress bridge を使う
+- [x] S9-5-4. missing runtime、model mismatch、timeout、malformed output、cache corruption、in-range invalidation、coarse fallback、partial range failure を構造化 error として日本語表示する。各エラーに job ID、range index、retry 可否、既存成果物を維持したかを含める。既存候補・cutplan・telop・mp4 は確認なく削除・再生成しない
+- [x] S9-5-5. artifact / cue digest 不一致時は台本確認または最終確認を証明できる状態だけ失効させる。使用区間外の変更でライン全体を失効させず、使用区間・対象 clip・次の gate を表示する
+- [x] S9-5-6. 表示場所を固定する。候補カード header は coarse VTT provenance / candidate fingerprint、工程 2 の cutplan panel は refined / coarse fallback と対象 range、telop editor header は同じ artifact reference と digest 配列、最終確認 banner は invalidation / fallback 理由を示す。partial は区間ごとに表示し、全体を高精度成功と表示しない
 
 **テスト:** settings capability 表示、CTA の明示 submit、通常 rerun で subprocess 非実行、single-job busy / 二重クリック、progress の job ID / range 分離、動画 A / B の状態分離、partial range の status と retry 表示、候補 card / cutplan panel / telop editor / final review banner の provenance 表示、構造化エラーの日本語要約、coarse fallback 表示、in-range / out-of-range 失効、再起動後の fail closed line state、既存確認 dialog の非回帰。
 
@@ -1698,6 +1698,8 @@ data/{video_id}/ ...
 - [ ] 非エンジニアが「どの候補区間を、どのモデルで、どこまで処理したか」を確認でき、失敗時に次の操作が分かる
 - [ ] 高精度 artifact を使ったと表示する条件と coarse fallback の表示が一致し、1 ジョブ制約・既存の破壊操作確認・U6 のゲートを壊さない
 - [ ] candidate card、cutplan、telop、final review の各画面が同じ artifact reference / digest と status を表示し、partial / failed を高精度成功と誤表示しない
+
+**S9-5 実装・検証実績（2026-08-04、実装ワーカー）:** 設定ページへ S9-1 の immutable contract と S9-3 の preflight capability を使った runtime / model / language / fingerprint / timeout / cache の読み取り専用表示を追加した。工程 2 は対象区間・固定 padding・音声のみの予想処理・既存成果物を上書きしない条件を preview し、`st.form` の明示 submit だけが既存 S9-4 `start_job` を起動する。通常 rerun は submit 前に service を呼ばず、busy 中は CTA を無効化し、既存の `JobBusyError` 競合処理を維持した。進捗は既存 job report bridge で job ID、stage、range、cache、per-range status を UI thread に渡し、worker thread から `st.*` を呼ばない。構造化 error は既存成果物維持・retry 可否・次操作を日本語で表示し、partial / fallback は区間単位で扱う。candidate card、cutplan、telop editor、final review は既存 artifact provenance / digest を再計算せず同じ lineage と失効理由を表示する。focused UI tests は 153 passed、全体は 1571 passed / 2 skipped、`uv lock --check`、`git diff --check`、`uv run python -m compileall -q src` も通過した。S9-5 Done 条件、S9-6、S9 全体、AC-35 / AC-37 の受け入れ判定は未完了のまま残す。
 
 **コミット境界:** UI / component / UI test を `S9-5` 単位でコミットする。設定・進捗・エラー表示だけを変更し、S9-4 の service 契約を UI に複製しない。
 

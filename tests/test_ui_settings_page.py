@@ -14,6 +14,7 @@ from yt_live_kit.services.schedule import (
     SchedulePolicy,
     SchedulePolicyNotConfigured,
 )
+from yt_live_kit.services.whisper_runtime import WhisperCapability, WhisperPreflightError
 from yt_live_kit.ui.views import settings as settings_page
 
 
@@ -244,6 +245,74 @@ def test_environment_settings_warns_when_subtitles_filter_is_missing(
     assert ".env" in message
     assert "YTLK_FFMPEG_PATH" in message
     success.assert_not_called()
+
+
+def test_whisper_settings_are_read_only_and_show_fixed_capability(
+    tmp_path: Path,
+) -> None:
+    settings = _settings(tmp_path)
+    capability = WhisperCapability(
+        binary_path="/opt/homebrew/bin/whisper-cli",
+        binary_bytes=123,
+        binary_sha256="b" * 64,
+        version="1.9.1",
+        supported_flags=("--output-json-full",),
+        json_timestamp_capability=True,
+        model_name="ggml-large-v3-turbo-q5_0",
+        model_path="/cache/ggml-large-v3-turbo-q5_0.bin",
+        model_bytes=456,
+        model_sha256="a" * 64,
+        ffmpeg_path="/opt/homebrew/bin/ffmpeg",
+        ffmpeg_version="8.0.1",
+        ffmpeg_capabilities=("audio_conversion",),
+    )
+    with (
+        patch.object(settings_page, "preflight_whisper_runtime", return_value=capability) as preflight,
+        patch.object(settings_page.st, "container") as container,
+        patch.object(settings_page.st, "code") as code,
+        patch.object(settings_page.st, "markdown"),
+        patch.object(settings_page.st, "caption"),
+        patch.object(settings_page.st, "subheader"),
+        patch.object(settings_page.st, "text_input") as text_input,
+        patch.object(settings_page.st, "file_uploader") as file_uploader,
+    ):
+        container.return_value.__enter__.return_value = container.return_value
+
+        settings_page._render_whisper_settings(settings)
+
+    preflight.assert_called_once_with(settings)
+    assert call("利用可能") in code.call_args_list
+    assert call(capability.model_name) in code.call_args_list
+    assert call("ja") in code.call_args_list
+    assert call(capability.model_sha256) in code.call_args_list
+    assert call(f"{180} 秒") in code.call_args_list
+    assert call(str(settings.data_dir / "{video_id}" / "transcripts" / "audio_cache")) in code.call_args_list
+    text_input.assert_not_called()
+    file_uploader.assert_not_called()
+
+
+def test_whisper_settings_keep_existing_vtt_when_capability_is_unavailable(
+    tmp_path: Path,
+) -> None:
+    with (
+        patch.object(
+            settings_page,
+            "preflight_whisper_runtime",
+            side_effect=WhisperPreflightError("model が見つかりません。"),
+        ),
+        patch.object(settings_page.st, "container") as container,
+        patch.object(settings_page.st, "code"),
+        patch.object(settings_page.st, "markdown"),
+        patch.object(settings_page.st, "caption"),
+        patch.object(settings_page.st, "subheader"),
+        patch.object(settings_page.st, "warning") as warning,
+    ):
+        container.return_value.__enter__.return_value = container.return_value
+
+        settings_page._render_whisper_settings(_settings(tmp_path))
+
+    assert "既存 VTT を維持" in warning.call_args.args[0]
+    assert "model が見つかりません" in warning.call_args.args[0]
 
 
 @patch.object(settings_page.st, "form_submit_button", return_value=True)
@@ -595,6 +664,7 @@ def test_shorts_line_defaults_shows_japanese_error_on_io_failure(
 @patch.object(settings_page, "_render_shorts_line_settings")
 @patch.object(settings_page, "render_storage_manager")
 @patch.object(settings_page, "_render_codex_status")
+@patch.object(settings_page, "_render_whisper_settings")
 @patch.object(settings_page, "_render_environment_settings")
 @patch.object(settings_page, "_render_channel_settings")
 @patch.object(settings_page, "get_settings")
@@ -602,6 +672,7 @@ def test_settings_page_connects_storage_manager(
     get_settings: MagicMock,
     channel: MagicMock,
     environment: MagicMock,
+    whisper: MagicMock,
     codex: MagicMock,
     storage: MagicMock,
     schedule: MagicMock,
@@ -614,5 +685,6 @@ def test_settings_page_connects_storage_manager(
     settings_page.render_settings_page()
 
     storage.assert_called_once_with(settings)
+    whisper.assert_called_once_with(settings)
     schedule.assert_called_once_with(settings)
     shorts.assert_called_once_with(settings)

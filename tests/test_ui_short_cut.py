@@ -34,6 +34,8 @@ from yt_live_kit.ui.components.short_cut import (
     parse_cut_timestamp,
     resolve_transcript_bounds,
     render_short_cut_section,
+    S9_WHISPER_PROGRESS_PREFIX,
+    _render_refine_preview,
     segments_to_pairs,
     short_cut_output_path,
     shift_cut_timestamp,
@@ -408,6 +410,99 @@ def test_build_disabled_message_prefers_parse_errors() -> None:
     assert build_disabled_message(ok, []) is None
 
 
+def test_refine_preview_does_not_start_without_explicit_submit(
+    tmp_path: Path,
+) -> None:
+    settings = Settings(data_dir=tmp_path)
+    option = MagicMock(id="clip_002", candidate=_clip())
+    segments = _document().candidates
+    with (
+        patch("yt_live_kit.ui.components.short_cut.st.form") as form,
+        patch("yt_live_kit.ui.components.short_cut.st.form_submit_button", return_value=False) as submit,
+        patch("yt_live_kit.ui.components.short_cut.st.markdown"),
+        patch("yt_live_kit.ui.components.short_cut.st.caption") as caption,
+        patch("yt_live_kit.ui.components.short_cut.st.info") as info,
+        patch("yt_live_kit.ui.components.short_cut._start_refine") as start,
+    ):
+        form.return_value.__enter__.return_value = form.return_value
+
+        _render_refine_preview(
+            video_id="video-1",
+            title="動画",
+            option=option,
+            segments=segments,
+            settings=settings,
+            busy=False,
+            disabled_message=None,
+        )
+
+    submit.assert_called_once_with("高精度字幕を準備", type="primary", disabled=False)
+    start.assert_not_called()
+    assert any("対象区間: 2 件" in item.args[0] for item in caption.call_args_list)
+    assert any("padding: 0 ms" in item.args[0] for item in caption.call_args_list)
+    assert "上書き・削除しません" in info.call_args.args[0]
+
+
+def test_refine_preview_starts_only_after_explicit_submit(tmp_path: Path) -> None:
+    settings = Settings(data_dir=tmp_path)
+    option = MagicMock(id="clip_002", candidate=_clip())
+    segments = _document().candidates
+    with (
+        patch("yt_live_kit.ui.components.short_cut.st.form") as form,
+        patch("yt_live_kit.ui.components.short_cut.st.form_submit_button", return_value=True),
+        patch("yt_live_kit.ui.components.short_cut.st.markdown"),
+        patch("yt_live_kit.ui.components.short_cut.st.caption"),
+        patch("yt_live_kit.ui.components.short_cut.st.info"),
+        patch("yt_live_kit.ui.components.short_cut._start_refine") as start,
+    ):
+        form.return_value.__enter__.return_value = form.return_value
+
+        _render_refine_preview(
+            video_id="video-1",
+            title="動画",
+            option=option,
+            segments=segments,
+            settings=settings,
+            busy=False,
+            disabled_message=None,
+        )
+
+    start.assert_called_once_with(
+        video_id="video-1",
+        title="動画",
+        option=option,
+        segments=segments,
+        settings=settings,
+    )
+
+
+def test_refine_preview_is_disabled_while_another_job_is_busy(tmp_path: Path) -> None:
+    settings = Settings(data_dir=tmp_path)
+    option = MagicMock(id="clip_002", candidate=_clip())
+    with (
+        patch("yt_live_kit.ui.components.short_cut.st.form") as form,
+        patch("yt_live_kit.ui.components.short_cut.st.form_submit_button", return_value=True) as submit,
+        patch("yt_live_kit.ui.components.short_cut.st.markdown"),
+        patch("yt_live_kit.ui.components.short_cut.st.caption"),
+        patch("yt_live_kit.ui.components.short_cut.st.info"),
+        patch("yt_live_kit.ui.components.short_cut._start_refine") as start,
+    ):
+        form.return_value.__enter__.return_value = form.return_value
+
+        _render_refine_preview(
+            video_id="video-1",
+            title="動画",
+            option=option,
+            segments=_document().candidates,
+            settings=settings,
+            busy=True,
+            disabled_message=None,
+        )
+
+    assert submit.call_args.kwargs["disabled"] is True
+    start.assert_not_called()
+
+
 def test_suggest_job_target_rebuilds_parent_by_type() -> None:
     settings = MagicMock()
     clip = _clip()
@@ -477,6 +572,84 @@ def test_build_job_target_calls_concat_builder_and_writes_meta(tmp_path: Path) -
     meta = json.loads((tmp_path / "short_abc.meta.json").read_text(encoding="utf-8"))
     assert meta["duration_sec"] == 110.0
     assert meta["output_path"] == str(output_path)
+
+
+def test_refine_job_target_bridges_job_range_progress_without_streamlit(
+    tmp_path: Path,
+) -> None:
+    settings = Settings(data_dir=tmp_path)
+    segments = _document().candidates
+    progress_events = [
+        MagicMock(
+            job_id="whisper-job-1",
+            range_index=1,
+            range_total=2,
+            status="audio_preparing",
+            cache_hit=False,
+            retryable=None,
+            diagnostic="音声を準備しています。",
+        ),
+        MagicMock(
+            job_id="whisper-job-1",
+            range_index=2,
+            range_total=2,
+            status="success",
+            cache_hit=True,
+            retryable=False,
+            diagnostic=None,
+        ),
+    ]
+
+    def run_refine(*args, **kwargs):
+        for event in progress_events:
+            kwargs["on_progress"](event)
+
+    report = MagicMock()
+    with patch(
+        "yt_live_kit.ui.components.short_cut.refine_selected_short_cut",
+        side_effect=run_refine,
+    ) as refine:
+        from yt_live_kit.ui.components.short_cut import refine_short_cut_job_target
+
+        refine_short_cut_job_target(
+            report=report,
+            settings=settings,
+            video_id="video-1",
+            parent_dict=_clip().model_dump(mode="json"),
+            parent_is_clip=True,
+            segment_dicts=[segment.model_dump(mode="json") for segment in segments],
+            job_id="job-1",
+        )
+
+    refine.assert_called_once()
+    assert report.call_args_list[0].kwargs == {
+        "stage": "capability",
+        "message": report.call_args_list[0].kwargs["message"],
+        "current": 0,
+        "total": 2,
+    }
+    assert report.call_args_list[1].kwargs["stage"] == "audio"
+    progress_call = next(
+        call
+        for call in reversed(report.call_args_list)
+        if call.kwargs["message"].startswith(S9_WHISPER_PROGRESS_PREFIX)
+    )
+    payload = json.loads(
+        progress_call.kwargs["message"][len(S9_WHISPER_PROGRESS_PREFIX) :]
+    )
+    assert payload["job_id"] == "whisper-job-1"
+    assert payload["stage"] == "artifact"
+    assert payload["range_index"] == 2
+    assert payload["range_total"] == 2
+    assert payload["cache_hit"] is True
+    assert payload["status"] == "success"
+    assert payload["current_range"] == {
+        "id": "cut_002",
+        "start": "00:41:00",
+        "end": "00:42:00",
+    }
+    assert report.call_args_list[-1].kwargs["current"] == 2
+    assert report.call_args_list[-1].kwargs["total"] == 2
 
 
 def test_render_section_reloads_saved_cutplan_after_job_rerun(tmp_path: Path) -> None:

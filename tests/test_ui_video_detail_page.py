@@ -1522,3 +1522,129 @@ def test_successful_description_mark_updates_summary_input(tmp_path: Path) -> No
         description_applied=video.video_id in applied_ids,
     )
     assert summary.description_applied is True
+def test_s9_whisper_progress_snapshot_is_rendered_with_range_and_cache() -> None:
+    import json
+    from unittest.mock import MagicMock, patch
+
+    from yt_live_kit.ui.views import video_detail as detail
+
+    job = MagicMock()
+    job.kind = "short_cut_refine"
+    job.video_id = "video-1"
+    job.job_id = "job-1"
+    job.stage = "Whisper"
+    job.total = 2
+    job.message = detail.S9_WHISPER_PROGRESS_PREFIX + json.dumps(
+        {
+            "schema": "s9-whisper-progress-v1",
+            "job_id": "job-1",
+            "stage": "Whisper",
+            "status": "success",
+            "range_index": 1,
+            "range_total": 2,
+            "current_range": {
+                "id": "cut_001",
+                "start": "00:39:10",
+                "end": "00:40:00",
+            },
+            "cache_hit": True,
+            "retryable": False,
+            "diagnostic": None,
+        },
+        ensure_ascii=False,
+    )
+    with (
+        patch.object(detail.st, "container") as container,
+        patch.object(detail.st, "markdown"),
+        patch.object(detail.st, "write") as write,
+        patch.object(detail.st, "caption"),
+    ):
+        container.return_value.__enter__.return_value = container.return_value
+
+        detail._render_whisper_job_progress(job, video_id="video-1")
+
+    rendered = [str(call.args[0]) for call in write.call_args_list]
+    assert any("job ID: job-1" in value for value in rendered)
+    assert any("range: 1 / 2" in value for value in rendered)
+    assert any("現在区間: cut_001" in value for value in rendered)
+    assert any("cache: hit" in value for value in rendered)
+
+
+def test_s9_whisper_structured_error_shows_retry_and_next_action() -> None:
+    import json
+    from unittest.mock import patch
+
+    from yt_live_kit.ui.views import video_detail as detail
+
+    payload = {
+        "schema": "s9-whisper-error-v1",
+        "job_id": "job-2",
+        "range_index": 2,
+        "range_total": 3,
+        "retryable": True,
+        "existing_artifacts": "維持",
+        "next_action": "対象区間を確認して再試行してください。",
+        "ranges": [
+            {
+                "range_index": 2,
+                "range_total": 3,
+                "current_range": {
+                    "id": "cut_002",
+                    "start": "00:41:00",
+                    "end": "00:42:00",
+                },
+                "status": "failed",
+            }
+        ],
+    }
+    with (
+        patch.object(detail.st, "warning") as warning,
+        patch.object(detail.st, "write") as write,
+        patch.object(detail.st, "caption"),
+    ):
+        detail._render_structured_whisper_error(
+            detail.S9_WHISPER_ERROR_PREFIX
+            + json.dumps(payload, ensure_ascii=False)
+        )
+
+    assert "既存成果物" in " ".join(str(call.args[0]) for call in write.call_args_list)
+    assert "再試行: 可" in " ".join(str(call.args[0]) for call in write.call_args_list)
+    assert "対象区間を確認して再試行" in " ".join(
+        str(call.args[0]) for call in write.call_args_list
+    )
+    assert "完了扱いにせず" in warning.call_args.args[0]
+def test_s9_candidate_card_uses_saved_coarse_vtt_provenance() -> None:
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock, patch
+
+    from yt_live_kit.ui.views import video_detail as detail
+
+    document = SimpleNamespace(
+        lineage=SimpleNamespace(
+            candidate_fingerprint="a" * 64,
+            coarse_vtt_artifact_fingerprint="b" * 64,
+        )
+    )
+    with patch.object(detail, "load_candidates_file", return_value=document):
+        value = detail._candidate_provenance_text("video-1", "clips", MagicMock())
+
+    assert "coarse VTT" in value
+    assert "a" * 64 in value
+    assert "b" * 64 in value
+
+
+def test_s9_candidate_card_fails_closed_when_coarse_lineage_is_missing() -> None:
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock, patch
+
+    from yt_live_kit.ui.views import video_detail as detail
+
+    with patch.object(
+        detail,
+        "load_candidates_file",
+        return_value=SimpleNamespace(lineage=None),
+    ):
+        value = detail._candidate_provenance_text("video-1", "clips", MagicMock())
+
+    assert "coarse VTT" in value
+    assert "lineage 未確認" in value

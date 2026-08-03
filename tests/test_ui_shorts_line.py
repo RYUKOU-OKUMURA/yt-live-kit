@@ -1070,3 +1070,64 @@ def test_external_symlink_path_is_rejected_as_confinement_error(
     if filename == "shorts_defaults.json":
         with pytest.raises(ValueError, match="データディレクトリ外"):
             save_shorts_line_defaults(ShortsLineDefaults(), settings)
+def test_s9_artifact_lineage_mismatch_keeps_clip_scope_and_fails_closed() -> None:
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock, patch
+
+    from yt_live_kit.ui.components import shorts_line
+
+    artifact_ref = MagicMock()
+    state = SimpleNamespace(
+        video_id="video-1",
+        clip_id="cut-1",
+        artifact_ref=artifact_ref,
+        artifact_fingerprint="a" * 64,
+        used_range_cue_digests=("b" * 64,),
+    )
+    artifact = SimpleNamespace(
+        video_id="video-1",
+        artifact_fingerprint="a" * 64,
+        used_range_cue_digests=("c" * 64,),
+        is_high_precision=True,
+    )
+    store = MagicMock()
+    store.load_artifact.return_value = artifact
+    store.artifact_ref.return_value = artifact_ref
+    with patch.object(shorts_line, "TranscriptArtifactStore", return_value=store):
+        current, reason = shorts_line._inspect_artifact_lineage(
+            state,
+            MagicMock(),
+        )
+
+    assert current is False
+    assert "使用区間の証跡" in reason
+    assert "対象 clip: cut-1" in reason
+    assert "ライン全体は失効していません" in reason
+
+
+def test_s9_telop_header_reuses_artifact_ref_and_digest_array() -> None:
+    from types import SimpleNamespace
+    from unittest.mock import patch
+
+    from yt_live_kit.ui.components import shorts_line
+
+    artifact_ref = SimpleNamespace(
+        model_dump=lambda mode="json": {"path": "transcripts/artifacts/ref.json"}
+    )
+    draft = SimpleNamespace(
+        artifact_ref=artifact_ref,
+        artifact_fingerprint="a" * 64,
+        used_range_cue_digests=("b" * 64, "c" * 64),
+    )
+    with (
+        patch.object(shorts_line.st, "caption") as caption,
+        patch.object(shorts_line.st, "code") as code,
+    ):
+        shorts_line._render_telop_provenance_header(draft)
+
+    assert "同一 ref / digest 配列" in caption.call_args.args[0]
+    rendered = code.call_args.args[0]
+    assert "transcripts/artifacts/ref.json" in rendered
+    assert "a" * 64 in rendered
+    assert "b" * 64 in rendered
+    assert "c" * 64 in rendered

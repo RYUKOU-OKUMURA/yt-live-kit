@@ -42,6 +42,10 @@ from yt_live_kit.services.youtube_api import (
     update_video_description,
 )
 from yt_live_kit.ui.components.clipboard import render_copy_button
+from yt_live_kit.ui.components.short_cut import (
+    S9_WHISPER_ERROR_PREFIX,
+    S9_WHISPER_PROGRESS_PREFIX,
+)
 from yt_live_kit.ui.components.shorts_line import (
     render_main_line_summary,
     render_shorts_line,
@@ -229,6 +233,96 @@ def _description_updated_ids() -> set[str]:
 def _safe_user_text(value: object) -> str:
     """ユーザー表示用テキストの半角山カッコを全角へ置換する."""
     return str(value).replace("<", "〈").replace(">", "〉")
+
+
+def _parse_s9_payload(value: object, prefix: str) -> dict[str, object] | None:
+    text = str(value or "")
+    marker = text.find(prefix)
+    if marker < 0:
+        return None
+    try:
+        payload = json.loads(text[marker + len(prefix) :].splitlines()[0])
+    except (TypeError, json.JSONDecodeError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _render_whisper_job_progress(job: JobState, *, video_id: str) -> None:
+    """jobs の既存 message snapshot を UI thread で日本語の進捗へ変換する."""
+    if job.kind not in {"short_cut", "short_cut_refine"} or job.video_id != video_id:
+        return
+    payload = _parse_s9_payload(job.message, S9_WHISPER_PROGRESS_PREFIX)
+    with st.container(border=True, gap="small"):
+        st.markdown("**高精度字幕の進捗**")
+        st.write(f"job ID: {_safe_user_text(job.job_id)}")
+        if payload is None:
+            st.write(f"段階: {_safe_user_text(job.stage or '確認中')}")
+            st.caption(_safe_user_text(job.message or "処理中です。"))
+            return
+        stage_labels = {
+            "capability": "runtime capability",
+            "audio": "音声準備",
+            "span": "音声 span",
+            "Whisper": "Whisper",
+            "artifact": "artifact 保存",
+            "resolver": "resolver",
+        }
+        stage = str(payload.get("stage", "確認中"))
+        st.write(f"段階: {stage_labels.get(stage, stage)}")
+        st.write(
+            f"range: {payload.get('range_index', 0)} / "
+            f"{payload.get('range_total', job.total)}"
+        )
+        current_range = payload.get("current_range")
+        if isinstance(current_range, dict):
+            st.write(
+                "現在区間: "
+                f"{_safe_user_text(current_range.get('id', '不明'))} "
+                f"{_safe_user_text(current_range.get('start', '?'))} → "
+                f"{_safe_user_text(current_range.get('end', '?'))}"
+            )
+        cache_hit = payload.get("cache_hit")
+        st.write(
+            "cache: "
+            + ("hit" if cache_hit is True else "miss" if cache_hit is False else "検査中")
+        )
+        st.write(f"区間 status: {_safe_user_text(payload.get('status', '処理中'))}")
+        diagnostic = payload.get("diagnostic")
+        if diagnostic:
+            st.caption(_safe_user_text(diagnostic))
+
+
+def _render_structured_whisper_error(detail: str) -> None:
+    payload = _parse_s9_payload(detail, S9_WHISPER_ERROR_PREFIX)
+    if payload is None:
+        return
+    st.warning("高精度字幕は完了扱いにせず、既存成果物を維持しました。")
+    st.write(f"job ID: {_safe_user_text(payload.get('job_id', '不明'))}")
+    st.write(
+        f"range: {_safe_user_text(payload.get('range_index', '不明'))} / "
+        f"{_safe_user_text(payload.get('range_total', '不明'))}"
+    )
+    st.write(f"再試行: {'可' if payload.get('retryable') else '不可'}")
+    st.write(f"既存成果物: {_safe_user_text(payload.get('existing_artifacts', '維持'))}")
+    st.write(f"次操作: {_safe_user_text(payload.get('next_action', '詳細を確認してください。'))}")
+    ranges = payload.get("ranges")
+    if isinstance(ranges, list):
+        for item in ranges:
+            if not isinstance(item, dict):
+                continue
+            current = item.get("current_range")
+            if isinstance(current, dict):
+                range_label = (
+                    f"{current.get('id', '不明')} "
+                    f"{current.get('start', '?')} → {current.get('end', '?')}"
+                )
+            else:
+                range_label = "区間不明"
+            st.caption(
+                f"区間 {item.get('range_index', '?')}/{item.get('range_total', '?')}: "
+                f"{_safe_user_text(range_label)}・status "
+                f"{_safe_user_text(item.get('status', 'failed'))}"
+            )
 
 
 def _mark_description_update_started(video_id: str) -> None:
@@ -523,6 +617,8 @@ def _render_job_error_notification(
                 max_bytes=_MAX_DETAIL_JOB_ERROR_LOG_BYTES,
             )
         if detail:
+            if notification.kind in {"short_cut", "short_cut_refine"}:
+                _render_structured_whisper_error(detail)
             job_key = notification.job_id or f"missing-{index}"
             st.text_area(
                 "技術ログ",
@@ -842,6 +938,28 @@ def _load_material_candidates(
     return clips, highlights
 
 
+def _candidate_provenance_text(
+    video_id: str,
+    source: str,
+    settings: Settings,
+) -> str:
+    """保存済み coarse candidate lineage を候補カード header 用に返す."""
+    if source != "clips":
+        return "candidate provenance: coarse VTT（候補 fingerprint は保存されていません）"
+    try:
+        document = load_candidates_file(video_id, settings)
+    except (OSError, UnicodeError, TypeError, ValueError):
+        document = None
+    lineage = getattr(document, "lineage", None)
+    if lineage is None:
+        return "candidate provenance: coarse VTT（lineage 未確認）"
+    return (
+        "candidate provenance: coarse VTT・"
+        f"candidate fingerprint {lineage.candidate_fingerprint}・"
+        f"VTT fingerprint {lineage.coarse_vtt_artifact_fingerprint}"
+    )
+
+
 def _render_materials_workspace(
     result: PipelineResult,
     settings: Settings,
@@ -889,10 +1007,16 @@ def _render_materials_workspace(
         st.session_state.pop(_transfer_key(result.video_id, source), None)
         st.warning("候補が更新されました。ショート作成対象を選び直してください。")
     selected_ids = list(valid_transfer.selected_ids if valid_transfer else ())
+    candidate_provenance = _candidate_provenance_text(
+        result.video_id,
+        source,
+        settings,
+    )
 
     for candidate in candidates:
         with st.container(border=True):
             st.markdown(f"**{_safe_user_text(candidate.title)}**")
+            st.caption(candidate_provenance)
             st.caption(
                 f"{_safe_user_text(candidate.start)} → {_safe_user_text(candidate.end)}"
                 f"（{candidate.duration_sec} 秒）"
@@ -1070,6 +1194,9 @@ def render_video_detail_page(
     busy = is_busy()
     if busy:
         st.info(_BUSY_MESSAGE)
+    active_job = get_active_job(settings)
+    if active_job is not None:
+        _render_whisper_job_progress(active_job, video_id=video_id)
 
     result = load_result_from_disk(video_id, settings)
     if result is None:
@@ -1104,7 +1231,7 @@ def render_video_detail_page(
         video_id=video.video_id,
         candidate_count=summary.candidate_count,
         reservable_short_count=summary.reservable_short_count,
-        active_job=get_active_job(settings),
+        active_job=active_job,
     )
     workspace = st.segmented_control(
         "作業を選択",

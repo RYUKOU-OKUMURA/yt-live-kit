@@ -42,6 +42,7 @@ from yt_live_kit.services.transcript_artifact import (
     TranscriptArtifactError,
     TranscriptArtifactStore,
 )
+from yt_live_kit.services.whisper_runtime import WhisperSettingsContract
 from yt_live_kit.ui.state import set_active_job_id
 
 _BUSY_MESSAGE = "他の処理が実行中です。完了までお待ちください。"
@@ -63,6 +64,130 @@ _HH_MM_SS_RE = re.compile(r"^\d{1,2}:\d{2}:\d{2}$")
 LAYOUT_BLUR_LABEL = "ぼかし背景（推奨）"
 LAYOUT_CROP_LABEL = "中央クロップ"
 LAYOUT_LABELS = (LAYOUT_BLUR_LABEL, LAYOUT_CROP_LABEL)
+S9_WHISPER_PROGRESS_PREFIX = "S9_WHISPER_PROGRESS:"
+S9_WHISPER_ERROR_PREFIX = "S9_WHISPER_ERROR:"
+
+
+def _whisper_stage_for_status(status: str) -> str:
+    if status == "audio_preparing":
+        return "span"
+    if status == "whisper_running":
+        return "Whisper"
+    if status in {"success", "failed", "partial"}:
+        return "artifact"
+    return "Whisper"
+
+
+def _whisper_progress_payload(
+    progress: object,
+    segments: Sequence[HighlightSegment],
+    *,
+    stage: str,
+) -> dict[str, object]:
+    """WhisperProgress を jobs の既存 message 欄へ渡す表示用 snapshot にする."""
+    try:
+        range_index = int(getattr(progress, "range_index"))
+        range_total = int(getattr(progress, "range_total"))
+    except (TypeError, ValueError):
+        range_index = 0
+        range_total = len(segments)
+    current_range: dict[str, str] | None = None
+    if 1 <= range_index <= len(segments):
+        segment = segments[range_index - 1]
+        current_range = {
+            "id": segment.id,
+            "start": segment.start,
+            "end": segment.end,
+        }
+    return {
+        "schema": "s9-whisper-progress-v1",
+        "job_id": str(getattr(progress, "job_id", "")),
+        "stage": stage,
+        "status": str(getattr(progress, "status", "unknown")),
+        "range_index": range_index,
+        "range_total": range_total,
+        "current_range": current_range,
+        "cache_hit": getattr(progress, "cache_hit", None),
+        "retryable": getattr(progress, "retryable", None),
+        "diagnostic": getattr(progress, "diagnostic", None),
+    }
+
+
+def _report_whisper_progress(
+    report,
+    progress: object,
+    segments: Sequence[HighlightSegment],
+    *,
+    stage: str,
+) -> None:
+    payload = _whisper_progress_payload(progress, segments, stage=stage)
+    report(
+        stage=stage,
+        message=S9_WHISPER_PROGRESS_PREFIX
+        + json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+        current=int(payload["range_index"]),
+        total=int(payload["range_total"]),
+    )
+
+
+def _whisper_error_payload(
+    job_id: str,
+    segments: Sequence[HighlightSegment],
+    progress_events: Sequence[object],
+    error: BaseException,
+) -> dict[str, object]:
+    reason = str(error).replace("<", "〈").replace(">", "〉").strip()
+    lowered = reason.lower()
+    if "一部" in reason or "partial" in lowered:
+        code = "partial_failure"
+    elif "timeout" in lowered or "タイムアウト" in reason:
+        code = "timeout"
+    elif "model" in lowered or "モデル" in reason:
+        code = "model_mismatch"
+    elif "cache" in lowered or "キャッシュ" in reason:
+        code = "cache_corruption"
+    elif "artifact" in lowered or "保存" in reason:
+        code = "artifact_failure"
+    else:
+        code = "refine_failed"
+    ranges = [
+        _whisper_progress_payload(
+            event,
+            segments,
+            stage=_whisper_stage_for_status(str(getattr(event, "status", "unknown"))),
+        )
+        for event in progress_events
+    ]
+    retryable = any(bool(item.get("retryable")) for item in ranges)
+    return {
+        "schema": "s9-whisper-error-v1",
+        "code": code,
+        "job_id": job_id,
+        "range_index": ranges[-1].get("range_index") if ranges else None,
+        "range_total": len(segments),
+        "ranges": ranges,
+        "retryable": retryable,
+        "existing_artifacts": "維持",
+        "next_action": (
+            "対象区間を確認して再試行してください。"
+            if retryable
+            else "既存 VTT fallback を明示的に選ぶか、処理を停止してください。"
+        ),
+        "reason": reason,
+    }
+
+
+def _whisper_error_message(payload: dict[str, object]) -> str:
+    return (
+        "選択区間の高精度字幕に失敗しました。"
+        f"job ID: {payload.get('job_id', '不明')}。"
+        f"再試行: {'可' if payload.get('retryable') else '不可'}。"
+        f"既存成果物: {payload.get('existing_artifacts', '維持')}。"
+        f"次操作: {payload.get('next_action', '詳細を確認してください。')}"
+        f"理由: {payload.get('reason', '不明')}\n"
+        f"{S9_WHISPER_ERROR_PREFIX}"
+        + json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+    )
 
 
 @dataclass(frozen=True)
@@ -404,21 +529,83 @@ def refine_short_cut_job_target(
     except Exception as exc:
         raise ValueError("高精度化する区間の形式が正しくありません。") from exc
 
+    report(
+        stage="capability",
+        message=(
+            f"{S9_WHISPER_PROGRESS_PREFIX}"
+            + json.dumps(
+                {
+                    "schema": "s9-whisper-progress-v1",
+                    "job_id": job_id or "未確定",
+                    "stage": "capability",
+                    "status": "checking",
+                    "range_index": 0,
+                    "range_total": len(segments),
+                    "current_range": None,
+                    "cache_hit": None,
+                    "retryable": None,
+                    "diagnostic": "固定 runtime capability を確認しています。",
+                },
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+        ),
+        current=0,
+        total=len(segments),
+    )
+    report(
+        stage="audio",
+        message="選択区間の音声のみを準備します。既存成果物は維持します。",
+        current=0,
+        total=len(segments),
+    )
+
+    progress_events: list[object] = []
+
     def on_progress(progress: object) -> None:
-        status = str(getattr(progress, "status", "whisper"))
-        diagnostic = getattr(progress, "diagnostic", None)
-        report(
-            stage="whisper",
-            message=str(diagnostic or f"選択区間を高精度化しています（{status}）"),
+        progress_events.append(progress)
+        _report_whisper_progress(
+            report,
+            progress,
+            segments,
+            stage=_whisper_stage_for_status(str(getattr(progress, "status", "unknown"))),
         )
 
-    refine_selected_short_cut(
-        video_id,
-        parent,
-        segments,
-        settings,
-        job_id=job_id,
-        on_progress=on_progress,
+    try:
+        refine_selected_short_cut(
+            video_id,
+            parent,
+            segments,
+            settings,
+            job_id=job_id,
+            on_progress=on_progress,
+        )
+    except Exception as exc:
+        payload = _whisper_error_payload(
+            job_id or "未確定",
+            segments,
+            progress_events,
+            exc,
+        )
+        report(
+            stage="resolver",
+            message=S9_WHISPER_ERROR_PREFIX
+            + json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+            current=len(segments),
+            total=len(segments),
+        )
+        raise ShortCutError(_whisper_error_message(payload)) from exc
+    report(
+        stage="artifact",
+        message="高精度 artifact を保存しました。",
+        current=len(segments),
+        total=len(segments),
+    )
+    report(
+        stage="resolver",
+        message="resolver が同じ artifact lineage の cutplan を保存しました。",
+        current=len(segments),
+        total=len(segments),
     )
 
 
@@ -497,7 +684,7 @@ def _start_refine(
 ) -> None:
     try:
         job_id = start_job(
-            "short_cut_refine",
+            "short_cut",
             refine_short_cut_job_target,
             video_id=video_id,
             title=title,
@@ -571,6 +758,83 @@ def _confirm_build_dialog(
             layout=layout,
             settings=settings,
         )
+
+
+def _render_refine_preview(
+    *,
+    video_id: str,
+    title: str,
+    option: ParentOption,
+    segments: Sequence[HighlightSegment],
+    settings: Settings,
+    busy: bool,
+    disabled_message: str | None,
+) -> None:
+    """高精度化の対象と非破壊条件を確認してから明示 submit を受け付ける."""
+    contract = WhisperSettingsContract.from_settings(settings)
+    candidate = option.candidate
+
+    st.markdown("**高精度字幕の準備プレビュー**")
+    st.caption(f"親候補範囲: {candidate.start} → {candidate.end}")
+    st.caption(f"対象区間: {len(segments)} 件")
+    for segment in segments:
+        st.caption(f"{segment.id}: {segment.start} → {segment.end}")
+    st.caption(f"padding: {contract.padding_ms} ms（固定）")
+    st.caption(
+        "予想処理: 選択区間の音声のみ準備 → span → Whisper → "
+        "artifact 保存 → resolver"
+    )
+    st.info(
+        "既存の ja.vtt、親候補、cutplan、テロップ、mp4 は上書き・削除しません。"
+    )
+
+    with st.form(key=f"short_cut_refine_form_{video_id}_{option.id}"):
+        submitted = st.form_submit_button(
+            "高精度字幕を準備",
+            type="primary",
+            disabled=busy or disabled_message is not None,
+        )
+    if submitted and not busy and disabled_message is None:
+        _start_refine(
+            video_id=video_id,
+            title=title,
+            option=option,
+            segments=segments,
+            settings=settings,
+        )
+
+
+def artifact_provenance_payload(document: object) -> dict[str, object] | None:
+    """既存 document の lineage を表示用 payload にする。fingerprint は再計算しない."""
+    artifact_ref = getattr(document, "artifact_ref", None)
+    artifact_fingerprint = getattr(document, "artifact_fingerprint", None)
+    digests = tuple(getattr(document, "used_range_cue_digests", ()) or ())
+    if artifact_ref is None:
+        return None
+    ref_payload = (
+        artifact_ref.model_dump(mode="json")
+        if hasattr(artifact_ref, "model_dump")
+        else str(artifact_ref)
+    )
+    return {
+        "artifact_ref": ref_payload,
+        "artifact_fingerprint": artifact_fingerprint,
+        "used_range_cue_digests": list(digests),
+    }
+
+
+def render_cutplan_provenance(document: ShortCutDocument) -> None:
+    """工程 2 panel 固定位置の coarse / refined provenance を表示する."""
+    ranges = "、".join(
+        f"{candidate.id} {candidate.start} → {candidate.end}"
+        for candidate in document.candidates
+    ) or "なし"
+    payload = artifact_provenance_payload(document)
+    if payload is None:
+        st.caption("字幕 provenance: coarse VTT fallback。対象 range: " + ranges)
+        return
+    st.caption("字幕 provenance: refined artifact。対象 range: " + ranges)
+    st.code(json.dumps(payload, ensure_ascii=False, indent=2))
 
 
 def _render_plan(
@@ -659,6 +923,8 @@ def _render_plan(
     if disabled_message:
         st.warning(disabled_message)
 
+    render_cutplan_provenance(document)
+
     busy = is_busy(settings)
     is_high_precision = document.artifact_ref is not None and transcript_notice is None
     if is_high_precision:
@@ -668,18 +934,15 @@ def _render_plan(
             "親候補の探索・通常 rerun は既存 VTT のままです。"
             "人が確認した選択区間だけを高精度化できます。"
         )
-        if st.button(
-            "選択区間を高精度化",
-            key=f"short_cut_refine_{video_id}",
-            disabled=busy or disabled_message is not None,
-        ):
-            _start_refine(
-                video_id=video_id,
-                title=title,
-                option=option,
-                segments=segments,
-                settings=settings,
-            )
+        _render_refine_preview(
+            video_id=video_id,
+            title=title,
+            option=option,
+            segments=segments,
+            settings=settings,
+            busy=busy,
+            disabled_message=disabled_message,
+        )
     if on_segments_confirmed is not None:
         if st.button(
             "区間列を確定してテロップ確認へ",
