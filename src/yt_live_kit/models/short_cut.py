@@ -1,11 +1,14 @@
 """ショート用サブ区間（カットプラン）モデル."""
 
+import re
 from collections.abc import Mapping
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from yt_live_kit.models.highlights import HighlightSegment
 from yt_live_kit.models.transcript import TranscriptArtifactRef
+
+_HEX64_RE = re.compile(r"[0-9a-f]{64}", re.ASCII)
 
 
 class ShortCutDocument(BaseModel):
@@ -22,7 +25,12 @@ class ShortCutDocument(BaseModel):
     # 高精度化した区間だけを下流へ同一 artifact として結び付ける。
     # None/空 tuple は既存の VTT ベース cutplan との後方互換を保つ。
     artifact_ref: TranscriptArtifactRef | None = None
-    artifact_fingerprint: str | None = Field(default=None, min_length=64, max_length=64)
+    artifact_fingerprint: str | None = Field(
+        default=None,
+        min_length=64,
+        max_length=64,
+        pattern=r"^[0-9a-f]{64}$",
+    )
     used_range_cue_digests: tuple[str, ...] = ()
 
     @field_validator("candidates", mode="before")
@@ -60,10 +68,6 @@ class ShortCutDocument(BaseModel):
         if self.artifact_fingerprint != self.artifact_ref.artifact_fingerprint:
             raise ValueError("artifact fingerprint が artifact ref と一致しません。")
         for digest in self.used_range_cue_digests:
-            if not isinstance(digest, str) or len(digest) != 64:
+            if not isinstance(digest, str) or _HEX64_RE.fullmatch(digest) is None:
                 raise ValueError("used_range_cue_digest が正しくありません。")
-            try:
-                int(digest, 16)
-            except ValueError as exc:
-                raise ValueError("used_range_cue_digest が正しくありません。") from exc
         return self

@@ -164,6 +164,52 @@ def test_short_cut_document_is_strict_and_lineage_digest_is_non_empty():
         )
 
 
+@pytest.mark.parametrize(
+    "invalid_hex",
+    [
+        "+" + "a" * 63,
+        "0x" + "a" * 62,
+        " " + "a" * 63,
+        "a" * 63 + " ",
+        "Ａ" + "a" * 63,
+        "A" + "a" * 63,
+        "a" * 32,
+    ],
+)
+def test_short_cut_document_rejects_non_ascii_lower_hex_fingerprints(invalid_hex: str):
+    payload = {
+        "parent_id": "clip_002",
+        "parent_start_ms": 2_340_000,
+        "parent_end_ms": 3_000_000,
+        "candidates": [_cut(1, start="00:39:10", end="00:40:00", duration_sec=50)],
+    }
+    fingerprint = "c" * 64
+    reference = TranscriptArtifactRef(
+        video_id="video-1",
+        artifact_fingerprint=fingerprint,
+        source_kind="whisper_cpp",
+        path=f"transcripts/artifacts/{fingerprint}.json",
+    )
+    with pytest.raises(ValueError):
+        ShortCutDocument.model_validate(
+            {
+                **payload,
+                "artifact_ref": reference,
+                "artifact_fingerprint": invalid_hex,
+                "used_range_cue_digests": ["a" * 64],
+            }
+        )
+    with pytest.raises(ValueError):
+        ShortCutDocument.model_validate(
+            {
+                **payload,
+                "artifact_ref": reference,
+                "artifact_fingerprint": fingerprint,
+                "used_range_cue_digests": [invalid_hex],
+            }
+        )
+
+
 def test_needs_short_cut_only_for_long_candidates():
     assert needs_short_cut(_parent()) is True
     assert needs_short_cut(_parent(start="00:00:00", end="00:03:00", duration_sec=180)) is False

@@ -182,6 +182,46 @@ def test_telop_document_is_strict_and_lineage_digest_is_non_empty():
         )
 
 
+@pytest.mark.parametrize(
+    "invalid_hex",
+    [
+        "+" + "a" * 63,
+        "0x" + "a" * 62,
+        " " + "a" * 63,
+        "a" * 63 + " ",
+        "Ａ" + "a" * 63,
+        "A" + "a" * 63,
+        "a" * 32,
+    ],
+)
+def test_telop_document_rejects_non_ascii_lower_hex_fingerprints(invalid_hex: str):
+    fingerprint = "c" * 64
+    reference = TranscriptArtifactRef(
+        video_id="video123",
+        artifact_fingerprint=fingerprint,
+        source_kind="whisper_cpp",
+        path=f"transcripts/artifacts/{fingerprint}.json",
+    )
+    with pytest.raises(ValueError):
+        TelopScriptDocument.model_validate(
+            {
+                **_valid_document(),
+                "artifact_ref": reference,
+                "artifact_fingerprint": invalid_hex,
+                "used_range_cue_digests": ["a" * 64],
+            }
+        )
+    with pytest.raises(ValueError):
+        TelopScriptDocument.model_validate(
+            {
+                **_valid_document(),
+                "artifact_ref": reference,
+                "artifact_fingerprint": fingerprint,
+                "used_range_cue_digests": [invalid_hex],
+            }
+        )
+
+
 def test_save_confirmed_telop_script_returns_path_and_normalized_document(
     tmp_path: Path,
 ):

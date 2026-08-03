@@ -1668,7 +1668,7 @@ data/{video_id}/ ...
 
 **コミット境界:** `short_cut.py` / `telop.py` / queue / line / UI handoff / model / tests を `S9-4` 単位でコミットする。S9-4 のコード変更に UI 設定画面の大規模再構成や local video adapter を混ぜない。
 
-**S9-4 実装・検証実績（2026-08-03、実装ワーカー）:** `TranscriptArtifactRef`、artifact fingerprint、入力順の `used_range_cue_digests` を cutplan → telop → queue spec → line state → output/reuse preflight へ伝播する最小縦断を実装した。既存 VTT 親候補探索と通常 rerun は Whisper を呼ばず、明示した「選択区間を高精度化」だけが S9-3 の selected-range runtime を入力順・整数 ms・padding 付きで呼ぶ。telop prompt は高精度経路で `ja.vtt` を読まず、同一 artifact の absolute cues を使い、Codex は1区間セット1回のままにした。legacy schema 1 line state、欠損 artifact、lineage 不一致は確認・出力を再利用せず未確認へ戻す。focused tests は 246 passed、全体は 1,536 passed / 2 skipped、`uv lock --check`、`git diff --check`、`uv run python -m compileall -q src` も通過した。独立レビュー、S9-4 Done 条件、S9 全体および AC-37 の受け入れ判定は未完了のままとする。
+**S9-4 実装・検証実績（2026-08-03、実装ワーカー）:** `TranscriptArtifactRef`、artifact fingerprint、入力順の `used_range_cue_digests` を cutplan → telop → queue spec → line state → output/reuse preflight へ伝播する最小縦断を実装した。既存 VTT 親候補探索と通常 rerun は Whisper を呼ばず、明示した「選択区間を高精度化」だけが S9-3 の selected-range runtime を入力順・整数 ms・padding 付きで呼ぶ。telop prompt は高精度経路で `ja.vtt` を読まず、同一 artifact の absolute cues を使い、Codex は1区間セット1回のままにした。legacy schema 1 line state、欠損 artifact、lineage 不一致は確認・出力を再利用せず未確認へ戻す。focused tests は 269 passed、全体は 1,559 passed / 2 skipped、`uv lock --check`、`git diff --check`、`uv run python -m compileall -q src` も通過した。独立レビュー、S9-4 Done 条件、S9 全体および AC-37 の受け入れ判定は未完了のままとする。
 
 `ui/components/shorts_line.py` は、cutplan の同一 artifact reference を line snapshot / state へ渡すために必要な最小 handoff として変更した。
 
