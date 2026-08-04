@@ -908,7 +908,10 @@ def _validate_full_json_token(value: Any, *, index: int, token_index: int) -> No
         label="whisper JSON token",
         details={"index": index, "token_index": token_index},
     )
-    _strict_string(token["text"], label="token.text")
+    # whisper.cpp 1.9.1 emits valid whitespace-only and empty metadata tokens.
+    # Token text is validated for type/NUL safety but is never used for cue text
+    # or boundaries; the segment text remains non-empty below.
+    _strict_string(token["text"], label="token.text", non_empty=False)
     timestamp_pair = _strict_timing_pair(
         token["timestamps"],
         label="token.timestamps",

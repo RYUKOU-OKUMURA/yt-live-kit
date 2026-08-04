@@ -380,6 +380,47 @@ def test_strict_full_json_rejects_unknown_schema_and_out_of_range_cue():
 
 
 @pytest.mark.parametrize(
+    "token_text",
+    (
+        pytest.param(" ", id="single-space-measured-shape"),
+        pytest.param("   ", id="multiple-spaces"),
+        pytest.param("", id="empty"),
+    ),
+)
+def test_strict_full_json_accepts_empty_or_whitespace_token_text(token_text):
+    payload = _full_payload(text="こんにちは")
+    token = payload["transcription"][0]["tokens"][0]
+    token["text"] = token_text
+    # This is the token shape observed in whisper.cpp 1.9.1 full JSON: id 220,
+    # a single-space metadata token, and a zero-length 2990 ms timestamp.
+    token["id"] = 220
+    token["timestamps"] = {"from": "00:00:02,990", "to": "00:00:02,990"}
+    token["offsets"] = {"from": 2990, "to": 2990}
+
+    cues = parse_whisper_full_json(payload)
+
+    assert len(cues) == 1
+    assert cues[0].text == "こんにちは"
+    assert (cues[0].start_ms, cues[0].end_ms) == (0, 500)
+
+
+@pytest.mark.parametrize("token_text", ("\x00", None, 1, True, b" "))
+def test_strict_full_json_rejects_invalid_token_text_types_and_nul(token_text):
+    payload = _full_payload()
+    payload["transcription"][0]["tokens"][0]["text"] = token_text
+
+    with pytest.raises(WhisperOutputError, match="token.text"):
+        parse_whisper_full_json(payload)
+
+
+def test_strict_full_json_rejects_whitespace_segment_text():
+    payload = _full_payload(text=" \t\n")
+
+    with pytest.raises(WhisperOutputError, match="segment"):
+        parse_whisper_full_json(payload)
+
+
+@pytest.mark.parametrize(
     "mutate,match",
     (
         (lambda payload: payload["model"]["audio"].update({"unknown": 1}), "schema"),
