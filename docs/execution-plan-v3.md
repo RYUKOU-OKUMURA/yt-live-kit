@@ -56,6 +56,7 @@
 | P6-4 | 投稿 UI 統合・確認ダイアログ | [x] 完了 |
 | P6-5 | P6 統合受け入れ・回帰 | [x] 完了 |
 | P6 | Shorts 投稿メタデータ品質ゲート + 関連動画確認追跡 | [x] 完了 |
+| R2 | UI 大幅刷新前の境界整理・回帰リスク監査 | [~] 進行中 |
 
 **状態の書き方:** `[ ] 未着手` / `[~] 進行中` / `[x] 完了`
 
@@ -243,6 +244,7 @@ data/{video_id}/ ...
 | **P6-4** | 投稿 UI 統合・確認ダイアログ | タイトル警告、最終概要欄 gate、関連動画チェックリスト | FR-27, FR-37, FR-38, AC-27, AC-38, AC-39 |
 | **P6-5** | P6 統合受け入れ・回帰 | API mock、全件テスト、scope guard、独立レビュー | AC-38, AC-39 |
 | **P6** | Shorts 投稿メタデータ品質ゲート + 関連動画確認追跡 | タイトル 3 方向、必須概要欄、upload 後の関連動画人確認 | FR-37, FR-38, AC-38, AC-39 |
+| **R2** | UI 大幅刷新前の境界整理・回帰リスク監査 | UI view model、widget state 契約、候補 lineage、投稿安全境界の characterization | 既存 FR / NFR / AC の非回帰 |
 
 各タスクは「実装 → 単体確認 → Done 条件チェック → **タスク完了コミット**」で閉じる。フェーズ末（U5 / S5 / P3）は「フェーズ受け入れ」も兼ねる。P4 / S6 は v3 受け入れ（P3）完了後に追加された要件であり、P3 の証跡・版数には手を入れない。
 
@@ -1752,7 +1754,7 @@ data/{video_id}/ ...
 
 **背景:** P4 は任意テンプレートの合成までを実装したが、テンプレート未設定時の後方互換 fallback を許しているため、現在の予約投稿経路ではチャンネル登録 CTA と元動画案内を必須にできない。また Shorts 概要欄の URL は主要クリック導線として扱えないため、元動画への導線は YouTube Studio の「関連動画」を別の人確認工程として管理する必要がある。YouTube Data API に書き込み可能な関連動画 field があるとは仮定せず、P6 は Studio 手動操作のローカル記録だけを実装する。関連動画は upload 後にしか設定できないため、`pending` は要対応表示と集計に使うだけで、`publishAt` の取消・延期・変更や publication poll の停止を行わない。
 
-**フェーズ状態:** [~] 進行中
+**フェーズ状態:** [x] 完了
 
 **全体依存:** `P6-PLAN → {P6-1, P6-2, P6-3} → P6-4 → P6-5`。P6-1〜P6-3 は変更ファイルが重ならない分離 worktree で並行実装できる。P6-4 は 3 タスクが main に統合された後だけ開始する。P6-1 の `telop.py` は S9-4 と競合するため、P6-1 のレビュー PASS・main 統合・依存元タスクへの完了報告を S9-4 着手より先に行う。
 
@@ -1918,6 +1920,42 @@ data/{video_id}/ ...
 **P6-5 最終受け入れ証跡（2026-08-03）:** P6 境界 6 ファイルの 410 件と全件 1,380 件（skip 2 件）が main `99bfc9c` で通過し、`git diff --check` も通過した。代表テストは `test_generation_invokes_codex_once_and_saves_valid_document`、`test_quality_gate_creates_default_template_and_freezes_requirements`、`test_confirmed_preview_description_reaches_worker_and_insert_body_unchanged`、`test_job_target_description_gate_fails_operation_before_api_attempt_or_report`、`test_related_video_confirmation_requires_both_canonical_ids_and_is_idempotency_safe`、`test_upload_section_keeps_global_related_pending_reachable_without_latest_manifest`、`test_metadata_boundaries`。P6 の main 統合は `410e99a` / `0202eb6`（計画）、`96aa302` / `0e03a23` / `665ba2f`（P6-1）、`1a70646` / `18a811b` / `4e6b274`（P6-2）、`1ab7658` / `9af5a4e`（P6-3）、`aaa89cf` / `99bfc9c`（P6-4）。テストは YouTube API をモックし、実 upload、公開データ変更、Studio 自動操作、関連動画 API write、追加 Codex 呼び出しを行っていない。P6-1 は S9-4 より先に main へ統合済みで、S9-4 commit はまだ存在しない。P6 開始前後で S9-1 監査節の SHA-256 は `7872b8aa5425087ee4d0a31e754a27a6f6ee3ec207899dfaf12018354c87e5ef` のまま一致し、`.codex/learning/user-decisions.md` の既存未コミット変更は P6 commit に含めていない。実装セッション内再レビュー、P6-4 独立レビュー、P6-5 独立最終レビューはすべて APPROVE（残存 P0 / P1 なし）。
 
 **P6 のコミット順:** `P6-PLAN` → `P6-1` / `P6-2` / `P6-3`（分離 worktree、個別レビュー後に順次 main 統合。P6-1 を最優先）→ `P6-4` → `P6-5`。main への統合はオーケストレーターだけが行う。
+
+---
+
+### R2: UI 大幅刷新前の境界整理・回帰リスク監査
+
+**目的:** 手動 E2E でショート生成から予約投稿まで完走した現行挙動を基準に、`docs/references/u6-short-production-line-v3.2.png` の視覚階層へ大幅刷新する前に、表示・session state・永続 state・投稿 transaction の境界を整理する。見た目の変更は行わず、UI 再配置で壊れやすい状態契約を純粋 view model と characterization test へ固定し、監査結果を独立文書に残す。
+
+**フェーズ状態:** [~] 進行中
+
+**前提・制約:** 2026-08-04 の手動 E2E 完走を受け入れ基準とし、外部 API、実 upload、実 Codex 呼び出し、動画再生成、既存成果物の削除は行わない。queue / review / output fingerprint、概要欄の immutable requirements、`run_line_reservation_transaction()`、`confirm_and_start_upload()` の transaction は挙動を変えない。S9-6 の人確認と benchmark 判定は別タスクとして未完了を維持する。
+
+**変更ファイル範囲:** `docs/execution-plan-v3.md`、新規監査文書、`src/yt_live_kit/ui/app.py`、`ui/state.py`、`ui/components/results.py` / `status_bar.py` / `shorts_line.py` / `shorts_queue.py` / `short_cut.py` / `upload.py`、`ui/views/video_detail.py` / `library.py`、新規 `ui/view_models/` / `ui/session_keys.py` / `ui/queries.py` / `ui/controllers/`、対応する `tests/test_ui_*.py` を許可する。ライン開始を原子的・再試行可能な command にするため必要な場合だけ `services/shorts_line.py` / `tests/test_shorts_line.py` を最小変更できる。`requirements-v3.md`、`docs/benchmarks/`、S9-6 fixture / evidence、production `data/`、prompt、`models/`、description / schedule / upload queue / YouTube / transcript artifact service は read-only とする。
+
+**追加の不変条件:** `TranscriptArtifactRef`、artifact fingerprint、ordered cue digest、coarse candidate fingerprint、高精度 / fallback 表示を変えず、通常 rerun で Whisper / Codex を起動しない。P6 の description requirements snapshot、upload operation、schedule / publication poll を変更しない。実 browser 確認は隔離した一時 `data_dir` または検証用コピーで行い、production data を読み書きしない。
+
+**作業:**
+
+- [ ] R2-1. `1645 passed / 2 skipped` を回帰基準に、現行画面・リファレンス画像、`app.py` / `results.py` / `status_bar.py` / `video_detail.py` / `shorts_line.py` / `short_cut.py` / `upload.py`、状態永続化、テスト結合度を監査し、優先度、再現条件、刷新時の影響、保護すべき安全境界を `docs/ui-refactor-review-2026-08-04.md` に記録する
+- [ ] R2-2. ページ境界を整理する。全ページ末尾へ旧 `render_results()` を混入させず、全ページで描画されるサイドバーは session snapshot を復元・保存しない読み取り専用 projection にする
+- [ ] R2-3. 詳細・投稿境界を整理する。予約可能件数は `can_reserve_shorts_queue_item()` と同じ service gate で数え、永続 operation / 関連動画 pending / 要照合 / publication poll を最新 manifest の件数 0 でも表示する。ライン投稿は必須 adapter で preview 検証と reservation transaction を一体で渡す
+- [ ] R2-4. 再生成・並び替えに強い widget state 契約を追加する。候補引き継ぎは保存済み coarse lineage fingerprint を優先する。telop は編集前 document 全体、queue fingerprint、artifact lineage、short-cut は提案 document 全体から immutable draft identity を作り、同じ identity では buffer を保持、新 identity では widget 描画前に限定 prefix だけを初期化する。親候補は配列 index ではなく source + ID で保持し、条件描画をまたぐ編集 widget は session persistence を明示する
+- [ ] R2-5. view 間 import と巨大 renderer 内の純粋計算を `ui/view_models/`、`ui/session_keys.py`、`ui/queries.py`、必要な `ui/controllers/` へ分離し、既存 import 名は互換 re-export で維持する。通常 rerun と表示だけの render は durable write を行わず、保存は名前付き command / callback に限定する。ライン開始は line state と active pointer を単一 command 境界で保存し、成功後にだけ session projection を適用する。各書込み失敗後は新 active line と line-mode snapshot を残さず、同じ操作を安全に再試行できるようにする
+- [ ] R2-6. 上記境界の characterization test、対象 UI test、全件 `uv run pytest -q`、`uv lock --check`、`git diff --check`、`compileall`、隔離 `data_dir` の実ブラウザ確認を行う。同一 artifact の新台本、A → B → A、同じ candidate ID の境界変更、line / pointer 各 fault、同じ状態の二重 render、動画 A 表示中の動画 B 完了通知と詳細導線を含める。upload、概要欄反映、高精度化、生成、候補確定、人確認、削除ボタンは押さない
+- [ ] R2-7. 実装者と別のサブエージェントが欠陥優先レビューを行い、P0 / P1 を解消してから進捗、監査文書、コミットを閉じる。既存の未コミット学習ログと skill pointer は commit に含めない
+
+**Done 条件:**
+
+- [ ] 旧結果のページ混入とサイドバー描画時の session state 変更が無く、ページ・workspace の見た目を移動しても生成 state を暗黙変更しない
+- [ ] 同じ clip / candidate ID の再生成、候補並び替え、workspace 往復で、古い編集値を新 provenance へ結合せず、未再生成の手編集は保持する
+- [ ] 永続投稿 tracking は新規予約候補の有無から独立し、表示件数と実際の予約 gate が一致する。ライン投稿 caller は安全 callback の一部を落とせない
+- [ ] line state / active pointer の各永続化失敗時に新 active line と session snapshot が残らず、孤立 state を成功扱いせずに再試行できる。既存の reservation / upload transaction と確認 dialog の順序は変わらない
+- [ ] 同じ状態を二度表示しても line / review / spec / output / operation の durable write と Whisper / Codex 起動がなく、pipeline 完了時は旧結果を全ページへ描画せず対象動画 ID の通知と詳細導線を維持する
+- [ ] 外部 write、新規依存、生成品質変更がなく、変更前の `1645 passed / 2 skipped` から回帰せずに全件テストが通る
+- [ ] 監査文書に未解消の構造課題、UI 刷新で触れてよい層、触れてはいけない transaction、推奨実装順が記録され、独立レビューが PASS する
+
+**コミット境界:** 先に本計画の開始を docs commit とし、実装・test・監査文書・完了チェックを `R2` commit に分ける。S9-6 の証跡と `.codex/learning/user-decisions.md` は含めない。
 
 ---
 
@@ -2268,6 +2306,7 @@ S9 初版で実装するのは、既存 YouTube `video_id` の良好な VTT を�
 12. **S9-2 → S9-3 → S9-4 → S9-5 → S9-6** の順に進める。各タスク完了時に当該チェックとコミットを閉じ、S9-6 の A/B 受け入れまで S9 を完了にしない
 13. ~~**P6-PLAN を S9-1 の人手 gold 監査と並行して docs-only で閉じる。**~~ 完了。独立レビュー済み plan commit から分離 worktree を作成した
 14. ~~**P6-1 / P6-2 / P6-3 を分離 worktree で並行実装し、個別レビュー後に main へ統合する。**~~ 完了。P6-1 を S9-4 より先に統合・依存元へ報告し、P6-4 → P6-5 まで独立レビュー後に閉じた
+15. **R2 を完了する。** 手動 E2E 済みの現行挙動を基準に、UI 大幅刷新前の page / session / durable state / upload gate を整理し、監査文書・characterization test・独立レビューで固定する
 
 ---
 
@@ -2275,6 +2314,7 @@ S9 初版で実装するのは、既存 YouTube `video_id` の良好な VTT を�
 
 | 日付 | 内容 |
 |------|------|
+| 2026-08-04 | **R2 を開始。** 手動 E2E でショート生成から予約投稿まで完走した現行挙動を基準に、UI 大幅刷新前の page 境界、サイドバー純粋性、再生成時 widget state、候補 lineage、投稿 tracking / reservation gate、ライン開始時の session projection を監査・整理する計画を追加。外部 API、実 upload、実 Codex、動画再生成、成果物削除は行わず、S9-6 の受け入れ判定を変更しない。あわせて進捗サマリーと不整合だった P6 本文のフェーズ状態を完了へ整合した。 |
 | 2026-08-03 | **P6 完了。** タイトル固定 3 方向、ショート概要欄の生成説明・元動画タイトル・開始秒付き URL・チャンネル登録 CTA の不変要件 gate、YouTube Studio 関連動画確認の永続追跡を統合した。明示編集本文の黙った差し戻しを独立レビューで検出・修正後、P6 境界 410 件、全体 `1380 passed, 2 skipped`、diff-check、実 YouTube / Studio write なしを確認。AC-38 / AC-39 と M17 を完了した。 |
 | 2026-08-03 | **P6-PLAN を開始。** タイトルを検索明快型・仕事影響型・好奇心型の固定 3 方向で生成し、概要欄の生成説明・チャンネル登録 CTA・元動画タイトル・開始秒付き URL を投稿前に二重再検証し、関連動画は API 自動設定せず YouTube Studio の手動確認状態を upload operation に永続化する FR-37 / FR-38 と AC-38 / AC-39 を追加。P6-1〜P6-3 の分離 worktree、P6-4 の単一 UI writer、P6-1 を S9-4 より先に main 統合する依存、S9-1 監査節と学習ログの保護を固定した |
 | 2026-08-03 | **S9-PLAN を確定。** S9 を S9-0 既存 VTT 非上書き契約 → S9-1 benchmark → S9-2 TranscriptArtifact / resolver / fingerprint / persistent cache → S9-3 whisper.cpp runtime / 音声区間 → S9-4 short_cut / telop / queue / line 再利用 → S9-5 UI / 進捗 / 失効 → S9-6 A/B 受け入れの依存順へ分割。各タスクの目的・前提・変更範囲・テスト・Done・コミット境界、候補 lineage、cache identity 分離、gold / glossary / 評価 gate、`ja.vtt` 非破壊、使用範囲 cue digest の fail closed、全編 Whisper / local video / asset ID の将来分離を固定した |
