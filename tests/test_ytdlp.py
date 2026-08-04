@@ -7,6 +7,7 @@ import os
 import subprocess
 import sys
 import wave
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -47,22 +48,82 @@ VTT_TWO = """WEBVTT
 """
 
 
-def _wav_bytes(*, sample_rate: int = 16_000, channels: int = 1) -> bytes:
+def _wav_bytes(
+    *,
+    sample_rate: int = 16_000,
+    channels: int = 1,
+    duration_ms: int = 30_000,
+) -> bytes:
     buffer = io.BytesIO()
     with wave.open(buffer, "wb") as wav:
         wav.setnchannels(channels)
         wav.setsampwidth(2)
         wav.setframerate(sample_rate)
-        wav.writeframes(b"\x00\x00" * channels * 160)
+        frame_count = duration_ms * sample_rate // 1000
+        wav.writeframes(b"\x00\x00" * channels * frame_count)
     return buffer.getvalue()
 
 
 def _fake_ffmpeg(tmp_path, *, name: str = "ffmpeg"):
     tmp_path.mkdir(parents=True, exist_ok=True)
     path = tmp_path / name
-    path.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    path.write_text(
+        f'''#!{sys.executable}
+import sys
+import wave
+from pathlib import Path
+
+args = sys.argv[1:]
+if "-version" in args:
+    raise SystemExit(0)
+input_path = Path(args[args.index("-i") + 1])
+output_path = Path(args[-1])
+audio_filter = args[args.index("-af") + 1]
+filter_prefix = "aresample=16000,atrim=end_sample="
+if not audio_filter.startswith(filter_prefix):
+    raise AssertionError(audio_filter)
+requested_frames = int(audio_filter[len(filter_prefix):])
+with wave.open(str(input_path), "rb") as source:
+    source_rate = source.getframerate()
+    source_channels = source.getnchannels()
+    source_width = source.getsampwidth()
+    source_frames = source.getnframes()
+    source_bytes = source.readframes(source_frames)
+source_frame_width = source_channels * source_width
+output_bytes = bytearray()
+for output_index in range(requested_frames):
+    source_index = min((output_index * source_rate) // 16000, source_frames - 1)
+    start = source_index * source_frame_width
+    sample = source_bytes[start:start + source_width]
+    output_bytes.extend(sample[:2] if len(sample) >= 2 else b"\\x00\\x00")
+with wave.open(str(output_path), "wb") as output:
+    output.setnchannels(1)
+    output.setsampwidth(2)
+    output.setframerate(16000)
+    output.writeframes(bytes(output_bytes))
+''',
+        encoding="utf-8",
+    )
     path.chmod(0o755)
     return path
+
+
+def _patch_audio_download(monkeypatch, content: bytes):
+    calls: list[list[str]] = []
+
+    def fake_run(args, _settings, *, timeout=None, pass_fds=(), cwd_fd=None):
+        calls.append(list(args))
+        current_fd = os.open(".", os.O_RDONLY)
+        try:
+            os.fchdir(cwd_fd)
+            __import__("pathlib").Path("span.wav").write_bytes(content)
+        finally:
+            os.fchdir(current_fd)
+            os.close(current_fd)
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr("yt_live_kit.services.ytdlp._run_ytdlp", fake_run)
+    return calls
 
 
 def test_resolve_audio_ffmpeg_accepts_command_name_and_uses_resolved_path(
@@ -675,14 +736,16 @@ def test_prepare_audio_span_uses_selected_audio_only_range_and_persistent_cache(
     tmp_path,
 ):
     video_id = "IJvd6k6ZmUo"
+    ffmpeg_path = _fake_ffmpeg(tmp_path / "configured ffmpeg", name="ffmpeg binary")
     settings = Settings(
         data_dir=tmp_path,
         ytdlp_path="yt-dlp-test",
         ytdlp_timeout=17,
-        ffmpeg_path=str(_fake_ffmpeg(tmp_path)),
+        ffmpeg_path=str(ffmpeg_path),
     )
     calls: list[list[str]] = []
-    content = _wav_bytes()
+    content = _wav_bytes(duration_ms=12_500)
+    expected_normalized = _wav_bytes(duration_ms=11_861)
 
     monkeypatch.setattr(
         "yt_live_kit.services.ytdlp.shutil.which",
@@ -704,6 +767,19 @@ def test_prepare_audio_span_uses_selected_audio_only_range_and_persistent_cache(
         return subprocess.CompletedProcess(args, 0, "", "")
 
     monkeypatch.setattr("yt_live_kit.services.ytdlp._run_ytdlp", fake_run)
+    real_subprocess_run = subprocess.run
+    ffmpeg_calls = []
+
+    def spy_subprocess_run(*args, **kwargs):
+        command = args[0]
+        if isinstance(command, list) and command and command[0] == str(ffmpeg_path.resolve()):
+            ffmpeg_calls.append((command, kwargs))
+        return real_subprocess_run(*args, **kwargs)
+
+    monkeypatch.setattr(
+        "yt_live_kit.services.ytdlp.subprocess.run",
+        spy_subprocess_run,
+    )
 
     first = prepare_audio_span(
         video_id,
@@ -713,18 +789,34 @@ def test_prepare_audio_span_uses_selected_audio_only_range_and_persistent_cache(
     )
 
     assert first.cache_hit is False
-    assert first.audio_bytes == content
+    assert first.audio_bytes == expected_normalized
     assert first.sample_rate == 16_000
     assert first.channel == 1
     assert first.codec == "pcm_s16le"
+    with wave.open(io.BytesIO(first.audio_bytes), "rb") as normalized:
+        assert normalized.getframerate() == 16_000
+        assert normalized.getnchannels() == 1
+        assert normalized.getsampwidth() == 2
+        assert normalized.getnframes() == 11_861 * 16
+    metadata = json.loads(first.path.with_suffix(".json").read_text(encoding="utf-8"))
+    assert metadata["audio"]["frames"] == 11_861 * 16
+    assert metadata["audio"]["duration_ms"] == 11_861
+    assert metadata["audio"]["sha256"] == hashlib.sha256(expected_normalized).hexdigest()
+    assert first.audio_input_fingerprint == hashlib.sha256(expected_normalized).hexdigest()
     assert first.range.requested_start_ms == 12_095
     assert first.range.requested_end_ms == 23_956
     assert len(calls) == 1
+    assert len(ffmpeg_calls) == 2
+    normalize_command, normalize_kwargs = ffmpeg_calls[-1]
+    assert normalize_command[0] == str(ffmpeg_path.resolve())
+    assert normalize_command[normalize_command.index("-af") + 1] == (
+        "aresample=16000,atrim=end_sample=189776"
+    )
+    assert normalize_kwargs["shell"] is False
+    assert normalize_kwargs["timeout"] == settings.ffmpeg_timeout
     command = calls[0]
     assert command[command.index("-f") + 1] == "bestaudio"
-    assert command[command.index("--ffmpeg-location") + 1] == str(
-        _fake_ffmpeg(tmp_path).resolve()
-    )
+    assert command[command.index("--ffmpeg-location") + 1] == str(ffmpeg_path.resolve())
     assert "--download-sections" in command
     section = command[command.index("--download-sections") + 1]
     assert section == "*00:00:12.095-00:00:23.956"
@@ -735,6 +827,12 @@ def test_prepare_audio_span_uses_selected_audio_only_range_and_persistent_cache(
         raise AssertionError("cache hit では yt-dlp を再実行しない")
 
     monkeypatch.setattr("yt_live_kit.services.ytdlp._run_ytdlp", fail_if_called)
+
+    def fail_preflight(*args, **kwargs):
+        raise AssertionError("cache hit では FFmpeg の解決・preflight を再実行しない")
+
+    monkeypatch.setattr("yt_live_kit.services.ytdlp._resolve_audio_ffmpeg", fail_preflight)
+    monkeypatch.setattr("yt_live_kit.services.ytdlp._check_audio_ffmpeg", fail_preflight)
     second = prepare_audio_span(
         video_id,
         AudioSpanRange(12_345, 23_456, padding_before_ms=250, padding_after_ms=500),
@@ -743,6 +841,124 @@ def test_prepare_audio_span_uses_selected_audio_only_range_and_persistent_cache(
     )
     assert second.cache_hit is True
     assert second.audio_input_fingerprint == first.audio_input_fingerprint
+
+
+def test_prepare_audio_span_rejects_oversized_legacy_cache_and_regenerates(
+    monkeypatch,
+    tmp_path,
+):
+    settings = Settings(
+        data_dir=tmp_path,
+        ytdlp_path="yt-dlp-test",
+        ffmpeg_path=str(_fake_ffmpeg(tmp_path / "configured ffmpeg")),
+    )
+    monkeypatch.setattr(
+        "yt_live_kit.services.ytdlp.shutil.which",
+        lambda value: "/usr/bin/yt-dlp" if value == "yt-dlp-test" else value,
+    )
+    calls = _patch_audio_download(monkeypatch, _wav_bytes(duration_ms=2_000))
+
+    first = prepare_audio_span("IJvd6k6ZmUo", (1_000, 2_000), settings)
+    oversized = _wav_bytes(duration_ms=2_000)
+    first.path.write_bytes(oversized)
+    metadata_path = first.path.with_suffix(".json")
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    metadata["audio"]["bytes"] = len(oversized)
+    metadata["audio"]["sha256"] = hashlib.sha256(oversized).hexdigest()
+    metadata["audio"]["frames"] = 2_000 * 16
+    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+
+    second = prepare_audio_span("IJvd6k6ZmUo", (1_000, 2_000), settings)
+
+    assert second.cache_hit is False
+    assert len(calls) == 2
+    with wave.open(io.BytesIO(second.audio_bytes), "rb") as normalized:
+        assert normalized.getnframes() == 1_000 * 16
+    assert list(first.path.parent.glob(f".{first.path.name}.corrupt-*"))
+
+
+def test_prepare_audio_span_rejects_undersized_download_without_normalizing(
+    monkeypatch,
+    tmp_path,
+):
+    settings = Settings(
+        data_dir=tmp_path,
+        ytdlp_path="yt-dlp-test",
+        ffmpeg_path=str(_fake_ffmpeg(tmp_path)),
+    )
+    monkeypatch.setattr(
+        "yt_live_kit.services.ytdlp.shutil.which",
+        lambda value: "/usr/bin/yt-dlp" if value == "yt-dlp-test" else value,
+    )
+    calls = _patch_audio_download(monkeypatch, _wav_bytes(duration_ms=999))
+
+    with pytest.raises(AudioSpanError, match="必要長未満"):
+        prepare_audio_span("IJvd6k6ZmUo", (1_000, 2_000), settings)
+
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize(
+    ("failure", "error_match"),
+    [
+        ("nonzero", "正規化に失敗"),
+        ("timeout", "タイムアウト"),
+        ("missing", "出力がありません"),
+        ("malformed", "形式が不正"),
+        ("oversized", "frame 数"),
+        ("wrong_format", "frame 数"),
+    ],
+)
+def test_prepare_audio_span_ffmpeg_output_failures_are_fail_closed(
+    monkeypatch,
+    tmp_path,
+    failure,
+    error_match,
+):
+    ffmpeg_path = _fake_ffmpeg(tmp_path / "ffmpeg path with spaces")
+    settings = Settings(
+        data_dir=tmp_path,
+        ytdlp_path="yt-dlp-test",
+        ffmpeg_path=str(ffmpeg_path),
+    )
+    monkeypatch.setattr(
+        "yt_live_kit.services.ytdlp.shutil.which",
+        lambda value: "/usr/bin/yt-dlp" if value == "yt-dlp-test" else None,
+    )
+    download_calls = _patch_audio_download(monkeypatch, _wav_bytes(duration_ms=2_000))
+    ffmpeg_calls = []
+
+    def failing_subprocess_run(command, *args, **kwargs):
+        assert isinstance(command, list)
+        assert command[0] == str(ffmpeg_path.resolve())
+        assert kwargs["shell"] is False
+        ffmpeg_calls.append(command)
+        if "-version" in command:
+            return subprocess.CompletedProcess(command, 0, "", "")
+        if failure == "nonzero":
+            return subprocess.CompletedProcess(command, 1, "", "conversion failed")
+        if failure == "timeout":
+            raise subprocess.TimeoutExpired(command, settings.ffmpeg_timeout)
+        if failure == "malformed":
+            Path(command[-1]).write_bytes(b"not a wav")
+        elif failure == "oversized":
+            Path(command[-1]).write_bytes(_wav_bytes(duration_ms=2_000))
+        elif failure == "wrong_format":
+            Path(command[-1]).write_bytes(
+                _wav_bytes(sample_rate=8_000, duration_ms=2_000)
+            )
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(
+        "yt_live_kit.services.ytdlp.subprocess.run",
+        failing_subprocess_run,
+    )
+
+    with pytest.raises(AudioSpanError, match=error_match):
+        prepare_audio_span("IJvd6k6ZmUo", (1_000, 2_000), settings)
+
+    assert len(download_calls) == 1
+    assert len(ffmpeg_calls) == 2
 
 
 def test_prepare_audio_span_corrupt_cache_is_a_miss(monkeypatch, tmp_path):
@@ -816,7 +1032,7 @@ def test_prepare_audio_span_invalid_wav_cache_is_quarantined_and_regenerated(
 
     second = prepare_audio_span("IJvd6k6ZmUo", (1_000, 2_000), settings)
     assert second.cache_hit is False
-    assert second.audio_bytes == content
+    assert second.audio_bytes == _wav_bytes(duration_ms=1_000)
     assert calls == 2
     assert list(first.path.parent.glob(f".{first.path.name}.corrupt-*"))
 

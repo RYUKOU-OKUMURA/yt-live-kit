@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+import io
 import os
 import re
 import stat
@@ -353,19 +354,22 @@ def _audio_file_fingerprint(path: Path) -> tuple[bytes, str]:
 _EXPECTED_WAV_FORMAT = (16_000, 1, "pcm_s16le")
 
 
-def _inspect_wav_format(content: bytes) -> tuple[int, int, str] | None:
-    """RIFF/WAVE と PCM format を確認する。壊れた bytes は None にする."""
+def _inspect_wav_details(content: bytes) -> tuple[int, int, str, int] | None:
+    """WAV の形式と実フレーム数を確認する。壊れた bytes は None にする."""
 
     if len(content) < 12 or content[:4] != b"RIFF" or content[8:12] != b"WAVE":
         return None
     try:
-        import io
-
         with wave.open(io.BytesIO(content), "rb") as wav:
             channels = wav.getnchannels()
             sample_rate = wav.getframerate()
             sample_width = wav.getsampwidth()
             compression = wav.getcomptype()
+            frame_count = wav.getnframes()
+            frame_size = channels * sample_width
+            if frame_count < 0 or frame_size <= 0:
+                return None
+            frame_bytes = wav.readframes(frame_count)
     except (EOFError, OSError, wave.Error):
         return None
     if (
@@ -373,9 +377,179 @@ def _inspect_wav_format(content: bytes) -> tuple[int, int, str] | None:
         or sample_rate <= 0
         or sample_width <= 0
         or compression != "NONE"
+        or len(frame_bytes) != frame_count * frame_size
     ):
         return None
-    return sample_rate, channels, f"pcm_s{sample_width * 8}le"
+    return sample_rate, channels, f"pcm_s{sample_width * 8}le", frame_count
+
+
+def _inspect_wav_format(content: bytes) -> tuple[int, int, str] | None:
+    """RIFF/WAVE と PCM format を確認する。壊れた bytes は None にする."""
+
+    inspected = _inspect_wav_details(content)
+    if inspected is None:
+        return None
+    return inspected[:3]
+
+
+def _requested_audio_frames(item: AudioSpanRange) -> int:
+    return (
+        item.requested_duration_ms
+        * int(_AUDIO_FORMAT_SETTINGS["sample_rate"])
+        // 1000
+    )
+
+
+def _assert_audio_file_identity(
+    path: Path,
+    expected_identity: os.stat_result,
+    *,
+    label: str,
+) -> None:
+    current = _lstat_without_symlink(path, label)
+    if current is None or not stat.S_ISREG(current.st_mode):
+        raise AudioSpanError(f"{label}が見つかりません。")
+    if (
+        current.st_dev != expected_identity.st_dev
+        or current.st_ino != expected_identity.st_ino
+    ):
+        raise AudioSpanError(f"{label}が処理中に置き換わりました。")
+
+
+def _audio_normalize_argv(
+    input_path: Path,
+    output_path: Path,
+    *,
+    ffmpeg_path: Path,
+    requested_frames: int,
+) -> list[str]:
+    return [
+        str(ffmpeg_path),
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-nostdin",
+        "-y",
+        "-i",
+        str(input_path),
+        "-map",
+        "0:a:0",
+        "-af",
+        (
+            f"aresample={_AUDIO_FORMAT_SETTINGS['sample_rate']},"
+            f"atrim=end_sample={requested_frames}"
+        ),
+        "-ar",
+        str(_AUDIO_FORMAT_SETTINGS["sample_rate"]),
+        "-ac",
+        str(_AUDIO_FORMAT_SETTINGS["channel"]),
+        "-c:a",
+        str(_AUDIO_FORMAT_SETTINGS["codec"]),
+        "-f",
+        str(_AUDIO_FORMAT_SETTINGS["container"]),
+        str(output_path),
+    ]
+
+
+def _normalize_audio_span(
+    input_path: Path,
+    output_path: Path,
+    item: AudioSpanRange,
+    *,
+    ffmpeg_path: Path,
+    settings: Settings,
+) -> tuple[bytes, str]:
+    """取得済み WAV を padding なしで指定 frame 数へ正規化する."""
+
+    try:
+        _validate_confined_path(input_path, settings, "取得した音声 WAV")
+        _validate_confined_path(output_path, settings, "正規化音声一時保存先")
+        input_identity = _lstat_without_symlink(input_path, "取得した音声 WAV")
+        if input_identity is None or not stat.S_ISREG(input_identity.st_mode):
+            raise AudioSpanError("取得した音声 WAV を確認できません。")
+        input_content, _ = _audio_file_fingerprint(input_path)
+        _assert_audio_file_identity(
+            input_path,
+            input_identity,
+            label="取得した音声 WAV",
+        )
+        input_details = _inspect_wav_details(input_content)
+        if input_details is None:
+            raise AudioSpanError("取得した音声 WAV の形式が不正です。")
+        input_sample_rate, _channels, _codec, input_frames = input_details
+        if input_frames * 1000 < item.requested_duration_ms * input_sample_rate:
+            raise AudioSpanError("取得した音声が選択区間の必要長未満です。")
+
+        existing_output = _lstat_without_symlink(
+            output_path,
+            "正規化音声一時保存先",
+        )
+        if existing_output is not None:
+            raise AudioSpanError("正規化音声一時保存先が既に存在します。")
+
+        requested_frames = _requested_audio_frames(item)
+        argv = _audio_normalize_argv(
+            input_path,
+            output_path,
+            ffmpeg_path=ffmpeg_path,
+            requested_frames=requested_frames,
+        )
+        try:
+            result = subprocess.run(
+                argv,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=settings.ffmpeg_timeout,
+                shell=False,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise AudioSpanError(
+                "音声 WAV の正規化がタイムアウトしました。"
+            ) from exc
+        except OSError as exc:
+            raise AudioSpanError("音声 WAV の正規化を実行できません。") from exc
+
+        if result.returncode != 0:
+            detail = _sanitize_diagnostic(result.stderr or result.stdout)
+            raise AudioSpanError(
+                f"音声 WAV の正規化に失敗しました（終了コード: {result.returncode}）。"
+                + (f"（詳細: {detail}）" if detail else "")
+            )
+
+        _assert_audio_file_identity(
+            input_path,
+            input_identity,
+            label="取得した音声 WAV",
+        )
+        output_identity = _lstat_without_symlink(
+            output_path,
+            "正規化音声一時保存先",
+        )
+        if output_identity is None or not stat.S_ISREG(output_identity.st_mode):
+            raise AudioSpanError("FFmpeg の正規化音声出力がありません。")
+        normalized_content, normalized_digest = _audio_file_fingerprint(output_path)
+        _assert_audio_file_identity(
+            output_path,
+            output_identity,
+            label="正規化音声一時保存先",
+        )
+        normalized_details = _inspect_wav_details(normalized_content)
+        if (
+            normalized_details is None
+            or normalized_details[:3] != _EXPECTED_WAV_FORMAT
+            or normalized_details[3] != requested_frames
+        ):
+            raise AudioSpanError(
+                "FFmpeg の正規化音声出力の形式が不正、または要求 frame 数が一致しません。"
+            )
+        return normalized_content, normalized_digest
+    except AudioSpanError:
+        raise
+    except YtdlpError as exc:
+        raise AudioSpanError("音声 WAV を安全に正規化できません。") from exc
+    except (OSError, ValueError, RuntimeError) as exc:
+        raise AudioSpanError("音声 WAV を安全に正規化できません。") from exc
 
 
 def _quarantine_audio_cache_file(path: Path, settings: Settings) -> None:
@@ -455,6 +629,8 @@ def _audio_cache_metadata(
             "sample_rate": _AUDIO_FORMAT_SETTINGS["sample_rate"],
             "channel": _AUDIO_FORMAT_SETTINGS["channel"],
             "codec": _AUDIO_FORMAT_SETTINGS["codec"],
+            "frames": _requested_audio_frames(item),
+            "duration_ms": item.requested_duration_ms,
         },
         "source_metadata": dict(source_metadata),
         "ffmpeg": dict(_AUDIO_FORMAT_SETTINGS),
@@ -506,19 +682,24 @@ def _read_audio_cache(
             "sample_rate",
             "channel",
             "codec",
+            "frames",
+            "duration_ms",
         }:
             return None
         content, digest = _audio_file_fingerprint(audio_path)
+        inspected = _inspect_wav_details(content)
         if (
             audio_metadata["bytes"] != len(content)
             or audio_metadata["sha256"] != digest
             or audio_metadata["sample_rate"] != _AUDIO_FORMAT_SETTINGS["sample_rate"]
             or audio_metadata["channel"] != _AUDIO_FORMAT_SETTINGS["channel"]
             or audio_metadata["codec"] != _AUDIO_FORMAT_SETTINGS["codec"]
+            or audio_metadata["frames"] != _requested_audio_frames(item)
+            or audio_metadata["duration_ms"] != item.requested_duration_ms
+            or inspected is None
+            or inspected[:3] != _EXPECTED_WAV_FORMAT
+            or inspected[3] != _requested_audio_frames(item)
         ):
-            return None
-        inspected = _inspect_wav_format(content)
-        if inspected != _EXPECTED_WAV_FORMAT:
             return None
         return AudioSpanResult(
             video_id=video_id,
@@ -598,6 +779,7 @@ def _check_audio_ffmpeg(ffmpeg_path: Path, settings: Settings) -> None:
             text=True,
             check=False,
             timeout=min(settings.ffmpeg_timeout, _AUDIO_FFMPEG_CHECK_TIMEOUT),
+            shell=False,
         )
     except subprocess.TimeoutExpired as exc:
         raise AudioSpanError(
@@ -808,11 +990,20 @@ def prepare_audio_span(
                 "動画全体や video format へ fallback せず、既存 YouTube VTT を明示的に使用してください。"
                 + (f"（詳細: {detail}）" if detail else "")
             )
-        output_path = _find_audio_output(temporary_dir, settings)
-        content, digest = _audio_file_fingerprint(output_path)
-        inspected = _inspect_wav_format(content)
-        if inspected != _EXPECTED_WAV_FORMAT:
-            raise AudioSpanError("変換後の音声形式が S9 の設定と一致しません。")
+        input_path = _find_audio_output(temporary_dir, settings)
+        normalized_path = temporary_dir / ".normalized-audio.wav"
+        content, digest = _normalize_audio_span(
+            input_path,
+            normalized_path,
+            item,
+            ffmpeg_path=resolved_ffmpeg,
+            settings=settings,
+        )
+        _assert_directory_identity(
+            temporary_dir,
+            temporary_identity,
+            label="音声一時保存先",
+        )
         metadata = _audio_cache_metadata(
             video_id=video_id,
             item=item,
@@ -841,6 +1032,8 @@ def prepare_audio_span(
         )
     except AudioSpanError:
         raise
+    except YtdlpError as exc:
+        raise AudioSpanError("選択区間の音声準備に失敗しました。") from exc
     except (OSError, ValueError, RuntimeError) as exc:
         raise AudioSpanError("選択区間の音声準備に失敗しました。再試行してください。") from exc
     finally:
