@@ -1,7 +1,7 @@
 {
   "schema": "t1-1-timing-spike-manifest-v3",
   "benchmark_id": "t1-1-timing-spike-20260804-corrected",
-  "manifest_revision": "corrected_pre_measurement_freeze_v3",
+  "manifest_revision": "corrected_pre_measurement_freeze_v3_1",
   "status": "manifest_frozen_waiting_for_human_gold",
   "measurement_status": "not_run_gold_missing",
   "created_from_commit": "3396ab3",
@@ -20,6 +20,13 @@
         "status": "review_rejected_draft",
         "candidate_measurements_run": 0,
         "reason": "raw timing claim, fallback provenance, multi label, and LB4 audio source issues"
+      },
+      {
+        "commit": "351c2ff",
+        "manifest_fingerprint": "7d1c75ec3897a99be3b0f754893ed929fee6cfb75b83554c401944bf8dd5293a",
+        "status": "review_rejected_draft",
+        "candidate_measurements_run": 0,
+        "reason": "post-freeze review required strict concat playback, onset-window, ffmpeg ordering/hash, and packet contract validation"
       }
     ],
     "replacement_reason": "v3 corrects cue-only artifact raw-timing claim, uses bounded Whisper plan for 8 artifact spans, replaces fallback with genuine LB4 VTT plus text-only splits, restricts multi to multi-cue cuts with four low-confidence rows, and binds LB4 playback to source MP4.",
@@ -230,15 +237,13 @@
         "-y",
         "-ss",
         "ABSOLUTE_START_SECONDS",
+        "-accurate_seek",
         "-i",
         "SOURCE_MP4",
-        "-accurate_seek",
         "-map",
         "0:a:0",
-        "-filter_complex",
-        "[0:a:0]aresample=16000,atrim=end_sample=DURATION_MS_TIMES_16,asetpts=N/SR/TB[a]",
-        "-map",
-        "[a]",
+        "-af",
+        "aresample=16000,atrim=end_sample=DURATION_MS_TIMES_16,asetpts=N/SR/TB",
         "-vn",
         "-ac",
         "1",
@@ -249,8 +254,26 @@
         "TEMP_WAV"
       ],
       "preflight_status": "pass",
-      "preflight_observation": "ffmpeg-full 8.1.2 path exists, SHA-256 verified, and --version starts successfully; extraction remains isolated/temp-only and no measurement was run.",
-      "production_write_allowed": false
+      "preflight_observation": "ffmpeg-full 8.1.2 path exists, SHA-256 verified, --version starts successfully, and one 1000 ms LB4 source-MP4 isolated smoke produced exactly 16000 frames; no candidate measurement was run.",
+      "production_write_allowed": false,
+      "smoke_test": {
+        "status": "pass",
+        "source_id": "lb4_e1ff-cut_001-audio",
+        "absolute_span_ms": {
+          "start_ms": 857000,
+          "end_ms": 858000
+        },
+        "expected_frames": 16000,
+        "actual_frames": 16000,
+        "format": {
+          "channels": 1,
+          "sample_width": 2,
+          "sample_rate": 16000
+        },
+        "isolated_wav_bytes": 32044,
+        "isolated_wav_sha256": "05a89dec49b48693538f0224d4463d9dab19eaf41d813706653d760767f42eb2",
+        "output_committed": false
+      }
     }
   },
   "telop_documents": {
@@ -6380,11 +6403,13 @@
   ],
   "notes": [
     "24c777d は候補測定前のP1レビューで棄却されたpre-freeze draftであり、正式freezeではない。corrected v2 fingerprint 9e8545b6b43ee2e656ff20b52d73c57b693418fd38831e73fc902e822c769cd0 も同様にreview-rejected draftであり、v3だけを正式pre-measurement freezeとする。",
+    "351c2ff は修正前の v3 freeze draftとして記録し、concat playback window、gold onset window、ffmpeg ordering/hash、packet top-level契約の追加レビューを反映した本 manifest がその後継である。",
+    "configured ffmpeg の subprocess 直前 hash 再検証と、LB4 source MP4 の1000 ms isolated smoke（16000 frames、mono 16 kHz PCM、出力未commit）を実行して PASS を固定した。",
     "artifact JSONはcue-onlyでraw token timingを保持しない。8 artifact-backed WAV spanはmanifest固定後にbounded whisper-cliをisolated tempで予定するが、freeze時点のinvocation_countは0である。",
     "音声bytesはcommitしない。12 audio context spanのうちgZA/hPe 8 spanだけが将来のbounded Whisper入力、LB4 4 spanはsource MP4からのisolated extraction playback契約に固定する。",
     "LB4旧audio_cache WAVは要求spanと実測durationが異なるlegacy cacheとしてrejected evidenceに留め、gold context・playbackには使用しない。requested_duration_msとactual_audio_duration_msを分離し、source MP4 SHA-256 5f8e8187fd3520da8ae6186f851995346eb8213123a456fdeb608ead00476aedをbindする。",
     "fallbackは真正legacy LB4 VTT由来だけで構成する。5つの最長保存行を候補結果を見ず指定済み意味境界で各2 subtargetへ置換し、元5行を同時には数えない。",
     "human goldが60行揃い、bounded timing入力が契約どおり生成されるまで候補測定、Go/No-Go、T1-2着手、AC-40更新は行わない."
   ],
-  "manifest_fingerprint": "7d1c75ec3897a99be3b0f754893ed929fee6cfb75b83554c401944bf8dd5293a"
+  "manifest_fingerprint": "8a2a3b542ed9534a444a73453bfab277e1bee02c304c9b227ff7ed2b7a121794"
 }
