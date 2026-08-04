@@ -56,7 +56,7 @@
 | P6-4 | 投稿 UI 統合・確認ダイアログ | [x] 完了 |
 | P6-5 | P6 統合受け入れ・回帰 | [x] 完了 |
 | P6 | Shorts 投稿メタデータ品質ゲート + 関連動画確認追跡 | [x] 完了 |
-| R2 | UI 大幅刷新前の境界整理・回帰リスク監査 | [~] 進行中 |
+| R2 | UI 大幅刷新前の境界整理・回帰リスク監査 | [x] 完了 |
 
 **状態の書き方:** `[ ] 未着手` / `[~] 進行中` / `[x] 完了`
 
@@ -1927,7 +1927,7 @@ data/{video_id}/ ...
 
 **目的:** 手動 E2E でショート生成から予約投稿まで完走した現行挙動を基準に、`docs/references/u6-short-production-line-v3.2.png` の視覚階層へ大幅刷新する前に、表示・session state・永続 state・投稿 transaction の境界を整理する。見た目の変更は行わず、UI 再配置で壊れやすい状態契約を純粋 view model と characterization test へ固定し、監査結果を独立文書に残す。
 
-**フェーズ状態:** [~] 進行中
+**フェーズ状態:** [x] 完了
 
 **前提・制約:** 2026-08-04 の手動 E2E 完走を受け入れ基準とし、外部 API、実 upload、実 Codex 呼び出し、動画再生成、既存成果物の削除は行わない。queue / review / output fingerprint、概要欄の immutable requirements、`run_line_reservation_transaction()`、`confirm_and_start_upload()` の transaction は挙動を変えない。S9-6 の人確認と benchmark 判定は別タスクとして未完了を維持する。
 
@@ -1937,26 +1937,28 @@ data/{video_id}/ ...
 
 **作業:**
 
-- [ ] R2-1. `1645 passed / 2 skipped` を回帰基準に、現行画面・リファレンス画像、`app.py` / `results.py` / `status_bar.py` / `video_detail.py` / `shorts_line.py` / `short_cut.py` / `upload.py`、状態永続化、テスト結合度を監査し、優先度、再現条件、刷新時の影響、保護すべき安全境界を `docs/ui-refactor-review-2026-08-04.md` に記録する
-- [ ] R2-2. ページ境界を整理する。全ページ末尾へ旧 `render_results()` を混入させず、全ページで描画されるサイドバーは session snapshot を復元・保存しない読み取り専用 projection にする
-- [ ] R2-3. 詳細・投稿境界を整理する。予約可能件数は `can_reserve_shorts_queue_item()` と同じ service gate で数え、永続 operation / 関連動画 pending / 要照合 / publication poll を最新 manifest の件数 0 でも表示する。ライン投稿は必須 adapter で preview 検証と reservation transaction を一体で渡す
-- [ ] R2-4. 再生成・並び替えに強い widget state 契約を追加する。候補引き継ぎは保存済み coarse lineage fingerprint を優先する。telop は編集前 document 全体、queue fingerprint、artifact lineage、short-cut は提案 document 全体から immutable draft identity を作り、同じ identity では buffer を保持、新 identity では widget 描画前に限定 prefix だけを初期化する。親候補は配列 index ではなく source + ID で保持し、条件描画をまたぐ編集 widget は session persistence を明示する。`persist_state` の導入版に合わせ Streamlit の宣言最低版を 1.59 とし、lock 解決版 1.60 と区別する
-- [ ] R2-5. view 間 import と巨大 renderer 内の純粋計算を `ui/view_models/`、`ui/session_keys.py`、`ui/queries.py`、必要な `ui/controllers/` へ分離し、既存 import 名は互換 re-export で維持する。通常 rerun と表示だけの render は durable write を行わず、保存は名前付き command / callback に限定する。ライン開始は line state と active pointer を単一 command 境界で保存し、成功後にだけ session projection を適用する。各書込み失敗後は新 active line と line-mode snapshot を残さず、同じ操作を安全に再試行できるようにする
-- [ ] R2-6. 上記境界の characterization test、対象 UI test、全件 `uv run pytest -q`、`uv lock --check`、`git diff --check`、`compileall`、隔離 `data_dir` の実ブラウザ確認を行う。同一 artifact の新台本、A → B → A、同じ candidate ID の境界変更、line / pointer 各 fault、同じ状態の二重 render、動画 A 表示中の動画 B 完了通知と詳細導線を含める。upload、概要欄反映、高精度化、生成、候補確定、人確認、削除ボタンは押さない
-- [ ] R2-7. 実装者と別のサブエージェントが欠陥優先レビューを行い、P0 / P1 を解消してから進捗、監査文書、コミットを閉じる。既存の未コミット学習ログと skill pointer は commit に含めない
+- [x] R2-1. `1645 passed / 2 skipped` を回帰基準に、現行画面・リファレンス画像、`app.py` / `results.py` / `status_bar.py` / `video_detail.py` / `shorts_line.py` / `short_cut.py` / `upload.py`、状態永続化、テスト結合度を監査し、優先度、再現条件、刷新時の影響、保護すべき安全境界を `docs/ui-refactor-review-2026-08-04.md` に記録する
+- [x] R2-2. ページ境界を整理する。全ページ末尾へ旧 `render_results()` を混入させず、全ページで描画されるサイドバーは session snapshot を復元・保存しない読み取り専用 projection にする
+- [x] R2-3. 詳細・投稿境界を整理する。予約可能件数は `can_reserve_shorts_queue_item()` と同じ service gate で数え、永続 operation / 関連動画 pending / 要照合 / publication poll を最新 manifest の件数 0 でも表示する。ライン投稿は必須 adapter で preview 検証と reservation transaction を一体で渡す
+- [x] R2-4. 再生成・並び替えに強い widget state 契約を追加する。候補引き継ぎは保存済み coarse lineage fingerprint を優先する。telop は編集前 document 全体、queue fingerprint、artifact lineage、short-cut は提案 document 全体から immutable draft identity を作り、同じ identity では buffer を保持、新 identity では widget 描画前に限定 prefix だけを初期化する。親候補は配列 index ではなく source + ID で保持し、条件描画をまたぐ編集 widget は session persistence を明示する。`persist_state` の導入版に合わせ Streamlit の宣言最低版を 1.59 とし、lock 解決版 1.60 と区別する
+- [x] R2-5. view 間 import と巨大 renderer 内の純粋計算を `ui/view_models/`、`ui/session_keys.py`、`ui/queries.py`、必要な `ui/controllers/` へ分離し、既存 import 名は互換 re-export で維持する。通常 rerun と表示だけの render は durable write を行わず、保存は名前付き command / callback に限定する。ライン開始は line state と active pointer を単一 command 境界で保存し、成功後にだけ session projection を適用する。各書込み失敗後は新 active line と line-mode snapshot を残さず、同じ操作を安全に再試行できるようにする
+- [x] R2-6. 上記境界の characterization test、対象 UI test、全件 `uv run pytest -q`、`uv lock --check`、`git diff --check`、`compileall`、隔離 `data_dir` の実ブラウザ確認を行う。同一 artifact の新台本、A → B → A、同じ candidate ID の境界変更、line / pointer 各 fault、同じ状態の二重 render、動画 A 表示中の動画 B 完了通知と詳細導線を含める。upload、概要欄反映、高精度化、生成、候補確定、人確認、削除ボタンは押さない
+- [x] R2-7. 実装者と別のサブエージェントが欠陥優先レビューを行い、P0 / P1 を解消してから進捗、監査文書、コミットを閉じる。既存の未コミット学習ログと skill pointer は commit に含めない
 
 **Done 条件:**
 
-- [ ] 旧結果のページ混入とサイドバー描画時の session state 変更が無く、ページ・workspace の見た目を移動しても生成 state を暗黙変更しない
-- [ ] 同じ clip / candidate ID の再生成、候補並び替え、workspace 往復で、古い編集値を新 provenance へ結合せず、未再生成の手編集は保持する
-- [ ] 永続投稿 tracking は新規予約候補の有無から独立し、表示件数と実際の予約 gate が一致する。ライン投稿 caller は安全 callback の一部を落とせない
-- [ ] line state / active pointer の各永続化失敗時に新 active line と session snapshot が残らず、孤立 state を成功扱いせずに再試行できる。既存の reservation / upload transaction と確認 dialog の順序は変わらない
-- [ ] 同じ状態を二度表示しても line / review / spec / output / operation の durable write と Whisper / Codex 起動がなく、pipeline 完了時は旧結果を全ページへ描画せず対象動画 ID の通知と詳細導線を維持する
-- [ ] 外部 write、新規依存、生成品質変更がなく、変更前の `1645 passed / 2 skipped` から回帰せずに全件テストが通る
-- [ ] Streamlit 1.59 以上という宣言と `persist_state` の利用が一致し、`uv lock --check` と `uv sync --locked` が通る
-- [ ] 監査文書に未解消の構造課題、UI 刷新で触れてよい層、触れてはいけない transaction、推奨実装順が記録され、独立レビューが PASS する
+- [x] 旧結果のページ混入とサイドバー描画時の session state 変更が無く、ページ・workspace の見た目を移動しても生成 state を暗黙変更しない
+- [x] 同じ clip / candidate ID の再生成、候補並び替え、workspace 往復で、古い編集値を新 provenance へ結合せず、未再生成の手編集は保持する
+- [x] 永続投稿 tracking は新規予約候補の有無から独立し、表示件数と実際の予約 gate が一致する。ライン投稿 caller は安全 callback の一部を落とせない
+- [x] line state / active pointer の各永続化失敗時に新 active line と session snapshot が残らず、孤立 state を成功扱いせずに再試行できる。既存の reservation / upload transaction と確認 dialog の順序は変わらない
+- [x] 同じ状態を二度表示しても line / review / spec / output / operation の durable write と Whisper / Codex 起動がなく、pipeline 完了時は旧結果を全ページへ描画せず対象動画 ID の通知と詳細導線を維持する
+- [x] 外部 write、新規依存、生成品質変更がなく、変更前の `1645 passed / 2 skipped` から回帰せずに全件テストが通る
+- [x] Streamlit 1.59 以上という宣言と `persist_state` の利用が一致し、`uv lock --check` と `uv sync --locked` が通る
+- [x] 監査文書に未解消の構造課題、UI 刷新で触れてよい層、触れてはいけない transaction、推奨実装順が記録され、独立レビューが PASS する
 
-**コミット境界:** 先に本計画の開始を docs commit とし、実装・test・監査文書・完了チェックを `R2` commit に分ける。S9-6 の証跡と `.codex/learning/user-decisions.md` は含めない。
+**完了証跡（2026-08-04）:** 計画 commit `dcec05f`、Streamlit persistence baseline `ef07b59`、実装・test・監査 commit `8992266`。全件 `1692 passed, 2 skipped`、upload 関連 175 件、`uv lock --check`、`uv sync --locked`、`git diff --check`、`compileall` が成功した。一時 `YTLK_DATA_DIR` の実ブラウザで library / intake / settings の空状態と navigation shell を非破壊確認し、終了後に一時 data を削除した。実装者と別のサブエージェントによる最終再レビューは残存 P0 / P1 / P2 なしで PASS。実 upload、YouTube / Studio write、追加 Codex / Whisper、動画生成、概要欄更新、成果物削除は行わず、既存の未コミット学習ログと skill pointer は commit に含めていない。S9-6 と M16 は未完了のまま維持する。
+
+**コミット境界:** 先に本計画の開始を docs commit とし、実装・test・監査文書を `R2` implementation commit、検証済みの完了チェックを直後の docs commit に分ける。S9-6 の証跡と `.codex/learning/user-decisions.md` は含めない。
 
 ---
 
@@ -1968,6 +1970,10 @@ data/{video_id}/ ...
 src/yt_live_kit/ui/
   app.py                    # st.navigation によるページ登録 + U6 の左パネル工程コンテキスト
   state.py                  # session_state ヘルパー（v2 から継続）
+  session_keys.py           # R2: revision-aware widget key と限定 prefix
+  queries.py                # R2: UI から使う読取入口
+  controllers/              # R2: view が安全 transaction を部分接続できない adapter
+  view_models/              # R2: durable state から作る純粋な表示 projection
   views/                    ← v3（U0 で pages/ から改名）
     library.py              # U1: ライブラリページ
     video_detail.py         # U2: 動画詳細ページ（U6 で作業選択型 IA へ再構成）
@@ -2302,12 +2308,12 @@ S9 初版で実装するのは、既存 YouTube `video_id` の良好な VTT を�
 7. ~~**G1** を production 非変更で実行する。~~ 完了。single-pass は速度 gate 未達のため不採用とし、production は変更していない
 8. ~~**U8**（構造化エラー通知、AC-33）に着手する。~~ 完了。**U7 は保留（v4 候補）**
 9. ~~**S9-PLAN** を完了する。~~ 完了。`requirements-v3.md` の FR-35 / FR-36 と AC-30 / AC-35 / AC-37、実行可能な S9-0〜S9-6、`v3-agent-prompts.md` の実行テンプレートを確定した
-10. **S9-0**（既存 VTT 互換・非上書き保存契約）を先頭に着手する。再取得時の `ja.vtt` bytes 保持、source VTT の immutable 保存、失敗時非変更を閉じる
-11. **S9-1**（代表素材 benchmark・モデル決定）を続けて着手する。production 非変更で VTT と whisper.cpp 1.9.1 の精度・固有名詞・時間・cache 根拠を取り、Go / No-Go を記録する
-12. **S9-2 → S9-3 → S9-4 → S9-5 → S9-6** の順に進める。各タスク完了時に当該チェックとコミットを閉じ、S9-6 の A/B 受け入れまで S9 を完了にしない
+10. ~~**S9-0**（既存 VTT 互換・非上書き保存契約）を完了する。~~ 完了。再取得時の `ja.vtt` bytes 保持、source VTT の immutable 保存、失敗時非変更を閉じた
+11. ~~**S9-1**（代表素材 benchmark・モデル決定）を完了する。~~ 完了。production 非変更で VTT と whisper.cpp 1.9.1 の精度・固有名詞・時間・cache 根拠を記録した
+12. ~~**S9-2 → S9-3 → S9-4 → S9-5** の順に完了する。~~ 完了。**次は S9-6 の A/B 受け入れ・回帰・フェーズ判定を行う。** 受け入れが PASS するまで S9 と M16 は未完了を維持する
 13. ~~**P6-PLAN を S9-1 の人手 gold 監査と並行して docs-only で閉じる。**~~ 完了。独立レビュー済み plan commit から分離 worktree を作成した
 14. ~~**P6-1 / P6-2 / P6-3 を分離 worktree で並行実装し、個別レビュー後に main へ統合する。**~~ 完了。P6-1 を S9-4 より先に統合・依存元へ報告し、P6-4 → P6-5 まで独立レビュー後に閉じた
-15. **R2 を完了する。** 手動 E2E 済みの現行挙動を基準に、UI 大幅刷新前の page / session / durable state / upload gate を整理し、監査文書・characterization test・独立レビューで固定する
+15. ~~**R2 を完了する。**~~ 完了。手動 E2E 済みの現行挙動を基準に、UI 大幅刷新前の page / session / durable state / upload gate を整理し、監査文書・characterization test・独立レビューで固定した
 
 ---
 
@@ -2315,6 +2321,7 @@ S9 初版で実装するのは、既存 YouTube `video_id` の良好な VTT を�
 
 | 日付 | 内容 |
 |------|------|
+| 2026-08-04 | **R2 完了。** 旧 global result、描画時 session 復元、再生成時 widget state、候補 lineage、ライン開始の部分保存、投稿 tracking と reservation gate の不整合を pure view model、query、session key、必須 adapter、rollback-safe command へ分離した。変更前 `1645 passed, 2 skipped` から変更後 `1692 passed, 2 skipped`、lock / sync / diff / compile、隔離ブラウザ確認を通過し、独立最終レビューは残存 P0 / P1 / P2 なしで PASS。見た目は変更せず、巨大 renderer、canonical gate の再計算、legacy read migration、queue snapshot、library paging を視覚刷新側の P3 として監査文書に残した。実 upload、外部 write、追加 Codex / Whisper、動画生成、成果物削除は行っていない。 |
 | 2026-08-04 | **R2 を開始。** 手動 E2E でショート生成から予約投稿まで完走した現行挙動を基準に、UI 大幅刷新前の page 境界、サイドバー純粋性、再生成時 widget state、候補 lineage、投稿 tracking / reservation gate、ライン開始時の session projection を監査・整理する計画を追加。外部 API、実 upload、実 Codex、動画再生成、成果物削除は行わず、S9-6 の受け入れ判定を変更しない。あわせて進捗サマリーと不整合だった P6 本文のフェーズ状態を完了へ整合した。 |
 | 2026-08-03 | **P6 完了。** タイトル固定 3 方向、ショート概要欄の生成説明・元動画タイトル・開始秒付き URL・チャンネル登録 CTA の不変要件 gate、YouTube Studio 関連動画確認の永続追跡を統合した。明示編集本文の黙った差し戻しを独立レビューで検出・修正後、P6 境界 410 件、全体 `1380 passed, 2 skipped`、diff-check、実 YouTube / Studio write なしを確認。AC-38 / AC-39 と M17 を完了した。 |
 | 2026-08-03 | **P6-PLAN を開始。** タイトルを検索明快型・仕事影響型・好奇心型の固定 3 方向で生成し、概要欄の生成説明・チャンネル登録 CTA・元動画タイトル・開始秒付き URL を投稿前に二重再検証し、関連動画は API 自動設定せず YouTube Studio の手動確認状態を upload operation に永続化する FR-37 / FR-38 と AC-38 / AC-39 を追加。P6-1〜P6-3 の分離 worktree、P6-4 の単一 UI writer、P6-1 を S9-4 より先に main 統合する依存、S9-1 監査節と学習ログの保護を固定した |
