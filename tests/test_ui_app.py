@@ -21,7 +21,9 @@ from yt_live_kit.ui.components.progress import mark_failed_stage, render_progres
 from yt_live_kit.ui.components.status_bar import (
     elapsed_seconds,
     format_status_message,
+    job_display_label,
     kind_label,
+    retry_hint_for_job,
     should_show_running_bar,
 )
 from yt_live_kit.ui.state import (
@@ -432,6 +434,18 @@ def test_kind_label_returns_japanese_name() -> None:
     assert kind_label("unknown") == "unknown"
 
 
+def test_job_display_label_distinguishes_whisper_refine_from_short_cut_suggest() -> None:
+    assert (
+        job_display_label(
+            "short_cut",
+            stage="resolver",
+            error="選択区間の高精度字幕に失敗しました。\nS9_WHISPER_ERROR:{}",
+        )
+        == "選択区間の高精度字幕"
+    )
+    assert job_display_label("short_cut", message="候補を解析中") == "ショート区間提案"
+
+
 def test_format_status_message_includes_elapsed_and_counts() -> None:
     started = datetime(2026, 7, 30, 12, 0, 0, tzinfo=timezone.utc)
     now = datetime(2026, 7, 30, 12, 0, 45, tzinfo=timezone.utc)
@@ -635,6 +649,36 @@ def test_failed_short_cut_records_structured_error_detail() -> None:
     assert args[:3] == ("video-short-cut", "failed-short-cut", "short_cut")
     assert "ショート区間提案に失敗しました" in args[3]
     assert "サブ区間の提案に失敗しました" in args[4]
+
+
+def test_failed_short_cut_refine_uses_high_precision_summary() -> None:
+    from yt_live_kit.ui.components import status_bar
+
+    job = JobState(
+        job_id="failed-short-cut-refine",
+        kind="short_cut",
+        status="failed",
+        stage="resolver",
+        video_id="video-short-cut",
+        error=(
+            "選択区間の高精度字幕に失敗しました。"
+            "S9_WHISPER_ERROR:{\"schema\":\"s9-whisper-error-v1\"}"
+        ),
+    )
+    with (
+        patch("yt_live_kit.ui.components.status_bar.is_job_handled", return_value=False),
+        patch("yt_live_kit.ui.components.status_bar.mark_job_handled"),
+        patch("yt_live_kit.ui.components.status_bar.read_job_error_log", return_value=None),
+        patch("yt_live_kit.ui.components.status_bar.record_job_error") as record_error,
+        patch("yt_live_kit.ui.components.status_bar.clear_active_job_id"),
+        patch("yt_live_kit.ui.components.status_bar.st.rerun"),
+    ):
+        status_bar._handle_finished_job(job)
+
+    summary = record_error.call_args.args[3]
+    assert "選択区間の高精度字幕に失敗しました" in summary
+    assert "ショート区間提案に失敗しました" not in summary
+    assert "高精度化を再試行" in summary
 
 
 def test_finished_all_failed_shorts_queue_reads_manifest_and_reports_failure() -> None:
@@ -974,6 +1018,51 @@ def test_interrupted_job_reads_log_and_records_before_handled() -> None:
     assert args[:3] == ("video-interrupted", "interrupted-job", "shorts_queue")
     assert args[5] == finished_at
     assert "traceback <raw>" in args[4]
+
+
+def test_interrupted_short_cut_refine_uses_high_precision_notice() -> None:
+    app_path = Path(__file__).parents[1] / "src/yt_live_kit/ui/app.py"
+    tree = ast.parse(app_path.read_text(encoding="utf-8"))
+    function = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef)
+        and node.name == "_record_interrupted_jobs"
+    )
+    job = JobState(
+        job_id="interrupted-refine",
+        kind="short_cut",
+        status="interrupted",
+        stage="resolver",
+        video_id="video-refine",
+        error=(
+            "選択区間の高精度字幕に失敗しました。"
+            "S9_WHISPER_ERROR:{\"schema\":\"s9-whisper-error-v1\"}"
+        ),
+        finished_at=datetime(2026, 8, 3, 1, 2, tzinfo=timezone.utc),
+    )
+    record_error = MagicMock()
+    namespace = {
+        "read_job": lambda _job_id, _settings: job,
+        "read_job_error_log": lambda _job_id, _settings: None,
+        "record_job_error": record_error,
+        "_top_summary": str,
+        "datetime": datetime,
+        "timezone": timezone,
+        "job_display_label": job_display_label,
+        "retry_hint_for_job": retry_hint_for_job,
+    }
+    exec(
+        compile(ast.Module(body=[function], type_ignores=[]), str(app_path), "exec"),
+        namespace,
+    )
+
+    namespace["_record_interrupted_jobs"]([job.job_id], object())
+
+    summary = record_error.call_args.args[3]
+    assert "選択区間の高精度字幕に失敗しました" in summary
+    assert "ショート区間提案に失敗しました" not in summary
+    assert "高精度化を再試行" in summary
 
 
 def test_running_fragment_does_not_clear_structured_job_history() -> None:

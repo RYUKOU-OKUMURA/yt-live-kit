@@ -22,6 +22,7 @@ from yt_live_kit.services.shorts_queue import (
     load_shorts_queue_result,
 )
 from yt_live_kit.services.upload_queue import UploadQueueError, load_operation
+from yt_live_kit.ui.components.short_cut import S9_WHISPER_ERROR_PREFIX
 from yt_live_kit.ui.state import (
     clear_active_job_id,
     clear_cut_result,
@@ -118,10 +119,73 @@ def _job_video_id(job: JobState) -> str | None:
     return None
 
 
-def _retry_hint(job: JobState) -> str:
+def is_short_cut_refine_job(
+    kind: str,
+    *,
+    stage: object | None = None,
+    message: object | None = None,
+    error: object | None = None,
+    detail: object | None = None,
+) -> bool:
+    """S9の構造化エラーを通常のサブ区間提案と区別する."""
+    if kind == "short_cut_refine":
+        return True
+    if kind != "short_cut":
+        return False
+    values = (stage, message, error, detail)
+    return any(S9_WHISPER_ERROR_PREFIX in str(value) for value in values)
+
+
+def job_display_label(
+    kind: str,
+    *,
+    stage: object | None = None,
+    message: object | None = None,
+    error: object | None = None,
+    detail: object | None = None,
+) -> str:
+    """jobの実処理段階に対応する日本語ラベルを返す."""
+    if is_short_cut_refine_job(
+        kind,
+        stage=stage,
+        message=message,
+        error=error,
+        detail=detail,
+    ):
+        return "選択区間の高精度字幕"
+    return kind_label(kind)
+
+
+def retry_hint_for_job(
+    kind: str,
+    *,
+    stage: object | None = None,
+    message: object | None = None,
+    error: object | None = None,
+    detail: object | None = None,
+) -> str:
+    """jobの実処理段階に対応する再試行案内を返す."""
+    if is_short_cut_refine_job(
+        kind,
+        stage=stage,
+        message=message,
+        error=error,
+        detail=detail,
+    ):
+        return "対象区間を確認して高精度化を再試行してください。"
     return _RETRY_HINTS.get(
-        job.kind,
+        kind,
         "ログを確認し、アプリの対応状況を確認してから再試行してください。",
+    )
+
+
+def _retry_hint(job: JobState, *, detail: object | None = None) -> str:
+    return retry_hint_for_job(
+        job.kind,
+        stage=job.stage,
+        message=job.message,
+        error=job.error,
+        detail=detail,
     )
 
 
@@ -140,9 +204,16 @@ def _record_job_error(
         if target_video_id
         else ""
     )
+    label = job_display_label(
+        job.kind,
+        stage=job.stage,
+        message=job.message,
+        error=job.error,
+        detail=detail,
+    )
     summary = _format_error_summary(
-        f"{kind_label(job.kind)}に失敗しました。{target}"
-        f"{cause}{_retry_hint(job)}",
+        f"{label}に失敗しました。{target}{cause}"
+        f"{_retry_hint(job, detail=detail)}",
         fallback="処理に失敗しました。詳細画面で確認して再試行してください。",
     )
     detail_text = _bounded_error_detail(detail)
@@ -193,7 +264,12 @@ def elapsed_seconds(job: JobState, *, now: datetime | None = None) -> int:
 
 
 def format_status_message(job: JobState, *, now: datetime | None = None) -> str:
-    label = kind_label(job.kind)
+    label = job_display_label(
+        job.kind,
+        stage=job.stage,
+        message=job.message,
+        error=job.error,
+    )
     elapsed = elapsed_seconds(job, now=now)
     message = _format_error_summary(job.message, fallback="処理中")
     parts = [f"{label} — {message}（経過 {elapsed} 秒）"]

@@ -52,7 +52,7 @@ from yt_live_kit.ui.components.shorts_line import (
     run_line_upload_transaction,
     validate_line_reservation,
 )
-from yt_live_kit.ui.components.status_bar import kind_label
+from yt_live_kit.ui.components.status_bar import job_display_label
 from yt_live_kit.ui.components.upload import render_upload_section
 from yt_live_kit.ui.state import (
     JOB_ERROR_HISTORY_LIMIT,
@@ -594,7 +594,12 @@ def _render_job_error_notification(
     with st.container(border=True, gap="small"):
         st.text(
             "処理種別: "
-            + sanitize_job_error_for_display(kind_label(notification.kind))
+            + sanitize_job_error_for_display(
+                job_display_label(
+                    notification.kind,
+                    detail=notification.detail,
+                )
+            )
         )
         st.text(
             "発生日時: "

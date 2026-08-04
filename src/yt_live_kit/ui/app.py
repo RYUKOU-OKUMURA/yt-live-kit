@@ -11,7 +11,11 @@ from yt_live_kit import __version__
 from yt_live_kit.config import get_settings
 from yt_live_kit.ui.components.results import render_results
 from yt_live_kit.ui.components.shorts_line import render_sidebar_line_context
-from yt_live_kit.ui.components.status_bar import kind_label, render_status_bar
+from yt_live_kit.ui.components.status_bar import (
+    job_display_label,
+    render_status_bar,
+    retry_hint_for_job,
+)
 from yt_live_kit.ui.runtime_checks import check_ytdlp_version_warning_cached
 from yt_live_kit.services.jobs import read_job, read_job_error_log
 from yt_live_kit.ui.state import (
@@ -66,13 +70,28 @@ def _record_interrupted_jobs(job_ids: list[str], settings) -> None:
         log = read_job_error_log(job.job_id, settings)
         detail = log or job.error or "前回の処理が中断されました。"
         occurred_at = job.finished_at or datetime.now(timezone.utc)
+        label = job_display_label(
+            job.kind,
+            stage=job.stage,
+            message=job.message,
+            error=job.error,
+            detail=detail,
+        )
+        retry_hint = retry_hint_for_job(
+            job.kind,
+            stage=job.stage,
+            message=job.message,
+            error=job.error,
+            detail=detail,
+        )
         record_job_error(
             video_id,
             job.job_id,
             job.kind,
             _top_summary(
-                f"{kind_label(job.kind)}に失敗しました。{target}"
-                "処理が中断されました。必要なら対象動画から再実行してください。"
+                f"{label}に失敗しました。{target}"
+                "処理が中断されました。"
+                f"{retry_hint}"
             ),
             (
                 f"詳細元: {'ジョブログ' if log else 'ジョブ状態'}\n{detail}"

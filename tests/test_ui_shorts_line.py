@@ -755,6 +755,117 @@ def test_pre_script_restart_restores_target_and_telop_retry(tmp_path: Path) -> N
     assert persisted.review_confirmed_fingerprint is None
 
 
+def test_rerun_replaces_stale_telop_error_when_persisted_script_matches(
+    tmp_path: Path,
+) -> None:
+    target, document, _spec = _lineage_fixture()
+    candidate = ClipCandidate(
+        id="clip-source",
+        title="短い候補",
+        start="0:00:00",
+        end="0:00:20",
+        duration_sec=20,
+        reason="理由",
+    )
+    queue_fingerprint = make_shorts_queue_fingerprint(
+        video_id="video-1",
+        source="clips",
+        mode="concat",
+        original_candidates=(candidate,),
+        segments=target.segments,
+        layout="blur",
+        preset="default",
+        hook_preset="hook",
+    )
+    review = make_review_fingerprint(
+        "video-1", target.target_id, queue_fingerprint, document
+    )
+    material = shorts_line._material_context_payload(
+        source="clips",
+        original_candidate=candidate,
+        target=target,
+        defaults=ShortsLineDefaults(),
+    )
+    state = create_line_state(
+        "video-1",
+        target.target_id,
+        queue_fingerprint,
+        review_fingerprint=review,
+        material_context=material,
+    )
+    settings = Settings(data_dir=tmp_path)
+    save_line_state(state, settings)
+    script_path = (
+        tmp_path
+        / "video-1"
+        / "shorts"
+        / "telop"
+        / f"telop_{target.target_id}.json"
+    )
+    script_path.parent.mkdir(parents=True)
+    script_path.write_text(
+        document.model_dump_json(indent=2),
+        encoding="utf-8",
+    )
+    stale_document = document.model_copy(update={"hook_text": "古い失敗前の台本"})
+    context = {
+        "telop_error": "前回の一時的なJSONエラー",
+        "target": target,
+        "draft": stale_document,
+    }
+    session_state: dict[str, object] = {}
+
+    with patch.object(shorts_line.st, "session_state", session_state):
+        restored = shorts_line._restore_stale_telop_context(
+            "video-1",
+            state,
+            context,
+            settings,
+        )
+
+    assert restored["draft"] == document
+    assert "telop_error" not in restored
+
+
+def test_telop_failure_keeps_fail_closed_retry_state(tmp_path: Path) -> None:
+    target, _document, _spec = _lineage_fixture()
+    candidate = ClipCandidate(
+        id="clip-source",
+        title="短い候補",
+        start="0:00:00",
+        end="0:00:20",
+        duration_sec=20,
+        reason="理由",
+    )
+    queue_fingerprint = make_shorts_queue_fingerprint(
+        video_id="video-1",
+        source="clips",
+        mode="concat",
+        original_candidates=(candidate,),
+        segments=target.segments,
+        layout="blur",
+        preset="default",
+        hook_preset="hook",
+    )
+    state = create_line_state("video-1", target.target_id, queue_fingerprint)
+    context: dict[str, object] = {"target": target}
+    with patch.object(
+        shorts_line,
+        "generate_telop_script",
+        return_value=MagicMock(document=None),
+    ):
+        shorts_line._generate_line_telop(
+            video_id="video-1",
+            target=target,
+            state=state,
+            context=context,
+            settings=Settings(data_dir=tmp_path),
+        )
+
+    assert "draft" not in context
+    assert "テロップ台本を生成できませんでした" in context["telop_error"]
+
+
 def test_restart_restores_s4_snapshot_and_can_confirm_overwrite(tmp_path: Path) -> None:
     target, document_a, _spec_a = _lineage_fixture()
     document_b = document_a.model_copy(update={"hook_text": "再起動後の台本"})

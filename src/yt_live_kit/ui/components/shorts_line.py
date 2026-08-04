@@ -671,6 +671,20 @@ def _restore_context(
                 document = None
         except (OSError, UnicodeError, ValueError, LineStateError):
             document = None
+    if document is not None:
+        document_lineage = (
+            document.artifact_ref,
+            document.artifact_fingerprint,
+            tuple(document.used_range_cue_digests),
+        )
+        state_lineage = (
+            state.artifact_ref,
+            state.artifact_fingerprint,
+            tuple(state.used_range_cue_digests),
+        )
+        if document_lineage != state_lineage:
+            # review fingerprintだけが一致する旧/別artifactの台本は復元しない。
+            document = None
     try:
         lineage = (
             {
@@ -707,6 +721,31 @@ def _restore_context(
         context["draft"] = document
     if spec is not None:
         context["confirmed_spec"] = spec
+    _save_context(video_id, context)
+    return context
+
+
+def _restore_stale_telop_context(
+    video_id: str,
+    state: LineState,
+    context: dict[str, object],
+    settings: Settings,
+) -> dict[str, object]:
+    """保存台本が現行line証跡に一致する場合だけ古い失敗表示を置き換える."""
+    if not context.get("telop_error"):
+        return context
+    if state.review_fingerprint is None:
+        return context
+    lineage_current, _ = _inspect_artifact_lineage(state, settings)
+    if not lineage_current:
+        return context
+    restored = _restore_context(video_id, state, settings)
+    if restored is not None and isinstance(
+        restored.get("draft"), TelopScriptDocument
+    ):
+        # _restore_context は review / queue / artifact lineage を検証済み。
+        # 生のCodex出力や不一致の保存ファイルはここへ到達しない。
+        return restored
     _save_context(video_id, context)
     return context
 
@@ -1036,6 +1075,13 @@ def render_shorts_line(
     context = _context(video_id)
     if state is not None and context is None:
         context = _restore_context(video_id, state, settings)
+    if state is not None and context is not None:
+        context = _restore_stale_telop_context(
+            video_id,
+            state,
+            context,
+            settings,
+        )
     lineage_current = True
     lineage_message = ""
     if state is not None:
