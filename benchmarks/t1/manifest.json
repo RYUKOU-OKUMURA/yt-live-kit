@@ -1,7 +1,7 @@
 {
   "schema": "t1-1-timing-spike-manifest-v3",
   "benchmark_id": "t1-1-timing-spike-20260804-corrected",
-  "manifest_revision": "corrected_pre_measurement_freeze_v3_3",
+  "manifest_revision": "corrected_pre_measurement_freeze_v3_4",
   "status": "manifest_frozen_waiting_for_human_gold",
   "measurement_status": "not_run_gold_missing",
   "created_from_commit": "3396ab3",
@@ -41,9 +41,16 @@
         "status": "review_rejected_draft",
         "candidate_measurements_run": 0,
         "reason": "fallback full-cut context was correct but the manifest lacked an actual concat fixture; fixed midpoint partition preserves the full cut without a gap"
+      },
+      {
+        "commit": "70ddcfa",
+        "manifest_fingerprint": "dc6b399b748f199f4f0e0ae2b0ba61f7484dcd672ddc05a31fef1927f03876c6",
+        "status": "review_rejected_draft",
+        "candidate_measurements_run": 0,
+        "reason": "manifest identity text contained repeated replacement rationale; v3.4 keeps the same fixture contract with canonical supersedes text"
       }
     ],
-    "replacement_reason": "v3 corrects cue-only artifact raw-timing claim, uses bounded Whisper plan for 8 artifact spans, replaces fallback with genuine LB4 VTT plus text-only splits, restricts multi to multi-cue cuts with four low-confidence rows, and binds LB4 playback to source MP4. This v3.2 correction replaces 9822ff2 after fallback target-audio containment review. This v3.3 correction adds a fixed non-candidate midpoint concat partition without narrowing full-cut context. This v3.3 correction adds a fixed non-candidate midpoint concat partition without narrowing full-cut context. This v3.3 correction adds a fixed non-candidate midpoint concat partition without narrowing full-cut context. This v3.3 correction adds a fixed non-candidate midpoint concat partition without narrowing full-cut context.",
+    "replacement_reason": "v3 corrects cue-only artifact raw-timing claim, uses bounded Whisper plan for 8 artifact spans, replaces fallback with genuine LB4 VTT plus text-only splits, restricts multi to multi-cue cuts with four low-confidence rows, and binds LB4 playback to source MP4. This v3.2 correction replaces 9822ff2 after fallback target-audio containment review. This v3.3 correction adds a fixed non-candidate midpoint concat partition without narrowing full-cut context.",
     "candidate_measurements_run": 0
   },
   "selection_policy": {
@@ -6848,5 +6855,5 @@
     "fallback 20 rows use each bound LB4 source-MP4 full cut as a contiguous two-part concat fixture; the midpoint is a fixed context partition, never a VTT, cue, token, draft, or gold boundary.",
     "fallback 20 rows use each bound LB4 source-MP4 full cut as a contiguous two-part concat fixture; the midpoint is a fixed context partition, never a VTT, cue, token, draft, or gold boundary."
   ],
-  "manifest_fingerprint": "dc6b399b748f199f4f0e0ae2b0ba61f7484dcd672ddc05a31fef1927f03876c6"
+  "manifest_fingerprint": "7c851ab4990e3d9598b4aa55d860a309ab4fc4f85877db53de56880988dbcf8b"
 }
