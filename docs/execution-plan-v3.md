@@ -1931,7 +1931,7 @@ data/{video_id}/ ...
 
 **前提・制約:** 2026-08-04 の手動 E2E 完走を受け入れ基準とし、外部 API、実 upload、実 Codex 呼び出し、動画再生成、既存成果物の削除は行わない。queue / review / output fingerprint、概要欄の immutable requirements、`run_line_reservation_transaction()`、`confirm_and_start_upload()` の transaction は挙動を変えない。S9-6 の人確認と benchmark 判定は別タスクとして未完了を維持する。
 
-**変更ファイル範囲:** `docs/execution-plan-v3.md`、新規監査文書、`src/yt_live_kit/ui/app.py`、`ui/state.py`、`ui/components/results.py` / `status_bar.py` / `shorts_line.py` / `shorts_queue.py` / `short_cut.py` / `upload.py`、`ui/views/video_detail.py` / `library.py`、新規 `ui/view_models/` / `ui/session_keys.py` / `ui/queries.py` / `ui/controllers/`、対応する `tests/test_ui_*.py` を許可する。ライン開始を原子的・再試行可能な command にするため必要な場合だけ `services/shorts_line.py` / `tests/test_shorts_line.py` を最小変更できる。`requirements-v3.md`、`docs/benchmarks/`、S9-6 fixture / evidence、production `data/`、prompt、`models/`、description / schedule / upload queue / YouTube / transcript artifact service は read-only とする。
+**変更ファイル範囲:** `docs/execution-plan-v3.md`、`docs/tech-stack.md`、新規監査文書、`pyproject.toml`、`uv.lock`、`src/yt_live_kit/ui/app.py`、`ui/state.py`、`ui/components/results.py` / `status_bar.py` / `shorts_line.py` / `shorts_queue.py` / `short_cut.py` / `upload.py`、`ui/views/video_detail.py` / `library.py`、新規 `ui/view_models/` / `ui/session_keys.py` / `ui/queries.py` / `ui/controllers/`、対応する `tests/test_ui_*.py` を許可する。ライン開始を原子的・再試行可能な command にするため必要な場合だけ `services/shorts_line.py` / `tests/test_shorts_line.py` を最小変更できる。`requirements-v3.md`、`docs/benchmarks/`、S9-6 fixture / evidence、production `data/`、prompt、`models/`、description / schedule / upload queue / YouTube / transcript artifact service は read-only とする。
 
 **追加の不変条件:** `TranscriptArtifactRef`、artifact fingerprint、ordered cue digest、coarse candidate fingerprint、高精度 / fallback 表示を変えず、通常 rerun で Whisper / Codex を起動しない。P6 の description requirements snapshot、upload operation、schedule / publication poll を変更しない。実 browser 確認は隔離した一時 `data_dir` または検証用コピーで行い、production data を読み書きしない。
 
@@ -1940,7 +1940,7 @@ data/{video_id}/ ...
 - [ ] R2-1. `1645 passed / 2 skipped` を回帰基準に、現行画面・リファレンス画像、`app.py` / `results.py` / `status_bar.py` / `video_detail.py` / `shorts_line.py` / `short_cut.py` / `upload.py`、状態永続化、テスト結合度を監査し、優先度、再現条件、刷新時の影響、保護すべき安全境界を `docs/ui-refactor-review-2026-08-04.md` に記録する
 - [ ] R2-2. ページ境界を整理する。全ページ末尾へ旧 `render_results()` を混入させず、全ページで描画されるサイドバーは session snapshot を復元・保存しない読み取り専用 projection にする
 - [ ] R2-3. 詳細・投稿境界を整理する。予約可能件数は `can_reserve_shorts_queue_item()` と同じ service gate で数え、永続 operation / 関連動画 pending / 要照合 / publication poll を最新 manifest の件数 0 でも表示する。ライン投稿は必須 adapter で preview 検証と reservation transaction を一体で渡す
-- [ ] R2-4. 再生成・並び替えに強い widget state 契約を追加する。候補引き継ぎは保存済み coarse lineage fingerprint を優先する。telop は編集前 document 全体、queue fingerprint、artifact lineage、short-cut は提案 document 全体から immutable draft identity を作り、同じ identity では buffer を保持、新 identity では widget 描画前に限定 prefix だけを初期化する。親候補は配列 index ではなく source + ID で保持し、条件描画をまたぐ編集 widget は session persistence を明示する
+- [ ] R2-4. 再生成・並び替えに強い widget state 契約を追加する。候補引き継ぎは保存済み coarse lineage fingerprint を優先する。telop は編集前 document 全体、queue fingerprint、artifact lineage、short-cut は提案 document 全体から immutable draft identity を作り、同じ identity では buffer を保持、新 identity では widget 描画前に限定 prefix だけを初期化する。親候補は配列 index ではなく source + ID で保持し、条件描画をまたぐ編集 widget は session persistence を明示する。`persist_state` の導入版に合わせ Streamlit の宣言最低版を 1.59 とし、lock 解決版 1.60 と区別する
 - [ ] R2-5. view 間 import と巨大 renderer 内の純粋計算を `ui/view_models/`、`ui/session_keys.py`、`ui/queries.py`、必要な `ui/controllers/` へ分離し、既存 import 名は互換 re-export で維持する。通常 rerun と表示だけの render は durable write を行わず、保存は名前付き command / callback に限定する。ライン開始は line state と active pointer を単一 command 境界で保存し、成功後にだけ session projection を適用する。各書込み失敗後は新 active line と line-mode snapshot を残さず、同じ操作を安全に再試行できるようにする
 - [ ] R2-6. 上記境界の characterization test、対象 UI test、全件 `uv run pytest -q`、`uv lock --check`、`git diff --check`、`compileall`、隔離 `data_dir` の実ブラウザ確認を行う。同一 artifact の新台本、A → B → A、同じ candidate ID の境界変更、line / pointer 各 fault、同じ状態の二重 render、動画 A 表示中の動画 B 完了通知と詳細導線を含める。upload、概要欄反映、高精度化、生成、候補確定、人確認、削除ボタンは押さない
 - [ ] R2-7. 実装者と別のサブエージェントが欠陥優先レビューを行い、P0 / P1 を解消してから進捗、監査文書、コミットを閉じる。既存の未コミット学習ログと skill pointer は commit に含めない
@@ -1953,6 +1953,7 @@ data/{video_id}/ ...
 - [ ] line state / active pointer の各永続化失敗時に新 active line と session snapshot が残らず、孤立 state を成功扱いせずに再試行できる。既存の reservation / upload transaction と確認 dialog の順序は変わらない
 - [ ] 同じ状態を二度表示しても line / review / spec / output / operation の durable write と Whisper / Codex 起動がなく、pipeline 完了時は旧結果を全ページへ描画せず対象動画 ID の通知と詳細導線を維持する
 - [ ] 外部 write、新規依存、生成品質変更がなく、変更前の `1645 passed / 2 skipped` から回帰せずに全件テストが通る
+- [ ] Streamlit 1.59 以上という宣言と `persist_state` の利用が一致し、`uv lock --check` と `uv sync --locked` が通る
 - [ ] 監査文書に未解消の構造課題、UI 刷新で触れてよい層、触れてはいけない transaction、推奨実装順が記録され、独立レビューが PASS する
 
 **コミット境界:** 先に本計画の開始を docs commit とし、実装・test・監査文書・完了チェックを `R2` commit に分ける。S9-6 の証跡と `.codex/learning/user-decisions.md` は含めない。
