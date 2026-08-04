@@ -1,7 +1,7 @@
 {
   "schema": "t1-1-timing-spike-manifest-v3",
   "benchmark_id": "t1-1-timing-spike-20260804-corrected",
-  "manifest_revision": "corrected_pre_measurement_freeze_v3_1",
+  "manifest_revision": "corrected_pre_measurement_freeze_v3_2",
   "status": "manifest_frozen_waiting_for_human_gold",
   "measurement_status": "not_run_gold_missing",
   "created_from_commit": "3396ab3",
@@ -27,9 +27,16 @@
         "status": "review_rejected_draft",
         "candidate_measurements_run": 0,
         "reason": "post-freeze review required strict concat playback, onset-window, ffmpeg ordering/hash, and packet contract validation"
+      },
+      {
+        "commit": "9822ff2",
+        "manifest_fingerprint": "8a2a3b542ed9534a444a73453bfab277e1bee02c304c9b227ff7ed2b7a121794",
+        "status": "review_rejected_draft",
+        "candidate_measurements_run": 0,
+        "reason": "fallback target audio was narrowly clipped by VTT cue union; full bound source-MP4 cut context and independent manual-scenario evaluation are required"
       }
     ],
-    "replacement_reason": "v3 corrects cue-only artifact raw-timing claim, uses bounded Whisper plan for 8 artifact spans, replaces fallback with genuine LB4 VTT plus text-only splits, restricts multi to multi-cue cuts with four low-confidence rows, and binds LB4 playback to source MP4.",
+    "replacement_reason": "v3 corrects cue-only artifact raw-timing claim, uses bounded Whisper plan for 8 artifact spans, replaces fallback with genuine LB4 VTT plus text-only splits, restricts multi to multi-cue cuts with four low-confidence rows, and binds LB4 playback to source MP4. This v3.2 correction replaces 9822ff2 after fallback target-audio containment review.",
     "candidate_measurements_run": 0
   },
   "selection_policy": {
@@ -138,7 +145,15 @@
     },
     "fallback_non_regression": {
       "required": "現行VTT fallback + 連結と同等",
-      "automatic_line_or_cross_cue_moves_max": 0
+      "automatic_line_or_cross_cue_moves_max": 0,
+      "denominator": "all 20 vtt_fallback_concat rows; each manual subtarget is an independent one-subtarget scenario",
+      "manual_split_scenarios": {
+        "included_in_vtt_non_regression_denominator": true,
+        "scenario_model": "replace_original_line_with_this_subtarget_only",
+        "sibling_subtargets_coemitted": false,
+        "baseline": "original immutable saved telop row time per independent scenario; reference only, never gold",
+        "automatic_line_or_cross_cue_moves_max": 0
+      }
     },
     "low_confidence": {
       "flag_all": true,
@@ -162,8 +177,13 @@
     "fixture_validity": {
       "long_single_cue": "同一artifact cue内で2行以上の保存済みtelop行に属し、2行目以降を20 distinct選ぶ。audio spanはartifact/token開始ではなく既存cut range全体。",
       "multi_cross_cue": "同一cut rangeに2つ以上のartifact cueが存在するcutから、line sequence境界周辺を20 distinct選ぶ。既知の4行をexpected low-confidenceとして含め、1行が必ず複数cueを跨ぐとは仮定しない。",
-      "vtt_fallback_concat": "真正legacy LB4 VTTの15保存行から、候補時刻を見ず指定済みの5つの意味境界で各2つのtext-only subtargetへ置換し、10 exact保存行＋10 manual subtargetの20 distinct targetにする。artifact-backed行は入れない。音声はsource MP4からowning VTT cue unionを抽出する。",
-      "manual_fixture": "manual subtarget 10件。元行の時刻はコピーせず、指定済み意味境界でtext-only分割した関係と非候補由来を各rowへ固定し、空・同一・文字欠落/重複・原文再結合不一致・単語途中の既知NGをvalidatorで拒否し、alignment denominator外。"
+      "vtt_fallback_concat": "真正legacy LB4 VTTの15保存行から、候補時刻を見ず指定済みの5つの意味境界で各2つのtext-only subtargetへ置換し、10 exact保存行＋10 manual subtargetの20 distinct targetにする。artifact-backed行は入れない。target audio contextは各LB4 bound source MP4の既存cut full spanで固定し、狭いVTT cue unionで切らない。",
+      "manual_fixture": "manual subtarget 10件。元行の時刻はコピーせず、指定済み意味境界でtext-only分割した関係と非候補由来を各rowへ固定し、空・同一・文字欠落/重複・原文再結合不一致・単語途中の既知NGをvalidatorで拒否する。各subtargetは兄弟subtargetを同時出力しない独立scenarioとしてfallback非回帰20行分母に含め、baseline draft timeは元行保存時刻のreference（goldではない）として保持する。"
+    },
+    "human_containment_audit": {
+      "machine_check": "each fallback draft_reference telop interval must be within its bound source MP4 full cut span; this is containment provenance, never gold",
+      "human_check": "annotator must listen to the full bound cut context and confirm the target utterance is present before entering onset; missing or ambiguous target fails closed",
+      "candidate_boundary_isolation": true
     }
   },
   "human_gold": {
@@ -186,7 +206,7 @@
       "gold.audio_listened"
     ],
     "completion_rule": "全60行で audio_listened=true、gold.line_onset_msが整数、timebaseがsource_audio_relative_ms、annotator_idとannotated_atが非空になるまで測定不可。",
-    "manual_subtarget_rule": "manual split subtargetのgoldも音声を実際に再生して決め、split位置や元行時刻を候補として入力しない。"
+    "manual_subtarget_rule": "manual split subtargetのgoldも音声を実際に再生して決め、split位置や元行時刻を候補として入力しない。manual rowsは兄弟subtargetを同時出力しない独立scenarioで、元行保存時刻はbaseline referenceのみである。"
   },
   "runtime": {
     "binary": {
@@ -919,6 +939,53 @@
     "file_count": 15,
     "purpose": "T1開始前のread-only baseline。測定後に同一15 file setを再hashし、変更があればfail closed。",
     "artifact_bytes": 2134
+  },
+  "production_integrity_contract": {
+    "bound_manifest_sources": {
+      "count": 12,
+      "source_ids": [
+        "gza_415-cut_001-audio",
+        "gza_415-cut_002-audio",
+        "gza_415-cut_003-audio",
+        "gza_f0-cut_001-audio",
+        "gza_f0-cut_002-audio",
+        "hpe_8ad-cut_001-audio",
+        "hpe_8ad-cut_002-audio",
+        "hpe_8ad-cut_003-audio",
+        "lb4_e1ff-cut_001-audio",
+        "lb4_e1ff-cut_002-audio",
+        "lb4_e1ff-cut_003-audio",
+        "lb4_e1ff-cut_004-audio"
+      ]
+    },
+    "bound_telop_documents": {
+      "count": 4,
+      "document_ids": [
+        "gza_415",
+        "gza_f0",
+        "hpe_8ad",
+        "lb4_e1ff"
+      ]
+    },
+    "bound_artifact_documents": {
+      "count": 3,
+      "document_ids": [
+        "21d4e0873219abbf5cb41da32993cf0a4e7bf47607d262d7e3b3799353bb8fd7",
+        "340c6983e95b2ffb4c81413bb5322d80da651d7374cd69677762d3e95725bdc2",
+        "6f2935df54d8b34aca5c76e371168b579d64a310b6cebf8a7115e504f5db9acc"
+      ]
+    },
+    "after_measurement_rehash": {
+      "required": true,
+      "status_at_freeze": "pending_candidate_measurement",
+      "compare": "re-hash every bound source/telop/artifact path bytes and SHA-256 against this manifest freeze before recording candidate result or Go-No-Go",
+      "fail_closed_on_mismatch": true,
+      "must_complete_before": [
+        "candidate_measurement_result",
+        "Go/No-Go",
+        "AC-40"
+      ]
+    }
   },
   "rows": [
     {
@@ -4269,36 +4336,17 @@
         "raw_timing_sha256": null,
         "source_content_sha256": "5f8e8187fd3520da8ae6186f851995346eb8213123a456fdeb608ead00476aed"
       },
-      "source_boundary_basis": "owning_existing_vtt_cue_union_within_existing_cut_range",
+      "source_boundary_basis": "bound_source_mp4_full_existing_cut_span_pre_candidate_context",
       "source_span": {
-        "kind": "concatenated_source_video_audio",
+        "kind": "single_source_video_audio",
         "coordinate_system": "absolute_video_ms",
-        "parts": [
-          {
-            "start_ms": 859990,
-            "end_ms": 860000,
-            "concat_offset_ms": 0
-          },
-          {
-            "start_ms": 860000,
-            "end_ms": 863509,
-            "concat_offset_ms": 10
-          }
-        ],
-        "duration_ms": 3519
+        "start_ms": 857000,
+        "end_ms": 875000
       },
       "absolute_video_span_ms": {
         "coordinate_system": "absolute_video_ms",
-        "parts": [
-          {
-            "start_ms": 859990,
-            "end_ms": 860000
-          },
-          {
-            "start_ms": 860000,
-            "end_ms": 863509
-          }
-        ]
+        "start_ms": 857000,
+        "end_ms": 875000
       },
       "vtt_cue_ids": [
         "320",
@@ -4316,7 +4364,7 @@
         "telop_line_end_ms": 863509,
         "text_source": "text_only_split_of_saved_legacy_telop_line",
         "source_cut_id": "cut_001",
-        "source_boundary_basis": "owning_existing_vtt_cue_union_within_existing_cut_range",
+        "source_boundary_basis": "bound_source_mp4_full_existing_cut_span_pre_candidate_context",
         "candidate_boundary_used": false,
         "gold_must_ignore_telop_time": true,
         "manual_split_provenance": {
@@ -4348,23 +4396,29 @@
       },
       "gold_provenance": "missing_human_audio_annotation",
       "fallback_concat_context": {
-        "contract": "existing_vtt_cue_union_concatenated",
+        "contract": "legacy_vtt_target_cues_with_full_bound_source_mp4_context",
         "selected_cue_ids": [
           "320",
           "321"
         ],
         "candidate_boundary_used": false,
-        "raw_timing_intentionally_omitted": true
+        "raw_timing_intentionally_omitted": true,
+        "audio_context_is_full_bound_source_mp4_cut": true,
+        "target_audio_containment_basis": "immutable_telop_line_interval_within_full_bound_cut",
+        "human_containment_check_required": true
       },
       "raw_timing_status": "not_applicable_legacy_vtt",
       "timing_input_source_id": null,
       "vtt_fallback_context": {
-        "contract": "legacy_vtt_cue_union_from_existing_cut_range",
+        "contract": "legacy_vtt_target_cues_with_full_bound_source_mp4_context",
         "raw_timing_absent": true,
         "audio_source_is_bound_source_mp4": true,
         "candidate_boundary_used": false,
         "automatic_line_or_cross_cue_move_max": 0,
-        "manual_text_split": true
+        "manual_text_split": true,
+        "audio_context_is_full_bound_source_mp4_cut": true,
+        "target_audio_containment_machine_check": "draft_reference_telop_interval_within_source_audio_span_origin",
+        "human_containment_check_required": true
       },
       "manual_split": {
         "kind": "manual_pre_measurement_text_split",
@@ -4377,6 +4431,20 @@
         "candidate_results_seen": false,
         "gold_requires_human_audio_listening": true,
         "boundary_text": "スラッシュ"
+      },
+      "manual_split_evaluation": {
+        "scope": "independent_manual_subtarget_fallback_scenario",
+        "scenario_id": "t1-fallback-001",
+        "scenario_emits_only_this_subtarget": true,
+        "sibling_subtargets_coemitted": false,
+        "included_in_vtt_non_regression_denominator": true,
+        "baseline_draft_time_ms": {
+          "start_ms": 857069,
+          "end_ms": 863509
+        },
+        "baseline_is_gold": false,
+        "automatic_line_or_cross_cue_moves_max": 0,
+        "gold_requires_human_audio_listening": true
       }
     },
     {
@@ -4388,36 +4456,17 @@
         "raw_timing_sha256": null,
         "source_content_sha256": "5f8e8187fd3520da8ae6186f851995346eb8213123a456fdeb608ead00476aed"
       },
-      "source_boundary_basis": "owning_existing_vtt_cue_union_within_existing_cut_range",
+      "source_boundary_basis": "bound_source_mp4_full_existing_cut_span_pre_candidate_context",
       "source_span": {
-        "kind": "concatenated_source_video_audio",
+        "kind": "single_source_video_audio",
         "coordinate_system": "absolute_video_ms",
-        "parts": [
-          {
-            "start_ms": 859990,
-            "end_ms": 860000,
-            "concat_offset_ms": 0
-          },
-          {
-            "start_ms": 860000,
-            "end_ms": 863509,
-            "concat_offset_ms": 10
-          }
-        ],
-        "duration_ms": 3519
+        "start_ms": 857000,
+        "end_ms": 875000
       },
       "absolute_video_span_ms": {
         "coordinate_system": "absolute_video_ms",
-        "parts": [
-          {
-            "start_ms": 859990,
-            "end_ms": 860000
-          },
-          {
-            "start_ms": 860000,
-            "end_ms": 863509
-          }
-        ]
+        "start_ms": 857000,
+        "end_ms": 875000
       },
       "vtt_cue_ids": [
         "320",
@@ -4435,7 +4484,7 @@
         "telop_line_end_ms": 863509,
         "text_source": "text_only_split_of_saved_legacy_telop_line",
         "source_cut_id": "cut_001",
-        "source_boundary_basis": "owning_existing_vtt_cue_union_within_existing_cut_range",
+        "source_boundary_basis": "bound_source_mp4_full_existing_cut_span_pre_candidate_context",
         "candidate_boundary_used": false,
         "gold_must_ignore_telop_time": true,
         "manual_split_provenance": {
@@ -4467,23 +4516,29 @@
       },
       "gold_provenance": "missing_human_audio_annotation",
       "fallback_concat_context": {
-        "contract": "existing_vtt_cue_union_concatenated",
+        "contract": "legacy_vtt_target_cues_with_full_bound_source_mp4_context",
         "selected_cue_ids": [
           "320",
           "321"
         ],
         "candidate_boundary_used": false,
-        "raw_timing_intentionally_omitted": true
+        "raw_timing_intentionally_omitted": true,
+        "audio_context_is_full_bound_source_mp4_cut": true,
+        "target_audio_containment_basis": "immutable_telop_line_interval_within_full_bound_cut",
+        "human_containment_check_required": true
       },
       "raw_timing_status": "not_applicable_legacy_vtt",
       "timing_input_source_id": null,
       "vtt_fallback_context": {
-        "contract": "legacy_vtt_cue_union_from_existing_cut_range",
+        "contract": "legacy_vtt_target_cues_with_full_bound_source_mp4_context",
         "raw_timing_absent": true,
         "audio_source_is_bound_source_mp4": true,
         "candidate_boundary_used": false,
         "automatic_line_or_cross_cue_move_max": 0,
-        "manual_text_split": true
+        "manual_text_split": true,
+        "audio_context_is_full_bound_source_mp4_cut": true,
+        "target_audio_containment_machine_check": "draft_reference_telop_interval_within_source_audio_span_origin",
+        "human_containment_check_required": true
       },
       "manual_split": {
         "kind": "manual_pre_measurement_text_split",
@@ -4496,6 +4551,20 @@
         "candidate_results_seen": false,
         "gold_requires_human_audio_listening": true,
         "boundary_text": "スラッシュ"
+      },
+      "manual_split_evaluation": {
+        "scope": "independent_manual_subtarget_fallback_scenario",
+        "scenario_id": "t1-fallback-002",
+        "scenario_emits_only_this_subtarget": true,
+        "sibling_subtargets_coemitted": false,
+        "included_in_vtt_non_regression_denominator": true,
+        "baseline_draft_time_ms": {
+          "start_ms": 857069,
+          "end_ms": 863509
+        },
+        "baseline_is_gold": false,
+        "automatic_line_or_cross_cue_moves_max": 0,
+        "gold_requires_human_audio_listening": true
       }
     },
     {
@@ -4507,36 +4576,17 @@
         "raw_timing_sha256": null,
         "source_content_sha256": "5f8e8187fd3520da8ae6186f851995346eb8213123a456fdeb608ead00476aed"
       },
-      "source_boundary_basis": "owning_existing_vtt_cue_union_within_existing_cut_range",
+      "source_boundary_basis": "bound_source_mp4_full_existing_cut_span_pre_candidate_context",
       "source_span": {
-        "kind": "concatenated_source_video_audio",
+        "kind": "single_source_video_audio",
         "coordinate_system": "absolute_video_ms",
-        "parts": [
-          {
-            "start_ms": 863509,
-            "end_ms": 863519,
-            "concat_offset_ms": 0
-          },
-          {
-            "start_ms": 863519,
-            "end_ms": 867470,
-            "concat_offset_ms": 10
-          }
-        ],
-        "duration_ms": 3961
+        "start_ms": 857000,
+        "end_ms": 875000
       },
       "absolute_video_span_ms": {
         "coordinate_system": "absolute_video_ms",
-        "parts": [
-          {
-            "start_ms": 863509,
-            "end_ms": 863519
-          },
-          {
-            "start_ms": 863519,
-            "end_ms": 867470
-          }
-        ]
+        "start_ms": 857000,
+        "end_ms": 875000
       },
       "vtt_cue_ids": [
         "322",
@@ -4554,7 +4604,7 @@
         "telop_line_end_ms": 867470,
         "text_source": "saved_production_telop_document",
         "source_cut_id": "cut_001",
-        "source_boundary_basis": "owning_existing_vtt_cue_union_within_existing_cut_range",
+        "source_boundary_basis": "bound_source_mp4_full_existing_cut_span_pre_candidate_context",
         "candidate_boundary_used": false,
         "gold_must_ignore_telop_time": true
       },
@@ -4574,23 +4624,29 @@
       },
       "gold_provenance": "missing_human_audio_annotation",
       "fallback_concat_context": {
-        "contract": "existing_vtt_cue_union_concatenated",
+        "contract": "legacy_vtt_target_cues_with_full_bound_source_mp4_context",
         "selected_cue_ids": [
           "322",
           "323"
         ],
         "candidate_boundary_used": false,
-        "raw_timing_intentionally_omitted": true
+        "raw_timing_intentionally_omitted": true,
+        "audio_context_is_full_bound_source_mp4_cut": true,
+        "target_audio_containment_basis": "immutable_telop_line_interval_within_full_bound_cut",
+        "human_containment_check_required": true
       },
       "raw_timing_status": "not_applicable_legacy_vtt",
       "timing_input_source_id": null,
       "vtt_fallback_context": {
-        "contract": "legacy_vtt_cue_union_from_existing_cut_range",
+        "contract": "legacy_vtt_target_cues_with_full_bound_source_mp4_context",
         "raw_timing_absent": true,
         "audio_source_is_bound_source_mp4": true,
         "candidate_boundary_used": false,
         "automatic_line_or_cross_cue_move_max": 0,
-        "manual_text_split": false
+        "manual_text_split": false,
+        "audio_context_is_full_bound_source_mp4_cut": true,
+        "target_audio_containment_machine_check": "draft_reference_telop_interval_within_source_audio_span_origin",
+        "human_containment_check_required": true
       }
     },
     {
@@ -4602,36 +4658,17 @@
         "raw_timing_sha256": null,
         "source_content_sha256": "5f8e8187fd3520da8ae6186f851995346eb8213123a456fdeb608ead00476aed"
       },
-      "source_boundary_basis": "owning_existing_vtt_cue_union_within_existing_cut_range",
+      "source_boundary_basis": "bound_source_mp4_full_existing_cut_span_pre_candidate_context",
       "source_span": {
-        "kind": "concatenated_source_video_audio",
+        "kind": "single_source_video_audio",
         "coordinate_system": "absolute_video_ms",
-        "parts": [
-          {
-            "start_ms": 870509,
-            "end_ms": 870519,
-            "concat_offset_ms": 0
-          },
-          {
-            "start_ms": 870519,
-            "end_ms": 875000,
-            "concat_offset_ms": 10
-          }
-        ],
-        "duration_ms": 4491
+        "start_ms": 857000,
+        "end_ms": 875000
       },
       "absolute_video_span_ms": {
         "coordinate_system": "absolute_video_ms",
-        "parts": [
-          {
-            "start_ms": 870509,
-            "end_ms": 870519
-          },
-          {
-            "start_ms": 870519,
-            "end_ms": 875000
-          }
-        ]
+        "start_ms": 857000,
+        "end_ms": 875000
       },
       "vtt_cue_ids": [
         "326",
@@ -4649,7 +4686,7 @@
         "telop_line_end_ms": 875000,
         "text_source": "saved_production_telop_document",
         "source_cut_id": "cut_001",
-        "source_boundary_basis": "owning_existing_vtt_cue_union_within_existing_cut_range",
+        "source_boundary_basis": "bound_source_mp4_full_existing_cut_span_pre_candidate_context",
         "candidate_boundary_used": false,
         "gold_must_ignore_telop_time": true
       },
@@ -4669,23 +4706,29 @@
       },
       "gold_provenance": "missing_human_audio_annotation",
       "fallback_concat_context": {
-        "contract": "existing_vtt_cue_union_concatenated",
+        "contract": "legacy_vtt_target_cues_with_full_bound_source_mp4_context",
         "selected_cue_ids": [
           "326",
           "327"
         ],
         "candidate_boundary_used": false,
-        "raw_timing_intentionally_omitted": true
+        "raw_timing_intentionally_omitted": true,
+        "audio_context_is_full_bound_source_mp4_cut": true,
+        "target_audio_containment_basis": "immutable_telop_line_interval_within_full_bound_cut",
+        "human_containment_check_required": true
       },
       "raw_timing_status": "not_applicable_legacy_vtt",
       "timing_input_source_id": null,
       "vtt_fallback_context": {
-        "contract": "legacy_vtt_cue_union_from_existing_cut_range",
+        "contract": "legacy_vtt_target_cues_with_full_bound_source_mp4_context",
         "raw_timing_absent": true,
         "audio_source_is_bound_source_mp4": true,
         "candidate_boundary_used": false,
         "automatic_line_or_cross_cue_move_max": 0,
-        "manual_text_split": false
+        "manual_text_split": false,
+        "audio_context_is_full_bound_source_mp4_cut": true,
+        "target_audio_containment_machine_check": "draft_reference_telop_interval_within_source_audio_span_origin",
+        "human_containment_check_required": true
       }
     },
     {
@@ -4697,36 +4740,17 @@
         "raw_timing_sha256": null,
         "source_content_sha256": "5f8e8187fd3520da8ae6186f851995346eb8213123a456fdeb608ead00476aed"
       },
-      "source_boundary_basis": "owning_existing_vtt_cue_union_within_existing_cut_range",
+      "source_boundary_basis": "bound_source_mp4_full_existing_cut_span_pre_candidate_context",
       "source_span": {
-        "kind": "concatenated_source_video_audio",
+        "kind": "single_source_video_audio",
         "coordinate_system": "absolute_video_ms",
-        "parts": [
-          {
-            "start_ms": 996150,
-            "end_ms": 996160,
-            "concat_offset_ms": 0
-          },
-          {
-            "start_ms": 996160,
-            "end_ms": 1000710,
-            "concat_offset_ms": 10
-          }
-        ],
-        "duration_ms": 4560
+        "start_ms": 996000,
+        "end_ms": 1012000
       },
       "absolute_video_span_ms": {
         "coordinate_system": "absolute_video_ms",
-        "parts": [
-          {
-            "start_ms": 996150,
-            "end_ms": 996160
-          },
-          {
-            "start_ms": 996160,
-            "end_ms": 1000710
-          }
-        ]
+        "start_ms": 996000,
+        "end_ms": 1012000
       },
       "vtt_cue_ids": [
         "372",
@@ -4744,7 +4768,7 @@
         "telop_line_end_ms": 1000710,
         "text_source": "saved_production_telop_document",
         "source_cut_id": "cut_002",
-        "source_boundary_basis": "owning_existing_vtt_cue_union_within_existing_cut_range",
+        "source_boundary_basis": "bound_source_mp4_full_existing_cut_span_pre_candidate_context",
         "candidate_boundary_used": false,
         "gold_must_ignore_telop_time": true
       },
@@ -4764,23 +4788,29 @@
       },
       "gold_provenance": "missing_human_audio_annotation",
       "fallback_concat_context": {
-        "contract": "existing_vtt_cue_union_concatenated",
+        "contract": "legacy_vtt_target_cues_with_full_bound_source_mp4_context",
         "selected_cue_ids": [
           "372",
           "373"
         ],
         "candidate_boundary_used": false,
-        "raw_timing_intentionally_omitted": true
+        "raw_timing_intentionally_omitted": true,
+        "audio_context_is_full_bound_source_mp4_cut": true,
+        "target_audio_containment_basis": "immutable_telop_line_interval_within_full_bound_cut",
+        "human_containment_check_required": true
       },
       "raw_timing_status": "not_applicable_legacy_vtt",
       "timing_input_source_id": null,
       "vtt_fallback_context": {
-        "contract": "legacy_vtt_cue_union_from_existing_cut_range",
+        "contract": "legacy_vtt_target_cues_with_full_bound_source_mp4_context",
         "raw_timing_absent": true,
         "audio_source_is_bound_source_mp4": true,
         "candidate_boundary_used": false,
         "automatic_line_or_cross_cue_move_max": 0,
-        "manual_text_split": false
+        "manual_text_split": false,
+        "audio_context_is_full_bound_source_mp4_cut": true,
+        "target_audio_containment_machine_check": "draft_reference_telop_interval_within_source_audio_span_origin",
+        "human_containment_check_required": true
       }
     },
     {
@@ -4792,36 +4822,17 @@
         "raw_timing_sha256": null,
         "source_content_sha256": "5f8e8187fd3520da8ae6186f851995346eb8213123a456fdeb608ead00476aed"
       },
-      "source_boundary_basis": "owning_existing_vtt_cue_union_within_existing_cut_range",
+      "source_boundary_basis": "bound_source_mp4_full_existing_cut_span_pre_candidate_context",
       "source_span": {
-        "kind": "concatenated_source_video_audio",
+        "kind": "single_source_video_audio",
         "coordinate_system": "absolute_video_ms",
-        "parts": [
-          {
-            "start_ms": 1003670,
-            "end_ms": 1003680,
-            "concat_offset_ms": 0
-          },
-          {
-            "start_ms": 1003680,
-            "end_ms": 1006430,
-            "concat_offset_ms": 10
-          }
-        ],
-        "duration_ms": 2760
+        "start_ms": 996000,
+        "end_ms": 1012000
       },
       "absolute_video_span_ms": {
         "coordinate_system": "absolute_video_ms",
-        "parts": [
-          {
-            "start_ms": 1003670,
-            "end_ms": 1003680
-          },
-          {
-            "start_ms": 1003680,
-            "end_ms": 1006430
-          }
-        ]
+        "start_ms": 996000,
+        "end_ms": 1012000
       },
       "vtt_cue_ids": [
         "376",
@@ -4839,7 +4850,7 @@
         "telop_line_end_ms": 1006430,
         "text_source": "saved_production_telop_document",
         "source_cut_id": "cut_002",
-        "source_boundary_basis": "owning_existing_vtt_cue_union_within_existing_cut_range",
+        "source_boundary_basis": "bound_source_mp4_full_existing_cut_span_pre_candidate_context",
         "candidate_boundary_used": false,
         "gold_must_ignore_telop_time": true
       },
@@ -4859,23 +4870,29 @@
       },
       "gold_provenance": "missing_human_audio_annotation",
       "fallback_concat_context": {
-        "contract": "existing_vtt_cue_union_concatenated",
+        "contract": "legacy_vtt_target_cues_with_full_bound_source_mp4_context",
         "selected_cue_ids": [
           "376",
           "377"
         ],
         "candidate_boundary_used": false,
-        "raw_timing_intentionally_omitted": true
+        "raw_timing_intentionally_omitted": true,
+        "audio_context_is_full_bound_source_mp4_cut": true,
+        "target_audio_containment_basis": "immutable_telop_line_interval_within_full_bound_cut",
+        "human_containment_check_required": true
       },
       "raw_timing_status": "not_applicable_legacy_vtt",
       "timing_input_source_id": null,
       "vtt_fallback_context": {
-        "contract": "legacy_vtt_cue_union_from_existing_cut_range",
+        "contract": "legacy_vtt_target_cues_with_full_bound_source_mp4_context",
         "raw_timing_absent": true,
         "audio_source_is_bound_source_mp4": true,
         "candidate_boundary_used": false,
         "automatic_line_or_cross_cue_move_max": 0,
-        "manual_text_split": false
+        "manual_text_split": false,
+        "audio_context_is_full_bound_source_mp4_cut": true,
+        "target_audio_containment_machine_check": "draft_reference_telop_interval_within_source_audio_span_origin",
+        "human_containment_check_required": true
       }
     },
     {
@@ -4887,36 +4904,17 @@
         "raw_timing_sha256": null,
         "source_content_sha256": "5f8e8187fd3520da8ae6186f851995346eb8213123a456fdeb608ead00476aed"
       },
-      "source_boundary_basis": "owning_existing_vtt_cue_union_within_existing_cut_range",
+      "source_boundary_basis": "bound_source_mp4_full_existing_cut_span_pre_candidate_context",
       "source_span": {
-        "kind": "concatenated_source_video_audio",
+        "kind": "single_source_video_audio",
         "coordinate_system": "absolute_video_ms",
-        "parts": [
-          {
-            "start_ms": 1006430,
-            "end_ms": 1006440,
-            "concat_offset_ms": 0
-          },
-          {
-            "start_ms": 1006440,
-            "end_ms": 1009550,
-            "concat_offset_ms": 10
-          }
-        ],
-        "duration_ms": 3120
+        "start_ms": 996000,
+        "end_ms": 1012000
       },
       "absolute_video_span_ms": {
         "coordinate_system": "absolute_video_ms",
-        "parts": [
-          {
-            "start_ms": 1006430,
-            "end_ms": 1006440
-          },
-          {
-            "start_ms": 1006440,
-            "end_ms": 1009550
-          }
-        ]
+        "start_ms": 996000,
+        "end_ms": 1012000
       },
       "vtt_cue_ids": [
         "378",
@@ -4934,7 +4932,7 @@
         "telop_line_end_ms": 1009550,
         "text_source": "saved_production_telop_document",
         "source_cut_id": "cut_002",
-        "source_boundary_basis": "owning_existing_vtt_cue_union_within_existing_cut_range",
+        "source_boundary_basis": "bound_source_mp4_full_existing_cut_span_pre_candidate_context",
         "candidate_boundary_used": false,
         "gold_must_ignore_telop_time": true
       },
@@ -4954,23 +4952,29 @@
       },
       "gold_provenance": "missing_human_audio_annotation",
       "fallback_concat_context": {
-        "contract": "existing_vtt_cue_union_concatenated",
+        "contract": "legacy_vtt_target_cues_with_full_bound_source_mp4_context",
         "selected_cue_ids": [
           "378",
           "379"
         ],
         "candidate_boundary_used": false,
-        "raw_timing_intentionally_omitted": true
+        "raw_timing_intentionally_omitted": true,
+        "audio_context_is_full_bound_source_mp4_cut": true,
+        "target_audio_containment_basis": "immutable_telop_line_interval_within_full_bound_cut",
+        "human_containment_check_required": true
       },
       "raw_timing_status": "not_applicable_legacy_vtt",
       "timing_input_source_id": null,
       "vtt_fallback_context": {
-        "contract": "legacy_vtt_cue_union_from_existing_cut_range",
+        "contract": "legacy_vtt_target_cues_with_full_bound_source_mp4_context",
         "raw_timing_absent": true,
         "audio_source_is_bound_source_mp4": true,
         "candidate_boundary_used": false,
         "automatic_line_or_cross_cue_move_max": 0,
-        "manual_text_split": false
+        "manual_text_split": false,
+        "audio_context_is_full_bound_source_mp4_cut": true,
+        "target_audio_containment_machine_check": "draft_reference_telop_interval_within_source_audio_span_origin",
+        "human_containment_check_required": true
       }
     },
     {
@@ -4982,36 +4986,17 @@
         "raw_timing_sha256": null,
         "source_content_sha256": "5f8e8187fd3520da8ae6186f851995346eb8213123a456fdeb608ead00476aed"
       },
-      "source_boundary_basis": "owning_existing_vtt_cue_union_within_existing_cut_range",
+      "source_boundary_basis": "bound_source_mp4_full_existing_cut_span_pre_candidate_context",
       "source_span": {
-        "kind": "concatenated_source_video_audio",
+        "kind": "single_source_video_audio",
         "coordinate_system": "absolute_video_ms",
-        "parts": [
-          {
-            "start_ms": 1009550,
-            "end_ms": 1009560,
-            "concat_offset_ms": 0
-          },
-          {
-            "start_ms": 1009560,
-            "end_ms": 1012000,
-            "concat_offset_ms": 10
-          }
-        ],
-        "duration_ms": 2450
+        "start_ms": 996000,
+        "end_ms": 1012000
       },
       "absolute_video_span_ms": {
         "coordinate_system": "absolute_video_ms",
-        "parts": [
-          {
-            "start_ms": 1009550,
-            "end_ms": 1009560
-          },
-          {
-            "start_ms": 1009560,
-            "end_ms": 1012000
-          }
-        ]
+        "start_ms": 996000,
+        "end_ms": 1012000
       },
       "vtt_cue_ids": [
         "380",
@@ -5029,7 +5014,7 @@
         "telop_line_end_ms": 1012000,
         "text_source": "text_only_split_of_saved_legacy_telop_line",
         "source_cut_id": "cut_002",
-        "source_boundary_basis": "owning_existing_vtt_cue_union_within_existing_cut_range",
+        "source_boundary_basis": "bound_source_mp4_full_existing_cut_span_pre_candidate_context",
         "candidate_boundary_used": false,
         "gold_must_ignore_telop_time": true,
         "manual_split_provenance": {
@@ -5061,23 +5046,29 @@
       },
       "gold_provenance": "missing_human_audio_annotation",
       "fallback_concat_context": {
-        "contract": "existing_vtt_cue_union_concatenated",
+        "contract": "legacy_vtt_target_cues_with_full_bound_source_mp4_context",
         "selected_cue_ids": [
           "380",
           "381"
         ],
         "candidate_boundary_used": false,
-        "raw_timing_intentionally_omitted": true
+        "raw_timing_intentionally_omitted": true,
+        "audio_context_is_full_bound_source_mp4_cut": true,
+        "target_audio_containment_basis": "immutable_telop_line_interval_within_full_bound_cut",
+        "human_containment_check_required": true
       },
       "raw_timing_status": "not_applicable_legacy_vtt",
       "timing_input_source_id": null,
       "vtt_fallback_context": {
-        "contract": "legacy_vtt_cue_union_from_existing_cut_range",
+        "contract": "legacy_vtt_target_cues_with_full_bound_source_mp4_context",
         "raw_timing_absent": true,
         "audio_source_is_bound_source_mp4": true,
         "candidate_boundary_used": false,
         "automatic_line_or_cross_cue_move_max": 0,
-        "manual_text_split": true
+        "manual_text_split": true,
+        "audio_context_is_full_bound_source_mp4_cut": true,
+        "target_audio_containment_machine_check": "draft_reference_telop_interval_within_source_audio_span_origin",
+        "human_containment_check_required": true
       },
       "manual_split": {
         "kind": "manual_pre_measurement_text_split",
@@ -5090,6 +5081,20 @@
         "candidate_results_seen": false,
         "gold_requires_human_audio_listening": true,
         "boundary_text": "こんなに許可が"
+      },
+      "manual_split_evaluation": {
+        "scope": "independent_manual_subtarget_fallback_scenario",
+        "scenario_id": "t1-fallback-008",
+        "scenario_emits_only_this_subtarget": true,
+        "sibling_subtargets_coemitted": false,
+        "included_in_vtt_non_regression_denominator": true,
+        "baseline_draft_time_ms": {
+          "start_ms": 1009560,
+          "end_ms": 1012000
+        },
+        "baseline_is_gold": false,
+        "automatic_line_or_cross_cue_moves_max": 0,
+        "gold_requires_human_audio_listening": true
       }
     },
     {
@@ -5101,36 +5106,17 @@
         "raw_timing_sha256": null,
         "source_content_sha256": "5f8e8187fd3520da8ae6186f851995346eb8213123a456fdeb608ead00476aed"
       },
-      "source_boundary_basis": "owning_existing_vtt_cue_union_within_existing_cut_range",
+      "source_boundary_basis": "bound_source_mp4_full_existing_cut_span_pre_candidate_context",
       "source_span": {
-        "kind": "concatenated_source_video_audio",
+        "kind": "single_source_video_audio",
         "coordinate_system": "absolute_video_ms",
-        "parts": [
-          {
-            "start_ms": 1009550,
-            "end_ms": 1009560,
-            "concat_offset_ms": 0
-          },
-          {
-            "start_ms": 1009560,
-            "end_ms": 1012000,
-            "concat_offset_ms": 10
-          }
-        ],
-        "duration_ms": 2450
+        "start_ms": 996000,
+        "end_ms": 1012000
       },
       "absolute_video_span_ms": {
         "coordinate_system": "absolute_video_ms",
-        "parts": [
-          {
-            "start_ms": 1009550,
-            "end_ms": 1009560
-          },
-          {
-            "start_ms": 1009560,
-            "end_ms": 1012000
-          }
-        ]
+        "start_ms": 996000,
+        "end_ms": 1012000
       },
       "vtt_cue_ids": [
         "380",
@@ -5148,7 +5134,7 @@
         "telop_line_end_ms": 1012000,
         "text_source": "text_only_split_of_saved_legacy_telop_line",
         "source_cut_id": "cut_002",
-        "source_boundary_basis": "owning_existing_vtt_cue_union_within_existing_cut_range",
+        "source_boundary_basis": "bound_source_mp4_full_existing_cut_span_pre_candidate_context",
         "candidate_boundary_used": false,
         "gold_must_ignore_telop_time": true,
         "manual_split_provenance": {
@@ -5180,23 +5166,29 @@
       },
       "gold_provenance": "missing_human_audio_annotation",
       "fallback_concat_context": {
-        "contract": "existing_vtt_cue_union_concatenated",
+        "contract": "legacy_vtt_target_cues_with_full_bound_source_mp4_context",
         "selected_cue_ids": [
           "380",
           "381"
         ],
         "candidate_boundary_used": false,
-        "raw_timing_intentionally_omitted": true
+        "raw_timing_intentionally_omitted": true,
+        "audio_context_is_full_bound_source_mp4_cut": true,
+        "target_audio_containment_basis": "immutable_telop_line_interval_within_full_bound_cut",
+        "human_containment_check_required": true
       },
       "raw_timing_status": "not_applicable_legacy_vtt",
       "timing_input_source_id": null,
       "vtt_fallback_context": {
-        "contract": "legacy_vtt_cue_union_from_existing_cut_range",
+        "contract": "legacy_vtt_target_cues_with_full_bound_source_mp4_context",
         "raw_timing_absent": true,
         "audio_source_is_bound_source_mp4": true,
         "candidate_boundary_used": false,
         "automatic_line_or_cross_cue_move_max": 0,
-        "manual_text_split": true
+        "manual_text_split": true,
+        "audio_context_is_full_bound_source_mp4_cut": true,
+        "target_audio_containment_machine_check": "draft_reference_telop_interval_within_source_audio_span_origin",
+        "human_containment_check_required": true
       },
       "manual_split": {
         "kind": "manual_pre_measurement_text_split",
@@ -5209,6 +5201,20 @@
         "candidate_results_seen": false,
         "gold_requires_human_audio_listening": true,
         "boundary_text": "こんなに許可が"
+      },
+      "manual_split_evaluation": {
+        "scope": "independent_manual_subtarget_fallback_scenario",
+        "scenario_id": "t1-fallback-009",
+        "scenario_emits_only_this_subtarget": true,
+        "sibling_subtargets_coemitted": false,
+        "included_in_vtt_non_regression_denominator": true,
+        "baseline_draft_time_ms": {
+          "start_ms": 1009560,
+          "end_ms": 1012000
+        },
+        "baseline_is_gold": false,
+        "automatic_line_or_cross_cue_moves_max": 0,
+        "gold_requires_human_audio_listening": true
       }
     },
     {
@@ -5220,36 +5226,17 @@
         "raw_timing_sha256": null,
         "source_content_sha256": "5f8e8187fd3520da8ae6186f851995346eb8213123a456fdeb608ead00476aed"
       },
-      "source_boundary_basis": "owning_existing_vtt_cue_union_within_existing_cut_range",
+      "source_boundary_basis": "bound_source_mp4_full_existing_cut_span_pre_candidate_context",
       "source_span": {
-        "kind": "concatenated_source_video_audio",
+        "kind": "single_source_video_audio",
         "coordinate_system": "absolute_video_ms",
-        "parts": [
-          {
-            "start_ms": 1069750,
-            "end_ms": 1069760,
-            "concat_offset_ms": 0
-          },
-          {
-            "start_ms": 1069760,
-            "end_ms": 1074110,
-            "concat_offset_ms": 10
-          }
-        ],
-        "duration_ms": 4360
+        "start_ms": 1069000,
+        "end_ms": 1101000
       },
       "absolute_video_span_ms": {
         "coordinate_system": "absolute_video_ms",
-        "parts": [
-          {
-            "start_ms": 1069750,
-            "end_ms": 1069760
-          },
-          {
-            "start_ms": 1069760,
-            "end_ms": 1074110
-          }
-        ]
+        "start_ms": 1069000,
+        "end_ms": 1101000
       },
       "vtt_cue_ids": [
         "388",
@@ -5267,7 +5254,7 @@
         "telop_line_end_ms": 1074110,
         "text_source": "text_only_split_of_saved_legacy_telop_line",
         "source_cut_id": "cut_003",
-        "source_boundary_basis": "owning_existing_vtt_cue_union_within_existing_cut_range",
+        "source_boundary_basis": "bound_source_mp4_full_existing_cut_span_pre_candidate_context",
         "candidate_boundary_used": false,
         "gold_must_ignore_telop_time": true,
         "manual_split_provenance": {
@@ -5299,23 +5286,29 @@
       },
       "gold_provenance": "missing_human_audio_annotation",
       "fallback_concat_context": {
-        "contract": "existing_vtt_cue_union_concatenated",
+        "contract": "legacy_vtt_target_cues_with_full_bound_source_mp4_context",
         "selected_cue_ids": [
           "388",
           "389"
         ],
         "candidate_boundary_used": false,
-        "raw_timing_intentionally_omitted": true
+        "raw_timing_intentionally_omitted": true,
+        "audio_context_is_full_bound_source_mp4_cut": true,
+        "target_audio_containment_basis": "immutable_telop_line_interval_within_full_bound_cut",
+        "human_containment_check_required": true
       },
       "raw_timing_status": "not_applicable_legacy_vtt",
       "timing_input_source_id": null,
       "vtt_fallback_context": {
-        "contract": "legacy_vtt_cue_union_from_existing_cut_range",
+        "contract": "legacy_vtt_target_cues_with_full_bound_source_mp4_context",
         "raw_timing_absent": true,
         "audio_source_is_bound_source_mp4": true,
         "candidate_boundary_used": false,
         "automatic_line_or_cross_cue_move_max": 0,
-        "manual_text_split": true
+        "manual_text_split": true,
+        "audio_context_is_full_bound_source_mp4_cut": true,
+        "target_audio_containment_machine_check": "draft_reference_telop_interval_within_source_audio_span_origin",
+        "human_containment_check_required": true
       },
       "manual_split": {
         "kind": "manual_pre_measurement_text_split",
@@ -5328,6 +5321,20 @@
         "candidate_results_seen": false,
         "gold_requires_human_audio_listening": true,
         "boundary_text": "Opusを使う"
+      },
+      "manual_split_evaluation": {
+        "scope": "independent_manual_subtarget_fallback_scenario",
+        "scenario_id": "t1-fallback-010",
+        "scenario_emits_only_this_subtarget": true,
+        "sibling_subtargets_coemitted": false,
+        "included_in_vtt_non_regression_denominator": true,
+        "baseline_draft_time_ms": {
+          "start_ms": 1069750,
+          "end_ms": 1074110
+        },
+        "baseline_is_gold": false,
+        "automatic_line_or_cross_cue_moves_max": 0,
+        "gold_requires_human_audio_listening": true
       }
     },
     {
@@ -5339,36 +5346,17 @@
         "raw_timing_sha256": null,
         "source_content_sha256": "5f8e8187fd3520da8ae6186f851995346eb8213123a456fdeb608ead00476aed"
       },
-      "source_boundary_basis": "owning_existing_vtt_cue_union_within_existing_cut_range",
+      "source_boundary_basis": "bound_source_mp4_full_existing_cut_span_pre_candidate_context",
       "source_span": {
-        "kind": "concatenated_source_video_audio",
+        "kind": "single_source_video_audio",
         "coordinate_system": "absolute_video_ms",
-        "parts": [
-          {
-            "start_ms": 1069750,
-            "end_ms": 1069760,
-            "concat_offset_ms": 0
-          },
-          {
-            "start_ms": 1069760,
-            "end_ms": 1074110,
-            "concat_offset_ms": 10
-          }
-        ],
-        "duration_ms": 4360
+        "start_ms": 1069000,
+        "end_ms": 1101000
       },
       "absolute_video_span_ms": {
         "coordinate_system": "absolute_video_ms",
-        "parts": [
-          {
-            "start_ms": 1069750,
-            "end_ms": 1069760
-          },
-          {
-            "start_ms": 1069760,
-            "end_ms": 1074110
-          }
-        ]
+        "start_ms": 1069000,
+        "end_ms": 1101000
       },
       "vtt_cue_ids": [
         "388",
@@ -5386,7 +5374,7 @@
         "telop_line_end_ms": 1074110,
         "text_source": "text_only_split_of_saved_legacy_telop_line",
         "source_cut_id": "cut_003",
-        "source_boundary_basis": "owning_existing_vtt_cue_union_within_existing_cut_range",
+        "source_boundary_basis": "bound_source_mp4_full_existing_cut_span_pre_candidate_context",
         "candidate_boundary_used": false,
         "gold_must_ignore_telop_time": true,
         "manual_split_provenance": {
@@ -5418,23 +5406,29 @@
       },
       "gold_provenance": "missing_human_audio_annotation",
       "fallback_concat_context": {
-        "contract": "existing_vtt_cue_union_concatenated",
+        "contract": "legacy_vtt_target_cues_with_full_bound_source_mp4_context",
         "selected_cue_ids": [
           "388",
           "389"
         ],
         "candidate_boundary_used": false,
-        "raw_timing_intentionally_omitted": true
+        "raw_timing_intentionally_omitted": true,
+        "audio_context_is_full_bound_source_mp4_cut": true,
+        "target_audio_containment_basis": "immutable_telop_line_interval_within_full_bound_cut",
+        "human_containment_check_required": true
       },
       "raw_timing_status": "not_applicable_legacy_vtt",
       "timing_input_source_id": null,
       "vtt_fallback_context": {
-        "contract": "legacy_vtt_cue_union_from_existing_cut_range",
+        "contract": "legacy_vtt_target_cues_with_full_bound_source_mp4_context",
         "raw_timing_absent": true,
         "audio_source_is_bound_source_mp4": true,
         "candidate_boundary_used": false,
         "automatic_line_or_cross_cue_move_max": 0,
-        "manual_text_split": true
+        "manual_text_split": true,
+        "audio_context_is_full_bound_source_mp4_cut": true,
+        "target_audio_containment_machine_check": "draft_reference_telop_interval_within_source_audio_span_origin",
+        "human_containment_check_required": true
       },
       "manual_split": {
         "kind": "manual_pre_measurement_text_split",
@@ -5447,6 +5441,20 @@
         "candidate_results_seen": false,
         "gold_requires_human_audio_listening": true,
         "boundary_text": "Opusを使う"
+      },
+      "manual_split_evaluation": {
+        "scope": "independent_manual_subtarget_fallback_scenario",
+        "scenario_id": "t1-fallback-011",
+        "scenario_emits_only_this_subtarget": true,
+        "sibling_subtargets_coemitted": false,
+        "included_in_vtt_non_regression_denominator": true,
+        "baseline_draft_time_ms": {
+          "start_ms": 1069750,
+          "end_ms": 1074110
+        },
+        "baseline_is_gold": false,
+        "automatic_line_or_cross_cue_moves_max": 0,
+        "gold_requires_human_audio_listening": true
       }
     },
     {
@@ -5458,36 +5466,17 @@
         "raw_timing_sha256": null,
         "source_content_sha256": "5f8e8187fd3520da8ae6186f851995346eb8213123a456fdeb608ead00476aed"
       },
-      "source_boundary_basis": "owning_existing_vtt_cue_union_within_existing_cut_range",
+      "source_boundary_basis": "bound_source_mp4_full_existing_cut_span_pre_candidate_context",
       "source_span": {
-        "kind": "concatenated_source_video_audio",
+        "kind": "single_source_video_audio",
         "coordinate_system": "absolute_video_ms",
-        "parts": [
-          {
-            "start_ms": 1074110,
-            "end_ms": 1074120,
-            "concat_offset_ms": 0
-          },
-          {
-            "start_ms": 1074120,
-            "end_ms": 1081230,
-            "concat_offset_ms": 10
-          }
-        ],
-        "duration_ms": 7120
+        "start_ms": 1069000,
+        "end_ms": 1101000
       },
       "absolute_video_span_ms": {
         "coordinate_system": "absolute_video_ms",
-        "parts": [
-          {
-            "start_ms": 1074110,
-            "end_ms": 1074120
-          },
-          {
-            "start_ms": 1074120,
-            "end_ms": 1081230
-          }
-        ]
+        "start_ms": 1069000,
+        "end_ms": 1101000
       },
       "vtt_cue_ids": [
         "390",
@@ -5505,7 +5494,7 @@
         "telop_line_end_ms": 1081230,
         "text_source": "text_only_split_of_saved_legacy_telop_line",
         "source_cut_id": "cut_003",
-        "source_boundary_basis": "owning_existing_vtt_cue_union_within_existing_cut_range",
+        "source_boundary_basis": "bound_source_mp4_full_existing_cut_span_pre_candidate_context",
         "candidate_boundary_used": false,
         "gold_must_ignore_telop_time": true,
         "manual_split_provenance": {
@@ -5537,23 +5526,29 @@
       },
       "gold_provenance": "missing_human_audio_annotation",
       "fallback_concat_context": {
-        "contract": "existing_vtt_cue_union_concatenated",
+        "contract": "legacy_vtt_target_cues_with_full_bound_source_mp4_context",
         "selected_cue_ids": [
           "390",
           "391"
         ],
         "candidate_boundary_used": false,
-        "raw_timing_intentionally_omitted": true
+        "raw_timing_intentionally_omitted": true,
+        "audio_context_is_full_bound_source_mp4_cut": true,
+        "target_audio_containment_basis": "immutable_telop_line_interval_within_full_bound_cut",
+        "human_containment_check_required": true
       },
       "raw_timing_status": "not_applicable_legacy_vtt",
       "timing_input_source_id": null,
       "vtt_fallback_context": {
-        "contract": "legacy_vtt_cue_union_from_existing_cut_range",
+        "contract": "legacy_vtt_target_cues_with_full_bound_source_mp4_context",
         "raw_timing_absent": true,
         "audio_source_is_bound_source_mp4": true,
         "candidate_boundary_used": false,
         "automatic_line_or_cross_cue_move_max": 0,
-        "manual_text_split": true
+        "manual_text_split": true,
+        "audio_context_is_full_bound_source_mp4_cut": true,
+        "target_audio_containment_machine_check": "draft_reference_telop_interval_within_source_audio_span_origin",
+        "human_containment_check_required": true
       },
       "manual_split": {
         "kind": "manual_pre_measurement_text_split",
@@ -5566,6 +5561,20 @@
         "candidate_results_seen": false,
         "gold_requires_human_audio_listening": true,
         "boundary_text": "挙動は見れたから"
+      },
+      "manual_split_evaluation": {
+        "scope": "independent_manual_subtarget_fallback_scenario",
+        "scenario_id": "t1-fallback-012",
+        "scenario_emits_only_this_subtarget": true,
+        "sibling_subtargets_coemitted": false,
+        "included_in_vtt_non_regression_denominator": true,
+        "baseline_draft_time_ms": {
+          "start_ms": 1074120,
+          "end_ms": 1081230
+        },
+        "baseline_is_gold": false,
+        "automatic_line_or_cross_cue_moves_max": 0,
+        "gold_requires_human_audio_listening": true
       }
     },
     {
@@ -5577,36 +5586,17 @@
         "raw_timing_sha256": null,
         "source_content_sha256": "5f8e8187fd3520da8ae6186f851995346eb8213123a456fdeb608ead00476aed"
       },
-      "source_boundary_basis": "owning_existing_vtt_cue_union_within_existing_cut_range",
+      "source_boundary_basis": "bound_source_mp4_full_existing_cut_span_pre_candidate_context",
       "source_span": {
-        "kind": "concatenated_source_video_audio",
+        "kind": "single_source_video_audio",
         "coordinate_system": "absolute_video_ms",
-        "parts": [
-          {
-            "start_ms": 1074110,
-            "end_ms": 1074120,
-            "concat_offset_ms": 0
-          },
-          {
-            "start_ms": 1074120,
-            "end_ms": 1081230,
-            "concat_offset_ms": 10
-          }
-        ],
-        "duration_ms": 7120
+        "start_ms": 1069000,
+        "end_ms": 1101000
       },
       "absolute_video_span_ms": {
         "coordinate_system": "absolute_video_ms",
-        "parts": [
-          {
-            "start_ms": 1074110,
-            "end_ms": 1074120
-          },
-          {
-            "start_ms": 1074120,
-            "end_ms": 1081230
-          }
-        ]
+        "start_ms": 1069000,
+        "end_ms": 1101000
       },
       "vtt_cue_ids": [
         "390",
@@ -5624,7 +5614,7 @@
         "telop_line_end_ms": 1081230,
         "text_source": "text_only_split_of_saved_legacy_telop_line",
         "source_cut_id": "cut_003",
-        "source_boundary_basis": "owning_existing_vtt_cue_union_within_existing_cut_range",
+        "source_boundary_basis": "bound_source_mp4_full_existing_cut_span_pre_candidate_context",
         "candidate_boundary_used": false,
         "gold_must_ignore_telop_time": true,
         "manual_split_provenance": {
@@ -5656,23 +5646,29 @@
       },
       "gold_provenance": "missing_human_audio_annotation",
       "fallback_concat_context": {
-        "contract": "existing_vtt_cue_union_concatenated",
+        "contract": "legacy_vtt_target_cues_with_full_bound_source_mp4_context",
         "selected_cue_ids": [
           "390",
           "391"
         ],
         "candidate_boundary_used": false,
-        "raw_timing_intentionally_omitted": true
+        "raw_timing_intentionally_omitted": true,
+        "audio_context_is_full_bound_source_mp4_cut": true,
+        "target_audio_containment_basis": "immutable_telop_line_interval_within_full_bound_cut",
+        "human_containment_check_required": true
       },
       "raw_timing_status": "not_applicable_legacy_vtt",
       "timing_input_source_id": null,
       "vtt_fallback_context": {
-        "contract": "legacy_vtt_cue_union_from_existing_cut_range",
+        "contract": "legacy_vtt_target_cues_with_full_bound_source_mp4_context",
         "raw_timing_absent": true,
         "audio_source_is_bound_source_mp4": true,
         "candidate_boundary_used": false,
         "automatic_line_or_cross_cue_move_max": 0,
-        "manual_text_split": true
+        "manual_text_split": true,
+        "audio_context_is_full_bound_source_mp4_cut": true,
+        "target_audio_containment_machine_check": "draft_reference_telop_interval_within_source_audio_span_origin",
+        "human_containment_check_required": true
       },
       "manual_split": {
         "kind": "manual_pre_measurement_text_split",
@@ -5685,6 +5681,20 @@
         "candidate_results_seen": false,
         "gold_requires_human_audio_listening": true,
         "boundary_text": "挙動は見れたから"
+      },
+      "manual_split_evaluation": {
+        "scope": "independent_manual_subtarget_fallback_scenario",
+        "scenario_id": "t1-fallback-013",
+        "scenario_emits_only_this_subtarget": true,
+        "sibling_subtargets_coemitted": false,
+        "included_in_vtt_non_regression_denominator": true,
+        "baseline_draft_time_ms": {
+          "start_ms": 1074120,
+          "end_ms": 1081230
+        },
+        "baseline_is_gold": false,
+        "automatic_line_or_cross_cue_moves_max": 0,
+        "gold_requires_human_audio_listening": true
       }
     },
     {
@@ -5696,36 +5706,17 @@
         "raw_timing_sha256": null,
         "source_content_sha256": "5f8e8187fd3520da8ae6186f851995346eb8213123a456fdeb608ead00476aed"
       },
-      "source_boundary_basis": "owning_existing_vtt_cue_union_within_existing_cut_range",
+      "source_boundary_basis": "bound_source_mp4_full_existing_cut_span_pre_candidate_context",
       "source_span": {
-        "kind": "concatenated_source_video_audio",
+        "kind": "single_source_video_audio",
         "coordinate_system": "absolute_video_ms",
-        "parts": [
-          {
-            "start_ms": 1083990,
-            "end_ms": 1084000,
-            "concat_offset_ms": 0
-          },
-          {
-            "start_ms": 1084000,
-            "end_ms": 1089149,
-            "concat_offset_ms": 10
-          }
-        ],
-        "duration_ms": 5159
+        "start_ms": 1069000,
+        "end_ms": 1101000
       },
       "absolute_video_span_ms": {
         "coordinate_system": "absolute_video_ms",
-        "parts": [
-          {
-            "start_ms": 1083990,
-            "end_ms": 1084000
-          },
-          {
-            "start_ms": 1084000,
-            "end_ms": 1089149
-          }
-        ]
+        "start_ms": 1069000,
+        "end_ms": 1101000
       },
       "vtt_cue_ids": [
         "394",
@@ -5743,7 +5734,7 @@
         "telop_line_end_ms": 1089149,
         "text_source": "text_only_split_of_saved_legacy_telop_line",
         "source_cut_id": "cut_003",
-        "source_boundary_basis": "owning_existing_vtt_cue_union_within_existing_cut_range",
+        "source_boundary_basis": "bound_source_mp4_full_existing_cut_span_pre_candidate_context",
         "candidate_boundary_used": false,
         "gold_must_ignore_telop_time": true,
         "manual_split_provenance": {
@@ -5775,23 +5766,29 @@
       },
       "gold_provenance": "missing_human_audio_annotation",
       "fallback_concat_context": {
-        "contract": "existing_vtt_cue_union_concatenated",
+        "contract": "legacy_vtt_target_cues_with_full_bound_source_mp4_context",
         "selected_cue_ids": [
           "394",
           "395"
         ],
         "candidate_boundary_used": false,
-        "raw_timing_intentionally_omitted": true
+        "raw_timing_intentionally_omitted": true,
+        "audio_context_is_full_bound_source_mp4_cut": true,
+        "target_audio_containment_basis": "immutable_telop_line_interval_within_full_bound_cut",
+        "human_containment_check_required": true
       },
       "raw_timing_status": "not_applicable_legacy_vtt",
       "timing_input_source_id": null,
       "vtt_fallback_context": {
-        "contract": "legacy_vtt_cue_union_from_existing_cut_range",
+        "contract": "legacy_vtt_target_cues_with_full_bound_source_mp4_context",
         "raw_timing_absent": true,
         "audio_source_is_bound_source_mp4": true,
         "candidate_boundary_used": false,
         "automatic_line_or_cross_cue_move_max": 0,
-        "manual_text_split": true
+        "manual_text_split": true,
+        "audio_context_is_full_bound_source_mp4_cut": true,
+        "target_audio_containment_machine_check": "draft_reference_telop_interval_within_source_audio_span_origin",
+        "human_containment_check_required": true
       },
       "manual_split": {
         "kind": "manual_pre_measurement_text_split",
@@ -5804,6 +5801,20 @@
         "candidate_results_seen": false,
         "gold_requires_human_audio_listening": true,
         "boundary_text": "ディープリサーチを"
+      },
+      "manual_split_evaluation": {
+        "scope": "independent_manual_subtarget_fallback_scenario",
+        "scenario_id": "t1-fallback-014",
+        "scenario_emits_only_this_subtarget": true,
+        "sibling_subtargets_coemitted": false,
+        "included_in_vtt_non_regression_denominator": true,
+        "baseline_draft_time_ms": {
+          "start_ms": 1083990,
+          "end_ms": 1089149
+        },
+        "baseline_is_gold": false,
+        "automatic_line_or_cross_cue_moves_max": 0,
+        "gold_requires_human_audio_listening": true
       }
     },
     {
@@ -5815,36 +5826,17 @@
         "raw_timing_sha256": null,
         "source_content_sha256": "5f8e8187fd3520da8ae6186f851995346eb8213123a456fdeb608ead00476aed"
       },
-      "source_boundary_basis": "owning_existing_vtt_cue_union_within_existing_cut_range",
+      "source_boundary_basis": "bound_source_mp4_full_existing_cut_span_pre_candidate_context",
       "source_span": {
-        "kind": "concatenated_source_video_audio",
+        "kind": "single_source_video_audio",
         "coordinate_system": "absolute_video_ms",
-        "parts": [
-          {
-            "start_ms": 1083990,
-            "end_ms": 1084000,
-            "concat_offset_ms": 0
-          },
-          {
-            "start_ms": 1084000,
-            "end_ms": 1089149,
-            "concat_offset_ms": 10
-          }
-        ],
-        "duration_ms": 5159
+        "start_ms": 1069000,
+        "end_ms": 1101000
       },
       "absolute_video_span_ms": {
         "coordinate_system": "absolute_video_ms",
-        "parts": [
-          {
-            "start_ms": 1083990,
-            "end_ms": 1084000
-          },
-          {
-            "start_ms": 1084000,
-            "end_ms": 1089149
-          }
-        ]
+        "start_ms": 1069000,
+        "end_ms": 1101000
       },
       "vtt_cue_ids": [
         "394",
@@ -5862,7 +5854,7 @@
         "telop_line_end_ms": 1089149,
         "text_source": "text_only_split_of_saved_legacy_telop_line",
         "source_cut_id": "cut_003",
-        "source_boundary_basis": "owning_existing_vtt_cue_union_within_existing_cut_range",
+        "source_boundary_basis": "bound_source_mp4_full_existing_cut_span_pre_candidate_context",
         "candidate_boundary_used": false,
         "gold_must_ignore_telop_time": true,
         "manual_split_provenance": {
@@ -5894,23 +5886,29 @@
       },
       "gold_provenance": "missing_human_audio_annotation",
       "fallback_concat_context": {
-        "contract": "existing_vtt_cue_union_concatenated",
+        "contract": "legacy_vtt_target_cues_with_full_bound_source_mp4_context",
         "selected_cue_ids": [
           "394",
           "395"
         ],
         "candidate_boundary_used": false,
-        "raw_timing_intentionally_omitted": true
+        "raw_timing_intentionally_omitted": true,
+        "audio_context_is_full_bound_source_mp4_cut": true,
+        "target_audio_containment_basis": "immutable_telop_line_interval_within_full_bound_cut",
+        "human_containment_check_required": true
       },
       "raw_timing_status": "not_applicable_legacy_vtt",
       "timing_input_source_id": null,
       "vtt_fallback_context": {
-        "contract": "legacy_vtt_cue_union_from_existing_cut_range",
+        "contract": "legacy_vtt_target_cues_with_full_bound_source_mp4_context",
         "raw_timing_absent": true,
         "audio_source_is_bound_source_mp4": true,
         "candidate_boundary_used": false,
         "automatic_line_or_cross_cue_move_max": 0,
-        "manual_text_split": true
+        "manual_text_split": true,
+        "audio_context_is_full_bound_source_mp4_cut": true,
+        "target_audio_containment_machine_check": "draft_reference_telop_interval_within_source_audio_span_origin",
+        "human_containment_check_required": true
       },
       "manual_split": {
         "kind": "manual_pre_measurement_text_split",
@@ -5923,6 +5921,20 @@
         "candidate_results_seen": false,
         "gold_requires_human_audio_listening": true,
         "boundary_text": "ディープリサーチを"
+      },
+      "manual_split_evaluation": {
+        "scope": "independent_manual_subtarget_fallback_scenario",
+        "scenario_id": "t1-fallback-015",
+        "scenario_emits_only_this_subtarget": true,
+        "sibling_subtargets_coemitted": false,
+        "included_in_vtt_non_regression_denominator": true,
+        "baseline_draft_time_ms": {
+          "start_ms": 1083990,
+          "end_ms": 1089149
+        },
+        "baseline_is_gold": false,
+        "automatic_line_or_cross_cue_moves_max": 0,
+        "gold_requires_human_audio_listening": true
       }
     },
     {
@@ -5934,36 +5946,17 @@
         "raw_timing_sha256": null,
         "source_content_sha256": "5f8e8187fd3520da8ae6186f851995346eb8213123a456fdeb608ead00476aed"
       },
-      "source_boundary_basis": "owning_existing_vtt_cue_union_within_existing_cut_range",
+      "source_boundary_basis": "bound_source_mp4_full_existing_cut_span_pre_candidate_context",
       "source_span": {
-        "kind": "concatenated_source_video_audio",
+        "kind": "single_source_video_audio",
         "coordinate_system": "absolute_video_ms",
-        "parts": [
-          {
-            "start_ms": 1091750,
-            "end_ms": 1091760,
-            "concat_offset_ms": 0
-          },
-          {
-            "start_ms": 1091760,
-            "end_ms": 1101000,
-            "concat_offset_ms": 10
-          }
-        ],
-        "duration_ms": 9250
+        "start_ms": 1069000,
+        "end_ms": 1101000
       },
       "absolute_video_span_ms": {
         "coordinate_system": "absolute_video_ms",
-        "parts": [
-          {
-            "start_ms": 1091750,
-            "end_ms": 1091760
-          },
-          {
-            "start_ms": 1091760,
-            "end_ms": 1101000
-          }
-        ]
+        "start_ms": 1069000,
+        "end_ms": 1101000
       },
       "vtt_cue_ids": [
         "398",
@@ -5981,7 +5974,7 @@
         "telop_line_end_ms": 1101000,
         "text_source": "saved_production_telop_document",
         "source_cut_id": "cut_003",
-        "source_boundary_basis": "owning_existing_vtt_cue_union_within_existing_cut_range",
+        "source_boundary_basis": "bound_source_mp4_full_existing_cut_span_pre_candidate_context",
         "candidate_boundary_used": false,
         "gold_must_ignore_telop_time": true
       },
@@ -6001,23 +5994,29 @@
       },
       "gold_provenance": "missing_human_audio_annotation",
       "fallback_concat_context": {
-        "contract": "existing_vtt_cue_union_concatenated",
+        "contract": "legacy_vtt_target_cues_with_full_bound_source_mp4_context",
         "selected_cue_ids": [
           "398",
           "399"
         ],
         "candidate_boundary_used": false,
-        "raw_timing_intentionally_omitted": true
+        "raw_timing_intentionally_omitted": true,
+        "audio_context_is_full_bound_source_mp4_cut": true,
+        "target_audio_containment_basis": "immutable_telop_line_interval_within_full_bound_cut",
+        "human_containment_check_required": true
       },
       "raw_timing_status": "not_applicable_legacy_vtt",
       "timing_input_source_id": null,
       "vtt_fallback_context": {
-        "contract": "legacy_vtt_cue_union_from_existing_cut_range",
+        "contract": "legacy_vtt_target_cues_with_full_bound_source_mp4_context",
         "raw_timing_absent": true,
         "audio_source_is_bound_source_mp4": true,
         "candidate_boundary_used": false,
         "automatic_line_or_cross_cue_move_max": 0,
-        "manual_text_split": false
+        "manual_text_split": false,
+        "audio_context_is_full_bound_source_mp4_cut": true,
+        "target_audio_containment_machine_check": "draft_reference_telop_interval_within_source_audio_span_origin",
+        "human_containment_check_required": true
       }
     },
     {
@@ -6029,36 +6028,17 @@
         "raw_timing_sha256": null,
         "source_content_sha256": "5f8e8187fd3520da8ae6186f851995346eb8213123a456fdeb608ead00476aed"
       },
-      "source_boundary_basis": "owning_existing_vtt_cue_union_within_existing_cut_range",
+      "source_boundary_basis": "bound_source_mp4_full_existing_cut_span_pre_candidate_context",
       "source_span": {
-        "kind": "concatenated_source_video_audio",
+        "kind": "single_source_video_audio",
         "coordinate_system": "absolute_video_ms",
-        "parts": [
-          {
-            "start_ms": 1104909,
-            "end_ms": 1104919,
-            "concat_offset_ms": 0
-          },
-          {
-            "start_ms": 1104919,
-            "end_ms": 1110310,
-            "concat_offset_ms": 10
-          }
-        ],
-        "duration_ms": 5401
+        "start_ms": 1104000,
+        "end_ms": 1140000
       },
       "absolute_video_span_ms": {
         "coordinate_system": "absolute_video_ms",
-        "parts": [
-          {
-            "start_ms": 1104909,
-            "end_ms": 1104919
-          },
-          {
-            "start_ms": 1104919,
-            "end_ms": 1110310
-          }
-        ]
+        "start_ms": 1104000,
+        "end_ms": 1140000
       },
       "vtt_cue_ids": [
         "402",
@@ -6076,7 +6056,7 @@
         "telop_line_end_ms": 1110310,
         "text_source": "saved_production_telop_document",
         "source_cut_id": "cut_004",
-        "source_boundary_basis": "owning_existing_vtt_cue_union_within_existing_cut_range",
+        "source_boundary_basis": "bound_source_mp4_full_existing_cut_span_pre_candidate_context",
         "candidate_boundary_used": false,
         "gold_must_ignore_telop_time": true
       },
@@ -6096,23 +6076,29 @@
       },
       "gold_provenance": "missing_human_audio_annotation",
       "fallback_concat_context": {
-        "contract": "existing_vtt_cue_union_concatenated",
+        "contract": "legacy_vtt_target_cues_with_full_bound_source_mp4_context",
         "selected_cue_ids": [
           "402",
           "403"
         ],
         "candidate_boundary_used": false,
-        "raw_timing_intentionally_omitted": true
+        "raw_timing_intentionally_omitted": true,
+        "audio_context_is_full_bound_source_mp4_cut": true,
+        "target_audio_containment_basis": "immutable_telop_line_interval_within_full_bound_cut",
+        "human_containment_check_required": true
       },
       "raw_timing_status": "not_applicable_legacy_vtt",
       "timing_input_source_id": null,
       "vtt_fallback_context": {
-        "contract": "legacy_vtt_cue_union_from_existing_cut_range",
+        "contract": "legacy_vtt_target_cues_with_full_bound_source_mp4_context",
         "raw_timing_absent": true,
         "audio_source_is_bound_source_mp4": true,
         "candidate_boundary_used": false,
         "automatic_line_or_cross_cue_move_max": 0,
-        "manual_text_split": false
+        "manual_text_split": false,
+        "audio_context_is_full_bound_source_mp4_cut": true,
+        "target_audio_containment_machine_check": "draft_reference_telop_interval_within_source_audio_span_origin",
+        "human_containment_check_required": true
       }
     },
     {
@@ -6124,36 +6110,17 @@
         "raw_timing_sha256": null,
         "source_content_sha256": "5f8e8187fd3520da8ae6186f851995346eb8213123a456fdeb608ead00476aed"
       },
-      "source_boundary_basis": "owning_existing_vtt_cue_union_within_existing_cut_range",
+      "source_boundary_basis": "bound_source_mp4_full_existing_cut_span_pre_candidate_context",
       "source_span": {
-        "kind": "concatenated_source_video_audio",
+        "kind": "single_source_video_audio",
         "coordinate_system": "absolute_video_ms",
-        "parts": [
-          {
-            "start_ms": 1113149,
-            "end_ms": 1113159,
-            "concat_offset_ms": 0
-          },
-          {
-            "start_ms": 1113159,
-            "end_ms": 1116110,
-            "concat_offset_ms": 10
-          }
-        ],
-        "duration_ms": 2961
+        "start_ms": 1104000,
+        "end_ms": 1140000
       },
       "absolute_video_span_ms": {
         "coordinate_system": "absolute_video_ms",
-        "parts": [
-          {
-            "start_ms": 1113149,
-            "end_ms": 1113159
-          },
-          {
-            "start_ms": 1113159,
-            "end_ms": 1116110
-          }
-        ]
+        "start_ms": 1104000,
+        "end_ms": 1140000
       },
       "vtt_cue_ids": [
         "406",
@@ -6171,7 +6138,7 @@
         "telop_line_end_ms": 1116110,
         "text_source": "saved_production_telop_document",
         "source_cut_id": "cut_004",
-        "source_boundary_basis": "owning_existing_vtt_cue_union_within_existing_cut_range",
+        "source_boundary_basis": "bound_source_mp4_full_existing_cut_span_pre_candidate_context",
         "candidate_boundary_used": false,
         "gold_must_ignore_telop_time": true
       },
@@ -6191,23 +6158,29 @@
       },
       "gold_provenance": "missing_human_audio_annotation",
       "fallback_concat_context": {
-        "contract": "existing_vtt_cue_union_concatenated",
+        "contract": "legacy_vtt_target_cues_with_full_bound_source_mp4_context",
         "selected_cue_ids": [
           "406",
           "407"
         ],
         "candidate_boundary_used": false,
-        "raw_timing_intentionally_omitted": true
+        "raw_timing_intentionally_omitted": true,
+        "audio_context_is_full_bound_source_mp4_cut": true,
+        "target_audio_containment_basis": "immutable_telop_line_interval_within_full_bound_cut",
+        "human_containment_check_required": true
       },
       "raw_timing_status": "not_applicable_legacy_vtt",
       "timing_input_source_id": null,
       "vtt_fallback_context": {
-        "contract": "legacy_vtt_cue_union_from_existing_cut_range",
+        "contract": "legacy_vtt_target_cues_with_full_bound_source_mp4_context",
         "raw_timing_absent": true,
         "audio_source_is_bound_source_mp4": true,
         "candidate_boundary_used": false,
         "automatic_line_or_cross_cue_move_max": 0,
-        "manual_text_split": false
+        "manual_text_split": false,
+        "audio_context_is_full_bound_source_mp4_cut": true,
+        "target_audio_containment_machine_check": "draft_reference_telop_interval_within_source_audio_span_origin",
+        "human_containment_check_required": true
       }
     },
     {
@@ -6219,36 +6192,17 @@
         "raw_timing_sha256": null,
         "source_content_sha256": "5f8e8187fd3520da8ae6186f851995346eb8213123a456fdeb608ead00476aed"
       },
-      "source_boundary_basis": "owning_existing_vtt_cue_union_within_existing_cut_range",
+      "source_boundary_basis": "bound_source_mp4_full_existing_cut_span_pre_candidate_context",
       "source_span": {
-        "kind": "concatenated_source_video_audio",
+        "kind": "single_source_video_audio",
         "coordinate_system": "absolute_video_ms",
-        "parts": [
-          {
-            "start_ms": 1136750,
-            "end_ms": 1136760,
-            "concat_offset_ms": 0
-          },
-          {
-            "start_ms": 1136760,
-            "end_ms": 1139950,
-            "concat_offset_ms": 10
-          }
-        ],
-        "duration_ms": 3200
+        "start_ms": 1104000,
+        "end_ms": 1140000
       },
       "absolute_video_span_ms": {
         "coordinate_system": "absolute_video_ms",
-        "parts": [
-          {
-            "start_ms": 1136750,
-            "end_ms": 1136760
-          },
-          {
-            "start_ms": 1136760,
-            "end_ms": 1139950
-          }
-        ]
+        "start_ms": 1104000,
+        "end_ms": 1140000
       },
       "vtt_cue_ids": [
         "416",
@@ -6266,7 +6220,7 @@
         "telop_line_end_ms": 1138300,
         "text_source": "saved_production_telop_document",
         "source_cut_id": "cut_004",
-        "source_boundary_basis": "owning_existing_vtt_cue_union_within_existing_cut_range",
+        "source_boundary_basis": "bound_source_mp4_full_existing_cut_span_pre_candidate_context",
         "candidate_boundary_used": false,
         "gold_must_ignore_telop_time": true
       },
@@ -6286,23 +6240,29 @@
       },
       "gold_provenance": "missing_human_audio_annotation",
       "fallback_concat_context": {
-        "contract": "existing_vtt_cue_union_concatenated",
+        "contract": "legacy_vtt_target_cues_with_full_bound_source_mp4_context",
         "selected_cue_ids": [
           "416",
           "417"
         ],
         "candidate_boundary_used": false,
-        "raw_timing_intentionally_omitted": true
+        "raw_timing_intentionally_omitted": true,
+        "audio_context_is_full_bound_source_mp4_cut": true,
+        "target_audio_containment_basis": "immutable_telop_line_interval_within_full_bound_cut",
+        "human_containment_check_required": true
       },
       "raw_timing_status": "not_applicable_legacy_vtt",
       "timing_input_source_id": null,
       "vtt_fallback_context": {
-        "contract": "legacy_vtt_cue_union_from_existing_cut_range",
+        "contract": "legacy_vtt_target_cues_with_full_bound_source_mp4_context",
         "raw_timing_absent": true,
         "audio_source_is_bound_source_mp4": true,
         "candidate_boundary_used": false,
         "automatic_line_or_cross_cue_move_max": 0,
-        "manual_text_split": false
+        "manual_text_split": false,
+        "audio_context_is_full_bound_source_mp4_cut": true,
+        "target_audio_containment_machine_check": "draft_reference_telop_interval_within_source_audio_span_origin",
+        "human_containment_check_required": true
       }
     },
     {
@@ -6314,36 +6274,17 @@
         "raw_timing_sha256": null,
         "source_content_sha256": "5f8e8187fd3520da8ae6186f851995346eb8213123a456fdeb608ead00476aed"
       },
-      "source_boundary_basis": "owning_existing_vtt_cue_union_within_existing_cut_range",
+      "source_boundary_basis": "bound_source_mp4_full_existing_cut_span_pre_candidate_context",
       "source_span": {
-        "kind": "concatenated_source_video_audio",
+        "kind": "single_source_video_audio",
         "coordinate_system": "absolute_video_ms",
-        "parts": [
-          {
-            "start_ms": 1136760,
-            "end_ms": 1139950,
-            "concat_offset_ms": 0
-          },
-          {
-            "start_ms": 1139950,
-            "end_ms": 1139960,
-            "concat_offset_ms": 3190
-          }
-        ],
-        "duration_ms": 3200
+        "start_ms": 1104000,
+        "end_ms": 1140000
       },
       "absolute_video_span_ms": {
         "coordinate_system": "absolute_video_ms",
-        "parts": [
-          {
-            "start_ms": 1136760,
-            "end_ms": 1139950
-          },
-          {
-            "start_ms": 1139950,
-            "end_ms": 1139960
-          }
-        ]
+        "start_ms": 1104000,
+        "end_ms": 1140000
       },
       "vtt_cue_ids": [
         "417",
@@ -6361,7 +6302,7 @@
         "telop_line_end_ms": 1140000,
         "text_source": "saved_production_telop_document",
         "source_cut_id": "cut_004",
-        "source_boundary_basis": "owning_existing_vtt_cue_union_within_existing_cut_range",
+        "source_boundary_basis": "bound_source_mp4_full_existing_cut_span_pre_candidate_context",
         "candidate_boundary_used": false,
         "gold_must_ignore_telop_time": true
       },
@@ -6381,23 +6322,29 @@
       },
       "gold_provenance": "missing_human_audio_annotation",
       "fallback_concat_context": {
-        "contract": "existing_vtt_cue_union_concatenated",
+        "contract": "legacy_vtt_target_cues_with_full_bound_source_mp4_context",
         "selected_cue_ids": [
           "417",
           "418"
         ],
         "candidate_boundary_used": false,
-        "raw_timing_intentionally_omitted": true
+        "raw_timing_intentionally_omitted": true,
+        "audio_context_is_full_bound_source_mp4_cut": true,
+        "target_audio_containment_basis": "immutable_telop_line_interval_within_full_bound_cut",
+        "human_containment_check_required": true
       },
       "raw_timing_status": "not_applicable_legacy_vtt",
       "timing_input_source_id": null,
       "vtt_fallback_context": {
-        "contract": "legacy_vtt_cue_union_from_existing_cut_range",
+        "contract": "legacy_vtt_target_cues_with_full_bound_source_mp4_context",
         "raw_timing_absent": true,
         "audio_source_is_bound_source_mp4": true,
         "candidate_boundary_used": false,
         "automatic_line_or_cross_cue_move_max": 0,
-        "manual_text_split": false
+        "manual_text_split": false,
+        "audio_context_is_full_bound_source_mp4_cut": true,
+        "target_audio_containment_machine_check": "draft_reference_telop_interval_within_source_audio_span_origin",
+        "human_containment_check_required": true
       }
     }
   ],
@@ -6411,5 +6358,5 @@
     "fallbackは真正legacy LB4 VTT由来だけで構成する。5つの最長保存行を候補結果を見ず指定済み意味境界で各2 subtargetへ置換し、元5行を同時には数えない。",
     "human goldが60行揃い、bounded timing入力が契約どおり生成されるまで候補測定、Go/No-Go、T1-2着手、AC-40更新は行わない."
   ],
-  "manifest_fingerprint": "8a2a3b542ed9534a444a73453bfab277e1bee02c304c9b227ff7ed2b7a121794"
+  "manifest_fingerprint": "c2b79bb1f9f0b20887c8ab4411a6db453ebc8011435d0bda6769b9cbbefd3c08"
 }
