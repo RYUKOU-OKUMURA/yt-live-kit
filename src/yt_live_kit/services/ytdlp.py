@@ -103,6 +103,7 @@ _AUDIO_FORMAT_SETTINGS: dict[str, Any] = {
     "cue_inclusion_rule": "half_open_overlap",
 }
 _AUDIO_FFMPEG_CHECK_TIMEOUT = 30
+_VIDEO_CONTAINER_SUFFIX_ORDER = {".mp4": 0, ".mkv": 1, ".webm": 2}
 
 
 @dataclass(frozen=True)
@@ -798,6 +799,135 @@ def _check_audio_ffmpeg(ffmpeg_path: Path, settings: Settings) -> None:
             "設定ページで YTLK_FFMPEG_PATH に実行可能な FFmpeg のパスを設定してください。"
             + (f"（詳細: {detail}）" if detail else "")
         )
+
+
+def _resolve_video_toolchain(settings: Settings) -> tuple[Path, Path]:
+    """動画取得に使う設定済み FFmpeg と同居する ffprobe を固定する."""
+
+    try:
+        ffmpeg_path = _resolve_audio_ffmpeg(settings.ffmpeg_path)
+        _check_audio_ffmpeg(ffmpeg_path, settings)
+    except AudioSpanError as exc:
+        raise YtdlpError(str(exc)) from exc
+
+    configured_ffprobe = ffmpeg_path.with_name("ffprobe")
+    try:
+        ffprobe_path = configured_ffprobe.resolve(strict=True)
+        stat_result = ffprobe_path.stat()
+    except (OSError, RuntimeError, TypeError, ValueError) as exc:
+        raise YtdlpError(
+            "設定済み FFmpeg と同じディレクトリに ffprobe が見つかりません。"
+            "FFmpeg のインストールと YTLK_FFMPEG_PATH を確認してください。"
+        ) from exc
+    if ffprobe_path.parent != ffmpeg_path.parent:
+        raise YtdlpError(
+            "ffprobe が設定済み FFmpeg と同じディレクトリの実体ではありません。"
+            "YTLK_FFMPEG_PATH を確認してください。"
+        )
+    if not stat.S_ISREG(stat_result.st_mode):
+        raise YtdlpError("ffprobe が通常のファイルではありません。")
+    if not os.access(ffprobe_path, os.X_OK):
+        raise YtdlpError(
+            "ffprobe に実行権限がありません。FFmpeg のインストールを確認してください。"
+        )
+    return ffmpeg_path, ffprobe_path
+
+
+def _probe_video_stream_types(
+    path: Path,
+    *,
+    ffprobe_path: Path,
+    settings: Settings,
+) -> frozenset[str]:
+    """候補動画の stream 種別を同居 ffprobe で厳密に確認する."""
+
+    command = [
+        str(ffprobe_path),
+        "-v",
+        "error",
+        "-show_entries",
+        "stream=codec_type",
+        "-of",
+        "json",
+        str(path),
+    ]
+    try:
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=min(settings.ffmpeg_timeout, _AUDIO_FFMPEG_CHECK_TIMEOUT),
+            shell=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise YtdlpError(
+            "取得した動画の音声確認がタイムアウトしました。再試行してください。"
+        ) from exc
+    except OSError as exc:
+        raise YtdlpError(
+            "ffprobe を実行できません。FFmpeg のインストールを確認してください。"
+        ) from exc
+    if result.returncode != 0:
+        detail = _sanitize_diagnostic(result.stderr or result.stdout)
+        raise YtdlpError(
+            "取得した動画の映像・音声を確認できませんでした。"
+            + (f"（詳細: {detail}）" if detail else "")
+        )
+
+    try:
+        document = json.loads(result.stdout)
+        streams = document["streams"]
+        if not isinstance(document, dict) or not isinstance(streams, list):
+            raise TypeError("invalid ffprobe document")
+        stream_types: set[str] = set()
+        for stream in streams:
+            if not isinstance(stream, dict):
+                raise TypeError("invalid ffprobe stream")
+            codec_type = stream.get("codec_type")
+            if not isinstance(codec_type, str) or not codec_type:
+                raise TypeError("invalid ffprobe codec type")
+            stream_types.add(codec_type)
+    except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+        raise YtdlpError(
+            "ffprobe の映像・音声確認結果が不正です。FFmpeg の実体を確認してください。"
+        ) from exc
+    return frozenset(stream_types)
+
+
+def _downloaded_video_candidates(
+    output_dir: Path,
+    video_id: str,
+    *,
+    settings: Settings,
+) -> list[Path]:
+    """要求動画 ID に属する container 候補を決定的な順序で返す."""
+
+    candidates: list[Path] = []
+    try:
+        entries = list(output_dir.iterdir())
+    except OSError as exc:
+        raise YtdlpError("動画保存先を確認できませんでした。") from exc
+    for entry in entries:
+        stat_result = _lstat_without_symlink(entry, "動画保存先")
+        if stat_result is None or not stat.S_ISREG(stat_result.st_mode):
+            continue
+        suffix = entry.suffix.lower()
+        if suffix not in _VIDEO_CONTAINER_SUFFIX_ORDER:
+            continue
+        if not entry.name.startswith(f"{video_id}."):
+            continue
+        candidates.append(_validate_confined_path(entry, settings, "動画保存先"))
+
+    def candidate_key(path: Path) -> tuple[int, int, str]:
+        is_formal_output = path.stem == video_id
+        return (
+            0 if is_formal_output else 1,
+            _VIDEO_CONTAINER_SUFFIX_ORDER[path.suffix.lower()],
+            path.name,
+        )
+
+    return sorted(candidates, key=candidate_key)
 
 
 def _audio_download_argv(
@@ -2451,7 +2581,7 @@ def fetch(url: str, settings: Settings | None = None) -> VideoMeta:
 def download_video(url: str, output_dir: Path, settings: Settings | None = None) -> Path:
     """切り出し用に動画を 1 本ダウンロードする."""
     settings = settings or get_settings()
-    extract_video_id(url)
+    video_id = extract_video_id(url)
     try:
         output_dir = validate_confined_candidate(
             settings.data_dir, output_dir, label="動画保存先"
@@ -2465,6 +2595,8 @@ def download_video(url: str, output_dir: Path, settings: Settings | None = None)
             "インストール後 PATH に通すか、YTLK_YTDLP_PATH を設定してください。"
         )
 
+    ffmpeg_path, ffprobe_path = _resolve_video_toolchain(settings)
+
     output_dir.mkdir(parents=True, exist_ok=True)
     _validate_directory_entries(output_dir, settings, "動画保存先")
     output_template = str(output_dir / "%(id)s.%(ext)s")
@@ -2475,6 +2607,9 @@ def download_video(url: str, output_dir: Path, settings: Settings | None = None)
             "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
             "--merge-output-format",
             "mp4",
+            "--keep-video",
+            "--ffmpeg-location",
+            str(ffmpeg_path),
             "-o",
             output_template,
             url,
@@ -2491,26 +2626,24 @@ def download_video(url: str, output_dir: Path, settings: Settings | None = None)
         )
 
     _validate_directory_entries(output_dir, settings, "動画保存先")
-    mp4_files = sorted(output_dir.glob("*.mp4"))
-    if mp4_files:
-        try:
-            return validate_confined_candidate(
-                settings.data_dir, mp4_files[0], label="動画保存先"
-            )
-        except PathConfinementError as exc:
-            raise YtdlpError(str(exc)) from exc
-
-    video_files = sorted(
-        f for f in output_dir.iterdir()
-        if f.is_file() and f.suffix.lower() in {".mp4", ".mkv", ".webm"}
+    video_files = _downloaded_video_candidates(
+        output_dir,
+        video_id,
+        settings=settings,
     )
     if not video_files:
         raise YtdlpError(
             "ダウンロードした動画ファイルが見つかりません。"
         )
-    try:
-        return validate_confined_candidate(
-            settings.data_dir, video_files[0], label="動画保存先"
+    for candidate in video_files:
+        stream_types = _probe_video_stream_types(
+            candidate,
+            ffprobe_path=ffprobe_path,
+            settings=settings,
         )
-    except PathConfinementError as exc:
-        raise YtdlpError(str(exc)) from exc
+        if {"video", "audio"}.issubset(stream_types):
+            return candidate
+    raise YtdlpError(
+        "映像と音声が結合された動画を確認できませんでした。"
+        "既存の映像・音声ファイルは保持しています。再実行してください。"
+    )

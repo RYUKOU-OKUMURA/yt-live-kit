@@ -24,6 +24,7 @@ from yt_live_kit.services.ytdlp import (
     _find_subtitle_file,
     _resolve_audio_ffmpeg,
     _run_ytdlp,
+    download_video,
     extract_video_id,
     fetch,
     get_ytdlp_binary_identity,
@@ -106,6 +107,39 @@ with wave.open(str(output_path), "wb") as output:
     )
     path.chmod(0o755)
     return path
+
+
+def _fake_video_toolchain(tmp_path: Path) -> tuple[Path, Path]:
+    bin_dir = tmp_path / "configured tools"
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    ffmpeg = bin_dir / "ffmpeg"
+    ffprobe = bin_dir / "ffprobe"
+    for path in (ffmpeg, ffprobe):
+        path.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        path.chmod(0o755)
+    return ffmpeg, ffprobe
+
+
+def _video_settings(tmp_path: Path, ffmpeg: Path) -> Settings:
+    return Settings(
+        data_dir=tmp_path / "data",
+        ytdlp_path="yt-dlp-test",
+        ffmpeg_path=str(ffmpeg),
+        ffmpeg_timeout=5,
+    )
+
+
+def _patch_ytdlp_available(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "yt_live_kit.services.ytdlp.shutil.which",
+        lambda value: "/usr/bin/yt-dlp" if value == "yt-dlp-test" else None,
+    )
+
+
+def _stream_document(*stream_types: str) -> str:
+    return json.dumps(
+        {"streams": [{"codec_type": value} for value in stream_types]}
+    )
 
 
 def _patch_audio_download(monkeypatch, content: bytes):
@@ -261,6 +295,266 @@ def test_prepare_audio_span_rejects_unlaunchable_ffmpeg_before_ytdlp(
 
     with pytest.raises(AudioSpanError, match="起動確認に失敗"):
         prepare_audio_span("IJvd6k6ZmUo", (1_000, 2_000), settings)
+
+
+def test_download_video_uses_configured_ffmpeg_when_path_ffmpeg_is_broken(
+    monkeypatch,
+    tmp_path,
+):
+    ffmpeg, ffprobe = _fake_video_toolchain(tmp_path)
+    broken_bin = tmp_path / "broken-path"
+    broken_bin.mkdir()
+    (broken_bin / "ffmpeg").write_text("#!/bin/sh\nexit 7\n", encoding="utf-8")
+    (broken_bin / "ffmpeg").chmod(0o755)
+    monkeypatch.setenv("PATH", str(broken_bin))
+    settings = _video_settings(tmp_path, ffmpeg)
+    output_dir = settings.data_dir / VIDEO_ID / "clips" / "source"
+    ytdlp_calls: list[list[str]] = []
+    process_calls: list[list[str]] = []
+    _patch_ytdlp_available(monkeypatch)
+
+    def fake_ytdlp(args, _settings, *, timeout=None, **_kwargs):
+        ytdlp_calls.append(list(args))
+        (output_dir / f"{VIDEO_ID}.mp4").write_bytes(b"merged av")
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    def fake_process(command, **kwargs):
+        process_calls.append(list(command))
+        assert kwargs["shell"] is False
+        if command == [str(ffmpeg.resolve()), "-hide_banner", "-version"]:
+            return subprocess.CompletedProcess(command, 0, "", "")
+        assert command[0] == str(ffprobe.resolve())
+        return subprocess.CompletedProcess(
+            command, 0, _stream_document("video", "audio"), ""
+        )
+
+    monkeypatch.setattr("yt_live_kit.services.ytdlp._run_ytdlp", fake_ytdlp)
+    monkeypatch.setattr("yt_live_kit.services.ytdlp.subprocess.run", fake_process)
+
+    result = download_video(URL, output_dir, settings)
+
+    assert result == output_dir / f"{VIDEO_ID}.mp4"
+    assert ytdlp_calls
+    command = ytdlp_calls[0]
+    assert command[command.index("--ffmpeg-location") + 1] == str(ffmpeg.resolve())
+    assert process_calls[-1][0] == str(ffprobe.resolve())
+    assert str(broken_bin) not in command
+
+
+def test_download_video_rejects_unlaunchable_ffmpeg_before_ytdlp(
+    monkeypatch,
+    tmp_path,
+):
+    ffmpeg, _ffprobe = _fake_video_toolchain(tmp_path)
+    ffmpeg.write_text("#!/bin/sh\nexit 7\n", encoding="utf-8")
+    settings = _video_settings(tmp_path, ffmpeg)
+    _patch_ytdlp_available(monkeypatch)
+
+    def fail_if_called(*_args, **_kwargs):
+        raise AssertionError("FFmpeg fail closed 前に yt-dlp を呼び出してはいけない")
+
+    monkeypatch.setattr("yt_live_kit.services.ytdlp._run_ytdlp", fail_if_called)
+
+    with pytest.raises(YtdlpError, match="起動確認に失敗"):
+        download_video(URL, settings.data_dir / VIDEO_ID / "clips" / "source", settings)
+
+
+def test_download_video_rejects_missing_colocated_ffprobe_before_ytdlp(
+    monkeypatch,
+    tmp_path,
+):
+    ffmpeg, ffprobe = _fake_video_toolchain(tmp_path)
+    ffprobe.unlink()
+    settings = _video_settings(tmp_path, ffmpeg)
+    _patch_ytdlp_available(monkeypatch)
+    monkeypatch.setattr(
+        "yt_live_kit.services.ytdlp.subprocess.run",
+        lambda command, **_kwargs: subprocess.CompletedProcess(command, 0, "", ""),
+    )
+
+    def fail_if_called(*_args, **_kwargs):
+        raise AssertionError("ffprobe fail closed 前に yt-dlp を呼び出してはいけない")
+
+    monkeypatch.setattr("yt_live_kit.services.ytdlp._run_ytdlp", fail_if_called)
+
+    with pytest.raises(YtdlpError, match="ffprobe が見つかりません"):
+        download_video(URL, settings.data_dir / VIDEO_ID / "clips" / "source", settings)
+
+
+def test_download_video_rejects_unmerged_sidecars_and_keeps_them(
+    monkeypatch,
+    tmp_path,
+):
+    ffmpeg, ffprobe = _fake_video_toolchain(tmp_path)
+    settings = _video_settings(tmp_path, ffmpeg)
+    output_dir = settings.data_dir / VIDEO_ID / "clips" / "source"
+    _patch_ytdlp_available(monkeypatch)
+
+    def fake_ytdlp(args, _settings, **_kwargs):
+        (output_dir / f"{VIDEO_ID}.f399.mp4").write_bytes(b"video only")
+        (output_dir / f"{VIDEO_ID}.f140.m4a").write_bytes(b"audio only")
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    def fake_process(command, **_kwargs):
+        if command[0] == str(ffmpeg.resolve()):
+            return subprocess.CompletedProcess(command, 0, "", "")
+        assert command[0] == str(ffprobe.resolve())
+        return subprocess.CompletedProcess(command, 0, _stream_document("video"), "")
+
+    monkeypatch.setattr("yt_live_kit.services.ytdlp._run_ytdlp", fake_ytdlp)
+    monkeypatch.setattr("yt_live_kit.services.ytdlp.subprocess.run", fake_process)
+
+    with pytest.raises(YtdlpError, match="映像と音声が結合"):
+        download_video(URL, output_dir, settings)
+
+    assert (output_dir / f"{VIDEO_ID}.f399.mp4").read_bytes() == b"video only"
+    assert (output_dir / f"{VIDEO_ID}.f140.m4a").read_bytes() == b"audio only"
+
+
+def test_download_video_leaves_existing_sidecars_for_ytdlp_local_merge(
+    monkeypatch,
+    tmp_path,
+):
+    ffmpeg, ffprobe = _fake_video_toolchain(tmp_path)
+    settings = _video_settings(tmp_path, ffmpeg)
+    output_dir = settings.data_dir / VIDEO_ID / "clips" / "source"
+    output_dir.mkdir(parents=True)
+    video_sidecar = output_dir / f"{VIDEO_ID}.f399.mp4"
+    audio_sidecar = output_dir / f"{VIDEO_ID}.f140.m4a"
+    video_sidecar.write_bytes(b"existing video")
+    audio_sidecar.write_bytes(b"existing audio")
+    _patch_ytdlp_available(monkeypatch)
+
+    def fake_ytdlp(args, _settings, **_kwargs):
+        assert video_sidecar.read_bytes() == b"existing video"
+        assert audio_sidecar.read_bytes() == b"existing audio"
+        assert "--force-overwrites" not in args
+        assert "--keep-video" in args
+        (output_dir / f"{VIDEO_ID}.mp4").write_bytes(b"locally merged")
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    def fake_process(command, **_kwargs):
+        if command[0] == str(ffmpeg.resolve()):
+            return subprocess.CompletedProcess(command, 0, "", "")
+        assert command[0] == str(ffprobe.resolve())
+        return subprocess.CompletedProcess(
+            command, 0, _stream_document("video", "audio"), ""
+        )
+
+    monkeypatch.setattr("yt_live_kit.services.ytdlp._run_ytdlp", fake_ytdlp)
+    monkeypatch.setattr("yt_live_kit.services.ytdlp.subprocess.run", fake_process)
+
+    result = download_video(URL, output_dir, settings)
+
+    assert result == output_dir / f"{VIDEO_ID}.mp4"
+    assert video_sidecar.read_bytes() == b"existing video"
+    assert audio_sidecar.read_bytes() == b"existing audio"
+
+
+def test_download_video_selects_first_deterministic_av_candidate(
+    monkeypatch,
+    tmp_path,
+):
+    ffmpeg, ffprobe = _fake_video_toolchain(tmp_path)
+    settings = _video_settings(tmp_path, ffmpeg)
+    output_dir = settings.data_dir / VIDEO_ID / "clips" / "source"
+    probed: list[str] = []
+    _patch_ytdlp_available(monkeypatch)
+
+    def fake_ytdlp(args, _settings, **_kwargs):
+        for name in (
+            f"{VIDEO_ID}.f399.mp4",
+            f"{VIDEO_ID}.mkv",
+            f"{VIDEO_ID}.mp4",
+            "unrelated.mp4",
+        ):
+            (output_dir / name).write_bytes(name.encode())
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    def fake_process(command, **_kwargs):
+        if command[0] == str(ffmpeg.resolve()):
+            return subprocess.CompletedProcess(command, 0, "", "")
+        assert command[0] == str(ffprobe.resolve())
+        candidate = Path(command[-1])
+        probed.append(candidate.name)
+        streams = (
+            ("video", "audio")
+            if candidate.suffix == ".mkv"
+            else ("video",)
+        )
+        return subprocess.CompletedProcess(command, 0, _stream_document(*streams), "")
+
+    monkeypatch.setattr("yt_live_kit.services.ytdlp._run_ytdlp", fake_ytdlp)
+    monkeypatch.setattr("yt_live_kit.services.ytdlp.subprocess.run", fake_process)
+
+    result = download_video(URL, output_dir, settings)
+
+    assert result == output_dir / f"{VIDEO_ID}.mkv"
+    assert probed == [f"{VIDEO_ID}.mp4", f"{VIDEO_ID}.mkv"]
+
+
+@pytest.mark.parametrize(
+    ("failure", "error_match"),
+    [
+        ("nonzero", "映像・音声を確認できません"),
+        ("timeout", "タイムアウト"),
+        ("invalid_json", "確認結果が不正"),
+        ("invalid_schema", "確認結果が不正"),
+    ],
+)
+def test_download_video_ffprobe_failures_are_fail_closed(
+    monkeypatch,
+    tmp_path,
+    failure,
+    error_match,
+):
+    ffmpeg, ffprobe = _fake_video_toolchain(tmp_path)
+    settings = _video_settings(tmp_path, ffmpeg)
+    output_dir = settings.data_dir / VIDEO_ID / "clips" / "source"
+    _patch_ytdlp_available(monkeypatch)
+
+    def fake_ytdlp(args, _settings, **_kwargs):
+        (output_dir / f"{VIDEO_ID}.mp4").write_bytes(b"candidate")
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    def fake_process(command, **_kwargs):
+        if command[0] == str(ffmpeg.resolve()):
+            return subprocess.CompletedProcess(command, 0, "", "")
+        assert command[0] == str(ffprobe.resolve())
+        if failure == "nonzero":
+            return subprocess.CompletedProcess(command, 7, "", "probe failed")
+        if failure == "timeout":
+            raise subprocess.TimeoutExpired(command, settings.ffmpeg_timeout)
+        if failure == "invalid_json":
+            return subprocess.CompletedProcess(command, 0, "not json", "")
+        return subprocess.CompletedProcess(command, 0, '{"streams": [{}]}', "")
+
+    monkeypatch.setattr("yt_live_kit.services.ytdlp._run_ytdlp", fake_ytdlp)
+    monkeypatch.setattr("yt_live_kit.services.ytdlp.subprocess.run", fake_process)
+
+    with pytest.raises(YtdlpError, match=error_match):
+        download_video(URL, output_dir, settings)
+
+
+def test_download_video_returncode_zero_without_video_candidate_is_failure(
+    monkeypatch,
+    tmp_path,
+):
+    ffmpeg, _ffprobe = _fake_video_toolchain(tmp_path)
+    settings = _video_settings(tmp_path, ffmpeg)
+    output_dir = settings.data_dir / VIDEO_ID / "clips" / "source"
+    _patch_ytdlp_available(monkeypatch)
+    monkeypatch.setattr(
+        "yt_live_kit.services.ytdlp.subprocess.run",
+        lambda command, **_kwargs: subprocess.CompletedProcess(command, 0, "", ""),
+    )
+    monkeypatch.setattr(
+        "yt_live_kit.services.ytdlp._run_ytdlp",
+        lambda args, _settings, **_kwargs: subprocess.CompletedProcess(args, 0, "", ""),
+    )
+
+    with pytest.raises(YtdlpError, match="動画ファイルが見つかりません"):
+        download_video(URL, output_dir, settings)
 
 
 def _mock_fetch_dependencies(monkeypatch, metadata: dict) -> None:
