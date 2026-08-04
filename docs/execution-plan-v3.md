@@ -47,6 +47,13 @@
 | S9-3 | whisper.cpp runtime・capability・音声区間準備 | [x] 完了 |
 | S9-4 | 親候補区間 Whisper 精査 → short_cut / telop / line 再利用 | [x] 完了 |
 | S9-5 | UI 設定・進捗・エラー・失効表示 | [x] 完了 |
+| T1-PLAN | テロップ行時刻同期計画（docs-only） | [x] 完了 |
+| T1 | テロップ行時刻同期・明示確認 | [~] 進行中 |
+| T1-1 | production 非変更 timing spike・評価 manifest | [ ] 未着手 |
+| T1-2 | timing 保存契約・extractor | [ ] 未着手 |
+| T1-3 | pure aligner・telop・fingerprint 統合 | [ ] 未着手 |
+| T1-4 | Streamlit UI 時刻確認 gate | [ ] 未着手 |
+| T1-5 | 同期 component acceptance | [ ] 未着手 |
 | S9-6 | A/B 受け入れ・回帰・フェーズ判定 | [~] 進行中 |
 | S9 | 選択親候補区間のローカル Whisper 精査（実装） | [~] 進行中 |
 | P6-PLAN | Shorts 投稿メタデータ品質ゲート計画（docs-only） | [x] 完了 |
@@ -1502,7 +1509,7 @@ data/{video_id}/ ...
 ### S9: 選択親候補区間のローカル Whisper 精査（v3.2 追加）
 
 **目的:** 良好な YouTube VTT を候補探索の粗い親入力として維持しながら、人が選択した親候補の必要区間だけをローカル Whisper で精査し、サブ区間判断とテロップ台本で同じ字幕結果を再利用する。全編再文字起こしを通常経路にしない。
-**フェーズ状態:** [ ] 未着手。S9-PLAN（要件・計画の確定）は [x] 完了。
+**フェーズ状態:** [~] 進行中。S9-PLAN（要件・計画の確定）は [x] 完了し、S9-6 は最終受け入れ専用として未完了のまま T1 を先行する。
 **前提:** U6、S8、S6、S1、S3、S4、U8、R1、H1、G1 が完了済みで、既存の `(video_id, clip_id)` ライン状態、FR-30 の cutplan、FR-22 の telop、FR-25 の整数ミリ秒境界を正本として再利用する。S9 で `video_id` を `asset_id` へ移行しない。
 
 **背景（実機で観測した事実）:** S8 の実機確認で、焼き込まれた字幕に固有名詞の誤認識が目立つことを確認した。実データ例（`data/LB4px1wRFnY`）では「クロード」が次行で「フロード」になり、「感覚すけど」のように助詞が脱落している。原因は YouTube 自動字幕（VTT）そのものの精度であり、区間の切り方や連結処理の問題ではない。U6 の AI 案と人の全文確認で直る誤りもあるため、先に S9 の A/B で追加効果を測定する。
@@ -1707,12 +1714,174 @@ data/{video_id}/ ...
 
 **コミット境界:** UI / component / UI test を `S9-5` 単位でコミットする。設定・進捗・エラー表示だけを変更し、S9-4 の service 契約を UI に複製しない。
 
+### T1: テロップ行時刻同期・明示確認（v3.2 追加）
+
+**目的:** S9-6 を受け入れ専用の未完了状態で保持したまま、Codex が作成したテロップ draft の行時刻を、既存の production 境界を変えずに評価・保存・補正・表示する独立した実装列を追加する。低信頼行は元時刻を維持して警告し、誤字・固有名詞の全文確認とは別に、要確認行の時刻確認を明示的に記録する。
+**フェーズ状態:** [~] 進行中。T1-PLAN は [x] 完了、次の未着手タスクは T1-1。T1-5 の同期受け入れ後に S9-6 の正式受け入れを一度だけ行う。
+**対応要件 / AC:** FR-22、FR-25、FR-33、FR-35、FR-36、FR-39、AC-23、AC-35、AC-37、AC-40。
+**依存:** `S9-5 → T1-PLAN → T1-1 → T1-2 → T1-3 → T1-4 → T1-5 → S9-6`。既存 S9-6 の ID・目的・受け入れ専用性は変更しない。
+
+**T1 全体の固定契約:**
+
+- Codex draft 後、人の全文確認前に pure monotonic aligner を実行できるのは T1-3 以降とし、T1-1 は production 非変更の測定、T1-2 は timing payload の保存契約に限定する。通常経路・production artifact / cache への追加 Whisper は禁止するが、T1-1 では固定した選択 span を隔離 temp へ bounded に再実行する benchmark だけ許可する
+- 一意かつ高信頼な行だけを補正する。低信頼、要約、省略、重複、cross-cue 曖昧、token 欠落は元時刻を保持し、全件 flag と日本語警告を付ける。各行への無意味な編集は要求しない
+- owning cue / range clamp、時系列、非重複、最低表示 500 ms を満たせない補正は採用せず fallback とする。token end は時刻の唯一の正本にしない
+- timing confirmation は全文確認とは別の gate とし、low-confidence 行がある場合だけ必須にする。本文、時刻、alignment input、policy の変更で失効し、A → B → A でも自動復帰しない
+- `subtitle_burn.py`、FFmpeg、cut 境界、queue fingerprint の意味、投稿予約、Codex 回数を変更しない。通常 rerun で外部処理を開始しない
+- T1-PLAN では方式選定 ADR を作らず、T1-1 の spike 合格後にだけ T1-2 が Artifact v2 と immutable timing sidecar の比較を ADR で決める
+- **Whisper 実行境界:** T1-1 だけは、固定 manifest の選定済み span に対象・回数の上限を設け、isolated temp へ bounded に whisper-cli を再実行してよい。production data / artifact / cache / output / hash は不変とする。T1-2 以降、本番経路、manifest 外の区間、全動画再解析、全編 Whisper、47 本 backfill は禁止する
+- 実 upload、公開データ変更、Studio 操作、local video、asset ID 移行、従量課金 API、新規依存は全 T1 で禁止する
+
+#### T1-PLAN: テロップ行時刻同期計画（docs-only）
+
+**タスク状態:** [x] 完了。S9-5 完了後、S9-6 を開いたまま T1 を挿入する計画を確定した。
+**目的:** 各 T1 を独立 commit・独立レビュー可能な境界へ分解し、評価・永続化・pure alignment・UI gate・同期受け入れの責務と安全境界を先に固定する。実装方式の選択や production schema の変更は行わない。
+**前提:** S9-1〜S9-5 完了、S9-6 は未確認の受け入れ専用、R2 の UI 安全境界と刷新順が確定済み。
+**変更ファイル範囲:** `docs/execution-plan-v3.md`、`docs/requirements-v3.md`、`docs/v3-agent-prompts.md`、`docs/tech-stack.md` の 4 ファイルだけ。ADR、コード、tests、benchmarks、fixture / data、production artifact / cache、`.codex/learning/user-decisions.md`、skill pointer は作成・編集しない。
+
+**作業:**
+
+- [x] T1-PLAN-1. FR-22 / FR-25 / FR-33 / FR-35 / FR-36 と AC-23 / AC-35 / AC-37 の既存契約を保ったまま、FR-39 / AC-40、用語、低信頼・timing confirmation・fallback の境界を要件書へ追加する
+- [x] T1-PLAN-2. T1-1〜T1-5 の目的、前提、変更範囲、作業、テスト、Done、コミット境界、推定工数、禁止事項と、S9-6 を最後にする依存を実行計画へ追加する
+- [x] T1-PLAN-3. 通常 / S9 ワーカー指示、T1 専用報告項目、レビュー観点、scope guard を `v3-agent-prompts.md` へ追加する
+- [x] T1-PLAN-4. timing payload、atomic 保存、pure service、Streamlit session-state、既存 FFmpeg / queue / upload 境界を `tech-stack.md` へ反映する。方式選定 ADR は作成しない
+- [x] T1-PLAN-5. `git diff --check`、docs 間の task ID / 依存 / FR / AC / 進捗 / 次アクション整合、変更範囲を確認する
+
+**テスト / 検証:** docs-only のため `uv run pytest` は実行対象外。`git diff --check`、Markdown 内の ID / 依存参照確認、許可された 4 docs 以外の変更が無いことを検証する。
+
+**Done 条件:**
+
+- [x] T1-1 が次の未着手タスクとして明示され、T1-2 以降と S9-6 の依存順が一意である
+- [x] 各 T1 タスクに目的、前提、変更ファイル範囲、作業、テスト、Done、commit 境界、推定工数、禁止事項がある
+- [x] 低信頼行の元時刻維持、独立 timing confirmation、入力変更時失効、全文確認・最終 preview 維持が FR / AC / prompt / tech-stack で一致する
+- [x] S9-6、S9、M16、AC-37 の未確認状態を完了へ変更していない
+- [x] T1-PLAN は方式選定 ADR、production 変更、tests / benchmarks / data / learning log を含まず、task ID 入り docs commit の境界が明示されている
+
+**コミット境界:** この 4 docs のみを `docs(T1-PLAN): define telop timing sync contract` としてコミットする。main へ統合しない。
+**推定工数:** 0.5 日。
+
+#### T1-1: production 非変更 timing spike と評価 manifest 固定
+
+**タスク状態:** [ ] 未着手。T1-PLAN 完了後の次の着手タスク。
+**目的:** token timing alignment を production に導入する前に、固定 fixture と人音声 gold で現行・短 cue 候補・token timing alignment 候補を比較し、採用可否の根拠を production 非変更で得る。現行 artifact が raw token timing を保持しない場合は、固定した選択 span だけを隔離 temp へ bounded に whisper-cli 再実行し、raw full JSON と token timing 候補を benchmark input として取得する。
+**前提:** S9-1 の固定評価・S9-5 完了・T1-PLAN 完了。測定開始前に manifest、gold、coverage 分母、gate、実行環境を immutable に固定する。
+**変更ファイル範囲:** `benchmarks/t1/` の専用 harness / fixture / manifest、`docs/benchmarks/` の T1-1 manifest・結果・再現記録、必要な benchmark 用 tests のみ。隔離 temp は repository 外または明示した一時 `data_dir` とし、`src/`、既存 `tests/`、既存 `data/`、production artifact / cache / output / hash、既存 S9-1 証跡は変更しない。
+
+**作業:**
+
+- [ ] T1-1-1. 長い単一 cue、multi / cross-cue、VTT fallback + 連結を各 20 行以上、全体 60 行以上含む評価 manifest を測定前に固定し、fixture fingerprint と変更禁止の記録を残す。manifest に有限の整数 `max_selected_spans` と `max_whisper_invocations` を各実行で明記し、実績が上限を超えないことを検証する
+- [ ] T1-1-2. gold は人が音声を聞いて付けた line onset だけとし、推測 token end、字幕 end、既存自動境界を gold に昇格しない
+- [ ] T1-1-3. 現行 artifact が raw token timing を持たない場合、manifest の `max_selected_spans` と `max_whisper_invocations` の範囲内で固定した選択 span を隔離 temp へ bounded に whisper-cli 再実行し、runtime / model / settings fingerprint、再現 command、raw full JSON の hash を記録する。production data / artifact / cache / output / hash は変更せず、全編処理・47 本 backfill は行わない
+- [ ] T1-1-4. 現行、短 cue 候補、token timing alignment 候補を同じ fixture・同じ policy で A/B 比較し、CER、固有名詞、cue 欠落 / 重複、wall time、peak memory も同じ証跡へ記録する
+- [ ] T1-1-5. coverage 分母を固定 manifest 内の検証済み token timing を持ち alignment 対象になり得る全 telop 行とし、VTT fallback と timing 無し legacy は coverage 外の非回帰群として分離する。VTT fallback + 連結群は現行出力同等、誤った自動移動 0 を別に判定する
+- [ ] T1-1-6. provisional Go gate を pooled と、alignment 対象の長い単一 cue 群・multi / cross-cue 群の各群で個別に満たす。各群と pooled の coverage 80％以上、absolute onset median 250 ms 以下、p90 500 ms 以下、max 1000 ms 以下、signed median bias の絶対値 200 ms 以下、誤った line / cross-cue 移動 0 を測定前に記録する。結果後の基準緩和は禁止し、変更は別承認と理由記録を要する
+- [ ] T1-1-7. low-confidence は全件 flag、元時刻維持、黙った移動 0 を確認し、owning cue / range clamp、時系列、非重複、最低表示 500 ms を満たせない場合は fallback にする。長い単一 cue 群・multi / cross-cue 群の signed bias と VTT fallback + 連結群の非回帰結果を別集計する
+
+**テスト / 検証:** 固定 manifest の再現実行、固定選択 span の隔離 bounded whisper-cli 実行、runtime / model fingerprint と再現 command の検証、候補別 metric 再計算、群別 / pooled gate、gold / glossary / cue 欠落重複監査、VTT fallback + 連結の現行出力同等性、failure / fallback、wall / peak memory、production hash unchanged、`git diff --check`。production 経路への追加 Whisper、実 upload、外部 API は使わない。
+
+**Done 条件:** 上記 3 fixture 群と 60 行以上の件数、gold、分母、gate、A/B 全指標、低信頼・fallback 証跡、再現 command、production 非変更が独立レビュー可能であり、Go / No-Go が事後緩和なしに判定できること。No-Go の場合は T1-2 へ進まず fallback-only と記録する。
+**コミット境界:** benchmark 専用ファイルと証跡だけを `T1-1` としてコミットする。production code / artifact / cache を混ぜない。
+**推定工数:** 1〜1.5 日。
+**禁止事項:** production data / artifact / cache / output / hash の変更、固定選択 span 外の Whisper、全編 Whisper、47 本 backfill、gold の自動生成、結果後の閾値緩和、候補の黙った移動、T1-2 の方式決定や production 採用。隔離 temp の bounded benchmark 以外の Whisper 実行は禁止する。
+
+#### T1-2: timing 保存契約・extractor
+
+**タスク状態:** [ ] 未着手。T1-1 の provisional Go 後だけ着手する。
+**目的:** Artifact v2 と immutable timing sidecar を比較し、既存 full JSON から一度だけ安全に token timing を抽出・永続化し、legacy / VTT fallback を壊さない immutable contract を実装する。
+**前提:** T1-1 の fixed manifest / Go 証跡、S9-2 / S9-3 の artifact・runtime・cache identity 契約、既存 full JSON schema。
+**変更ファイル範囲:** `docs/adr/0001-telop-timing-persistence.md`、`src/yt_live_kit/models/transcript.py`、`src/yt_live_kit/services/transcript.py`、`src/yt_live_kit/services/transcript_artifact.py`、`src/yt_live_kit/services/whisper_runtime.py`、必要なら新規 `src/yt_live_kit/models/transcript_timing.py` / `src/yt_live_kit/services/transcript_timing.py`、`tests/test_transcript.py`、`tests/test_whisper_runtime.py`、新規 timing tests。T1-2 が所有しない telop UI、subtitle burn、FFmpeg、cutplan、queue、upload は編集しない。
+
+**作業:**
+
+- [ ] T1-2-1. Artifact v2 と immutable timing sidecar の保存単位、互換性、失効、atomic replace、再検証条件を ADR で比較し、T1-1 の根拠に基づき一方を選ぶ。T1-PLAN では ADR を作らない
+- [ ] T1-2-2. sidecar を選ぶ場合は parent artifact reference だけでなく、正規化 token payload または raw full JSON hash、model / runtime / settings / ranges、schema / policy version、自身の fingerprint を保存する。Artifact v2 の場合も同じ provenance を strict schema で保持する
+- [ ] T1-2-3. T1-2 の extractor は既存 full JSON の結果だけを再利用し、T1-1 の isolated benchmark 例外を持ち越して追加 Whisper を呼ばない。atomic 保存後に parent、payload、policy、fingerprint、範囲、cue 所属を再検証する
+- [ ] T1-2-4. whitespace / metadata、zero / reverse end、日本語 subword を安全に扱い、解釈できない token は alignment 不可にする。token end を時刻の唯一の正本にしない
+- [ ] T1-2-5. 既存 artifact は backfill せず、timing 無し artifact / VTT / legacy は明示的 timing fallback として返す
+
+**テスト / 検証:** strict schema、未知 field、payload / parent hash、model / runtime / settings / range / policy mismatch、atomic crash、cache restart、zero / reverse end、whitespace / metadata、日本語 subword、legacy fallback、T1-2 の追加 Whisper 呼び出し無しを unit / integration test で確認する。
+
+**Done 条件:** ADR と実装が同じ保存選択を示し、保存・再検証・失効・fallback が deterministic で、既存 artifact / VTT / legacy の bytes と意味を変更せず、full JSON 一回の処理から timing payload を再利用できること。T1-3 が読む typed contract と fingerprint が固定されること。
+**コミット境界:** ADR、timing model / extractor / artifact 接続、該当 tests だけを `T1-2` としてコミットする。
+**推定工数:** 1〜1.5 日。
+**禁止事項:** T1-1 不合格時の着手、T1-1 の isolated benchmark 例外の持ち越し、manifest 外の解析、既存 artifact の backfill、T1-2 の追加 Whisper、token end の正本化、UI での schema 複製、production data の一括変換、新規依存。
+
+#### T1-3: pure aligner・telop・fingerprint 統合
+
+**タスク状態:** [ ] 未着手。T1-2 の保存 contract が review PASS した後に着手する。
+**目的:** Codex draft と T1-2 timing payload を純粋関数で対応付け、一意高信頼行だけを補正し、行別状態と policy / provenance / fingerprint を telop review lineage へ統合する。
+**前提:** T1-1 Go、T1-2 commit / review PASS、FR-25 の整数ミリ秒・区間・入力順、S9-4 の immutable artifact handoff、R2 の service 境界。
+**変更ファイル範囲:** `src/yt_live_kit/models/telop.py`、`src/yt_live_kit/services/telop.py`、新規 `src/yt_live_kit/services/timing_alignment.py`、必要最小限の `src/yt_live_kit/services/shorts_line.py` の review lineage / fingerprint 接続、`tests/test_telop.py`、`tests/test_shorts_line.py`、新規 timing alignment tests。`subtitle_burn.py`、`services/ffmpeg.py`、cut boundary、queue fingerprint の意味、投稿予約、Codex 呼び出し回数は変更しない。
+
+**作業:**
+
+- [ ] T1-3-1. monotonic・cue ownership・confidence 判定を持つ副作用のない aligner を draft 生成後、人確認前に呼べる形へする。行と token が一意かつ高信頼のときだけ start / end を補正する
+- [ ] T1-3-2. 要約・省略・重複・cross-cue 曖昧・token 欠落は元時刻と flag を返し、自動移動や編集強制をしない。低信頼が混在しても高信頼行だけの補正を silent な全体移動にしない
+- [ ] T1-3-3. owning cue / range clamp、時系列、非重複、最低表示 500 ms を検証し、違反時は元時刻へ fallback する。VTT / legacy / timing 無し artifact は既存 route を維持する
+- [ ] T1-3-4. telop review lineage に timing policy、provenance、parent / payload fingerprint、status、行別 flag を含め、A → B → A を含む text / time / alignment / policy 変更で review と timing confirmation を失効可能にする
+- [ ] T1-3-5. 人が本文または時刻を編集した後、明示的な再生成なしに自動再配置しない。subtitle_burn、FFmpeg、cut、queue、upload の入力意味と Codex 回数を固定する
+
+**テスト / 検証:** pure unit test、長い単一 cue / multi / cross-cue、Japanese subword / whitespace、低信頼全件 flag、clamp / chronology / non-overlap / 500 ms、VTT / legacy fallback、fingerprint、A → B → A、編集後の自動再配置無し、既存 burn / cut / queue の回帰。
+
+**Done 条件:** aligner が pure で、補正対象と fallback 対象を deterministic に分け、lineage / fingerprint が T1-4 と生成 preflight で再検証できる。既存 subtitle burn、FFmpeg、cut 境界、queue fingerprint、投稿予約、Codex 回数に差分が無いことをレビューできる。
+**コミット境界:** aligner、telop model / service、review lineage 接続、該当 tests だけを `T1-3` としてコミットする。
+**推定工数:** 1〜1.5 日。
+**禁止事項:** UI への business logic 複製、低信頼行の自動移動、無意味な編集要求、subtitle burn / FFmpeg / cut / queue / upload 契約の改変、text edit 後の暗黙再配置、追加 Codex。
+
+#### T1-4: Streamlit UI 時刻確認 gate
+
+**タスク状態:** [ ] 未着手。T1-3 の service / lineage contract が review PASS した後に着手する。
+**目的:** 同期状態、時刻確認の必要性、現在の start / end editor、独立 confirmation、再起動後の fail closed を UI へ接続し、通常 rerun で外部処理を発生させない。
+**前提:** T1-3 の typed status / flags / policy / fingerprint、U6 の line state、S9-5 の status 表示、R2 の `ui-refactor-review-2026-08-04.md` の安全境界と刷新順。
+**変更ファイル範囲:** `src/yt_live_kit/ui/components/shorts_line.py`、`src/yt_live_kit/ui/view_models/shorts_line.py`、必要な `src/yt_live_kit/ui/session_keys.py`、`src/yt_live_kit/services/shorts_line.py` の timing confirmation 永続化境界、`tests/test_ui_shorts_line.py`、該当 service tests。page shell〜工程 bar の刷新は計画更新後の別 diff とし、telop editor の刷新は T1 contract 後に分離する。
+
+**作業:**
+
+- [ ] T1-4-1. `synchronized`、`timing_review_required`、`cannot_sync` と行別 warning / fallback 理由を日本語で表示する
+- [ ] T1-4-2. 現行の開始秒・終了秒 editor を維持し、全文の誤字・固有名詞確認と別の「要確認行の時刻を確認した」 gate を実装する。low-confidence が無い場合は timing gate を必須にしない
+- [ ] T1-4-3. confirmation snapshot に text / time / alignment input / policy / lineage fingerprint を結び付け、変更、範囲変更、cache restart、A → B → A で失効させる。確認済みを推測復元しない
+- [ ] T1-4-4. Streamlit session state は draft buffer / widget identity に限定し、validator・alignment・line state 遷移を UI に複製しない。通常 rerun、表示切替、再描画で Codex / Whisper / ffmpeg / upload を呼ばない
+- [ ] T1-4-5. R2 の conditional rendering、explicit CTA、破壊操作確認、service の atomic / fail closed 境界と、UI 刷新順を壊さない
+
+**テスト / 検証:** Streamlit AppTest または既存 UI harness、3 status 表示、low-confidence 有無、editor 保持、timing gate と全文確認の分離、入力変更 / A → B → A 失効、cache restart、failure / fallback、通常 rerun の外部処理無し、line state atomic / fail closed、既存 preview / generation gate。
+
+**Done 条件:** ユーザーが現在の時刻、要確認行、次の確認操作を理解でき、low-confidence があるときだけ timing confirmation 後に生成へ進める。full-text confirmation と final preview を維持し、UI に business logic がなく、再起動後に証明できない確認を再利用しない。
+**コミット境界:** UI、view model、timing confirmation service 境界、該当 tests だけを `T1-4` としてコミットする。ページ shell / 工程 bar の刷新差分を混ぜない。
+**推定工数:** 1〜1.5 日。
+**禁止事項:** 通常 rerun の外部処理、UI への schema / fingerprint / alignment 複製、全行編集の強制、低信頼行の黙った移動、確認状態の推測、破壊操作の確認省略。
+
+#### T1-5: 同期 component acceptance
+
+**タスク状態:** [ ] 未着手。T1-1〜T1-4 の独立 review PASS 後に着手する。完了しても S9-6 は開いたままにする。
+**目的:** T1 の component contract である A/B、gold、保存・失効・fallback、UI gate、scope guard を一度の同期受け入れで検証し、S9-6 が最後に formal phase acceptance を実施できる状態を作る。T1-5 PASS は S9-6 の人 preview、A/B、gold、失効、cache、fallback、scope gate を省略する根拠にならない。
+**位置づけ:** T1-5 は同期 component acceptance、S9-6 は S9 の formal phase acceptance である。T1-5 の immutable evidence は、manifest / gold / runtime / model / policy / artifact fingerprint が一致し再検証できる範囲で S9-6 が参照してよいが、S9-6 は必要な人 preview と最終 gate を独立に確認する。
+**前提:** T1-1〜T1-4 の commit / review PASS、S9-1〜S9-5 の証跡、R2 の安全境界、実 upload / Studio 操作を行わない受け入れ環境。
+**変更ファイル範囲:** `benchmarks/t1/` の受け入れ harness、`docs/benchmarks/` の T1-5 証跡、新規または T1 専用の `tests/test_t1_timing_sync.py`、検証用 copy / 隔離 `data_dir` への preview 出力、`docs/execution-plan-v3.md` と `docs/requirements-v3.md` の事実ベースのチェック更新。production `src/`、production artifact / cache / output / hash、既存 S9-1 監査節、learning log は変更しない。
+
+**作業:**
+
+- [ ] T1-5-1. T1-1 の固定 manifest / gold / coverage / gate で A/B と metric、CER、固有名詞、cue 欠落 / 重複、wall、peak memory を再現する
+- [ ] T1-5-2. in-range / out-of-range VTT、parent / payload / model / settings / audio、policy、text / time の変更と cache restart を検証し、失効対象を証跡化する
+- [ ] T1-5-3. failure / fallback、legacy、VTT、low-confidence、timing confirmation、全文確認、final preview、通常 rerun、scope guard を通しで確認する
+- [ ] T1-5-4. 全 `uv run pytest`、`git diff --check`、`uv run python -m compileall -q src`、再現 command、隔離 `data_dir` または production 素材の検証用 copy への再生成 preview を実行し、production artifact / cache / output / hash unchanged を保存する
+- [ ] T1-5-5. 実 upload、公開データ変更、Studio、全編 Whisper、47 本 backfill が無いことを確認し、T1-5 のみを完了へ更新する。T1-5 は AC-40 の証跡を揃えるが AC-40 を `[x]` にせず、S9-6 の未確認 checkbox と S9 / M16 も更新しない
+
+**テスト / 検証:** T1 A/B と fixed gold、in / out range 失効、cache restart、failure / fallback、legacy、scope guard、隔離 `data_dir` / 検証用 copy への再生成 preview、production hash unchanged、全 pytest、diff check、compileall、独立レビュー。
+
+**Done 条件:** T1 の全契約と AC-40 の証跡が揃い、T1-5 の component Go / No-Go を記録できる。T1-5 が PASS しても S9-6 が一度だけ人 preview・最終 A/B・gold・失効・cache・fallback・scope の formal phase 判定を行うまで、S9-6、S9、M16、AC-37、AC-40 は未完了のまま残る。AC-40 は S9-6 formal PASS 時にだけ `[x]` へ更新する。
+**コミット境界:** T1 受け入れ harness / 証跡 / tests と事実ベースの計画更新だけを `T1-5` としてコミットする。S9-6 の判定や production code の追加変更を混ぜない。
+**推定工数:** 1 日。
+**禁止事項:** 実 upload、公開データ変更、Studio、production data / artifact / cache / output の再生成、全編 Whisper、47 本 backfill、S9-6 の先行完了、AC-37 / AC-40 の先行完了。preview は必ず隔離 `data_dir` または検証用 copy へ出力する。
+
+**T1-PLAN 完了時点の次アクション:** `T1-1` の固定 manifest を測定前に確定し、production 非変更 spike の Go / No-Go を独立 review する。T1-1 が PASS するまで T1-2 の ADR や production schema を作らない。
+
 #### S9-6: A/B 受け入れ・回帰・フェーズ判定
 
 **目的:** 精度改善が実運用の毎日 3 本に効くことと、既存 VTT 経路・人確認・境界安全性が非回帰であることを証跡化し、S9 を完了または fallback-only と判定する。
-**対応要件 / AC:** 運用目標、FR-22、FR-25、FR-30、FR-33、FR-35、FR-36、AC-30、AC-35、AC-37。
+**位置づけ:** S9-6 は T1-5 の component acceptance とは別の S9 formal phase acceptance である。T1-5 の immutable evidence は fingerprint と入力条件が一致する場合に参照できるが、人 preview、A/B、gold、失効、cache、fallback、scope の最終 gate を省略しない。
+**対応要件 / AC:** 運用目標、FR-22、FR-25、FR-30、FR-33、FR-35、FR-36、FR-39、AC-30、AC-35、AC-37、AC-40。
 
-**前提:** S9-1〜S9-5 の完了、S9-1 と同じ 3〜5 本の代表素材・gold transcript・固有名詞 glossary・固定 gate、可能なら短い候補と 180 秒超候補を含む実配信アーカイブ 2 本以上、ユーザーが確認できるローカル runtime / model。実 YouTube upload はこのタスクの自動試験に含めない。
+**前提:** S9-1〜S9-5 と T1-5 の完了、S9-1 と同じ 3〜5 本の代表素材・gold transcript・固有名詞 glossary・固定 gate、可能なら短い候補と 180 秒超候補を含む実配信アーカイブ 2 本以上、ユーザーが確認できるローカル runtime / model。実 YouTube upload はこのタスクの自動試験に含めない。
 
 **S9-1 境界 evidence の再確認:** final short preview では4 caseの editorial outcome（case 1 は今回の境界・連続性で追加処置なし、case 2・3 は opening trim / review、case 4 は internal gap removal / review）を再確認する。親候補の無発話を許すことと、最終 short に無発話を残さないことは別の acceptance とし、S9-1 の partial auditだけで S9 を完了・Go にしない。
 
@@ -1724,7 +1893,7 @@ data/{video_id}/ ...
 - [ ] S9-6-2. 代表素材で「VTT で親候補選定 → 選択区間だけ Whisper → cutplan → 同じ artifact で telop → 人確認 → 生成」を通し、180 秒以下の単一区間経路も確認する
 - [ ] S9-6-3. VTT を使用範囲内・範囲外で変え、candidate / cutplan / telop / review / output の失効差を確認する。Whisper artifact の model / settings / audio input を変えた場合は高精度扱いが解除されることを確認する
 - [ ] S9-6-4. `uv run pytest` 全件、`git diff --check`、S9 benchmark の再現 command、手動 UI 証跡、導入できない runtime の日本語 fallback をまとめる
-- [ ] S9-6-5. Go の場合だけ進捗サマリーの S9 実装タスクと AC-30 / AC-35 / AC-37 を更新する。No-Go または fallback-only の場合は S9 を完了にせず、根拠と次段階候補を記録する
+- [ ] S9-6-5. Go の場合だけ進捗サマリーの S9 実装タスクと AC-30 / AC-35 / AC-37 / AC-40 を更新する。AC-40 は T1-5 で証跡が揃っていても、この formal PASS 時にだけ `[x]` にする。No-Go または fallback-only の場合は S9 と AC-40 を完了にせず、根拠と次段階候補を記録する
 - [ ] S9-6-6. S9-1 の CER 相対改善 10％、固有名詞 exact match 非悪化、cue 欠落 / 重複 baseline +5％以内、wall time / peak memory budget を同じ fixture で再判定し、閾値未達は No-Go のまま残す
 
 **テスト:** unit / integration / UI tests、同じ 3〜5 本の fixture A/B、実配信アーカイブ 2 本以上（取得できる場合）、cache restart、failure injection、実機 UI 1 本。実 YouTube の字幕取得は承認済み素材に限り、投稿・概要欄反映・削除・全本 backfill は行わない。
@@ -1733,8 +1902,9 @@ data/{video_id}/ ...
 - [ ] A/B 数値と目視・人確認の証跡、選択モデル、処理時間、失効差、回帰結果、fallback の挙動、Go / No-Go が独立レビュー可能な形で残る
 - [ ] S9-1 と同じ gold / glossary / threshold / budget が再現 command と fixture fingerprint に結び付き、代表素材と実配信アーカイブの差が記録される
 - [ ] S9 初版の scope 外（全編 Whisper、字幕なし通常経路、local video、asset ID）は実装されていない
+- [ ] T1-5 の immutable evidence の再利用条件が確認され、人 preview、A/B、gold、失効、cache、fallback、scope の formal gate を独立に通過し、AC-40 を `[x]` に更新する
 
-**S9-6 受け入れ証跡の追記:** 2026-08-04 main の `3d113ef` / `071929d` 統合後、初回レビューで P1 二点を指摘し、follow-up で APPROVE とした。main focused S9 は123件 passedしたが、判定は fallback-only のまま人 UI 確認待ちである。次の具体的な確認は case2 / case3 の opening trim 後 preview、case4 の internal gap removal 後 preview、final short に無発話がないことの確認とする。exact gold / glossary / cue anchor 監査または明示的 waiverも未完了であり、S9-6 の全チェック、S9、M16、AC-30 / AC-35 / AC-37 の受け入れ判定は未完了を維持する。
+**S9-6 受け入れ証跡の追記:** 2026-08-04 main の `3d113ef` / `071929d` 統合後、初回レビューで P1 二点を指摘し、follow-up で APPROVE とした。main focused S9 は123件 passedしたが、判定は fallback-only のまま人 UI 確認待ちである。次の具体的な確認は case2 / case3 の opening trim 後 preview、case4 の internal gap removal 後 preview、final short に無発話がないことの確認とする。exact gold / glossary / cue anchor 監査または明示的 waiverも未完了であり、S9-6 の全チェック、S9、M16、AC-30 / AC-35 / AC-37 / AC-40 の受け入れ判定は未完了を維持する。
 
 **S9-6 実機障害 hotfix・統合実績（2026-08-04）:** 実 UI で選択区間の高精度字幕 job が resolver 段階で失敗した原因を、`YTLK_FFMPEG_PATH` に設定済みの `ffmpeg-full` が yt-dlp の部分音声取得へ渡らず、壊れた PATH 上の `ffmpeg` に依存していたことと特定した。HF1 `4a37533` で設定済み実行ファイルの解決・起動確認を network 前に fail closed で行い、yt-dlp へ明示的な `--ffmpeg-location` を渡した。cache hit は従来どおり不要な preflight / network を省略する。HF2 `b68429c` では S9 の構造化 error を持つ失敗だけを「選択区間の高精度字幕」と表示し、通常の short cut 提案ラベルを維持した。さらに current review fingerprint、queue fingerprint、artifact reference / fingerprint / ordered cue digests と実 artifact の現行性がすべて一致する場合だけ保存済み strict telop document を復元して古い一時 error を除き、不一致・破損・失効時は fail closed を維持した。Codex の自動再呼び出し・自動承認・自動生成は追加していない。各実装の独立レビュー後、両修正の統合レビューも APPROVE（P0 / P1 なし）。main 上で focused 294 passed、全体 1595 passed / 2 skipped、lock / diff / compile を再確認し、設定値 `/opt/homebrew/opt/ffmpeg-full/bin/ffmpeg` が実体 `/opt/homebrew/Cellar/ffmpeg-full/8.1.2_2/bin/ffmpeg` へ解決され version preflight を通ることを確認した。これは実機障害の修正記録であり、case2 / case3 の opening trim 後 preview、case4 の internal gap removal 後 preview、final short の人確認は未実施のため、S9-6 の全チェック、S9、M16、AC-30 / AC-35 / AC-37 は未完了を維持する。
 
@@ -1744,7 +1914,7 @@ data/{video_id}/ ...
 
 **コミット境界:** benchmark / acceptance docs と進捗更新を `S9-6` のフェーズ受け入れコミットに含める。S9 を完了にする場合だけフェーズ状態を `[x] 完了`、M16 と AC の該当チェックを更新する。
 
-**S9 のコミット順:** `S9-0` → `S9-1` → `S9-2` → `S9-3` → `S9-4` → `S9-5` → `S9-6`。各タスクは実装、単体確認、Done 条件、レビュー後に個別コミットし、未確認の AC を先に `[x]` にしない。
+**S9 / T1 のコミット順:** `S9-0` → `S9-1` → `S9-2` → `S9-3` → `S9-4` → `S9-5` → `T1-PLAN` → `T1-1` → `T1-2` → `T1-3` → `T1-4` → `T1-5` → `S9-6`。各タスクは実装、単体確認、Done 条件、レビュー後に個別コミットし、未確認の AC を先に `[x]` にしない。
 
 **見積もり目安:** S9-0 0.5 日、S9-1 0.5〜1 日、S9-2 1〜1.5 日、S9-3 1〜2 日、S9-4 1.5〜2 日、S9-5 1〜1.5 日、S9-6 1 日。合計 6.5〜9.5 日。benchmark の No-Go は実装を止めるため、速度は固定の完了条件ではなく S9-6 で採否を判断する。
 
@@ -2094,7 +2264,13 @@ S9-PLAN（docs-only 完了）
              └─ S9-3 whisper.cpp runtime・capability・モデル設定・音声区間準備
                  └─ S9-4 親候補区間 Whisper 精査 → short_cut / telop / line 再利用
                      └─ S9-5 UI 設定・進捗・エラー・失効表示
-                         └─ S9-6 A/B 受け入れ・回帰・フェーズ判定
+                         └─ T1-PLAN テロップ行時刻同期計画（docs-only）
+                             └─ T1-1 production 非変更 timing spike
+                                 └─ T1-2 timing 保存契約・extractor
+                                     └─ T1-3 pure aligner・telop・fingerprint 統合
+                                         └─ T1-4 Streamlit UI 時刻確認 gate
+                                             └─ T1-5 同期受け入れ
+                                                 └─ S9-6 A/B 受け入れ・回帰・フェーズ判定
 
 P6-PLAN（docs-only。S9-1 の人手 gold 監査と並行可）
  ├─ P6-1 タイトル 3 方向生成・検証 ── ★main 統合を S9-4 より先に完了
@@ -2126,7 +2302,11 @@ U7（概要欄 fingerprint 化）は保留 = v4 候補（優先度③: チャプ
 | S9-1 を S9-0 の後にする | 実モデルと設定を代表素材で決める前に、既存 VTT の保存境界を安全化する。S9-1 は production 非変更の benchmark として先に閉じる |
 | S9-2 を S9-3 より先にする | subprocess の出力形式や cache の正本を先に決め、runtime が独自 JSON や独自 fingerprint を作らないようにする |
 | S9-4 を S9-5 より先にする | UI は `TranscriptArtifact`、resolver、失効理由を表示するだけにし、short_cut / telop への再利用契約を UI 実装と混ぜない |
-| S9-6 を最後にする | benchmark の精度・時間、使用範囲だけの失効、既存 VTT 経路、人確認、1 ジョブ制約を同じ受け入れ証跡で判定する。No-Go は S9 完了にしない |
+| T1-1 を T1-2 より先にする | production 非変更 spike で固定 manifest、gold、coverage 分母、時刻 gate、低信頼 fallback を測定してから保存方式を選ぶ。結果後の基準緩和を防ぐ |
+| T1-2 を T1-3 より先にする | pure aligner が読む timing payload、parent lineage、policy、fingerprint、legacy fallback を先に immutable に固定する |
+| T1-3 を T1-4 より先にする | UI は同期 status / flag / confirmation を表示するだけにし、alignment・validator・lineage を Streamlit に複製しない |
+| T1-4 を T1-5 より先にする | UI の独立 timing gate、再起動、失効、通常 rerun の副作用無しを同期受け入れでまとめて検証できる状態にする |
+| S9-6 を最後にする | T1-5 までの timing 契約を先に証明したうえで、benchmark の精度・時間、使用範囲だけの失効、既存 VTT 経路、人確認、1 ジョブ制約を同じ最終受け入れ証跡で一度だけ判定する。No-Go は S9 完了にしない |
 | P6-1〜P6-3 を分離して並行する | telop、description、upload operation の変更範囲を物理的に分け、共通 UI と schedule の接続を P6-4 の単一 writer に集約する |
 | P6-1 を S9-4 より先に統合する | 両タスクが `services/telop.py` と telop tests を変更するため、P6 のタイトル契約を main の前提にしてから S9 artifact 伝播を実装する |
 | P6-4 を 3 service 統合後にする | 最終説明文の二重再検証と関連動画状態表示は P6-1〜P6-3 の公開契約を消費する統合作業であり、並行中に UI へ暫定ロジックを複製しない |
@@ -2176,6 +2356,12 @@ U7（概要欄 fingerprint 化）は保留 = v4 候補（優先度③: チャプ
 | S9-3 whisper.cpp runtime・capability・音声区間準備 | 1〜2 日 |
 | S9-4 親候補区間 Whisper 精査・short_cut / telop / queue / line 再利用 | 1.5〜2 日 |
 | S9-5 UI 設定・進捗・エラー・失効表示 | 1〜1.5 日 |
+| T1-PLAN テロップ行時刻同期計画（docs-only） | 0.5 日 |
+| T1-1 production 非変更 timing spike・評価 manifest | 1〜1.5 日 |
+| T1-2 timing 保存契約・extractor | 1〜1.5 日 |
+| T1-3 pure aligner・telop・fingerprint 統合 | 1〜1.5 日 |
+| T1-4 Streamlit UI 時刻確認 gate | 1〜1.5 日 |
+| T1-5 同期受け入れ | 1 日 |
 | S9-6 A/B 受け入れ・回帰・フェーズ判定 | 1 日 |
 | P6-PLAN 要件・AC・writer 境界 | 0.5 日 |
 | P6-1 タイトル 3 方向生成・検証 | 0.5〜1 日 |
@@ -2259,6 +2445,11 @@ U7（概要欄 fingerprint 化）は保留 = v4 候補（優先度③: チャプ
 | whisper-cli の build / JSON schema / model が環境ごとに違い、cache が壊れる | S9-1 で実体と model fingerprint を記録し、S9-3 の capability preflight と未知 schema 拒否を通す。モデル自動取得・自由な shell command は許可しない |
 | 音声準備が動画全体取得や複数ジョブ実行に膨張する | S9-3 で yt-dlp の音声のみ、選択 range の span manifest、1 ジョブ内の入力順 serial 処理、永続 audio cache を固定し、全編 Whisper と local video を別フェーズへ残す |
 | 高精度化の失敗が既存 S6 / U6 の導線を止めるか、逆に高精度と偽って進める | runtime 不備は日本語の明示 coarse fallback または停止として扱い、旧 VTT・cutplan・mp4 を削除しない。高精度 artifact と人確認の証明が無い状態は fail closed にする |
+| token timing が精密に見えても whitespace / metadata / 日本語 subword / cross-cue の曖昧さで行を誤移動する | T1-1 で固定 manifest と人音声 onset gold を先に作り、一意高信頼行だけを対象にする。低信頼は元時刻 + flag、誤った line / cross-cue 移動 0、clamp / 時系列 / 非重複 / 500 ms を満たせない場合は fallback にする |
+| coverage や閾値を結果に合わせて都合よく緩和する | manifest、coverage 分母、Go gate を測定前に fingerprint 付きで固定し、結果後の変更を禁止する。変更は別承認と理由記録を要求する |
+| timing payload の保存方式が parent artifact と混ざり、legacy や cache restart で古い時刻を再利用する | T1-2 の ADR で Artifact v2 / immutable sidecar を比較し、strict provenance、schema / policy version、自身 fingerprint、atomic 保存・再検証、既存 artifact の timing 無し fallback、backfill 無しを固定する |
+| timing confirmation を全文確認と混同し、低信頼行への無意味な編集や未確認状態の自動通過が起きる | T1-4 で独立 gate と状態表示を持ち、low-confidence がある場合だけ明示確認を必須にする。本文・時刻・alignment input・policy 変更、A → B → A、再起動では失効し、全文確認と最終 preview は維持する |
+| UI 刷新が alignment / fingerprint / line state の安全境界を複製し、通常 rerun で外部処理を起こす | R2 の刷新順を守り、T1-3 の pure service と T1-4 の view model / session-state 境界を分離する。通常 rerun は Codex / Whisper / ffmpeg / upload を呼ばず、破壊操作は既存 dialog を通す |
 
 ---
 
@@ -2310,10 +2501,11 @@ S9 初版で実装するのは、既存 YouTube `video_id` の良好な VTT を�
 9. ~~**S9-PLAN** を完了する。~~ 完了。`requirements-v3.md` の FR-35 / FR-36 と AC-30 / AC-35 / AC-37、実行可能な S9-0〜S9-6、`v3-agent-prompts.md` の実行テンプレートを確定した
 10. ~~**S9-0**（既存 VTT 互換・非上書き保存契約）を完了する。~~ 完了。再取得時の `ja.vtt` bytes 保持、source VTT の immutable 保存、失敗時非変更を閉じた
 11. ~~**S9-1**（代表素材 benchmark・モデル決定）を完了する。~~ 完了。production 非変更で VTT と whisper.cpp 1.9.1 の精度・固有名詞・時間・cache 根拠を記録した
-12. ~~**S9-2 → S9-3 → S9-4 → S9-5** の順に完了する。~~ 完了。**次は S9-6 の A/B 受け入れ・回帰・フェーズ判定を行う。** 受け入れが PASS するまで S9 と M16 は未完了を維持する
+12. ~~**S9-2 → S9-3 → S9-4 → S9-5** の順に完了する。~~ 完了。S9-6 は受け入れ専用として開いたまま、**次は T1-PLAN → T1-1 → T1-2 → T1-3 → T1-4 → T1-5** を進める。T1-5 が PASS した後に S9-6 の A/B 受け入れ・回帰・フェーズ判定を一度だけ行い、受け入れが PASS するまで S9 と M16 は未完了を維持する
 13. ~~**P6-PLAN を S9-1 の人手 gold 監査と並行して docs-only で閉じる。**~~ 完了。独立レビュー済み plan commit から分離 worktree を作成した
 14. ~~**P6-1 / P6-2 / P6-3 を分離 worktree で並行実装し、個別レビュー後に main へ統合する。**~~ 完了。P6-1 を S9-4 より先に統合・依存元へ報告し、P6-4 → P6-5 まで独立レビュー後に閉じた
 15. ~~**R2 を完了する。**~~ 完了。手動 E2E 済みの現行挙動を基準に、UI 大幅刷新前の page / session / durable state / upload gate を整理し、監査文書・characterization test・独立レビューで固定した
+16. ~~**T1-PLAN を docs-only で完了する。**~~ 完了。FR-39 / AC-40、T1-1〜T1-5 の独立境界、S9-6 最終受け入れ順、R2 安全境界を 4 docs に反映した。**次は T1-1 の production 非変更 spike と評価 manifest 固定。**
 
 ---
 
@@ -2321,6 +2513,8 @@ S9 初版で実装するのは、既存 YouTube `video_id` の良好な VTT を�
 
 | 日付 | 内容 |
 |------|------|
+| 2026-08-04 | **T1-PLAN 親レビュー指摘を反映。** T1-1 に固定選択 span の隔離 bounded whisper-cli benchmark を許可し、pooled / 長い単一 cue / multi-cross-cue の群別 gate、VTT fallback + 連結の非回帰、再現 fingerprint を追加した。T1-5 を同期 component acceptance、S9-6 を formal phase acceptance と明記し、隔離 preview、production 不変、T1-5 evidence の条件付き再利用、AC-40 を S9-6 formal PASS 時だけ完了する規約、T1-1〜T1-5 の進捗行、標準 ADR path を反映した。 |
+| 2026-08-04 | **T1-PLAN を docs-only で完了。** S9-6 を受け入れ専用の未完了状態で保持し、S9-5 → T1-PLAN → T1-1 → T1-2 → T1-3 → T1-4 → T1-5 → S9-6 の依存を追加した。固定 manifest と人音声 gold による production 非変更 spike、timing payload 保存 ADR、pure aligner、独立 timing confirmation、R2 の UI 安全境界、AC-40 の同期受け入れを計画し、次の未着手を T1-1 とした。 |
 | 2026-08-04 | **R2 完了。** 旧 global result、描画時 session 復元、再生成時 widget state、候補 lineage、ライン開始の部分保存、投稿 tracking と reservation gate の不整合を pure view model、query、session key、必須 adapter、rollback-safe command へ分離した。変更前 `1645 passed, 2 skipped` から変更後 `1692 passed, 2 skipped`、lock / sync / diff / compile、隔離ブラウザ確認を通過し、独立最終レビューは残存 P0 / P1 / P2 なしで PASS。見た目は変更せず、巨大 renderer、canonical gate の再計算、legacy read migration、queue snapshot、library paging を視覚刷新側の P3 として監査文書に残した。実 upload、外部 write、追加 Codex / Whisper、動画生成、成果物削除は行っていない。 |
 | 2026-08-04 | **R2 を開始。** 手動 E2E でショート生成から予約投稿まで完走した現行挙動を基準に、UI 大幅刷新前の page 境界、サイドバー純粋性、再生成時 widget state、候補 lineage、投稿 tracking / reservation gate、ライン開始時の session projection を監査・整理する計画を追加。外部 API、実 upload、実 Codex、動画再生成、成果物削除は行わず、S9-6 の受け入れ判定を変更しない。あわせて進捗サマリーと不整合だった P6 本文のフェーズ状態を完了へ整合した。 |
 | 2026-08-03 | **P6 完了。** タイトル固定 3 方向、ショート概要欄の生成説明・元動画タイトル・開始秒付き URL・チャンネル登録 CTA の不変要件 gate、YouTube Studio 関連動画確認の永続追跡を統合した。明示編集本文の黙った差し戻しを独立レビューで検出・修正後、P6 境界 410 件、全体 `1380 passed, 2 skipped`、diff-check、実 YouTube / Studio write なしを確認。AC-38 / AC-39 と M17 を完了した。 |

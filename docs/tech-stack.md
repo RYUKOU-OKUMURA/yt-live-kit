@@ -1,7 +1,7 @@
 # yt-live-kit 技術スタック定義書
 
 **バージョン:** v1（MVP）  
-**最終更新:** 2026-07-30  
+**最終更新:** 2026-08-04
 **関連:** [要件定義書](./requirements.md)
 
 ---
@@ -437,10 +437,49 @@ FontName=Hiragino Sans,FontSize=54,PrimaryColour=&H00FFFFFF,OutlineColour=&H0000
 
 ---
 
+## 16. v3.2 T1 テロップ行時刻同期方針
+
+T1 は既存 S9 の transcript / telop / FFmpeg 経路を置き換えるのではなく、Codex draft の行時刻に対する評価、timing payload の保存、純粋な alignment、独立した人確認を追加する。T1-PLAN では方式を選ばず、T1-1 の production 非変更 spike が provisional Go になった後、T1-2 の ADR で Artifact v2 と immutable timing sidecar の一方を選ぶ。
+
+### 16.1 timing payload と provenance
+
+- T1-2 以降と本番経路では、Whisper full JSON の token timing は既存の一回の処理結果から抽出し、UI rerun や alignment 実行のために追加 Whisper を呼ばない。T1-1 だけは、固定 manifest の選定済み span に対象・回数の上限を設け、isolated temp へ bounded に whisper-cli を再実行して benchmark input を得てもよい
+- 現行 artifact が raw token timing を保持しない T1-1 の評価だけは、測定前 manifest に固定した有限整数 `max_selected_spans` / `max_whisper_invocations` の範囲内で選定済み span を隔離 temp へ bounded に whisper-cli 再実行してよい。再現 command、runtime / model / settings fingerprint、raw full JSON hash と実績を記録し、production data / artifact / cache / output / hash は変更しない。全編処理と 47 本 backfill は行わない
+- 選択した保存方式は、parent artifact reference、正規化 token payload または raw full JSON hash、model / runtime / settings / ranges、schema / policy version、自身の fingerprint を strict schema で保持する
+- 保存は一時ファイル + atomic replace と再検証を使う。parent、payload、range、policy、fingerprint の不一致、未知 field、破損、cache restart 後の証明不能状態は fail closed にする
+- 既存 artifact、VTT、timing 無し legacy は backfill せず、明示的な timing 無し fallback として扱う。whitespace / metadata、zero / reverse end、日本語 subword は入力妥当性を検証し、解釈不能なら alignment 不可にする
+- token end は補助的な timing evidence に留め、字幕区間・cut 境界・生成前 preflight の時刻正本にはしない
+
+### 16.2 pure alignment と telop lineage
+
+- aligner は副作用のない service とし、Codex draft と timing payload から一意かつ高信頼な行だけを monotonic に補正する
+- 要約・省略・重複・cross-cue 曖昧・token 欠落・low-confidence は元時刻を保持し、行別 flag と日本語警告を返す。各行への無意味な編集は要求しない
+- owning cue / range clamp、時系列、非重複、最低表示 500 ms を満たさない補正は採用せず fallback にする
+- telop review lineage には timing policy、provenance、parent / payload fingerprint、status、行別 flag を含める。本文・時刻・alignment input・policy が変われば review と timing confirmation を失効させ、A → B → A でも自動復帰させない
+- `subtitle_burn.py`、FFmpeg の encode / concat、cut 境界、queue fingerprint、予約投稿、Codex 呼び出し回数の意味は変更しない。既存の整数ミリ秒正規化と input order を再利用する
+
+### 16.3 Streamlit の状態境界
+
+- UI は service / view model が返す `synchronized`、`timing_review_required`、`cannot_sync`、行別警告、次の操作を表示するだけとする。schema、fingerprint、alignment、validator を UI へ複製しない
+- 現行の start / end editor、全文の誤字・固有名詞確認、最終 preview confirmation を維持する。low-confidence 行がある場合だけ、別の「要確認行の時刻を確認した」 gate を必須にする
+- session state は draft buffer と widget identity に限定し、timing confirmation は line state の atomic / fail closed 境界へ保存する。通常 rerun、表示切替、再起動で Codex / Whisper / ffmpeg / upload を起動しない
+- UI 大幅刷新は `ui-refactor-review-2026-08-04.md` の page shell → readonly view model → summary / workspace → stage bar → revision-aware editor → upload tracking → destructive confirmation の順で別 diff に分ける。T1 contract 前に telop editor を刷新しない
+
+### 16.4 依存と検証
+
+- T1 の依存は `S9-5 → T1-PLAN → T1-1 → T1-2 → T1-3 → T1-4 → T1-5 → S9-6`。S9-6 は T1-5 後の最終受け入れ専用として未完了のまま保持する
+- 新規 pip 依存、従量課金 API、T1-2 以降・本番経路の追加 Whisper、manifest 外の解析、全動画再解析、全編 Whisper、47 本 backfill、実 upload、Studio 操作は追加しない。T1-1 の isolated bounded benchmark 以外の Whisper 実行は許可しない
+- T1-1 は固定 manifest、`max_selected_spans` / `max_whisper_invocations` と実績、human audio onset gold、coverage、pooled / 群別 gate、各群の signed bias、CER、固有名詞、cue 欠落 / 重複、VTT fallback + 連結の現行出力同等性、wall、peak memory、bounded whisper-cli の再現情報を証跡化する。T1-5 は同じ evidence に加え、scope guard、全 pytest、diff check、compileall、隔離 data_dir / 検証用 copy への再生成 preview、production hash unchanged を証跡化する。結果後に gate を緩和しない
+- T1-5 は同期 component acceptance、S9-6 は formal phase acceptance とする。T1-5 の immutable evidence は入力 fingerprint が一致する場合に S9-6 が参照できるが、人 preview、A/B、gold、失効、cache、fallback、scope の最終 gate を省略しない。AC-40 は S9-6 formal PASS 時にだけ完了へ更新する
+
+---
+
 ## 変更履歴
 
 | 日付 | 内容 |
 |------|------|
+| 2026-08-04 | **T1 親レビュー指摘を反映。** raw token timing が無い場合の T1-1 隔離 bounded whisper-cli benchmark、群別 / pooled gate、T1-5 の隔離 preview と production 不変、component acceptance / formal phase acceptance の分離、AC-40 の完了時点を追記した。 |
+| 2026-08-04 | **T1 技術方針を追加。** timing payload の Artifact v2 / immutable sidecar 選択を T1-2 ADR へ保留し、full JSON 再利用、strict provenance、atomic 保存、pure alignment、低信頼 fallback、独立 timing confirmation、R2 の Streamlit 境界、既存 subtitle burn / FFmpeg / queue / upload 非変更を固定した。 |
 | 2026-07-30 | 初版作成（MVP v1） |
 | 2026-07-30 | 主要インターフェースを CLI からローカル Web UI（Streamlit）に変更 |
 | 2026-07-30 | v2 追加: ffmpeg 連結方針、Streamlit 非同期方針、日本語字幕フォント |

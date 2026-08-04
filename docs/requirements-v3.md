@@ -1,7 +1,7 @@
 # yt-live-kit 要件定義書 v3
 
 **バージョン:** v3（ショート量産・投稿）
-**最終更新:** 2026-08-03
+**最終更新:** 2026-08-04
 **対象:** ローカル Web UI ツール「yt-live-kit」
 **関連:** [v1 要件定義書](./requirements.md) / [v2 実行計画](./execution-plan-v2.md) / [v3 実行計画](./execution-plan-v3.md) / [AGENTS.md](../AGENTS.md)
 
@@ -274,6 +274,8 @@ Streamlit は、エントリスクリプト（[`src/yt_live_kit/ui/app.py`](../s
 | **出力** | `data/{video_id}/transcripts/artifacts/{artifact_fingerprint}.json` と `data/{video_id}/transcripts/index.json`。既存の `subtitles/ja.vtt`、`transcript/full.txt`、`transcript/compressed.txt` は後方互換のため残し、source VTT は `subtitles/sources/` に別名で保存する |
 | **スコープ** | S9 初版の保存キーは既存の `video_id` を維持する。`asset_id` による抽象化、`source_kind=local_video`、ローカル動画を入力にする経路は別フェーズで追加し、S9 で現行の data path や `VideoMeta.id` を移行しない |
 
+**T1 timing payload の扱い:** token timing を使う場合は、既存 full JSON の処理結果から正規化済み token payload または raw full JSON hash と、model / runtime / settings / ranges、schema / policy version を provenance として再検証できる形にする。T1-2 以降と本番経路では追加 Whisper、manifest 外の解析、全動画再解析、既存 artifact の backfill を行わない。raw token timing が無い T1-1 だけは、固定 manifest の選定済み span を isolated temp へ bounded に whisper-cli 再実行して benchmark input を得てもよいが、production data / artifact / cache / output / hash は変更しない。既存 artifact、VTT、timing 無し legacy は timing alignment の対象外として明示的 fallback にする。
+
 ### FR-36: 選択親候補区間のローカル精査（S9）
 
 | 項目 | 内容 |
@@ -282,6 +284,17 @@ Streamlit は、エントリスクリプト（[`src/yt_live_kit/ui/app.py`](../s
 | **処理** | 明示操作で選択区間列を音声 span として準備し、現行の 1 ジョブ制約の中で入力順に複数区間を処理する。whisper.cpp はサブプロセスとして呼び、出力を絶対時刻へ変換して 1 件の `TranscriptArtifact` に区間順で保存する。`used_range_cue_digest` は正規化済み range、padding、cue inclusion rule、cue の絶対時刻・本文・順序から計算する。区間境界は Whisper の timestamp だけで確定せず、padding、必要な VAD、既存 cue、動画プレビュー、人の確認を使う。精査済み artifact の immutable reference と順序付き区間 digest 配列を FR-30 の cutplan、FR-22 のテロップ台本、FR-25 の生成 preflight、FR-33 の line / review snapshot へ渡し、resolver を downstream で再実行しない |
 | **出力** | 区間ごとの絶対時刻 cue と status を含む精査済み `TranscriptArtifact`、runtime / model / input の診断情報、cache hit / miss と処理時間。1 区間でも失敗した partial artifact は要求全体の高精度結果として resolver が返さず、runtime 不備や精査失敗時は日本語エラーと明示された YouTube VTT fallback を返す |
 | **スコープ** | 字幕なし・低品質字幕を理由に全編 Whisper を通常経路へ入れない。全編再文字起こし、47 本の一括 backfill、VTT の自動置換、無確認の自動境界確定は将来フェーズとする |
+
+**T1 の追加制約:** 精査済み artifact に token timing が含まれる場合も、token end は時刻の唯一の正本にしない。whitespace / metadata token、zero end、reverse end、日本語 subword の扱いを検証し、解釈できない入力は alignment 不可として元時刻維持の fallback にする。artifact reference、timing payload、policy、fingerprint の不一致は downstream で fail closed にする。
+
+### FR-39: テロップ行時刻同期と明示確認（v3.2 追加要件・T1）
+
+| 項目 | 内容 |
+|------|------|
+| **入力** | FR-22 の Codex draft、FR-35 / FR-36 の immutable transcript artifact または timing sidecar、正規化済み token payload、使用区間の cue / range、既存の行本文・開始・終了時刻、timing policy。VTT fallback と timing 無し legacy は入力として受け付けるが alignment coverage の分母には含めない |
+| **処理** | draft 生成後、人の確認前に pure monotonic aligner を実行できる。行と token の対応が一意かつ高信頼な場合だけ開始・終了を補正し、要約・省略・重複・cross-cue 曖昧、token 欠落、zero / reverse end、whitespace / metadata のみの対応は元時刻を維持して警告する。終端は owning cue / range に clamp し、時系列、非重複、最低表示 500 ms を満たさない場合は補正を採用せず fallback にする。alignment policy、provenance、payload / parent artifact fingerprint を telop review lineage へ含める。本文・時刻・alignment input・policy のいずれかが変わったら timing confirmation を失効させ、明示的な再確認なしに自動再配置しない |
+| **出力** | `synchronized`、`timing_review_required`、`cannot_sync` の状態、補正または元の行時刻、行別 low-confidence flag、timing policy / provenance / fingerprint、独立した timing confirmation。全文確認と最終 preview confirmation は従来どおり別に保持する |
+| **スコープ** | 低信頼行の自動移動、無意味な編集の強制、全編 Whisper、既存 artifact の backfill、production 通常経路での追加 Codex / Whisper、実 upload、Studio 操作、queue fingerprint・cut 境界・subtitle burn・FFmpeg の意味変更は行わない。T1-1 に限り、固定した選択 span を隔離 temp へ bounded に whisper-cli 再実行して benchmark 用 raw full JSON を得てもよいが、production data / artifact / cache / output / hash は変更しない。新しい表示・生成は明示された確認 gate を通過した場合だけ許可する |
 
 ### FR-37: ショート投稿メタデータの品質ゲート（P6）
 
@@ -315,6 +328,8 @@ Streamlit は、エントリスクリプト（[`src/yt_live_kit/ui/app.py`](../s
 | **処理** | cutplan が確定した artifact reference と digest 配列を snapshot として凍結し、downstream で resolver を再実行せず Codex CLI に区間の字幕を渡す。誤認識の修正・句読点付与・短い行への分割・強調行フラグの付与まで済んだ「テロップ台本」を JSON で生成させる。[`services/highlights.py`](../src/yt_live_kit/services/highlights.py) と同じパターン（テンプレート結合 → Codex CLI 実行 → JSON 抽出 → バリデーション → 保存）を踏襲する。保存する台本には使用した artifact fingerprint と順序付き使用区間 cue digest を含め、入力 artifact が変わった場合は確認済み台本を有効扱いにしない |
 | **出力** | テロップ台本 JSON（区間ごとの行・行全体に対する強調行フラグ、使用 artifact reference / fingerprint、順序付き使用区間 cue digest 配列） |
 | **成功条件** | 生成後、UI 上でテキストを人が確認・微修正できること。**自動字幕の品質が上限を決めるため、確認ステップは省略しない** |
+
+**T1 の時刻同期 handoff:** Codex の台本 draft 生成後、人の全文確認前に、利用可能な token timing を T1 の pure aligner へ渡してよい。ただし、alignment は FR-39 の一意高信頼条件を満たす行だけを対象とし、低信頼・要約・省略・重複・cross-cue 曖昧行は元の行時刻を維持して警告する。全文確認と、低信頼行の時刻を確認したことの明示確認は別の gate とし、時刻確認後も誤字・固有名詞確認を省略できない。通常 rerun で Codex / Whisper を追加実行せず、本文・時刻・alignment 入力・policy の変更時は時刻確認を失効させる。
 
 ### FR-23: フックタイトル・メタデータ生成
 
@@ -367,6 +382,8 @@ Streamlit は、エントリスクリプト（[`src/yt_live_kit/ui/app.py`](../s
 | **処理** | 既存の `encode_segment` + `concat_segments`（[`services/ffmpeg.py`](../src/yt_live_kit/services/ffmpeg.py)）と [`services/shorts.py`](../src/yt_live_kit/services/shorts.py) の縦型レイアウト処理（blur / crop、2 パス方式、`INTERMEDIATE_CRF=16`）を組み合わせ、複数の小区間を 1 本のショートに連結する。区間境界は共通 API で `Decimal(str(value))` + `ROUND_HALF_UP` により整数ミリ秒へ正規化し、以後その値を ID、合計尺、エンコード引数、字幕の累積 offset / clip の唯一の基準とする。公開境界では同じ共通 API により冪等に再検証する。入力順を再生順・ID 生成順・エンコード順として保持し、自動で並べ替え・重複除去しない。確認済みテロップ台本は ffmpeg 実行前と字幕関数の公開境界で入力区間との一致および artifact fingerprint / digest 配列を再検証し、字幕の関係範囲が変わっていれば fail closed で生成を止める。フックタイトルは冒頭 1〜2 秒の大テロップとして同じ ASS に載せる |
 | **出力** | 1 本の縦型 mp4（1080x1920）とコマンドログ |
 | **スコープ** | ショートは **10〜180 秒**（[`shorts.py`](../src/yt_live_kit/services/shorts.py) の `MIN_DURATION_SEC` / `MAX_DURATION_SEC`）を維持する。ハイライト候補は最大 300 秒（`highlights.py` の `MAX_DURATION_SEC`）なので、**180 秒を超える区間を選んだ場合はエラーで止めず、分割・短縮を促す導線にする** |
+
+**T1 の境界不変:** テロップ行の時刻同期は、FR-25 の区間列、整数ミリ秒境界、入力順、cut 境界、FFmpeg の字幕焼き込み契約を変更しない。行の補正結果が owning cue / range の範囲、時系列、非重複、最低表示 500 ms を満たせない場合は元時刻へ戻して fallback とし、生成前の既存 preflight を通過しない限り焼き込みを開始しない。
 
 連結処理の中間物はクリップ ID ごとの専用ディレクトリへ隔離し、既定では成功・失敗のどちらでも削除する。最終 mp4 は同じ出力ディレクトリ内の一時 `.mp4` へ生成し、非ゼロの生成成功を確認してから正式出力へ原子的に置換する。再生成失敗時は既存の正式 mp4 を維持し、最終 ffmpeg コマンドログは正式出力名に追従する `{正式出力stem}.ffmpeg.log` として出力ディレクトリへ残す。元動画の取得や ffmpeg を始める前に、区間・レイアウト・出力名・フック文言・通常 / Hook プリセットをすべて検証する。
 
@@ -753,6 +770,22 @@ Streamlit は、エントリスクリプト（[`src/yt_live_kit/ui/app.py`](../s
 - [x] 重複時刻・不正形式が日本語エラーで拒否される
 - [x] 設定ページで枠リストとショート既定値（レイアウト・プリセット）を編集・保存できる
 
+### AC-40: テロップ行時刻同期と明示確認（FR-39 / T1）
+
+- [ ] T1-1 の固定 manifest が測定前に fingerprint 付きで保存され、長い単一 cue、multi / cross-cue、VTT fallback + 連結を各 20 行以上、合計 60 行以上含み、gold は人が音声で付けた line onset だけである
+- [ ] coverage 分母が固定 manifest 内の検証済み token timing を持ち alignment 対象になり得る全 telop 行に固定され、VTT fallback と timing 無し legacy は非回帰群として coverage 外に分離される
+- [ ] provisional Go gate が coverage 80％以上、absolute onset median 250 ms 以下、p90 500 ms 以下、max 1000 ms 以下、signed median bias の絶対値 200 ms 以下、誤った line / cross-cue 移動 0 で事前固定され、結果後に緩和されない
+- [ ] provisional Go gate が pooled と、alignment 対象の長い単一 cue 群・multi / cross-cue 群の各群で個別に満たされ、各群と pooled の coverage、median、p90、max、signed median bias、誤った line / cross-cue 移動 0 が別集計される。VTT fallback + 連結群は coverage 外の非回帰群として現行出力同等・自動移動 0 を別に判定する
+- [ ] 現行 artifact が raw token timing を保持しない場合、T1-1 が manifest に固定した有限整数 `max_selected_spans` / `max_whisper_invocations` の範囲内で選定済み span だけを隔離 temp へ bounded に whisper-cli 再実行し、再現 command、runtime / model / settings fingerprint、raw full JSON hash を記録する。production data / artifact / cache / output / hash、全編処理、47 本 backfill は変更しない
+- [ ] 一意高信頼行だけが補正され、低信頼行は全件 flag と元時刻維持になり、無意味な編集を強制せず、誤った line / cross-cue の黙った移動が無い。終端は owning cue / range 内、時系列、非重複、最低表示 500 ms を満たさなければ fallback になる
+- [ ] timing payload または Artifact v2 の選択が T1-2 の ADR で決まり、strict schema、parent artifact、正規化 token payload または raw full JSON hash、model / runtime / settings / ranges、schema / policy version、自身 fingerprint、atomic 保存・再検証を持つ。既存 artifact は backfill せず timing 無し fallback になり、T1-1 の isolated benchmark 例外を除く T1-2 以降・本番経路では追加 Whisper を呼ばない
+- [ ] `synchronized` / `timing_review_required` / `cannot_sync` が表示され、低信頼行がある場合だけ独立した「要確認行の時刻を確認した」gate を必須とする。全文の誤字・固有名詞確認と最終 preview confirmation は維持され、各行への無意味な編集は要求されない
+- [ ] 本文・時刻・alignment input・policy の変更で timing confirmation が失効し、A → B → A、範囲変更、cache restart、失敗・fallback、legacy / VTT 経路も fail closed で検証される。通常 rerun に外部処理が無い
+- [ ] `subtitle_burn`、FFmpeg、cut 境界、queue fingerprint の意味、投稿予約、Codex 回数に変更が無く、実 upload、公開データ変更、Studio 操作、全編 Whisper、47 本 backfill を行わない
+- [ ] T1-5 の A/B・gold・scope guard・全 pytest・diff check・compileall・隔離 `data_dir` または検証用 copy への再生成 preview の証跡が揃い、production artifact / cache / output / hash が不変で、S9-6 は formal phase acceptance 専用の未完了状態に残る
+
+**AC-40 の完了タイミング:** T1-5 は同期 component acceptance として AC-40 の証跡を揃えるが、AC-40 の checkbox は `[ ]` のまま維持する。S9-6 が人 preview、A/B、gold、失効、cache、fallback、scope の formal phase acceptance を一度だけ PASS した時点で、AC-40 を `[x]` に更新する。T1-5 の PASS や immutable evidence の再利用は、S9-6 の最終 gate を省略する根拠にならない。
+
 ---
 
 ## 用語集（v3 追加分）
@@ -774,6 +807,11 @@ Streamlit は、エントリスクリプト（[`src/yt_live_kit/ui/app.py`](../s
 | transcript resolver | 粗い候補探索には YouTube VTT、選択済み区間には有効な Whisper artifact を返し、不一致や破損を高精度扱いにしない解決器 |
 | 精査済み字幕 | S9 で選択した親候補区間だけを whisper.cpp で再文字起こしした artifact。Whisper の時刻は境界の唯一の正本ではなく、人確認用の材料である |
 | 高精度字幕 fallback | runtime 不備や cache 不一致時に、精査済みと偽らず既存 YouTube VTT を明示的に使う経路 |
+| token timing | Whisper の full JSON に含まれ得る token 単位の timing 候補。正規化・妥当性検証の入力であり、単独で行境界や区間境界の正本にはしない |
+| timing policy | token timing を行へ対応付ける規則、信頼度、clamp、最低表示時間、fallback 条件を識別する versioned policy |
+| low-confidence timing | 一意対応・cue 所属・時刻制約を証明できず、自動補正せず元時刻を維持して警告する行状態 |
+| timing confirmation | low-confidence 行がある場合に、人が要確認行の時刻を確認したことを明示する gate。全文の誤字・固有名詞確認とは別で、入力や policy の変更で失効する |
+| timing status | `synchronized`、`timing_review_required`、`cannot_sync` のいずれかで、行時刻の利用可否と人確認の要否を示す状態 |
 | タイトル 3 方向 | P6 で固定する検索明快型・仕事影響型・好奇心型の 3 候補。新規生成は同じ Codex 呼び出し内で固定順に返す |
 | 関連動画確認状態 | YouTube Studio で Shorts の関連動画を元動画へ設定した事実を、`not_ready` / `pending` / `confirmed` で upload operation に保存するローカル状態 |
 | フックタイトル | ショート冒頭 1〜2 秒に表示する、視聴継続を促す大きなテロップ |
@@ -787,6 +825,7 @@ Streamlit は、エントリスクリプト（[`src/yt_live_kit/ui/app.py`](../s
 
 | 日付 | 内容 |
 |------|------|
+| 2026-08-04 | **T1-PLAN を追加。** FR-22 / FR-25 / FR-33 / FR-35 / FR-36 と新設 FR-39 に、低信頼行の元時刻維持、token timing の provenance、pure monotonic alignment、独立した timing confirmation、入力変更時の失効、T1-1 の隔離 bounded whisper-cli benchmark、T1-5 component acceptance と S9-6 formal phase acceptance の分離を追加。AC-40 と timing 用語を追加し、実装方式の ADR は T1-2 まで保留した。 |
 | 2026-08-03 | **P6 投稿メタデータ品質ゲートを追加。** FR-37 / AC-38 に同一 Codex 呼び出し内のタイトル固定 3 方向、概要欄の生成説明・チャンネル登録 CTA・元動画タイトル・開始秒付き URL、合成時と投稿確定時の再検証を定義。FR-38 / AC-39 に YouTube API 自動設定を行わない Studio 手動確認と `not_ready` / `pending` / `confirmed` の永続状態を定義し、P4 の歴史的 fallback と P6 投稿ゲートの優先関係を明記した |
 | 2026-08-03 | **AC-33 完了。** ジョブエラーを必須 6 field の構造化通知へ移行し、上部 1 行要約、対象動画導線、動画別直近 3 件、上限付き global 要約、現在動画だけの技術詳細表示を実装。長い ffmpeg log の実ブラウザ確認、全件テスト、独立レビューを通過した |
 | 2026-08-03 | **AC-31 / AC-35 / AC-36 受け入れ完了。** 実ブラウザで 3 ワークスペース、左パネル 4 状態、折り畳み、確認失効、生産ライン 3 周を確認した。09:00 / 13:00 / 18:00（Asia/Tokyo）の複数枠設定と、既存予約を避ける空き枠順の 3 本予約を実機で確認し、全件テストと独立レビューを通過した |
