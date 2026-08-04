@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 from collections.abc import Callable
@@ -51,6 +52,19 @@ class FfmpegDiagnostics:
     subtitles_available: bool
 
 
+@dataclass(frozen=True)
+class MediaStreams:
+    """メディア内の映像・音声 stream 数."""
+
+    video_count: int
+    audio_count: int
+
+    @property
+    def has_audio_video(self) -> bool:
+        """映像と音声が各 1 stream 以上あるか返す."""
+        return self.video_count >= 1 and self.audio_count >= 1
+
+
 def _run_ffmpeg_command(
     cmd: list[str],
     *,
@@ -76,6 +90,139 @@ def ffprobe_path_for(ffmpeg_path: str) -> str:
     """ffmpeg コマンドと同じディレクトリの ffprobe パスを返す."""
     path = Path(ffmpeg_path)
     return str(path.with_name("ffprobe"))
+
+
+def _find_colocated_ffprobe(ffmpeg_path: str) -> str:
+    """解決済み FFmpeg と同じディレクトリの ffprobe を返す."""
+    resolved_ffmpeg = find_ffmpeg(ffmpeg_path)
+    configured_ffprobe = ffprobe_path_for(resolved_ffmpeg)
+    try:
+        resolved_ffprobe = shutil.which(configured_ffprobe)
+    except OSError as exc:
+        raise FfmpegError(
+            "ffprobe のパスを確認できませんでした。"
+            "YTLK_FFMPEG_PATH と同じ場所にある ffprobe を確認してください。"
+        ) from exc
+    if resolved_ffprobe is None:
+        raise FfmpegError(
+            "設定済み FFmpeg と同じ場所に ffprobe が見つかりません。"
+            "ffmpeg-full のインストールと YTLK_FFMPEG_PATH を確認してください。"
+        )
+    try:
+        ffprobe_parent = Path(resolved_ffprobe).resolve(strict=True).parent
+        ffmpeg_parent = Path(resolved_ffmpeg).resolve(strict=True).parent
+    except (OSError, RuntimeError) as exc:
+        raise FfmpegError(
+            "設定済み FFmpeg と ffprobe の実体パスを確認できませんでした。"
+            "YTLK_FFMPEG_PATH とファイルの実行権限を確認してください。"
+        ) from exc
+    if ffprobe_parent != ffmpeg_parent:
+        raise FfmpegError(
+            "設定済み FFmpeg と同じ場所の ffprobe を解決できませんでした。"
+            "YTLK_FFMPEG_PATH に ffmpeg-full の ffmpeg 実体を設定してください。"
+        )
+    return resolved_ffprobe
+
+
+def parse_media_streams_json(payload: str) -> MediaStreams:
+    """ffprobe JSON を strict に解析して stream 数を返す純粋関数."""
+    try:
+        value = json.loads(payload)
+    except (TypeError, json.JSONDecodeError) as exc:
+        raise FfmpegError("ffprobe の stream 検査結果が正しい JSON ではありません。") from exc
+    allowed_root_keys = {"streams", "programs", "stream_groups"}
+    if (
+        not isinstance(value, dict)
+        or "streams" not in value
+        or not set(value).issubset(allowed_root_keys)
+    ):
+        raise FfmpegError("ffprobe の stream 検査結果の形式が正しくありません。")
+    for optional_key in ("programs", "stream_groups"):
+        if optional_key in value and not isinstance(value[optional_key], list):
+            raise FfmpegError("ffprobe の stream 検査結果の形式が正しくありません。")
+    streams = value["streams"]
+    if not isinstance(streams, list):
+        raise FfmpegError("ffprobe の stream 一覧の形式が正しくありません。")
+
+    video_count = 0
+    audio_count = 0
+    for stream in streams:
+        if not isinstance(stream, dict) or set(stream) != {"codec_type"}:
+            raise FfmpegError("ffprobe の stream 情報の形式が正しくありません。")
+        codec_type = stream["codec_type"]
+        if not isinstance(codec_type, str) or not codec_type:
+            raise FfmpegError("ffprobe の stream 種別が正しくありません。")
+        if codec_type == "video":
+            video_count += 1
+        elif codec_type == "audio":
+            audio_count += 1
+    return MediaStreams(video_count=video_count, audio_count=audio_count)
+
+
+def probe_media_streams(
+    source: Path,
+    *,
+    ffmpeg_path: str = FFMPEG_DEFAULT,
+    ffmpeg_timeout: int = FFMPEG_TIMEOUT_DEFAULT,
+) -> MediaStreams:
+    """設定済み FFmpeg と同居する ffprobe で stream を検査する."""
+    try:
+        path = source.resolve(strict=True)
+        is_file = path.is_file()
+    except (OSError, RuntimeError) as exc:
+        raise FfmpegError(
+            "stream を検査する動画ファイルの実体パスを確認できません。"
+            "ファイルの場所とアクセス権を確認してください。"
+        ) from exc
+    if not is_file:
+        raise FfmpegError(f"stream を検査する動画ファイルが見つかりません: {path}")
+    ffprobe = _find_colocated_ffprobe(ffmpeg_path)
+    command = [
+        ffprobe,
+        "-v",
+        "error",
+        "-show_entries",
+        "stream=codec_type",
+        "-of",
+        "json",
+        str(path),
+    ]
+    try:
+        result = _run_ffmpeg_command(command, ffmpeg_timeout=ffmpeg_timeout)
+    except OSError as exc:
+        raise FfmpegError(
+            "ffprobe を実行できませんでした。"
+            "YTLK_FFMPEG_PATH とファイルの実行権限を確認してください。"
+        ) from exc
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip()
+        raise FfmpegError(
+            "動画の映像・音声 stream を確認できませんでした。"
+            "元動画を確認して再生成してください。"
+            + (f"（詳細: {detail}）" if detail else "")
+        )
+    return parse_media_streams_json(result.stdout or "")
+
+
+def require_audio_video_streams(
+    source: Path,
+    *,
+    ffmpeg_path: str = FFMPEG_DEFAULT,
+    ffmpeg_timeout: int = FFMPEG_TIMEOUT_DEFAULT,
+    label: str = "動画",
+) -> MediaStreams:
+    """映像・音声が各 1 stream 以上あることを fail closed で検証する."""
+    streams = probe_media_streams(
+        source,
+        ffmpeg_path=ffmpeg_path,
+        ffmpeg_timeout=ffmpeg_timeout,
+    )
+    if not streams.has_audio_video:
+        raise FfmpegError(
+            f"{label}に映像と音声の両方が含まれていません。"
+            "元動画を音声付きで再取得してから、ショート動画を再生成してください。"
+        )
+    return streams
 
 
 def probe_duration(
@@ -334,12 +481,29 @@ def ensure_source_video(video_id: str, settings: Settings) -> Path:
     source_dir = video_dir / "clips" / "source"
     source_dir.mkdir(parents=True, exist_ok=True)
 
-    existing = sorted(source_dir.glob("*.mp4")) + sorted(source_dir.glob("*.mkv"))
-    if existing:
-        return existing[0]
+    existing = (
+        sorted(source_dir.glob("*.mp4"))
+        + sorted(source_dir.glob("*.mkv"))
+        + sorted(source_dir.glob("*.webm"))
+    )
+    for candidate in existing:
+        streams = probe_media_streams(
+            candidate,
+            ffmpeg_path=settings.ffmpeg_path,
+            ffmpeg_timeout=settings.ffmpeg_timeout,
+        )
+        if streams.has_audio_video:
+            return candidate
 
     meta = load_meta(video_dir)
-    return download_video(meta.url, source_dir, settings)
+    downloaded = download_video(meta.url, source_dir, settings)
+    require_audio_video_streams(
+        downloaded,
+        ffmpeg_path=settings.ffmpeg_path,
+        ffmpeg_timeout=settings.ffmpeg_timeout,
+        label="取得した元動画",
+    )
+    return downloaded
 
 
 _ensure_source_video = ensure_source_video
@@ -489,6 +653,13 @@ def encode_segment(
             f"エンコードファイルが生成されませんでした。ログ: {log_path}"
         )
 
+    require_audio_video_streams(
+        output,
+        ffmpeg_path=ffmpeg,
+        ffmpeg_timeout=ffmpeg_timeout,
+        label="切り出した区間動画",
+    )
+
     return output
 
 
@@ -561,6 +732,13 @@ def concat_segments(
         raise FfmpegError(
             f"連結ファイルが生成されませんでした。ログ: {log_path}"
         )
+
+    require_audio_video_streams(
+        output_path,
+        ffmpeg_path=ffmpeg,
+        ffmpeg_timeout=ffmpeg_timeout,
+        label="連結した区間動画",
+    )
 
     list_path.unlink(missing_ok=True)
     return output_path

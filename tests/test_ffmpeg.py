@@ -13,18 +13,36 @@ from yt_live_kit.models.meta import VideoMeta
 from yt_live_kit.services.ffmpeg import (
     FFMPEG_CAPABILITY_TIMEOUT_DEFAULT,
     FfmpegError,
+    MediaStreams,
     build_concat_list,
     build_ffmpeg_command,
     concat_segments,
     cut_clip,
     diagnose_ffmpeg,
     encode_segment,
+    ensure_source_video,
     ensure_subtitles_filter,
     ffprobe_path_for,
     parse_ffmpeg_filter_names,
+    parse_media_streams_json,
     probe_ffmpeg_capabilities,
     probe_duration,
+    probe_media_streams,
+    require_audio_video_streams,
 )
+
+
+@pytest.fixture(autouse=True)
+def _stub_media_stream_validation_for_existing_tests(monkeypatch):
+    """既存テストでは追加した stream 検査を独立させる."""
+    streams = MediaStreams(video_count=1, audio_count=1)
+    monkeypatch.setattr(
+        "yt_live_kit.services.ffmpeg.probe_media_streams", lambda *args, **kwargs: streams
+    )
+    monkeypatch.setattr(
+        "yt_live_kit.services.ffmpeg.require_audio_video_streams",
+        lambda *args, **kwargs: streams,
+    )
 
 
 def _setup_video_dir(tmp_path: Path, video_id: str = "testvid1234") -> Path:
@@ -45,6 +63,17 @@ def _setup_video_dir(tmp_path: Path, video_id: str = "testvid1234") -> Path:
     )
     (video_dir / "meta.json").write_text(meta.model_dump_json(), encoding="utf-8")
     return video_dir
+
+
+def _fake_ffmpeg_tools(tmp_path: Path) -> tuple[str, str]:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    ffmpeg = bin_dir / "ffmpeg"
+    ffprobe = bin_dir / "ffprobe"
+    for path in (ffmpeg, ffprobe):
+        path.write_text("tool", encoding="utf-8")
+        path.chmod(0o755)
+    return str(ffmpeg), str(ffprobe)
 
 
 def test_parse_ffmpeg_filter_names_uses_exact_second_column_from_both_streams():
@@ -433,6 +462,246 @@ def test_probe_duration_rejects_invalid_result(mock_which, mock_run, tmp_path):
 )
 def test_ffprobe_path_for_replaces_basename_only(ffmpeg_path, expected):
     assert ffprobe_path_for(ffmpeg_path) == expected
+
+
+def test_parse_media_streams_json_accepts_ffprobe_shape_and_counts_av():
+    streams = parse_media_streams_json(
+        json.dumps(
+            {
+                "programs": [],
+                "stream_groups": [],
+                "streams": [
+                    {"codec_type": "video"},
+                    {"codec_type": "audio"},
+                    {"codec_type": "audio"},
+                    {"codec_type": "subtitle"},
+                ],
+            }
+        )
+    )
+    assert streams == MediaStreams(video_count=1, audio_count=2)
+    assert streams.has_audio_video
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        "not-json",
+        "[]",
+        '{"streams": "invalid"}',
+        '{"streams": [{"codec_type": null}]}',
+        '{"streams": [{"codec_type": "video", "index": 0}]}',
+        '{"streams": [], "unknown": []}',
+        '{"streams": [], "programs": {}}',
+    ],
+)
+def test_parse_media_streams_json_rejects_invalid_schema(payload):
+    with pytest.raises(FfmpegError, match="ffprobe"):
+        parse_media_streams_json(payload)
+
+
+@patch("yt_live_kit.services.ffmpeg.subprocess.run")
+@patch("yt_live_kit.services.ffmpeg.shutil.which")
+def test_probe_media_streams_uses_colocated_ffprobe_argv_and_timeout(
+    mock_which, mock_run, tmp_path
+):
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"media")
+    ffmpeg, ffprobe = _fake_ffmpeg_tools(tmp_path)
+    mock_which.side_effect = [ffmpeg, ffprobe]
+    mock_run.return_value = MagicMock(
+        returncode=0,
+        stdout='{"streams":[{"codec_type":"video"},{"codec_type":"audio"}]}',
+        stderr="",
+    )
+
+    streams = probe_media_streams(
+        source, ffmpeg_path="configured-ffmpeg", ffmpeg_timeout=17
+    )
+
+    assert streams.has_audio_video
+    assert mock_run.call_args.args[0] == [
+        ffprobe,
+        "-v",
+        "error",
+        "-show_entries",
+        "stream=codec_type",
+        "-of",
+        "json",
+        str(source.resolve()),
+    ]
+    assert mock_run.call_args.kwargs["timeout"] == 17
+    assert "shell" not in mock_run.call_args.kwargs
+
+
+@patch("yt_live_kit.services.ffmpeg.shutil.which")
+def test_probe_media_streams_missing_colocated_ffprobe_fails_closed(
+    mock_which, tmp_path
+):
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"media")
+    ffmpeg, _ffprobe = _fake_ffmpeg_tools(tmp_path)
+    mock_which.side_effect = [ffmpeg, None]
+    with pytest.raises(FfmpegError, match="同じ場所に ffprobe"):
+        probe_media_streams(source, ffmpeg_path="configured-ffmpeg")
+
+
+@patch("yt_live_kit.services.ffmpeg.subprocess.run")
+@patch("yt_live_kit.services.ffmpeg.shutil.which")
+def test_probe_media_streams_timeout_fails_closed(mock_which, mock_run, tmp_path):
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"media")
+    ffmpeg, ffprobe = _fake_ffmpeg_tools(tmp_path)
+    mock_which.side_effect = [ffmpeg, ffprobe]
+    mock_run.side_effect = subprocess.TimeoutExpired(cmd=["ffprobe"], timeout=3)
+    with pytest.raises(FfmpegError, match="タイムアウト"):
+        probe_media_streams(
+            source, ffmpeg_path="configured-ffmpeg", ffmpeg_timeout=3
+        )
+
+
+@patch("yt_live_kit.services.ffmpeg.subprocess.run")
+@patch("yt_live_kit.services.ffmpeg.shutil.which")
+def test_probe_media_streams_nonzero_fails_closed(mock_which, mock_run, tmp_path):
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"media")
+    ffmpeg, ffprobe = _fake_ffmpeg_tools(tmp_path)
+    mock_which.side_effect = [ffmpeg, ffprobe]
+    mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="invalid media")
+    with pytest.raises(FfmpegError, match="映像・音声 stream"):
+        probe_media_streams(source, ffmpeg_path="configured-ffmpeg")
+
+
+def test_require_audio_video_streams_rejects_video_only(tmp_path, monkeypatch):
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"media")
+    monkeypatch.setattr(
+        "yt_live_kit.services.ffmpeg.probe_media_streams",
+        lambda *args, **kwargs: MediaStreams(video_count=1, audio_count=0),
+    )
+    with pytest.raises(FfmpegError, match="音声付きで再取得"):
+        require_audio_video_streams(source, label="完成したショート動画")
+
+
+def test_ensure_source_video_rejects_video_only_candidate_and_downloads(
+    tmp_path, monkeypatch
+):
+    video_id = "testvid1234"
+    video_dir = _setup_video_dir(tmp_path, video_id)
+    existing = video_dir / "clips" / "source" / f"{video_id}.mp4"
+    downloaded = existing.parent / "downloaded.mp4"
+    probe = MagicMock(
+        side_effect=[
+            MediaStreams(video_count=1, audio_count=0),
+            MediaStreams(video_count=1, audio_count=1),
+        ]
+    )
+    def download_result(*args):
+        downloaded.write_bytes(b"downloaded")
+        return downloaded
+
+    download = MagicMock(side_effect=download_result)
+    monkeypatch.setattr("yt_live_kit.services.ffmpeg.probe_media_streams", probe)
+    monkeypatch.setattr(
+        "yt_live_kit.services.ffmpeg.require_audio_video_streams",
+        lambda path, **kwargs: probe(path, **kwargs),
+    )
+    monkeypatch.setattr("yt_live_kit.services.ffmpeg.download_video", download)
+    settings = Settings(data_dir=tmp_path, ffmpeg_path="configured-ffmpeg")
+
+    assert ensure_source_video(video_id, settings) == downloaded
+    download.assert_called_once()
+    assert existing.is_file()
+
+
+def test_ensure_source_video_reuses_only_existing_av_candidate(tmp_path, monkeypatch):
+    video_id = "testvid1234"
+    video_dir = _setup_video_dir(tmp_path, video_id)
+    source_dir = video_dir / "clips" / "source"
+    first = source_dir / "000-video-only.mp4"
+    first.write_bytes(b"video-only")
+    expected = source_dir / f"{video_id}.mp4"
+    probe = MagicMock(
+        side_effect=[
+            MediaStreams(video_count=1, audio_count=0),
+            MediaStreams(video_count=1, audio_count=1),
+        ]
+    )
+    download = MagicMock()
+    monkeypatch.setattr("yt_live_kit.services.ffmpeg.probe_media_streams", probe)
+    monkeypatch.setattr("yt_live_kit.services.ffmpeg.download_video", download)
+
+    result = ensure_source_video(video_id, Settings(data_dir=tmp_path))
+
+    assert result == expected
+    download.assert_not_called()
+
+
+def test_ensure_source_video_rejects_download_result_without_audio(
+    tmp_path, monkeypatch
+):
+    video_id = "testvid1234"
+    video_dir = _setup_video_dir(tmp_path, video_id)
+    downloaded = video_dir / "clips" / "source" / "downloaded.mp4"
+    monkeypatch.setattr(
+        "yt_live_kit.services.ffmpeg.probe_media_streams",
+        MagicMock(
+            side_effect=[
+                MediaStreams(video_count=1, audio_count=0),
+                MediaStreams(video_count=1, audio_count=0),
+            ]
+        ),
+    )
+    def download_result(*args):
+        downloaded.write_bytes(b"downloaded")
+        return downloaded
+
+    monkeypatch.setattr("yt_live_kit.services.ffmpeg.download_video", download_result)
+    monkeypatch.setattr(
+        "yt_live_kit.services.ffmpeg.require_audio_video_streams",
+        require_audio_video_streams,
+    )
+
+    with pytest.raises(FfmpegError, match="音声付きで再取得"):
+        ensure_source_video(video_id, Settings(data_dir=tmp_path))
+
+
+def test_encode_segment_rejects_output_without_audio(tmp_path, monkeypatch):
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"source")
+    output = tmp_path / "segment.mp4"
+
+    def run(cmd, **kwargs):
+        output.write_bytes(b"video-only")
+        return MagicMock(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr("yt_live_kit.services.ffmpeg.find_ffmpeg", lambda path: path)
+    monkeypatch.setattr("yt_live_kit.services.ffmpeg.subprocess.run", run)
+    monkeypatch.setattr(
+        "yt_live_kit.services.ffmpeg.require_audio_video_streams",
+        MagicMock(side_effect=FfmpegError("切り出した区間動画に音声がありません。")),
+    )
+    with pytest.raises(FfmpegError, match="音声"):
+        encode_segment(source, output, 0, 10, ffmpeg_path="ffmpeg-test")
+
+
+def test_concat_segments_rejects_output_without_audio(tmp_path, monkeypatch):
+    segment = tmp_path / "segment.mp4"
+    segment.write_bytes(b"segment")
+    output = tmp_path / "concat.mp4"
+
+    def run(cmd, **kwargs):
+        output.write_bytes(b"video-only")
+        return MagicMock(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr("yt_live_kit.services.ffmpeg.find_ffmpeg", lambda path: path)
+    monkeypatch.setattr("yt_live_kit.services.ffmpeg.subprocess.run", run)
+    monkeypatch.setattr(
+        "yt_live_kit.services.ffmpeg.require_audio_video_streams",
+        MagicMock(side_effect=FfmpegError("連結した区間動画に音声がありません。")),
+    )
+    with pytest.raises(FfmpegError, match="音声"):
+        concat_segments([segment], output, ffmpeg_path="ffmpeg-test")
 
 
 @patch("yt_live_kit.services.ffmpeg.subprocess.run")

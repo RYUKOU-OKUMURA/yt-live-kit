@@ -20,6 +20,7 @@ from yt_live_kit.services.ffmpeg import (
     ensure_source_video,
     ensure_subtitles_filter,
     find_ffmpeg,
+    require_audio_video_streams,
     resolve_output_filename,
     save_command_log,
 )
@@ -225,9 +226,18 @@ def _build_short_layout_command(
     ]
 
     if use_filter_complex:
-        cmd.extend(["-filter_complex", f"[0:v]{filter_chain}[vout]", "-map", "[vout]", "-map", "0:a?"])
+        cmd.extend(
+            [
+                "-filter_complex",
+                f"[0:v]{filter_chain}[vout]",
+                "-map",
+                "[vout]",
+                "-map",
+                "0:a:0",
+            ]
+        )
     else:
-        cmd.extend(["-vf", filter_chain])
+        cmd.extend(["-vf", filter_chain, "-map", "0:v:0", "-map", "0:a:0"])
 
     cmd.extend(
         [
@@ -455,6 +465,15 @@ def build_short_from_segments(
                 f"ショート動画ファイルが生成されませんでした。ログ: {log_path}"
             )
         try:
+            require_audio_video_streams(
+                temporary_output,
+                ffmpeg_path=effective_ffmpeg_path,
+                ffmpeg_timeout=ffmpeg_timeout,
+                label="完成したショート動画",
+            )
+        except FfmpegError as exc:
+            raise ShortsError(str(exc)) from exc
+        try:
             temporary_output.replace(output_path)
         except OSError as exc:
             raise ShortsError(f"ショート動画の保存に失敗しました: {exc}") from exc
@@ -634,6 +653,15 @@ def build_short(
             raise ShortsError(
                 f"ショート動画ファイルが生成されませんでした。ログ: {log_path}"
             )
+        try:
+            require_audio_video_streams(
+                temporary_output,
+                ffmpeg_path=effective_ffmpeg_path,
+                ffmpeg_timeout=ffmpeg_timeout,
+                label="完成したショート動画",
+            )
+        except FfmpegError as exc:
+            raise ShortsError(str(exc)) from exc
         try:
             temporary_output.replace(output_path)
         except OSError as exc:

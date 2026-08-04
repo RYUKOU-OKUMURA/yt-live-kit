@@ -21,6 +21,7 @@ from yt_live_kit.models.clips import ClipCandidate
 from yt_live_kit.models.highlights import HighlightSegment
 from yt_live_kit.models.telop import TelopScriptDocument
 from yt_live_kit.models.transcript import TranscriptArtifactRef
+from yt_live_kit.services.ffmpeg import FfmpegError, probe_media_streams
 from yt_live_kit.services.shorts import (
     MAX_DURATION_SEC,
     MIN_DURATION_SEC,
@@ -969,8 +970,15 @@ def can_reuse_shorts_queue_item(
         actual_path = item.output_path.resolve(strict=True)
         if actual_path != expected_path.resolve(strict=True):
             return False
+        streams = probe_media_streams(
+            actual_path,
+            ffmpeg_path=settings.ffmpeg_path,
+            ffmpeg_timeout=settings.ffmpeg_timeout,
+        )
+        if not streams.has_audio_video:
+            return False
         return make_shorts_queue_output_fingerprint(actual_path, settings) == item.output_fingerprint
-    except (OSError, RuntimeError, ShortsQueueError, ValueError):
+    except (FfmpegError, OSError, RuntimeError, ShortsQueueError, ValueError):
         return False
 
 

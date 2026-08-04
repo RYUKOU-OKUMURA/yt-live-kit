@@ -13,6 +13,7 @@ from yt_live_kit.models.meta import VideoMeta
 from yt_live_kit.models.telop import TelopScriptDocument
 from yt_live_kit.services.ffmpeg import (
     FfmpegError,
+    MediaStreams,
     concat_segments as real_concat_segments,
     ensure_subtitles_filter as real_ensure_subtitles_filter,
 )
@@ -40,6 +41,14 @@ def _stub_subtitles_capability_for_unit_tests(monkeypatch):
     monkeypatch.setattr(
         "yt_live_kit.services.shorts.ensure_subtitles_filter",
         lambda ffmpeg_path: ffmpeg_path,
+    )
+    monkeypatch.setattr(
+        "yt_live_kit.services.shorts.require_audio_video_streams",
+        lambda *args, **kwargs: MediaStreams(video_count=1, audio_count=1),
+    )
+    monkeypatch.setattr(
+        "yt_live_kit.services.ffmpeg.require_audio_video_streams",
+        lambda *args, **kwargs: MediaStreams(video_count=1, audio_count=1),
     )
 
 
@@ -329,6 +338,9 @@ def test_build_short_blur_filter_in_command(
     filter_graph = cmd[fc_index + 1]
     assert BLUR_LAYOUT_FILTER in filter_graph
     assert "subtitles=" not in filter_graph
+    assert "0:a?" not in cmd
+    assert cmd[cmd.index("-map") + 1] == "[vout]"
+    assert cmd[cmd.index("-map", cmd.index("-map") + 1) + 1] == "0:a:0"
     assert result.layout == "blur"
     assert result.burned_subtitles is False
     assert result.duration_sec == pytest.approx(15.0)
@@ -378,6 +390,8 @@ def test_build_short_crop_with_subtitles(
     vf_chain = cmd[vf_index + 1]
     assert CROP_LAYOUT_FILTER in vf_chain
     assert "subtitles=" in vf_chain
+    map_values = [cmd[index + 1] for index, value in enumerate(cmd) if value == "-map"]
+    assert map_values == ["0:v:0", "0:a:0"]
     assert "FontName=Hiragino Sans" in vf_chain
     assert result.burned_subtitles is True
     assert result.font_warning is None
@@ -824,6 +838,51 @@ def test_build_short_pass2_failure_preserves_existing_output(
         )
 
     assert existing.read_bytes() == b"old output"
+    assert not list(existing.parent.glob(".short_10_25.*.mp4"))
+
+
+@patch("yt_live_kit.services.shorts.subprocess.run")
+@patch("yt_live_kit.services.shorts.find_ffmpeg")
+@patch("yt_live_kit.services.shorts.encode_segment")
+@patch("yt_live_kit.services.shorts.ensure_source_video")
+def test_build_short_final_without_audio_preserves_existing_output(
+    mock_ensure,
+    mock_encode_segment,
+    mock_find_ffmpeg,
+    mock_run,
+    tmp_path,
+    monkeypatch,
+):
+    mock_find_ffmpeg.return_value = "/usr/bin/ffmpeg"
+    mock_ensure.return_value = tmp_path / "source.mp4"
+    mock_encode_segment.side_effect = _fake_encode_segment
+    mock_run.side_effect = _fake_ffmpeg_run
+    video_id = "testvid1234"
+    video_dir = _setup_video_dir(tmp_path, video_id)
+    existing = video_dir / "shorts" / "output" / "short_10_25.mp4"
+    existing.parent.mkdir(parents=True)
+    existing.write_bytes(b"old-with-audio")
+    monkeypatch.setattr(
+        "yt_live_kit.services.shorts.require_audio_video_streams",
+        MagicMock(
+            side_effect=FfmpegError(
+                "完成したショート動画に映像と音声の両方が含まれていません。"
+            )
+        ),
+    )
+
+    with pytest.raises(ShortsError, match="映像と音声"):
+        build_short(
+            video_id,
+            10.0,
+            25.0,
+            Settings(data_dir=tmp_path),
+            layout="crop",
+            burn_subtitles=False,
+            ffmpeg_path="/usr/bin/ffmpeg",
+        )
+
+    assert existing.read_bytes() == b"old-with-audio"
     assert not list(existing.parent.glob(".short_10_25.*.mp4"))
 
 
@@ -1314,6 +1373,38 @@ def test_build_short_from_segments_pass2_failure_preserves_existing_and_cleans(
     assert existing.read_bytes() == b"old"
     assert not any((video_dir / "shorts" / "segments").iterdir())
     assert not list(existing.parent.glob(".custom.*.mp4"))
+
+
+def test_build_short_from_segments_final_without_audio_preserves_existing(
+    tmp_path, monkeypatch
+):
+    video_id = "testvid1234"
+    video_dir = _setup_video_dir(tmp_path, video_id)
+    settings = Settings(data_dir=tmp_path)
+    _install_s3_success_mocks(monkeypatch, tmp_path)
+    existing = video_dir / "shorts" / "output" / "custom.mp4"
+    existing.parent.mkdir(parents=True)
+    existing.write_bytes(b"old-with-audio")
+    monkeypatch.setattr(
+        "yt_live_kit.services.shorts.require_audio_video_streams",
+        MagicMock(
+            side_effect=FfmpegError(
+                "完成したショート動画に映像と音声の両方が含まれていません。"
+            )
+        ),
+    )
+
+    with pytest.raises(ShortsError, match="映像と音声"):
+        build_short_from_segments(
+            video_id,
+            [(0.0, 10.0)],
+            settings,
+            output_name="custom.mp4",
+        )
+
+    assert existing.read_bytes() == b"old-with-audio"
+    assert not list(existing.parent.glob(".custom.*.mp4"))
+    assert not any((video_dir / "shorts" / "segments").iterdir())
 
 
 def test_build_short_from_segments_font_warning_matches_legacy(tmp_path, monkeypatch):

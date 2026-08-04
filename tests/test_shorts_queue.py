@@ -17,6 +17,7 @@ from yt_live_kit.models.highlights import HighlightSegment
 from yt_live_kit.models.telop import TelopScriptDocument
 from yt_live_kit.models.transcript import TranscriptArtifactRef, TranscriptCue, TranscriptRange
 from yt_live_kit.services.shorts import ShortResult, ShortsError
+from yt_live_kit.services.ffmpeg import FfmpegError, MediaStreams
 from yt_live_kit.services.telop import make_clip_id
 from yt_live_kit.services.transcript_artifact import (
     TranscriptArtifactStore,
@@ -44,6 +45,14 @@ from yt_live_kit.services.shorts_queue import (
     run_shorts_queue_job_target,
     select_queue_candidates_by_id,
 )
+
+
+@pytest.fixture(autouse=True)
+def _stub_queue_media_probe(monkeypatch):
+    monkeypatch.setattr(
+        "yt_live_kit.services.shorts_queue.probe_media_streams",
+        lambda *args, **kwargs: MediaStreams(video_count=1, audio_count=1),
+    )
 
 
 def _clip(index: int, start: int, end: int) -> ClipCandidate:
@@ -750,6 +759,46 @@ def test_output_fingerprint_mismatch_cannot_be_reused(tmp_path: Path) -> None:
         manifest_path=tmp_path / "manifest.json",
     )
     assert not can_reserve_shorts_queue_item(result, item, settings)
+
+
+@pytest.mark.parametrize("probe_result", ["video-only", "probe-error"])
+def test_output_without_verified_audio_cannot_be_reused(
+    tmp_path: Path, monkeypatch, probe_result: str
+) -> None:
+    settings = Settings(data_dir=tmp_path)
+    spec = _specs(1)[0]
+    short = _successful_short_result(tmp_path, spec)
+    item = ShortsQueueItemResult(
+        target_id=spec.target_id,
+        status="succeeded",
+        output_path=short.output_path,
+        log_path=short.command_log_path,
+        font_warning=None,
+        title_candidates=("タイトル",),
+        description="説明",
+        tags=("タグ",),
+        error=None,
+        input_fingerprint=shorts_queue_service.make_shorts_queue_input_fingerprint(
+            "video", spec
+        ),
+        output_fingerprint=shorts_queue_service.make_shorts_queue_output_fingerprint(
+            short.output_path, settings
+        ),
+    )
+    if probe_result == "video-only":
+        probe = MagicMock(return_value=MediaStreams(video_count=1, audio_count=0))
+    else:
+        probe = MagicMock(side_effect=FfmpegError("ffprobe 失敗"))
+    monkeypatch.setattr("yt_live_kit.services.shorts_queue.probe_media_streams", probe)
+
+    assert not can_reuse_shorts_queue_item(
+        video_id="video", spec=spec, item=item, settings=settings
+    )
+    probe.assert_called_once_with(
+        short.output_path.resolve(),
+        ffmpeg_path=settings.ffmpeg_path,
+        ffmpeg_timeout=settings.ffmpeg_timeout,
+    )
 
 
 def test_interrupted_rerun_reuses_only_proven_success_item(tmp_path: Path) -> None:
