@@ -23,6 +23,7 @@ SESSION_JOB_ERROR = "job_error"
 SESSION_JOB_ERROR_HISTORY = "job_error_history"
 SESSION_GLOBAL_JOB_ERRORS = "global_job_error_notifications"
 SESSION_UNREAD_JOB_ERRORS = "unread_job_error_notifications"
+SESSION_PIPELINE_COMPLETIONS = "pipeline_completion_notifications"
 SESSION_SELECTED_VIDEO_ID = "selected_video_id"
 SESSION_SHOW_ARCHIVED = "library_show_archived"
 
@@ -35,6 +36,7 @@ SESSION_JOB_ERROR_UNREAD = SESSION_UNREAD_JOB_ERRORS
 MAX_VIDEO_JOB_ERROR_NOTIFICATIONS = 3
 MAX_GLOBAL_JOB_ERROR_NOTIFICATIONS = 3
 MAX_UNREAD_JOB_ERROR_NOTIFICATIONS = 3
+MAX_PIPELINE_COMPLETION_NOTIFICATIONS = 3
 JOB_ERROR_HISTORY_LIMIT = MAX_VIDEO_JOB_ERROR_NOTIFICATIONS
 
 
@@ -96,6 +98,43 @@ class JobErrorNotification:
         if detail is not None and not isinstance(detail, str):
             raise ValueError("エラー通知の詳細が正しくありません")
         return cls(video_id, job_id, kind, summary, detail, occurred_at)
+
+
+@dataclass(frozen=True, slots=True)
+class PipelineCompletionNotification:
+    """本文を持たない、動画詳細への導線専用の完了通知。"""
+
+    video_id: str
+    job_id: str
+    kind: str
+    title: str
+    completed_at: datetime
+
+    def __post_init__(self) -> None:
+        if not self.video_id or not self.job_id:
+            raise ValueError("完了通知には video_id と job_id が必要です")
+        completed_at = self.completed_at
+        if completed_at.tzinfo is None:
+            completed_at = completed_at.replace(tzinfo=timezone.utc)
+        else:
+            completed_at = completed_at.astimezone(timezone.utc)
+        object.__setattr__(self, "completed_at", completed_at)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "PipelineCompletionNotification":
+        completed_at = data.get("completed_at")
+        if isinstance(completed_at, str):
+            completed_at = datetime.fromisoformat(completed_at)
+        if not isinstance(completed_at, datetime):
+            raise ValueError("completed_at の形式が正しくありません")
+
+        video_id = data.get("video_id")
+        job_id = data.get("job_id")
+        kind = data.get("kind")
+        title = data.get("title")
+        if not all(isinstance(value, str) for value in (video_id, job_id, kind, title)):
+            raise ValueError("完了通知の形式が正しくありません")
+        return cls(video_id, job_id, kind, title, completed_at)
 
 
 def sanitize_job_error_for_display(value: object) -> str:
@@ -310,6 +349,78 @@ def consume_unread_job_error_notifications() -> list[JobErrorNotification]:
     notifications = get_unread_job_error_notifications()
     st.session_state[SESSION_UNREAD_JOB_ERRORS] = []
     return notifications
+
+
+def _coerce_pipeline_completion_notification(
+    value: object,
+) -> PipelineCompletionNotification | None:
+    if isinstance(value, PipelineCompletionNotification):
+        return value
+    if isinstance(value, dict):
+        try:
+            return PipelineCompletionNotification.from_dict(value)
+        except (TypeError, ValueError, OverflowError):
+            return None
+    return None
+
+
+def get_pipeline_completion_notifications() -> list[PipelineCompletionNotification]:
+    """未消去の完了通知を新しい順で返す。読み取り時は state を変更しない。"""
+    raw = st.session_state.get(SESSION_PIPELINE_COMPLETIONS)
+    if not isinstance(raw, (list, tuple)):
+        return []
+    notifications = [
+        notification
+        for value in raw
+        if (notification := _coerce_pipeline_completion_notification(value)) is not None
+    ]
+    return sorted(
+        notifications,
+        key=lambda notification: notification.completed_at,
+        reverse=True,
+    )[:MAX_PIPELINE_COMPLETION_NOTIFICATIONS]
+
+
+def record_pipeline_completion(
+    video_id: str,
+    job_id: str,
+    kind: str,
+    title: str,
+    completed_at: datetime | None = None,
+) -> PipelineCompletionNotification:
+    """pipeline 完了を job ID 単位で一度だけ通知へ追加する。"""
+    notification = PipelineCompletionNotification(
+        video_id=str(video_id),
+        job_id=str(job_id),
+        kind=str(kind),
+        title=str(title),
+        completed_at=completed_at or datetime.now(timezone.utc),
+    )
+    notifications = get_pipeline_completion_notifications()
+    existing = next(
+        (item for item in notifications if item.job_id == notification.job_id),
+        None,
+    )
+    if existing is not None:
+        return existing
+
+    notifications.append(notification)
+    st.session_state[SESSION_PIPELINE_COMPLETIONS] = sorted(
+        notifications,
+        key=lambda item: item.completed_at,
+        reverse=True,
+    )[:MAX_PIPELINE_COMPLETION_NOTIFICATIONS]
+    return notification
+
+
+def dismiss_pipeline_completion(job_id: str) -> bool:
+    """指定 job の完了通知だけを消去する。"""
+    notifications = get_pipeline_completion_notifications()
+    remaining = [item for item in notifications if item.job_id != job_id]
+    if len(remaining) == len(notifications):
+        return False
+    st.session_state[SESSION_PIPELINE_COMPLETIONS] = remaining
+    return True
 
 _orphans_initialized = False
 

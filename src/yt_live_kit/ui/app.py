@@ -9,10 +9,10 @@ import streamlit as st
 
 from yt_live_kit import __version__
 from yt_live_kit.config import get_settings
-from yt_live_kit.ui.components.results import render_results
 from yt_live_kit.ui.components.shorts_line import render_sidebar_line_context
 from yt_live_kit.ui.components.status_bar import (
     job_display_label,
+    render_pipeline_completion_notices,
     render_status_bar,
     retry_hint_for_job,
 )
@@ -21,7 +21,6 @@ from yt_live_kit.services.jobs import read_job, read_job_error_log
 from yt_live_kit.ui.state import (
     consume_unread_job_error_notifications,
     format_job_error_summary_for_display,
-    get_result,
     get_selected_video_id,
     get_unread_job_error_notifications,
     init_orphans_once,
@@ -163,6 +162,7 @@ interrupted_job_ids = init_orphans_once()
 _record_interrupted_jobs(interrupted_job_ids, app_settings)
 
 _render_unread_job_errors(detail_page)
+render_pipeline_completion_notices(detail_page=detail_page)
 
 st.title("yt-live-kit")
 st.caption(f"v{__version__} — YouTube ライブアーカイブのタイムライン生成")
@@ -175,8 +175,3 @@ with st.sidebar:
     render_status_bar(detail_page=detail_page)
     render_sidebar_line_context(get_selected_video_id(), app_settings)
 page.run()
-
-result = get_result()
-if result is not None:
-    st.divider()
-    render_results(result)

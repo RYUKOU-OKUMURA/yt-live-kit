@@ -43,11 +43,14 @@ from yt_live_kit.services.shorts_line import (
     load_line_state,
     make_output_fingerprint,
     make_review_fingerprint,
+    materialize_line_state_projection,
+    persist_line_start,
     reconcile_output,
     record_output,
     record_upload_operation,
     recover_line_state,
     resolve_active_line,
+    resolve_active_line_read_only,
     run_line_reservation_transaction,
     save_active_line,
     save_line_state,
@@ -670,6 +673,47 @@ def test_missing_artifact_invalidates_line_confirmations_without_resolver(tmp_pa
     assert restored.current_stage == LineStage.TELOP_REVIEW
 
 
+def test_materialize_missing_artifact_projection_for_first_explicit_command(
+    tmp_path: Path,
+) -> None:
+    settings = _settings(tmp_path)
+    artifact = _stored_high_precision_artifact()
+    store = TranscriptArtifactStore("video-1", settings)
+    store.save(artifact)
+    reference = store.artifact_ref(artifact)
+    document = _document().model_copy(
+        update={
+            "artifact_ref": reference,
+            "artifact_fingerprint": artifact.artifact_fingerprint,
+            "used_range_cue_digests": artifact.used_range_cue_digests,
+        }
+    )
+    review = _review_fingerprint(document)
+    state = create_line_state(
+        "video-1",
+        "clip-1",
+        QUEUE_FP,
+        review_fingerprint=review,
+        artifact_ref=reference,
+        artifact_fingerprint=artifact.artifact_fingerprint,
+        used_range_cue_digests=artifact.used_range_cue_digests,
+        now=NOW,
+    )
+    state = confirm_review(state, review, now=NOW + timedelta(seconds=1))
+    line_path = save_line_state(state, settings)
+    store._artifact_path(artifact.artifact_fingerprint).unlink()
+    line_before = line_path.read_bytes()
+    displayed = resolve_active_line_read_only("video-1", settings)
+    assert displayed is not None
+    assert line_path.read_bytes() == line_before
+
+    canonical = materialize_line_state_projection(displayed, settings)
+
+    assert canonical.review_confirmed_fingerprint is None
+    assert canonical.current_stage == LineStage.TELOP_REVIEW
+    assert load_line_state("video-1", "clip-1", settings) == canonical
+
+
 def test_lineage_invalidation_is_persisted_and_not_revived_after_artifact_restore(
     tmp_path: Path,
 ) -> None:
@@ -836,6 +880,152 @@ def test_atomic_replace_failure_preserves_previous_line(tmp_path: Path) -> None:
             save_line_state(updated, settings)
     assert path.read_bytes() == original
     assert not tuple(path.parent.glob("*.tmp"))
+
+
+@pytest.mark.parametrize("failed_write", [1, 2])
+def test_line_start_rolls_back_line_and_pointer_after_each_write_fault(
+    tmp_path: Path,
+    failed_write: int,
+) -> None:
+    from yt_live_kit.services import shorts_line as line_service
+
+    settings = _settings(tmp_path)
+    previous = create_line_state("video-1", "clip-old", QUEUE_FP, now=NOW)
+    save_line_state(previous, settings)
+    save_active_line(
+        previous.video_id,
+        previous.clip_id,
+        settings,
+        now=NOW + timedelta(seconds=1),
+    )
+    active_path = (
+        settings.data_dir / "video-1" / "shorts" / "line" / "active_line.json"
+    )
+    active_before = active_path.read_bytes()
+    started = create_line_state(
+        "video-1",
+        "clip-new",
+        "b" * 64,
+        now=NOW + timedelta(seconds=2),
+    )
+    new_path = line_state_path("video-1", "clip-new", settings)
+    real_write = line_service._atomic_write
+    write_count = 0
+
+    def fault(path: Path, payload: dict[str, object]) -> None:
+        nonlocal write_count
+        write_count += 1
+        if write_count == failed_write:
+            raise LineStateError("injected write fault")
+        real_write(path, payload)
+
+    with patch.object(line_service, "_atomic_write", side_effect=fault):
+        with pytest.raises(LineStateError, match="開始を安全に保存"):
+            persist_line_start(started, settings)
+
+    assert new_path.exists() is False
+    assert active_path.read_bytes() == active_before
+    assert resolve_active_line_read_only("video-1", settings) == previous
+
+
+def test_read_only_line_resolver_does_not_persist_legacy_invalidation(
+    tmp_path: Path,
+) -> None:
+    settings = _settings(tmp_path)
+    confirmed, _output_path = _confirmed_state(tmp_path)
+    save_line_state(confirmed, settings)
+    save_active_line(
+        confirmed.video_id,
+        confirmed.clip_id,
+        settings,
+        now=NOW + timedelta(seconds=4),
+    )
+    line_path = line_state_path("video-1", "clip-1", settings)
+    active_path = line_path.parent / "active_line.json"
+    legacy = confirmed.model_copy(update={"schema_version": 1})
+    line_path.write_text(legacy.model_dump_json(indent=2), encoding="utf-8")
+    line_before = line_path.read_bytes()
+    active_before = active_path.read_bytes()
+
+    projected = resolve_active_line_read_only("video-1", settings)
+
+    assert projected is not None
+    assert projected.schema_version == 2
+    assert projected.review_confirmed_fingerprint is None
+    assert projected.preview_confirmed_fingerprint is None
+    assert line_path.read_bytes() == line_before
+    assert active_path.read_bytes() == active_before
+
+
+def test_materialize_read_only_legacy_projection_once_for_explicit_command(
+    tmp_path: Path,
+) -> None:
+    settings = _settings(tmp_path)
+    confirmed, _output_path = _confirmed_state(tmp_path)
+    legacy = confirmed.model_copy(update={"schema_version": 1})
+    line_path = save_line_state(confirmed, settings)
+    save_active_line(legacy.video_id, legacy.clip_id, settings)
+    line_path.write_text(legacy.model_dump_json(indent=2), encoding="utf-8")
+    displayed = resolve_active_line_read_only("video-1", settings)
+    assert displayed is not None
+    before = line_path.read_bytes()
+
+    canonical = materialize_line_state_projection(displayed, settings)
+
+    assert before != line_path.read_bytes()
+    assert canonical.schema_version == 2
+    assert canonical.review_confirmed_fingerprint is None
+    assert load_line_state("video-1", "clip-1", settings) == canonical
+    assert materialize_line_state_projection(canonical, settings) == canonical
+
+
+def test_materialize_projection_rejects_concurrent_change_without_overwrite(
+    tmp_path: Path,
+) -> None:
+    settings = _settings(tmp_path)
+    state = create_line_state("video-1", "clip-1", QUEUE_FP, now=NOW)
+    save_line_state(state, settings)
+    changed = set_review_fingerprint(
+        state,
+        _review_fingerprint(),
+        now=NOW + timedelta(seconds=1),
+    )
+    save_line_state(changed, settings, expected_state=state)
+    line_path = line_state_path("video-1", "clip-1", settings)
+    changed_bytes = line_path.read_bytes()
+
+    with pytest.raises(LineStateError, match="別の操作"):
+        materialize_line_state_projection(state, settings)
+
+    assert line_path.read_bytes() == changed_bytes
+
+
+def test_read_only_fallback_sorts_raw_timestamps_before_legacy_projection(
+    tmp_path: Path,
+) -> None:
+    settings = _settings(tmp_path)
+    old_legacy = create_line_state(
+        "video-1",
+        "clip-old",
+        QUEUE_FP,
+        now=NOW,
+    ).model_copy(update={"schema_version": 1})
+    newest = create_line_state(
+        "video-1",
+        "clip-new",
+        "b" * 64,
+        now=NOW + timedelta(hours=1),
+    )
+    old_path = save_line_state(old_legacy, settings)
+    new_path = save_line_state(newest, settings)
+    old_before = old_path.read_bytes()
+    new_before = new_path.read_bytes()
+
+    resolved = resolve_active_line_read_only("video-1", settings)
+
+    assert resolved == newest
+    assert old_path.read_bytes() == old_before
+    assert new_path.read_bytes() == new_before
 
 
 def test_active_pointer_and_deterministic_fallback(tmp_path: Path) -> None:

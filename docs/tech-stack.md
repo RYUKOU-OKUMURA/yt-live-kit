@@ -60,7 +60,7 @@ v1 では Whisper 関連パッケージは **含めない**（v1.5 フォール�
 
 | 項目 | 内容 |
 |------|------|
-| **フレームワーク** | [Streamlit](https://streamlit.io/) 1.55+（lock 解決版は 1.60） |
+| **フレームワーク** | [Streamlit](https://streamlit.io/) 1.59+（`persist_state` 導入版。lock 解決版は 1.60） |
 | **理由** | Python 製でパイプラインと同一言語。1 ファイルから始められる。進捗表示（`st.status` / `st.progress`）、コピー（`st.code` + ボタン）、ダウンロード（`st.download_button`）等の UI が標準部品で足りる |
 | **実行形態** | ローカルホスト（`localhost`）のみ。外部公開しない |
 | **代替案** | Gradio — 同様に Python 製で UI を素早く構築できるが、v1 では Streamlit を推奨 |

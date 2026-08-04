@@ -162,6 +162,48 @@ def test_human_confirmation_does_not_return_after_edit_and_revert() -> None:
     assert shorts_line.is_human_review_current(state, original) is False
 
 
+def test_telop_editor_widgets_explicitly_persist_across_conditional_workspaces() -> None:
+    _target, document, _spec = _lineage_fixture()
+    session_state: dict[str, object] = {}
+    first_column = MagicMock()
+    second_column = MagicMock()
+
+    @contextmanager
+    def container(*_args: object, **_kwargs: object):
+        yield
+
+    with (
+        patch.object(shorts_line.st, "session_state", session_state),
+        patch.object(shorts_line.st, "text_input") as text_input,
+        patch.object(shorts_line.st, "text_area") as text_area,
+        patch.object(shorts_line.st, "toggle") as toggle,
+        patch.object(
+            shorts_line.st,
+            "columns",
+            return_value=(first_column, second_column),
+        ),
+        patch.object(shorts_line.st, "container", side_effect=container),
+        patch.object(shorts_line.st, "markdown"),
+        patch.object(shorts_line.st, "caption"),
+    ):
+        shorts_line._editor_document(
+            document,
+            video_id="video-1",
+            clip_id="clip-1",
+            queue_fingerprint="a" * 64,
+        )
+
+    widget_calls = [
+        *text_input.call_args_list,
+        *text_area.call_args_list,
+        *toggle.call_args_list,
+        *first_column.number_input.call_args_list,
+        *second_column.number_input.call_args_list,
+    ]
+    assert widget_calls
+    assert all(call.kwargs["persist_state"] == "session" for call in widget_calls)
+
+
 def test_manifest_output_is_rejected_when_review_lineage_changed(tmp_path: Path) -> None:
     target, document_a, spec_a = _lineage_fixture()
     output = tmp_path / target.output_name
@@ -379,7 +421,7 @@ def test_mixed_handoff_preselects_order_and_does_not_force_long_cut(
     )
     session_state: dict[str, object] = {}
     with (
-        patch.object(shorts_line, "resolve_active_line", return_value=None),
+        patch.object(shorts_line, "resolve_active_line_read_only", return_value=None),
         patch.object(shorts_line, "render_stage_bar"),
         patch.object(shorts_line, "render_short_cut_section") as cut,
         patch.object(shorts_line.st, "session_state", session_state),
@@ -441,6 +483,59 @@ def test_recovery_actions_offer_retry_and_confirmed_abandon(tmp_path: Path) -> N
         "保存状態を再読み込み",
         "ラインを終了して素材選定へ戻る",
     ]
+
+
+def test_legacy_abandon_first_click_materializes_before_archive(tmp_path: Path) -> None:
+    settings = Settings(data_dir=tmp_path)
+    state = create_line_state("video-1", "clip-1", "a" * 64)
+    legacy = state.model_copy(update={"schema_version": 1})
+    line_path = save_line_state(state, settings)
+    save_active_line("video-1", "clip-1", settings)
+    line_path.write_text(legacy.model_dump_json(indent=2), encoding="utf-8")
+    displayed = shorts_line.resolve_active_line_read_only("video-1", settings)
+    assert displayed is not None
+    session_state: dict[str, object] = {}
+
+    with (
+        patch.object(shorts_line.st, "session_state", session_state),
+        patch.object(shorts_line.st, "warning"),
+        patch.object(shorts_line.st, "write"),
+        patch.object(shorts_line.st, "checkbox", return_value=True),
+        patch.object(shorts_line.st, "button", return_value=True),
+        patch.object(shorts_line.st, "success"),
+        patch.object(shorts_line.st, "rerun") as rerun,
+        patch.object(shorts_line, "clear_line_confirmed_spec"),
+        patch.object(shorts_line, "clear_line_snapshot"),
+    ):
+        shorts_line._confirm_abandon_line_dialog.__wrapped__(displayed, settings)
+
+    assert not line_path.exists()
+    assert tuple(line_path.parent.glob("abandoned_clip-1_*.json"))
+    rerun.assert_called_once()
+
+
+def test_abandon_stops_before_archive_when_projection_is_stale(tmp_path: Path) -> None:
+    state = create_line_state("video-1", "clip-1", "a" * 64)
+    error = LineStateError("ライン状態が別の操作で更新されました。")
+    with (
+        patch.object(shorts_line.st, "warning"),
+        patch.object(shorts_line.st, "write"),
+        patch.object(shorts_line.st, "checkbox", return_value=True),
+        patch.object(shorts_line.st, "button", return_value=True),
+        patch.object(shorts_line.st, "error"),
+        patch.object(
+            shorts_line,
+            "materialize_line_state_projection",
+            side_effect=error,
+        ),
+        patch.object(shorts_line, "abandon_line_state") as abandon,
+    ):
+        shorts_line._confirm_abandon_line_dialog.__wrapped__(
+            state,
+            Settings(data_dir=tmp_path),
+        )
+
+    abandon.assert_not_called()
 
 
 def test_validate_line_reservation_invalidates_changed_output(tmp_path: Path) -> None:
@@ -532,9 +627,14 @@ def test_publish_callbacks_bypass_non_line_item_and_do_not_require_active_line(
 def test_sidebar_is_display_only_and_shows_daily_progress(tmp_path: Path) -> None:
     settings = Settings(data_dir=tmp_path)
     daily = DailyLineSummary(completed_count=1, needs_attention_count=2)
+    session_state: dict[str, object] = {"unrelated": "keep"}
     with (
-        patch("yt_live_kit.ui.components.shorts_line.resolve_active_line", return_value=None),
+        patch(
+            "yt_live_kit.ui.components.shorts_line.resolve_active_line_read_only",
+            return_value=None,
+        ),
         patch("yt_live_kit.ui.components.shorts_line.load_daily_line_summary", return_value=daily),
+        patch.object(shorts_line.st, "session_state", session_state),
         patch("yt_live_kit.ui.components.shorts_line.st.divider"),
         patch("yt_live_kit.ui.components.shorts_line.st.markdown") as markdown,
         patch("yt_live_kit.ui.components.shorts_line.st.caption") as caption,
@@ -547,6 +647,43 @@ def test_sidebar_is_display_only_and_shows_daily_progress(tmp_path: Path) -> Non
     assert any("作成中のラインはありません" in call.args[0] for call in caption.call_args_list)
     assert any("本日のライン完了 1／3" in call.args[0] for call in write.call_args_list)
     button.assert_not_called()
+    assert session_state == {"unrelated": "keep"}
+
+
+def test_main_line_double_render_keeps_legacy_line_pointer_and_session_unchanged(
+    tmp_path: Path,
+) -> None:
+    settings = Settings(data_dir=tmp_path)
+    state = create_line_state("video-1", "clip-1", "a" * 64)
+    line_path = save_line_state(state, settings)
+    save_active_line("video-1", "clip-1", settings)
+    active_path = line_path.parent / "active_line.json"
+    legacy = state.model_copy(update={"schema_version": 1})
+    line_path.write_text(legacy.model_dump_json(indent=2), encoding="utf-8")
+    line_before = line_path.read_bytes()
+    active_before = active_path.read_bytes()
+    session_state: dict[str, object] = {"unrelated": "keep"}
+
+    with (
+        patch.object(shorts_line.st, "session_state", session_state),
+        patch.object(shorts_line, "resolve_active_line") as mutating_resolver,
+        patch.object(shorts_line, "render_stage_bar"),
+        patch.object(shorts_line, "_render_line_recovery_actions"),
+        patch.object(shorts_line.st, "error"),
+    ):
+        for _ in range(2):
+            shorts_line.render_shorts_line(
+                video_id="video-1",
+                title="動画",
+                clip_candidates=(),
+                highlight_candidates=(),
+                settings=settings,
+            )
+
+    mutating_resolver.assert_not_called()
+    assert session_state == {"unrelated": "keep"}
+    assert line_path.read_bytes() == line_before
+    assert active_path.read_bytes() == active_before
 
 
 def test_sidebar_labels_target_stage_next_and_attention() -> None:
@@ -589,8 +726,7 @@ def test_sidebar_generation_preview_has_no_duplicate_location_guidance(
         kind="shorts_queue",
     )
     with (
-        patch.object(shorts_line, "resolve_active_line", return_value=state),
-        patch.object(shorts_line, "_context", return_value={}),
+        patch.object(shorts_line, "resolve_active_line_read_only", return_value=state),
         patch.object(shorts_line, "_find_output", return_value=(None, None)),
         patch.object(shorts_line, "get_active_job", return_value=active_job),
         patch.object(shorts_line, "render_compact_line_status"),
@@ -617,7 +753,7 @@ def test_main_line_summary_is_only_collapsed_stage_status(tmp_path: Path) -> Non
         kind="shorts_queue",
     )
     with (
-        patch.object(shorts_line, "resolve_active_line", return_value=state),
+        patch.object(shorts_line, "resolve_active_line_read_only", return_value=state),
         patch.object(shorts_line, "get_active_job", return_value=active_job),
         patch.object(shorts_line, "render_compact_line_status") as compact,
         patch.object(shorts_line, "load_daily_line_summary") as daily,
@@ -677,7 +813,7 @@ def test_sidebar_restores_persisted_segment_preview_after_restart(tmp_path: Path
     result = MagicMock(clip_specs=(spec,), items=())
     session_state: dict[str, object] = {}
     with (
-        patch.object(shorts_line, "resolve_active_line", return_value=state),
+        patch.object(shorts_line, "resolve_active_line_read_only", return_value=state),
         patch.object(shorts_line, "load_latest_shorts_queue_result", return_value=result),
         patch.object(shorts_line, "get_active_job", return_value=None),
         patch.object(shorts_line, "render_compact_line_status"),
@@ -753,6 +889,290 @@ def test_pre_script_restart_restores_target_and_telop_retry(tmp_path: Path) -> N
         "video-1", target.target_id, queue_fingerprint, document
     )
     assert persisted.review_confirmed_fingerprint is None
+
+
+def test_legacy_telop_generation_first_click_uses_canonical_state(
+    tmp_path: Path,
+) -> None:
+    target, document, _spec = _lineage_fixture()
+    settings = Settings(data_dir=tmp_path)
+    state = create_line_state("video-1", target.target_id, "a" * 64)
+    legacy = state.model_copy(update={"schema_version": 1})
+    line_path = save_line_state(state, settings)
+    save_active_line("video-1", target.target_id, settings)
+    line_path.write_text(legacy.model_dump_json(indent=2), encoding="utf-8")
+    displayed = shorts_line.resolve_active_line_read_only("video-1", settings)
+    assert displayed is not None
+    context: dict[str, object] = {"target": target}
+
+    with (
+        patch.object(shorts_line.st, "session_state", {}),
+        patch.object(
+            shorts_line,
+            "generate_telop_script",
+            return_value=MagicMock(document=document),
+        ) as generate,
+    ):
+        shorts_line._generate_line_telop(
+            video_id="video-1",
+            target=target,
+            state=displayed,
+            context=context,
+            settings=settings,
+        )
+
+    generate.assert_called_once()
+    persisted = load_line_state("video-1", target.target_id, settings)
+    assert persisted is not None
+    assert persisted.schema_version == 2
+    assert persisted.review_fingerprint == make_review_fingerprint(
+        "video-1", target.target_id, "a" * 64, document
+    )
+    assert context["draft"] == document
+
+
+def test_stale_telop_generation_stops_before_codex_or_script_side_effect(
+    tmp_path: Path,
+) -> None:
+    target, _document, _spec = _lineage_fixture()
+    state = create_line_state("video-1", target.target_id, "a" * 64)
+    context: dict[str, object] = {"target": target}
+    with (
+        patch.object(shorts_line.st, "session_state", {}),
+        patch.object(
+            shorts_line,
+            "materialize_line_state_projection",
+            side_effect=LineStateError("CAS conflict"),
+        ),
+        patch.object(shorts_line, "generate_telop_script") as generate,
+    ):
+        shorts_line._generate_line_telop(
+            video_id="video-1",
+            target=target,
+            state=state,
+            context=context,
+            settings=Settings(data_dir=tmp_path),
+        )
+
+    generate.assert_not_called()
+    assert context["telop_error"] == "CAS conflict"
+
+
+def test_legacy_telop_review_first_commit_rebases_canonical_timestamp(
+    tmp_path: Path,
+) -> None:
+    target, document, _spec = _lineage_fixture()
+    settings = Settings(data_dir=tmp_path)
+    queue_fingerprint = "a" * 64
+    review = make_review_fingerprint(
+        "video-1",
+        target.target_id,
+        queue_fingerprint,
+        document,
+    )
+    state = create_line_state(
+        "video-1",
+        target.target_id,
+        queue_fingerprint,
+        review_fingerprint=review,
+    )
+    state = confirm_review(state, review)
+    legacy = state.model_copy(update={"schema_version": 1})
+    line_path = save_line_state(state, settings)
+    save_active_line("video-1", target.target_id, settings)
+    line_path.write_text(legacy.model_dump_json(indent=2), encoding="utf-8")
+    displayed = shorts_line.resolve_active_line_read_only("video-1", settings)
+    assert displayed is not None
+    projected = shorts_line.project_review_state(
+        displayed,
+        review,
+        force_unconfirmed=True,
+    )
+
+    completed, spec, saved_document = shorts_line._commit_telop_review(
+        persisted_state=displayed,
+        projected_state=projected,
+        review_fingerprint=review,
+        hard_errors=(),
+        edited=document,
+        target=target,
+        defaults=ShortsLineDefaults(),
+        settings=settings,
+    )
+
+    assert completed.schema_version == 2
+    assert completed.review_confirmed_fingerprint == review
+    assert completed.generation_spec_fingerprint is not None
+    assert spec.target_id == target.target_id
+    assert saved_document == document
+    assert load_line_state("video-1", target.target_id, settings) == completed
+
+
+def test_stale_telop_review_stops_before_confirmed_script_write(
+    tmp_path: Path,
+) -> None:
+    target, document, _spec = _lineage_fixture()
+    review = make_review_fingerprint(
+        "video-1",
+        target.target_id,
+        "a" * 64,
+        document,
+    )
+    state = create_line_state(
+        "video-1",
+        target.target_id,
+        "a" * 64,
+        review_fingerprint=review,
+    )
+    with (
+        patch.object(
+            shorts_line,
+            "materialize_line_state_projection",
+            side_effect=LineStateError("CAS conflict"),
+        ),
+        patch.object(shorts_line, "save_confirmed_telop_script") as save_script,
+    ):
+        with pytest.raises(LineStateError, match="CAS conflict"):
+            shorts_line._commit_telop_review(
+                persisted_state=state,
+                projected_state=state,
+                review_fingerprint=review,
+                hard_errors=(),
+                edited=document,
+                target=target,
+                defaults=ShortsLineDefaults(),
+                settings=Settings(data_dir=tmp_path),
+            )
+
+    save_script.assert_not_called()
+
+
+def test_preview_confirmation_reobserves_output_from_canonical_state(
+    tmp_path: Path,
+) -> None:
+    settings = Settings(data_dir=tmp_path)
+    output_path = tmp_path / "video-1" / "shorts" / "output" / "short.mp4"
+    output_path.parent.mkdir(parents=True)
+    output_path.write_bytes(b"output")
+    review = "b" * 64
+    state = create_line_state(
+        "video-1",
+        "clip-1",
+        "a" * 64,
+        review_fingerprint=review,
+    )
+    state = confirm_review(state, review)
+    state = set_generation_spec(
+        state,
+        review,
+        {"target_id": "clip-1", "layout": "blur", "preset": "default"},
+    )
+    save_line_state(state, settings)
+
+    confirmed = shorts_line._confirm_line_preview(state, output_path, settings)
+
+    assert confirmed.current_stage == LineStage.RESERVATION
+    assert confirmed.output_fingerprint is not None
+    assert confirmed.preview_confirmed_fingerprint == confirmed.output_fingerprint
+    assert load_line_state("video-1", "clip-1", settings) == confirmed
+
+
+def test_stale_preview_confirmation_stops_before_output_observation(
+    tmp_path: Path,
+) -> None:
+    state = create_line_state("video-1", "clip-1", "a" * 64)
+    with (
+        patch.object(
+            shorts_line,
+            "materialize_line_state_projection",
+            side_effect=LineStateError("CAS conflict"),
+        ),
+        patch.object(shorts_line, "record_output") as record,
+        patch.object(shorts_line, "reconcile_output") as reconcile,
+        patch.object(shorts_line, "confirm_preview") as confirm,
+        patch.object(shorts_line, "save_line_state") as save,
+    ):
+        with pytest.raises(LineStateError, match="CAS conflict"):
+            shorts_line._confirm_line_preview(
+                state,
+                tmp_path / "short.mp4",
+                Settings(data_dir=tmp_path),
+            )
+
+    record.assert_not_called()
+    reconcile.assert_not_called()
+    confirm.assert_not_called()
+    save.assert_not_called()
+
+
+def test_generation_command_revalidates_canonical_review_and_spec_before_job(
+    tmp_path: Path,
+) -> None:
+    target, document, spec = _lineage_fixture()
+    settings = Settings(data_dir=tmp_path)
+    review = make_review_fingerprint(
+        "video-1",
+        target.target_id,
+        "a" * 64,
+        document,
+    )
+    state = create_line_state(
+        "video-1",
+        target.target_id,
+        "a" * 64,
+        review_fingerprint=review,
+    )
+    state = confirm_review(state, review)
+    state = set_generation_spec(state, review, spec.to_dict())
+    save_line_state(state, settings)
+
+    with patch.object(shorts_line, "start_or_confirm_line_generation") as start:
+        shorts_line._start_line_generation_command(
+            displayed_state=state,
+            review_fingerprint=review,
+            spec=spec,
+            video_id="video-1",
+            title="動画",
+            settings=settings,
+        )
+
+    start.assert_called_once()
+    assert start.call_args.kwargs["snapshot_fingerprint"] == "a" * 64
+
+
+def test_stale_generation_command_stops_before_job_start(tmp_path: Path) -> None:
+    target, document, spec = _lineage_fixture()
+    review = make_review_fingerprint(
+        "video-1",
+        target.target_id,
+        "a" * 64,
+        document,
+    )
+    state = create_line_state(
+        "video-1",
+        target.target_id,
+        "a" * 64,
+        review_fingerprint=review,
+    )
+    with (
+        patch.object(
+            shorts_line,
+            "materialize_line_state_projection",
+            side_effect=LineStateError("CAS conflict"),
+        ),
+        patch.object(shorts_line, "start_or_confirm_line_generation") as start,
+    ):
+        with pytest.raises(LineStateError, match="CAS conflict"):
+            shorts_line._start_line_generation_command(
+                displayed_state=state,
+                review_fingerprint=review,
+                spec=spec,
+                video_id="video-1",
+                title="動画",
+                settings=Settings(data_dir=tmp_path),
+            )
+
+    start.assert_not_called()
 
 
 def test_rerun_replaces_stale_telop_error_when_persisted_script_matches(
@@ -849,6 +1269,8 @@ def test_telop_failure_keeps_fail_closed_retry_state(tmp_path: Path) -> None:
     )
     state = create_line_state("video-1", target.target_id, queue_fingerprint)
     context: dict[str, object] = {"target": target}
+    settings = Settings(data_dir=tmp_path)
+    save_line_state(state, settings)
     with patch.object(
         shorts_line,
         "generate_telop_script",
@@ -859,7 +1281,7 @@ def test_telop_failure_keeps_fail_closed_retry_state(tmp_path: Path) -> None:
             target=target,
             state=state,
             context=context,
-            settings=Settings(data_dir=tmp_path),
+            settings=settings,
         )
 
     assert "draft" not in context
@@ -1043,6 +1465,49 @@ def test_start_line_handles_external_defaults_symlink_without_starting_line(
     save_active.assert_not_called()
     generate_telop.assert_not_called()
     rerun.assert_not_called()
+
+
+def test_start_line_installs_no_session_projection_when_durable_command_fails(
+    tmp_path: Path,
+) -> None:
+    candidate = ClipCandidate(
+        id="clip-source",
+        title="短い候補",
+        start="0:00:00",
+        end="0:00:20",
+        duration_sec=20,
+        reason="理由",
+    )
+    segment = HighlightSegment.model_validate(candidate.model_dump())
+    option = shorts_line.ParentOption("切り抜き", candidate)
+    session_state: dict[str, object] = {"unrelated": "keep"}
+    settings = Settings(data_dir=tmp_path)
+
+    with (
+        patch.object(shorts_line.st, "session_state", session_state),
+        patch.object(
+            shorts_line,
+            "persist_line_start",
+            side_effect=LineStateError("pointer write fault"),
+        ),
+        patch.object(shorts_line, "install_prepared_line_snapshot") as install,
+        patch.object(shorts_line, "_generate_line_telop") as generate_telop,
+        patch.object(shorts_line.st, "error") as error,
+        patch.object(shorts_line.st, "rerun") as rerun,
+    ):
+        shorts_line._start_line(
+            video_id="video-1",
+            title="動画",
+            segments=(segment,),
+            option=option,
+            settings=settings,
+        )
+
+    assert session_state == {"unrelated": "keep"}
+    install.assert_not_called()
+    generate_telop.assert_not_called()
+    rerun.assert_not_called()
+    assert "pointer write fault" in error.call_args.args[0]
 
 
 def _write_line_defaults(path: Path, defaults: dict[str, object]) -> None:

@@ -150,12 +150,21 @@ def test_count_reservable_shorts_requires_completed_manifest(tmp_path: Path) -> 
     ):
         assert video_detail.count_reservable_shorts("vid1234567", settings) == 0
 
-    with patch.object(
-        video_detail,
-        "load_latest_shorts_queue_result",
-        return_value=MagicMock(status="done", items=(item,)),
+    completed = MagicMock(status="done", items=(item,))
+    with (
+        patch.object(
+            video_detail,
+            "load_latest_shorts_queue_result",
+            return_value=completed,
+        ),
+        patch.object(
+            video_detail,
+            "can_reserve_shorts_queue_item",
+            return_value=True,
+        ) as can_reserve,
     ):
         assert video_detail.count_reservable_shorts("vid1234567", settings) == 1
+    can_reserve.assert_called_once_with(completed, item, settings)
 
 
 def test_initial_workspace_prioritizes_running_job_for_current_video() -> None:
@@ -231,6 +240,57 @@ def test_candidate_transfer_preserves_order_and_invalidates_on_change() -> None:
         current_fingerprint=changed,
         candidate_ids={"clip-1", "clip-2"},
     ) is None
+
+
+def test_material_transfer_uses_saved_coarse_lineage_and_invalidates_lineage_only_change(
+    tmp_path: Path,
+) -> None:
+    from types import SimpleNamespace
+
+    candidate = ClipCandidate(
+        id="clip-1",
+        title="同じ表示候補",
+        start="0:00:00",
+        end="0:00:20",
+        duration_sec=20,
+        reason="理由",
+    )
+    old_fingerprint = "a" * 64
+    new_fingerprint = "b" * 64
+    session_state: dict[str, object] = {
+        "shorts_line_transfer_video-1_clips": {
+            "source": "clips",
+            "selected_ids": (candidate.id,),
+            "fingerprint": old_fingerprint,
+        },
+        "shorts_line_transfer_order_video-1": [("clips", candidate.id)],
+    }
+    document = SimpleNamespace(
+        lineage=SimpleNamespace(candidate_fingerprint=new_fingerprint)
+    )
+
+    with (
+        patch.object(video_detail, "load_candidates_file", return_value=document),
+        patch.object(video_detail.st, "session_state", session_state),
+        patch.object(video_detail.st, "warning") as warning,
+    ):
+        fingerprints = video_detail._load_material_candidate_fingerprints(
+            "video-1",
+            Settings(data_dir=tmp_path),
+            clips=[candidate],
+            highlights=[],
+        )
+        valid = video_detail._valid_transfer_candidates(
+            "video-1",
+            clips=[candidate],
+            highlights=[],
+            candidate_fingerprints=fingerprints,
+        )
+
+    assert fingerprints["clips"] == new_fingerprint
+    assert valid == ()
+    assert "shorts_line_transfer_video-1_clips" not in session_state
+    warning.assert_called_once()
 
 
 def test_candidate_transfer_preserves_global_source_identity_and_order() -> None:
@@ -417,7 +477,11 @@ def test_publish_to_shorts_callback_preserves_job_transfer_and_confirmed_line(
     assert load_line_state("vid1234567", "clip-confirmed", settings) == confirmed_line
     assert current_job.read_bytes() == job_before
     assert not (tmp_path / "_schedule" / "queue.json").exists()
-    upload_section.assert_not_called()
+    upload_section.assert_called_once()
+    assert isinstance(
+        upload_section.call_args.kwargs["line_adapter"],
+        video_detail.make_line_upload_adapter("vid1234567", settings).__class__,
+    )
     transaction.assert_not_called()
     start_job.assert_not_called()
     rerun.assert_not_called()

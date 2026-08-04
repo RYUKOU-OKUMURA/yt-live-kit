@@ -6,9 +6,11 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
-from collections.abc import Callable, Mapping, Sequence
+import stat
+from collections.abc import Callable, Mapping, MutableMapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -203,6 +205,16 @@ class ParentOption:
         return self.candidate.id
 
     @property
+    def source(self) -> str:
+        """表示順や翻訳文言に依存しない候補ソースを返す."""
+        return "clip" if isinstance(self.candidate, ClipCandidate) else "highlight"
+
+    @property
+    def identity(self) -> str:
+        """同じ ID が別ソースに存在しても衝突しない選択 identity."""
+        return f"{self.source}:{self.id}"
+
+    @property
     def label(self) -> str:
         return (
             f"[{self.source_label}] {self.candidate.id}: {self.candidate.title}"
@@ -224,6 +236,32 @@ def collect_parent_options(
         if needs_short_cut(segment):
             options.append(ParentOption("ハイライト", segment))
     return options
+
+
+def resolve_parent_option_identity(
+    options: Sequence[ParentOption],
+    stored_value: object,
+    *,
+    preferred_candidate_ids: Sequence[str] = (),
+) -> str:
+    """保存済み選択を source + ID identity へ安全に正規化する.
+
+    R2 より前の session は配列 index を保存していたため、有効な整数だけを現在の
+    選択肢へ移行する。削除済み・不正値は preferred、先頭の順で決定的に戻す。
+    """
+    if not options:
+        raise ValueError("親候補がありません。")
+
+    identities = {option.identity for option in options}
+    if isinstance(stored_value, str) and stored_value in identities:
+        return stored_value
+    if type(stored_value) is int and 0 <= stored_value < len(options):
+        return options[stored_value].identity
+    for preferred_id in preferred_candidate_ids:
+        for option in options:
+            if option.id == preferred_id:
+                return option.identity
+    return options[0].identity
 
 
 def layout_from_label(label: str) -> str:
@@ -273,6 +311,8 @@ def _render_time_assist(key: str, label: str) -> None:
                 on_click=_shift_cut_input,
                 args=(key, delta),
             )
+
+
 def resolve_transcript_bounds(
     start_text: str,
     end_text: str,
@@ -321,15 +361,37 @@ def extract_segment_text(
     return "\n".join(lines)
 
 
-@st.cache_data(show_spinner=False)
-def load_transcript_cues(
-    video_id: str,
-    data_dir: Path,
+def _vtt_file_identity(vtt_path: Path) -> tuple[object, ...]:
+    """VTT cache を失効させる軽量な file identity を返す."""
+    try:
+        metadata = vtt_path.stat()
+    except FileNotFoundError:
+        return ("missing",)
+    except OSError:
+        return ("unreadable",)
+    if not stat.S_ISREG(metadata.st_mode):
+        return ("missing",)
+    return (
+        "file",
+        metadata.st_dev,
+        metadata.st_ino,
+        metadata.st_size,
+        metadata.st_mtime_ns,
+        metadata.st_ctime_ns,
+        metadata.st_mode,
+    )
+
+
+@st.cache_data(show_spinner=False, max_entries=64)
+def _load_transcript_cues_cached(
+    vtt_path: Path,
+    file_identity: tuple[object, ...],
 ) -> tuple[tuple[TimedCue, ...], str | None]:
-    """動画の VTT を読み込み、rerun 間で video_id と data_dir ごとにキャッシュする."""
-    vtt_path = data_dir / video_id / "subtitles" / "ja.vtt"
-    if not vtt_path.is_file():
+    """path と file identity が同じ間だけ VTT の parse 結果を再利用する."""
+    if file_identity[0] == "missing":
         return (), "文字起こしファイルが見つからないため、区間内容を表示できません。"
+    if file_identity[0] != "file":
+        return (), "文字起こしファイルを読み込めないため、区間内容を表示できません。"
     try:
         content = vtt_path.read_text(encoding="utf-8")
     except (OSError, UnicodeError):
@@ -341,6 +403,21 @@ def load_transcript_cues(
     if not cues:
         return (), "文字起こしに表示できる内容がありません。"
     return tuple(cues), None
+
+
+def load_transcript_cues(
+    video_id: str,
+    data_dir: Path,
+) -> tuple[tuple[TimedCue, ...], str | None]:
+    """VTT を file identity 付き cache から読み込む."""
+    vtt_path = data_dir / video_id / "subtitles" / "ja.vtt"
+    return _load_transcript_cues_cached(vtt_path, _vtt_file_identity(vtt_path))
+
+
+# 既存テスト・呼び出し元が利用する cache clear API を互換維持する。
+load_transcript_cues.clear = (  # type: ignore[attr-defined]
+    _load_transcript_cues_cached.clear
+)
 
 
 def load_transcript_cues_for_document(
@@ -389,34 +466,140 @@ def format_total_ms(total_ms: int) -> str:
     return f"{total_ms / 1000:.1f} 秒"
 
 
-def checkbox_key(video_id: str, cut_id: str) -> str:
+def _short_cut_editor_prefix(video_id: str, parent_identity: str) -> str:
+    parent_digest = hashlib.sha256(parent_identity.encode("utf-8")).hexdigest()
+    return f"short_cut_editor_{video_id}_{parent_digest}_"
+
+
+def short_cut_draft_identity(document: ShortCutDocument) -> str:
+    """提案 document 全体と artifact lineage の immutable identity を返す."""
+    canonical = json.dumps(
+        document.model_dump(mode="json"),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def checkbox_key(
+    video_id: str,
+    cut_id: str,
+    *,
+    parent_identity: str | None = None,
+) -> str:
     """採否チェックボックスの session_state キーを返す."""
+    if parent_identity is not None:
+        return f"{_short_cut_editor_prefix(video_id, parent_identity)}cb_{cut_id}"
     return f"short_cut_cb_{video_id}_{cut_id}"
 
 
-def start_key(video_id: str, cut_id: str) -> str:
+def start_key(
+    video_id: str,
+    cut_id: str,
+    *,
+    parent_identity: str | None = None,
+) -> str:
     """開始時刻入力の session_state キーを返す."""
+    if parent_identity is not None:
+        return f"{_short_cut_editor_prefix(video_id, parent_identity)}start_{cut_id}"
     return f"short_cut_start_{video_id}_{cut_id}"
 
 
-def end_key(video_id: str, cut_id: str) -> str:
+def end_key(
+    video_id: str,
+    cut_id: str,
+    *,
+    parent_identity: str | None = None,
+) -> str:
     """終了時刻入力の session_state キーを返す."""
+    if parent_identity is not None:
+        return f"{_short_cut_editor_prefix(video_id, parent_identity)}end_{cut_id}"
     return f"short_cut_end_{video_id}_{cut_id}"
+
+
+def sync_short_cut_editor_state(
+    document: ShortCutDocument,
+    video_id: str,
+    parent_identity: str,
+    session_state: MutableMapping[str, object],
+) -> str:
+    """draft revision ごとに対象親の editor buffer だけを初期化する.
+
+    同じ identity の再描画では手編集を保持する。新しい提案・lineage では widget
+    描画前に対象親 prefix を消し、document の値を唯一の初期値として設定する。
+    """
+    prefix = _short_cut_editor_prefix(video_id, parent_identity)
+    identity_key = f"{prefix}draft_identity"
+    identity = short_cut_draft_identity(document)
+    if session_state.get(identity_key) != identity:
+        for key in tuple(session_state):
+            if isinstance(key, str) and key.startswith(prefix):
+                del session_state[key]
+        session_state[identity_key] = identity
+
+    for candidate in document.candidates:
+        session_state.setdefault(
+            checkbox_key(
+                video_id,
+                candidate.id,
+                parent_identity=parent_identity,
+            ),
+            True,
+        )
+        session_state.setdefault(
+            start_key(
+                video_id,
+                candidate.id,
+                parent_identity=parent_identity,
+            ),
+            candidate.start,
+        )
+        session_state.setdefault(
+            end_key(
+                video_id,
+                candidate.id,
+                parent_identity=parent_identity,
+            ),
+            candidate.end,
+        )
+    return identity
 
 
 def collect_edited_segments(
     document: ShortCutDocument,
     video_id: str,
     session_state: Mapping[str, object],
+    *,
+    parent_identity: str | None = None,
 ) -> tuple[list[HighlightSegment], list[str]]:
     """session_state から採用中の区間を、編集後の時刻で組み立てる."""
     segments: list[HighlightSegment] = []
     errors: list[str] = []
     for candidate in document.candidates:
-        if not session_state.get(checkbox_key(video_id, candidate.id), True):
+        if not session_state.get(
+            checkbox_key(
+                video_id,
+                candidate.id,
+                parent_identity=parent_identity,
+            ),
+            True,
+        ):
             continue
-        start_text = session_state.get(start_key(video_id, candidate.id))
-        end_text = session_state.get(end_key(video_id, candidate.id))
+        start_text = session_state.get(
+            start_key(
+                video_id,
+                candidate.id,
+                parent_identity=parent_identity,
+            )
+        )
+        end_text = session_state.get(
+            end_key(
+                video_id,
+                candidate.id,
+                parent_identity=parent_identity,
+            )
+        )
         start_value = candidate.start if start_text is None else str(start_text)
         end_value = candidate.end if end_text is None else str(end_text)
 
@@ -850,6 +1033,13 @@ def _render_plan(
     ) = None,
 ) -> None:
     st.markdown("**提案された区間**（採用するものにチェックし、必要なら時刻を調整）")
+    parent_identity = option.identity
+    sync_short_cut_editor_state(
+        document,
+        video_id,
+        parent_identity,
+        st.session_state,
+    )
     cues, transcript_notice = load_transcript_cues_for_document(
         video_id,
         document,
@@ -862,14 +1052,25 @@ def _render_plan(
             st.info(transcript_notice)
 
     for candidate in document.candidates:
-        candidate_start_key = start_key(video_id, candidate.id)
-        candidate_end_key = end_key(video_id, candidate.id)
-        st.session_state.setdefault(candidate_start_key, candidate.start)
-        st.session_state.setdefault(candidate_end_key, candidate.end)
+        candidate_checkbox_key = checkbox_key(
+            video_id,
+            candidate.id,
+            parent_identity=parent_identity,
+        )
+        candidate_start_key = start_key(
+            video_id,
+            candidate.id,
+            parent_identity=parent_identity,
+        )
+        candidate_end_key = end_key(
+            video_id,
+            candidate.id,
+            parent_identity=parent_identity,
+        )
         st.checkbox(
             f"{candidate.id}: {candidate.title}（{candidate.duration_sec} 秒）",
-            value=True,
-            key=checkbox_key(video_id, candidate.id),
+            key=candidate_checkbox_key,
+            persist_state="session",
         )
         columns = st.columns(2)
         with columns[0]:
@@ -877,12 +1078,14 @@ def _render_plan(
             st.text_input(
                 "開始",
                 key=candidate_start_key,
+                persist_state="session",
             )
         with columns[1]:
             _render_time_assist(candidate_end_key, "終了を調整")
             st.text_input(
                 "終了",
                 key=candidate_end_key,
+                persist_state="session",
             )
         st.caption(candidate.reason)
 
@@ -908,7 +1111,10 @@ def _render_plan(
             st.write(transcript or _NO_TRANSCRIPT_MESSAGE)
 
     segments, parse_errors = collect_edited_segments(
-        document, video_id, st.session_state
+        document,
+        video_id,
+        st.session_state,
+        parent_identity=parent_identity,
     )
     validation = validate_short_cut_selection(segments, parent=option.candidate)
     total_ms = validation.total_ms
@@ -959,6 +1165,7 @@ def _render_plan(
         LAYOUT_LABELS,
         index=0,
         key=f"short_cut_layout_{video_id}",
+        persist_state="session",
     )
     layout = layout_from_label(layout_label)
 
@@ -1006,6 +1213,7 @@ def render_short_cut_section(
     ) = None,
 ) -> None:
     """長い候補を刻んでショートにするセクションを描画する."""
+
     def render_contents() -> None:
         st.caption(_SECTION_NOTE)
 
@@ -1015,24 +1223,28 @@ def render_short_cut_section(
             return
 
         selected_key = f"short_cut_parent_{video_id}"
-        if selected_key not in st.session_state:
-            preferred = next(
-                (
-                    index
-                    for index, option in enumerate(options)
-                    if option.id in preferred_candidate_ids
-                ),
-                0,
-            )
-            st.session_state[selected_key] = preferred
-
-        selected_index = st.radio(
-            "刻む候補",
-            range(len(options)),
-            format_func=lambda index: options[index].label,
-            key=selected_key,
+        selected_identity = resolve_parent_option_identity(
+            options,
+            st.session_state.get(selected_key),
+            preferred_candidate_ids=preferred_candidate_ids,
         )
-        option = options[selected_index]
+        if st.session_state.get(selected_key) != selected_identity:
+            st.session_state[selected_key] = selected_identity
+        options_by_identity = {option.identity: option for option in options}
+
+        selected_value = st.radio(
+            "刻む候補",
+            tuple(options_by_identity),
+            format_func=lambda identity: options_by_identity[identity].label,
+            key=selected_key,
+            persist_state="session",
+        )
+        selected_identity = resolve_parent_option_identity(
+            options,
+            selected_value,
+            preferred_candidate_ids=preferred_candidate_ids,
+        )
+        option = options_by_identity[selected_identity]
 
         document = load_cut_plan(video_id, option.id, settings)
         busy = is_busy(settings)

@@ -40,10 +40,16 @@ from yt_live_kit.services.upload_queue import (
     UploadQueueError,
     confirm_related_video,
     get_related_video_summary,
+    list_operations,
     load_operation,
     start_publication_poll,
 )
+from yt_live_kit.ui.controllers.upload import LineUploadAdapter
 from yt_live_kit.ui.state import set_active_job_id
+from yt_live_kit.ui.view_models.upload import (
+    SourceOperationProjection,
+    project_source_operations,
+)
 
 _OPERATION_IDS_KEY = "upload_operation_ids"
 _POST_START_ERRORS_KEY = "upload_post_start_errors"
@@ -383,6 +389,32 @@ def render_upload_operation(
             _render_related_video_status(operation, settings)
 
 
+def _render_persisted_source_operations(
+    video_id: str,
+    settings: Settings,
+) -> SourceOperationProjection | None:
+    """Render durable tracking before consulting the latest generation manifest."""
+    try:
+        projection = project_source_operations(
+            list_operations(settings),
+            video_id,
+        )
+    except UploadQueueError:
+        st.error(
+            "投稿キューを安全に読み込めないため、永続した投稿状態を表示できず、"
+            "予約投稿を停止しました。"
+            "投稿キューを手動修復してください。"
+        )
+        return None
+    if not projection.operations:
+        return projection
+
+    st.markdown("**この動画から開始した投稿の追跡**")
+    for operation in projection.operations:
+        render_upload_operation(operation, settings=settings)
+    return projection
+
+
 def _selection_from_label(value: str | None) -> bool | None:
     if value == "はい":
         return True
@@ -454,8 +486,18 @@ def upload_preview_dialog(
     reservation_transaction: (
         Callable[[str, Path, Callable[[], UploadOperation]], UploadOperation] | None
     ) = None,
+    line_adapter: LineUploadAdapter | None = None,
 ) -> None:
     """全 snapshot を表示し、明示選択と同意後だけ service confirm を呼ぶ."""
+    if line_adapter is not None and any(
+        callback is not None
+        for callback in (
+            before_confirm,
+            on_operation_started,
+            reservation_transaction,
+        )
+    ):
+        raise TypeError("ライン投稿 adapter と個別 callback は同時に指定できません。")
     st.warning(
         "YouTube へ非公開アップロードし、指定時刻に公開予約します。"
         "内容をすべて確認してから確定してください。"
@@ -516,9 +558,14 @@ def upload_preview_dialog(
         disabled=not ready,
         key=f"upload_confirm_{dialog_nonce}",
     ):
-        if before_confirm is not None:
+        preview_validator = (
+            line_adapter.validate_preview
+            if line_adapter is not None
+            else before_confirm
+        )
+        if preview_validator is not None:
             try:
-                before_confirm(preview.clip_id, preview.video_path)
+                preview_validator(preview.clip_id, preview.video_path)
             except LineStateError as exc:
                 st.error(_safe_text(exc))
                 return
@@ -533,13 +580,18 @@ def upload_preview_dialog(
             )
 
         try:
+            transaction = (
+                line_adapter.reservation_transaction
+                if line_adapter is not None
+                else reservation_transaction
+            )
             operation = (
-                reservation_transaction(
+                transaction(
                     preview.clip_id,
                     preview.video_path,
                     start_upload,
                 )
-                if reservation_transaction is not None
+                if transaction is not None
                 else start_upload()
             )
         except LineReservationStartedError as exc:
@@ -561,7 +613,7 @@ def upload_preview_dialog(
         _store_operation_id(preview.source_video_id, operation.operation_id)
         # operation 作成後は、ライン記録が失敗してもジョブ追跡を失わない。
         set_active_job_id(operation.job_id)
-        if on_operation_started is not None:
+        if line_adapter is None and on_operation_started is not None:
             try:
                 on_operation_started(
                     preview.clip_id,
@@ -608,14 +660,30 @@ def _open_preview(
         Callable[[str, Path, Callable[[], UploadOperation]], UploadOperation] | None
     ) = None,
     p6_quality_gate: bool = False,
+    line_adapter: LineUploadAdapter | None = None,
 ) -> None:
     """現在の編集値だけから、新しい不変 preview を作って確認を開く."""
+    if line_adapter is not None and any(
+        callback is not None
+        for callback in (
+            before_preview,
+            before_confirm,
+            on_operation_started,
+            reservation_transaction,
+        )
+    ):
+        raise TypeError("ライン投稿 adapter と個別 callback は同時に指定できません。")
     if item.output_path is None:
         st.error("投稿できるショート動画ファイルがありません。")
         return
-    if before_preview is not None:
+    preview_validator = (
+        line_adapter.validate_preview
+        if line_adapter is not None
+        else before_preview
+    )
+    if preview_validator is not None:
         try:
-            before_preview(item.target_id, item.output_path)
+            preview_validator(item.target_id, item.output_path)
         except LineStateError as exc:
             st.error(_safe_text(exc))
             return
@@ -685,6 +753,11 @@ def _open_preview(
     except ScheduleError as exc:
         st.error(_safe_text(exc))
         return
+    dialog_kwargs = (
+        {"line_adapter": line_adapter}
+        if line_adapter is not None
+        else {}
+    )
     upload_preview_dialog(
         preview,
         settings,
@@ -692,6 +765,7 @@ def _open_preview(
         before_confirm,
         on_operation_started,
         reservation_transaction,
+        **dialog_kwargs,
     )
 
 
@@ -700,6 +774,7 @@ def _render_upload_metadata_editor(
     *,
     job_id: str,
     initial_description: str,
+    disabled: bool = False,
 ) -> tuple[str, str, tuple[str, ...]]:
     """候補を起点に、実送信 metadata の編集値だけを返す."""
     _render_title_candidate_directions(item)
@@ -716,6 +791,8 @@ def _render_upload_metadata_editor(
         direction_options,
         format_func=format_direction,
         key=f"upload_title_candidate_{job_id}_{item.target_id}",
+        disabled=disabled,
+        persist_state="session",
     )
     if isinstance(selected_option, int) and not isinstance(selected_option, bool):
         candidate_index = selected_option if selected_option in direction_options else 0
@@ -735,6 +812,8 @@ def _render_upload_metadata_editor(
         max_chars=100,
         key=f"upload_title_{job_id}_{item.target_id}_{candidate_index}",
         help="候補を選んだ後、この欄で自由に編集できます。",
+        disabled=disabled,
+        persist_state="session",
     )
     description = st.text_area(
         "説明文",
@@ -742,6 +821,8 @@ def _render_upload_metadata_editor(
         height=240,
         key=f"upload_description_edit_{job_id}_{item.target_id}",
         help="ここに表示される全文が投稿内容の確認対象になります。",
+        disabled=disabled,
+        persist_state="session",
     )
     tags = st.multiselect(
         "タグ",
@@ -751,6 +832,8 @@ def _render_upload_metadata_editor(
         placeholder="タグを選択または追加",
         key=f"upload_tags_{job_id}_{item.target_id}",
         help="選択を外すと削除でき、新しいタグも入力できます。",
+        disabled=disabled,
+        persist_state="session",
     )
     st.caption("編集後は、予約日時と投稿内容をあらためて確認してください。")
     return title, description, tuple(tags)
@@ -773,6 +856,7 @@ def _render_upload_schedule_editor(
         key=f"upload_publish_date_{job_id}_{item_id}",
         format="YYYY/MM/DD",
         disabled=disabled,
+        persist_state="session",
     )
     publish_time = st.time_input(
         "予約時刻",
@@ -780,6 +864,7 @@ def _render_upload_schedule_editor(
         key=f"upload_publish_time_{job_id}_{item_id}",
         step=60,
         disabled=disabled,
+        persist_state="session",
     )
     try:
         return make_requested_publish_at(policy, publish_date, publish_time)
@@ -798,8 +883,19 @@ def render_upload_section(
     reservation_transaction: (
         Callable[[str, Path, Callable[[], UploadOperation]], UploadOperation] | None
     ) = None,
+    line_adapter: LineUploadAdapter | None = None,
 ) -> None:
     """最新の検証済み shorts queue から成功 item の投稿入口を描画する."""
+    if line_adapter is not None and any(
+        callback is not None
+        for callback in (
+            before_preview,
+            before_confirm,
+            on_operation_started,
+            reservation_transaction,
+        )
+    ):
+        raise TypeError("ライン投稿 adapter と個別 callback は同時に指定できません。")
     post_start_error = _pop_post_start_error(video_id)
     if post_start_error:
         st.error(post_start_error)
@@ -810,6 +906,9 @@ def render_upload_section(
     # これは最新 shorts manifest の存在・状態・成果物とは独立した P6-3 の
     # 永続追跡入口。再起動後や過去 clip が manifest から消えた場合も残す。
     _render_related_video_summary_panel(settings)
+    source_operations = _render_persisted_source_operations(video_id, settings)
+    if source_operations is None:
+        return
     try:
         result = load_latest_shorts_queue_result(video_id, settings)
     except ShortsQueueError as exc:
@@ -856,16 +955,6 @@ def render_upload_section(
                 f"**{_safe_text(candidates[0] if candidates else 'タイトル未設定')}**"
             )
             st.caption(_safe_text(item.target_id))
-            try:
-                operation = _resolve_operation(video_id, item.target_id, settings)
-            except UploadQueueError:
-                st.error(
-                    "投稿キューを安全に読み込めないため、予約投稿を停止しました。"
-                    "投稿キューを手動修復してください。"
-                )
-                continue
-            if operation is not None:
-                render_upload_operation(operation, settings=settings)
             # 既存 operation の復元・関連動画追跡は、ローカル成果物の欠損や
             # stale manifest に依存させない。ここから下は新規 preview 用の gate。
             if item.output_path is None:
@@ -898,12 +987,18 @@ def render_upload_section(
             except DescriptionError as exc:
                 st.error(_safe_text(exc))
                 continue
+            active_operation = item.target_id in source_operations.blocking_clip_ids
+            if active_operation:
+                st.warning(
+                    "このショートは既存の投稿 operation を追跡中のため、"
+                    "新しい予約投稿は開始できません。投稿履歴を確認してください。"
+                )
             title, description, tags = _render_upload_metadata_editor(
                 item,
                 job_id=result.job_id,
                 initial_description=initial_description,
+                disabled=active_operation,
             )
-            active_operation = operation is not None and operation.state != "failed"
             requested_publish_at = _render_upload_schedule_editor(
                 job_id=result.job_id,
                 item_id=item.target_id,
@@ -934,4 +1029,5 @@ def render_upload_section(
                     on_operation_started=on_operation_started,
                     reservation_transaction=reservation_transaction,
                     p6_quality_gate=True,
+                    line_adapter=line_adapter,
                 )

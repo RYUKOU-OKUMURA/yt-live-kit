@@ -1,0 +1,1 @@
+"""Named UI command adapters."""

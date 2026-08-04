@@ -1032,6 +1032,46 @@ def _atomic_write(path: Path, payload: dict[str, object]) -> None:
             pass
 
 
+def _file_snapshot(path: Path) -> bytes | None:
+    """Capture one small JSON file for command-level rollback."""
+    try:
+        return path.read_bytes() if path.exists() else None
+    except OSError as exc:
+        raise LineStateError(
+            "ショート生産ラインの以前の状態を確認できませんでした。"
+        ) from exc
+
+
+def _restore_file_snapshot(path: Path, snapshot: bytes | None) -> None:
+    """Restore bytes without routing rollback through the failed writer."""
+    if snapshot is None:
+        try:
+            path.unlink(missing_ok=True)
+        except OSError as exc:
+            raise LineStateError(
+                "ショート生産ラインの開始失敗を安全に巻き戻せませんでした。"
+            ) from exc
+        return
+
+    temporary = path.parent / f".{path.name}.{uuid.uuid4().hex}.rollback.tmp"
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with temporary.open("wb") as handle:
+            handle.write(snapshot)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    except OSError as exc:
+        raise LineStateError(
+            "ショート生産ラインの開始失敗を安全に巻き戻せませんでした。"
+        ) from exc
+    finally:
+        try:
+            temporary.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
 @contextmanager
 def _line_lock(video_id: str, settings: Settings) -> Iterator[None]:
     """同一動画の状態確認と atomic replace をプロセス間で直列化する。"""
@@ -1134,6 +1174,69 @@ def _load_line_state_locked(
     return state
 
 
+def _same_line_projection(
+    first: LineState,
+    second: LineState,
+) -> bool:
+    """Compare a displayed projection while ignoring its synthetic timestamp."""
+    first_payload = first.model_dump(mode="python")
+    second_payload = second.model_dump(mode="python")
+    first_payload.pop("updated_at", None)
+    second_payload.pop("updated_at", None)
+    return first_payload == second_payload
+
+
+def materialize_line_state_projection(
+    displayed_state: LineState,
+    settings: Settings,
+) -> LineState:
+    """Canonicalize one read-only UI snapshot before an explicit command.
+
+    A normal render may project legacy or stale artifact lineage in memory so it
+    remains write-free.  An explicit command must first turn that exact
+    projection into the durable CAS baseline.  Only the projection timestamp is
+    synthetic; every other field must still match.  Concurrent durable changes
+    therefore fail closed before callers perform file or external side effects.
+    """
+    if not isinstance(displayed_state, LineState):
+        raise LineStateError("確認するライン状態が正しくありません。")
+    path = line_state_path(
+        displayed_state.video_id,
+        displayed_state.clip_id,
+        settings,
+    )
+    with _line_lock(displayed_state.video_id, settings):
+        persisted = _read_line_state(
+            path,
+            displayed_state.video_id,
+            displayed_state.clip_id,
+        )
+        if persisted is None:
+            raise LineStateError(
+                "ライン状態が見つかりません。最新状態を読み直してください。"
+            )
+        if not _line_state_needs_invalidation(persisted, settings):
+            if persisted != displayed_state:
+                raise LineStateError(
+                    "ライン状態が別の操作で更新されました。最新状態を読み直してください。"
+                )
+            return persisted
+        if _lineage_is_already_invalidated(persisted):
+            if persisted != displayed_state:
+                raise LineStateError(
+                    "ライン状態が別の操作で更新されました。最新状態を読み直してください。"
+                )
+            return persisted
+
+        canonical = _invalidate_transcript_lineage(persisted)
+        if not _same_line_projection(canonical, displayed_state):
+            raise LineStateError(
+                "ライン状態が別の操作で更新されました。最新状態を読み直してください。"
+            )
+        _atomic_write(path, canonical.model_dump(mode="json"))
+        return canonical
+
+
 def save_line_state(
     state: LineState,
     settings: Settings,
@@ -1197,6 +1300,74 @@ def save_active_line(
             raise LineStateError("予約完了したラインを作成中として選択できません。")
         _atomic_write(path, pointer.model_dump(mode="json"))
     return path
+
+
+def persist_line_start(
+    state: LineState,
+    settings: Settings,
+    *,
+    now: datetime | None = None,
+) -> tuple[Path, Path]:
+    """Persist a new line and its active pointer as one rollback-safe command.
+
+    The two JSON files cannot be replaced by one filesystem rename.  This
+    command therefore snapshots both under the per-video lock and restores both
+    if either write fails.  Session projections must only be installed after
+    this function returns successfully.
+    """
+    if not isinstance(state, LineState):
+        raise LineStateError("開始するライン状態が正しくありません。")
+    if state.current_stage == LineStage.RESERVED:
+        raise LineStateError("予約完了したラインを作成中として開始できません。")
+
+    line_path = line_state_path(state.video_id, state.clip_id, settings)
+    active_path = _active_line_path(state.video_id, settings)
+    pointer = ActiveLinePointer(
+        clip_id=state.clip_id,
+        updated_at=_timestamp(now, "選択更新日時"),
+    )
+
+    with _line_lock(state.video_id, settings):
+        previous_line = _file_snapshot(line_path)
+        previous_active = _file_snapshot(active_path)
+        try:
+            persisted = _load_line_state_locked(
+                state.video_id,
+                state.clip_id,
+                settings,
+            )
+            if persisted is not None:
+                if state.updated_at < persisted.updated_at:
+                    raise LineStateError(
+                        "古いライン状態では新しい確認状態を上書きできません。"
+                    )
+                if state.updated_at == persisted.updated_at and state != persisted:
+                    raise LineStateError(
+                        "同じ更新日時に異なるライン状態があるため開始を停止しました。"
+                    )
+            _atomic_write(active_path, pointer.model_dump(mode="json"))
+            # Pointer-first makes a process stop between replaces fail closed:
+            # a dangling pointer is ignored by the resolver, while writing the
+            # line first could make an uncommitted orphan win fallback selection.
+            _atomic_write(line_path, state.model_dump(mode="json"))
+        except LineStateError as exc:
+            rollback_errors: list[LineStateError] = []
+            for path, snapshot in (
+                (line_path, previous_line),
+                (active_path, previous_active),
+            ):
+                try:
+                    _restore_file_snapshot(path, snapshot)
+                except LineStateError as rollback_error:
+                    rollback_errors.append(rollback_error)
+            if rollback_errors:
+                raise LineStateError(
+                    "ライン開始の保存に失敗し、以前の状態も安全に復元できませんでした。"
+                ) from rollback_errors[0]
+            raise LineStateError(
+                "ショート生産ラインの開始を安全に保存できませんでした。"
+            ) from exc
+    return line_path, active_path
 
 
 def _load_active_pointer(video_id: str, settings: Settings) -> ActiveLinePointer | None:
@@ -1322,6 +1493,55 @@ def _valid_line_states(video_id: str, settings: Settings) -> tuple[LineState, ..
         if state is not None:
             states.append(state)
     return tuple(states)
+
+
+def _project_line_state_read_only(
+    state: LineState,
+    settings: Settings,
+) -> LineState:
+    """Apply fail-closed lineage invalidation in memory without saving it."""
+    if not _line_state_needs_invalidation(state, settings):
+        return state
+    if _lineage_is_already_invalidated(state):
+        return state
+    return _invalidate_transcript_lineage(state)
+
+
+def resolve_active_line_read_only(
+    video_id: str,
+    settings: Settings,
+) -> LineState | None:
+    """Resolve the sidebar line without modifying line or pointer files."""
+    _safe_identifier(video_id, "動画 ID")
+    pointer = _load_active_pointer(video_id, settings)
+    if pointer is not None:
+        try:
+            pointed = _read_line_state(
+                line_state_path(video_id, pointer.clip_id, settings),
+                video_id,
+                pointer.clip_id,
+            )
+        except LineStateError:
+            pointed = None
+        if pointed is not None and pointed.current_stage != LineStage.RESERVED:
+            return _project_line_state_read_only(pointed, settings)
+
+    directory = _active_line_path(video_id, settings).parent
+    states: list[LineState] = []
+    if directory.exists():
+        for path in directory.glob("line_*.json"):
+            clip_id = path.stem.removeprefix("line_")
+            try:
+                state = _read_line_state(path, video_id, clip_id)
+            except LineStateError:
+                continue
+            if state is not None and state.current_stage != LineStage.RESERVED:
+                states.append(state)
+    if not states:
+        return None
+    states.sort(key=lambda state: state.clip_id)
+    states.sort(key=lambda state: state.updated_at, reverse=True)
+    return _project_line_state_read_only(states[0], settings)
 
 
 def resolve_active_line(video_id: str, settings: Settings) -> LineState | None:

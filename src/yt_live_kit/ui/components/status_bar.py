@@ -26,17 +26,21 @@ from yt_live_kit.ui.components.short_cut import S9_WHISPER_ERROR_PREFIX
 from yt_live_kit.ui.state import (
     clear_active_job_id,
     clear_cut_result,
+    clear_result,
+    dismiss_pipeline_completion,
     format_job_error_summary_for_display,
     get_active_job_id,
     get_last_job_id,
+    get_pipeline_completion_notifications,
     is_job_handled,
     mark_job_handled,
+    record_pipeline_completion,
     record_job_error,
     set_active_job_id,
     set_batch_summary,
     set_cut_result,
     set_last_job_id,
-    set_result,
+    set_selected_video_id,
 )
 
 _KIND_LABELS: dict[str, str] = {
@@ -354,6 +358,31 @@ def _render_running_job(job: JobState) -> None:
         st.progress(0, text=message)
 
 
+def render_pipeline_completion_notices(*, detail_page) -> None:
+    """完了した pipeline の本文を描かず、対象動画への導線だけを表示する。"""
+    for index, notice in enumerate(get_pipeline_completion_notifications()):
+        title = _safe_summary_text(notice.title).strip() or notice.video_id
+        if len(title) > _ERROR_SUMMARY_MAX_CHARS:
+            title = title[: _ERROR_SUMMARY_MAX_CHARS - 1].rstrip() + "…"
+        st.success(f"「{title}」の処理が完了しました。")
+
+        key_suffix = f"{index}-{notice.job_id}"
+        if st.button(
+            "対象動画を開く",
+            key=f"pipeline-complete-detail-{key_suffix}",
+        ):
+            set_selected_video_id(notice.video_id)
+            dismiss_pipeline_completion(notice.job_id)
+            st.switch_page(detail_page)
+
+        if st.button(
+            "通知を閉じる",
+            key=f"pipeline-complete-dismiss-{key_suffix}",
+        ):
+            dismiss_pipeline_completion(notice.job_id)
+            st.rerun(scope="app")
+
+
 def _handle_finished_job(job: JobState) -> None:
     if is_job_handled(job.job_id):
         return
@@ -373,7 +402,16 @@ def _handle_finished_job(job: JobState) -> None:
                 )
             else:
                 if result is not None:
-                    set_result(result)
+                    record_pipeline_completion(
+                        result.video_id,
+                        job.job_id,
+                        job.kind,
+                        result.title,
+                        _job_finished_at(job),
+                    )
+                    # 旧 page shell の全文表示用 state は互換 API として残すが、
+                    # 新しい完了処理では保持しない。
+                    clear_result()
                     clear_cut_result()
                 else:
                     _record_job_error(

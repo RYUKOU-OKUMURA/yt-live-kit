@@ -9,6 +9,7 @@ import streamlit as st
 
 from yt_live_kit.config import Settings, get_settings
 from yt_live_kit.services.history import ProcessedVideo, list_processed_videos
+from yt_live_kit.ui.queries import count_generated_shorts
 from yt_live_kit.ui.state import SESSION_SHOW_ARCHIVED, set_selected_video_id
 from yt_live_kit.ui.views._local_settings import (
     load_archived_ids,
@@ -29,12 +30,9 @@ LIBRARY_STATUS_OPTIONS: tuple[LibraryStatus, ...] = (
 )
 
 
-def count_shorts(video_id: str, settings: Settings) -> int:
-    """生成済みショート動画の本数を返す."""
-    output_dir = settings.data_dir / video_id / "shorts" / "output"
-    if not output_dir.is_dir():
-        return 0
-    return sum(1 for path in output_dir.glob("*.mp4") if path.is_file())
+# Existing imports from this view remain valid while the implementation lives in
+# the shared read-only query layer.
+count_shorts = count_generated_shorts
 
 
 def title_matches(title: str, query: str) -> bool:

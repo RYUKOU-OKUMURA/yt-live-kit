@@ -33,6 +33,11 @@ from yt_live_kit.services.upload_queue import (
     save_reserved_operation,
 )
 from yt_live_kit.ui.components import upload
+from yt_live_kit.ui.controllers.upload import LineUploadAdapter
+from yt_live_kit.ui.view_models.upload import (
+    latest_operations_for_source,
+    project_source_operations,
+)
 
 
 NOW = datetime(2026, 8, 1, tzinfo=timezone.utc)
@@ -123,6 +128,223 @@ def _operation(tmp_path: Path, *, state: str = "reserved") -> UploadOperation:
         ),
         poll_history=(),
         publication_eligibility="unknown",
+    )
+
+
+@pytest.mark.parametrize("active_state", ["reserved", "uploading"])
+def test_tracking_projection_keeps_older_active_operation_for_same_clip(
+    tmp_path: Path,
+    active_state: str,
+) -> None:
+    older = _operation(tmp_path, state=active_state).model_copy(
+        update={"operation_id": "operation-active"}
+    )
+    newer = _operation(tmp_path, state="failed").model_copy(
+        update={
+            "operation_id": "operation-newer",
+            "created_at": NOW + timedelta(hours=1),
+            "updated_at": NOW + timedelta(hours=1),
+            "started_at": NOW + timedelta(hours=1),
+            "finished_at": NOW + timedelta(hours=1),
+        }
+    )
+
+    projection = project_source_operations((newer, older), "source-1")
+
+    assert tuple(item.operation_id for item in projection.operations) == (
+        "operation-newer",
+        "operation-active",
+    )
+    assert projection.operation_ids == {
+        "operation-newer",
+        "operation-active",
+    }
+    assert projection.blocking_clip_ids == {"clip-1"}
+
+
+def test_tracking_projection_keeps_older_reconciliation_and_unpolled_upload(
+    tmp_path: Path,
+) -> None:
+    reconciliation = _operation(tmp_path, state="needs_reconciliation").model_copy(
+        update={"operation_id": "operation-reconcile"}
+    )
+    uploaded = _operation(tmp_path, state="uploaded").model_copy(
+        update={
+            "operation_id": "operation-uploaded",
+            "created_at": NOW + timedelta(minutes=1),
+            "updated_at": NOW + timedelta(minutes=1),
+            "started_at": NOW + timedelta(minutes=1),
+            "finished_at": NOW + timedelta(minutes=1),
+            "related_video_status": "confirmed",
+            "related_video_confirmed_at": NOW + timedelta(minutes=1),
+        }
+    )
+    scheduled_observation = UploadStatusObservation(
+        polled_at=NOW + timedelta(minutes=2),
+        phase="publication",
+        status={"privacyStatus": "private"},
+        processing_details={},
+        classification="scheduled",
+        error=None,
+    )
+    publication_pending = uploaded.model_copy(
+        update={
+            "operation_id": "operation-publication-pending",
+            "created_at": NOW + timedelta(minutes=2),
+            "updated_at": NOW + timedelta(minutes=2),
+            "started_at": NOW + timedelta(minutes=2),
+            "finished_at": NOW + timedelta(minutes=2),
+            "poll_history": (scheduled_observation,),
+        }
+    )
+    newer = _operation(tmp_path, state="failed").model_copy(
+        update={
+            "operation_id": "operation-newest",
+            "created_at": NOW + timedelta(hours=1),
+            "updated_at": NOW + timedelta(hours=1),
+            "started_at": NOW + timedelta(hours=1),
+            "finished_at": NOW + timedelta(hours=1),
+        }
+    )
+
+    projection = project_source_operations(
+        (newer, reconciliation, uploaded, publication_pending),
+        "source-1",
+    )
+
+    assert {item.operation_id for item in projection.operations} == {
+        "operation-newest",
+        "operation-reconcile",
+        "operation-uploaded",
+        "operation-publication-pending",
+    }
+    assert projection.blocking_clip_ids == {"clip-1"}
+
+
+def test_tracking_projection_drops_superseded_terminal_upload_unless_related_pending(
+    tmp_path: Path,
+) -> None:
+    publication = UploadStatusObservation(
+        polled_at=NOW + timedelta(minutes=1),
+        phase="publication",
+        status={"privacyStatus": "public"},
+        processing_details={},
+        classification="published",
+        error=None,
+    )
+    terminal = _operation(tmp_path, state="uploaded").model_copy(
+        update={
+            "operation_id": "operation-terminal",
+            "poll_history": (publication,),
+            "related_video_status": "confirmed",
+            "related_video_confirmed_at": NOW + timedelta(minutes=1),
+        }
+    )
+    related_pending = terminal.model_copy(
+        update={
+            "operation_id": "operation-related-pending",
+            "related_video_status": "pending",
+            "related_video_confirmed_at": None,
+        }
+    )
+    newer = _operation(tmp_path, state="failed").model_copy(
+        update={
+            "operation_id": "operation-newer",
+            "created_at": NOW + timedelta(hours=1),
+            "updated_at": NOW + timedelta(hours=1),
+            "started_at": NOW + timedelta(hours=1),
+            "finished_at": NOW + timedelta(hours=1),
+        }
+    )
+
+    terminal_only = latest_operations_for_source((terminal, newer), "source-1")
+    pending = latest_operations_for_source((related_pending, newer), "source-1")
+    terminal_projection = project_source_operations((terminal, newer), "source-1")
+
+    assert tuple(item.operation_id for item in terminal_only) == ("operation-newer",)
+    assert {item.operation_id for item in pending} == {
+        "operation-newer",
+        "operation-related-pending",
+    }
+    assert terminal_projection.blocking_clip_ids == {"clip-1"}
+
+
+def test_upload_section_blocks_new_reservation_for_older_upload_behind_newer_failure(
+    tmp_path: Path,
+) -> None:
+    older = _operation(tmp_path, state="uploaded").model_copy(
+        update={"operation_id": "operation-uploaded"}
+    )
+    newer = _operation(tmp_path, state="failed").model_copy(
+        update={
+            "operation_id": "operation-failed",
+            "created_at": NOW + timedelta(hours=1),
+            "updated_at": NOW + timedelta(hours=1),
+            "started_at": NOW + timedelta(hours=1),
+            "finished_at": NOW + timedelta(hours=1),
+        }
+    )
+    item = MagicMock(
+        status="succeeded",
+        output_path=older.video_path,
+        title_candidates=("検索タイトル", "仕事タイトル", "好奇心タイトル"),
+        target_id="clip-1",
+        description="説明文",
+        tags=("タグ",),
+    )
+    result = MagicMock(
+        status="done",
+        items=(item,),
+        job_id="shorts-job",
+        clip_specs=(),
+    )
+    settings = Settings(data_dir=tmp_path)
+    policy = SchedulePolicy(daily_times=["09:00"])
+    requested = datetime(2026, 8, 5, 9, 0, tzinfo=ZoneInfo(policy.timezone))
+
+    with (
+        patch.object(upload, "list_operations", return_value=(newer, older)) as list_ops,
+        patch.object(upload, "_render_related_video_summary_panel"),
+        patch.object(upload, "load_latest_shorts_queue_result", return_value=result),
+        patch.object(upload, "get_next_upload_slot", return_value=(policy, requested)),
+        patch.object(upload, "can_reserve_shorts_queue_item", return_value=True),
+        patch.object(
+            upload,
+            "build_shorts_description_for_upload",
+            return_value=_quality_build(),
+        ),
+        patch.object(
+            upload,
+            "_render_upload_metadata_editor",
+            return_value=("予約タイトル", "説明文", ("タグ",)),
+        ) as metadata,
+        patch.object(
+            upload,
+            "_render_upload_schedule_editor",
+            return_value=requested,
+        ) as schedule,
+        patch.object(upload, "render_upload_operation") as render_operation,
+        patch.object(upload, "_resolve_operation") as resolve,
+        patch.object(upload, "_open_preview") as open_preview,
+        patch.object(upload.st, "container", side_effect=_container),
+        patch.object(upload.st, "caption"),
+        patch.object(upload.st, "markdown"),
+        patch.object(upload.st, "info"),
+        patch.object(upload.st, "warning") as warning,
+        patch.object(upload.st, "button", return_value=True) as button,
+    ):
+        upload.render_upload_section("source-1", settings)
+
+    list_ops.assert_called_once_with(settings)
+    assert render_operation.call_count == 2
+    resolve.assert_not_called()
+    assert metadata.call_args.kwargs["disabled"] is True
+    assert schedule.call_args.kwargs["disabled"] is True
+    assert button.call_args.kwargs["disabled"] is True
+    open_preview.assert_not_called()
+    assert any(
+        "既存の投稿 operation を追跡中" in call.args[0]
+        for call in warning.call_args_list
     )
 
 
@@ -227,6 +449,47 @@ def test_dialog_runs_confirm_inside_reservation_transaction(tmp_path: Path) -> N
     confirm.assert_called_once()
 
 
+def test_line_adapter_revalidates_and_wraps_confirm_as_one_required_pair(
+    tmp_path: Path,
+) -> None:
+    preview = _preview(tmp_path)
+    operation = _operation(tmp_path)
+    validate = MagicMock()
+    transaction = MagicMock(
+        side_effect=lambda _clip_id, _path, start_upload: start_upload()
+    )
+    adapter = LineUploadAdapter(validate, transaction)
+
+    with (
+        patch.object(upload.st, "container", side_effect=_container),
+        patch.object(upload.st, "warning"),
+        patch.object(upload.st, "markdown"),
+        patch.object(upload.st, "write"),
+        patch.object(upload.st, "code"),
+        patch.object(upload.st, "text_area"),
+        patch.object(upload.st, "caption"),
+        patch.object(upload.st, "segmented_control", side_effect=["いいえ", "いいえ"]),
+        patch.object(upload.st, "checkbox", return_value=True),
+        patch.object(upload.st, "button", return_value=True),
+        patch.object(upload.st, "success"),
+        patch.object(upload.st, "rerun"),
+        patch.object(upload, "confirm_and_start_upload", return_value=operation) as confirm,
+        patch.object(upload, "_store_operation_id"),
+        patch.object(upload, "set_active_job_id"),
+    ):
+        upload.upload_preview_dialog.__wrapped__(
+            preview,
+            Settings(data_dir=tmp_path),
+            "line-adapter",
+            line_adapter=adapter,
+        )
+
+    validate.assert_called_once_with("clip-1", preview.video_path)
+    transaction.assert_called_once()
+    assert transaction.call_args.args[:2] == ("clip-1", preview.video_path)
+    confirm.assert_called_once()
+
+
 def test_dialog_revalidates_line_immediately_before_confirm(tmp_path: Path) -> None:
     preview = _preview(tmp_path)
     before_confirm = MagicMock(
@@ -315,6 +578,34 @@ def test_dialog_does_not_confirm_when_button_is_not_clicked(tmp_path: Path) -> N
     ):
         upload.upload_preview_dialog.__wrapped__(preview, Settings(data_dir=tmp_path), "open-1")
     confirm.assert_not_called()
+
+
+def test_open_preview_uses_the_same_line_adapter_before_opening_dialog(
+    tmp_path: Path,
+) -> None:
+    preview = _preview(tmp_path)
+    item = MagicMock(
+        output_path=preview.video_path,
+        target_id="clip-1",
+        title_candidates=(preview.title,),
+        description=preview.description,
+        tags=preview.tags,
+    )
+    validate = MagicMock()
+    adapter = LineUploadAdapter(validate, MagicMock())
+    with (
+        patch.object(upload, "build_upload_preview", return_value=preview),
+        patch.object(upload, "upload_preview_dialog") as dialog,
+    ):
+        upload._open_preview(
+            "source-1",
+            item,
+            Settings(data_dir=tmp_path),
+            line_adapter=adapter,
+        )
+
+    validate.assert_called_once_with("clip-1", preview.video_path)
+    assert dialog.call_args.kwargs["line_adapter"] is adapter
 
 
 def test_each_dialog_open_uses_new_widget_keys_and_unselected_defaults(tmp_path: Path) -> None:
@@ -1007,6 +1298,26 @@ def test_upload_section_blocks_partial_running_manifest(tmp_path: Path) -> None:
     button.assert_not_called()
 
 
+def test_upload_section_renders_durable_operation_without_latest_manifest(
+    tmp_path: Path,
+) -> None:
+    settings = Settings(data_dir=tmp_path)
+    operation = _operation(tmp_path, state="reserved")
+    save_reserved_operation(operation, settings)
+
+    with (
+        patch.object(upload, "load_latest_shorts_queue_result", return_value=None),
+        patch.object(upload, "_render_related_video_summary_panel"),
+        patch.object(upload, "render_upload_operation") as render_operation,
+        patch.object(upload.st, "caption"),
+        patch.object(upload.st, "markdown"),
+        patch.object(upload.st, "info"),
+    ):
+        upload.render_upload_section("source-1", settings)
+
+    render_operation.assert_called_once_with(operation, settings=settings)
+
+
 @pytest.mark.parametrize("manifest_kind", ["none", "interrupted", "done-empty"])
 def test_upload_section_keeps_global_related_pending_reachable_without_latest_manifest(
     tmp_path: Path, manifest_kind: str
@@ -1073,7 +1384,7 @@ def test_upload_section_restores_uploaded_operation_before_output_gate(
         patch.object(upload, "load_latest_shorts_queue_result", return_value=result),
         patch.object(upload, "get_next_upload_slot", return_value=(policy, requested)),
         patch.object(upload, "_render_related_video_summary_panel"),
-        patch.object(upload, "_resolve_operation", return_value=operation) as resolve,
+        patch.object(upload, "list_operations", return_value=(operation,)) as list_ops,
         patch.object(upload, "render_upload_operation") as render_operation,
         patch.object(upload, "_open_preview") as open_preview,
         patch.object(upload.st, "container", side_effect=_container),
@@ -1084,7 +1395,7 @@ def test_upload_section_restores_uploaded_operation_before_output_gate(
     ):
         upload.render_upload_section("source-1", settings)
 
-    resolve.assert_called_once_with("source-1", "clip-1", settings)
+    list_ops.assert_called_once_with(settings)
     render_operation.assert_called_once_with(operation, settings=settings)
     open_preview.assert_not_called()
     button.assert_not_called()
@@ -1131,7 +1442,7 @@ def test_upload_section_blocks_missing_output_before_reservation_controls(
     with (
         patch.object(upload, "load_latest_shorts_queue_result", return_value=result),
         patch.object(upload, "get_next_upload_slot", return_value=(policy, requested)),
-        patch.object(upload, "_resolve_operation", return_value=None) as resolve,
+        patch.object(upload, "list_operations", return_value=()) as list_ops,
         patch.object(upload.st, "container", side_effect=_container),
         patch.object(upload.st, "caption"),
         patch.object(upload.st, "markdown"),
@@ -1141,7 +1452,7 @@ def test_upload_section_blocks_missing_output_before_reservation_controls(
     ):
         upload.render_upload_section("source-1", Settings(data_dir=tmp_path))
 
-    resolve.assert_called_once_with("source-1", "clip-1", Settings(data_dir=tmp_path))
+    list_ops.assert_called_once_with(Settings(data_dir=tmp_path))
     button.assert_not_called()
     assert any("予約投稿せず" in call.args[0] for call in warning.call_args_list)
 
@@ -1173,7 +1484,7 @@ def test_upload_section_validates_legacy_manifest_before_reservation(
         patch.object(
             upload, "can_reserve_shorts_queue_item", return_value=False
         ) as reserve,
-        patch.object(upload, "_resolve_operation", return_value=None) as resolve,
+        patch.object(upload, "list_operations", return_value=()) as list_ops,
         patch.object(upload.st, "container", side_effect=_container),
         patch.object(upload.st, "caption"),
         patch.object(upload.st, "markdown"),
@@ -1184,7 +1495,7 @@ def test_upload_section_validates_legacy_manifest_before_reservation(
         upload.render_upload_section("source-1", settings)
 
     reserve.assert_called_once_with(result, item, settings)
-    resolve.assert_called_once_with("source-1", "clip-1", settings)
+    list_ops.assert_called_once_with(settings)
     button.assert_not_called()
     assert any("予約投稿せず" in call.args[0] for call in warning.call_args_list)
 
@@ -1420,7 +1731,7 @@ def test_queue_corruption_shows_japanese_error_and_hides_post_action(tmp_path: P
     save_schedule_policy(SchedulePolicy(daily_times=["09:00"]), settings)
     with (
         patch.object(upload, "load_latest_shorts_queue_result", return_value=result),
-        patch.object(upload, "_resolve_operation", side_effect=UploadQueueError("raw error")),
+        patch.object(upload, "list_operations", side_effect=UploadQueueError("raw error")),
         patch.object(upload.st, "container", side_effect=_container),
         patch.object(upload.st, "subheader"),
         patch.object(upload.st, "caption"),

@@ -28,13 +28,18 @@ from yt_live_kit.ui.components.status_bar import (
 )
 from yt_live_kit.ui.state import (
     SESSION_GLOBAL_JOB_ERRORS,
+    SESSION_HANDLED_JOBS,
     SESSION_JOB_ERROR_HISTORY,
+    SESSION_PIPELINE_COMPLETIONS,
     SESSION_UNREAD_JOB_ERRORS,
     consume_unread_job_error_notifications,
     format_job_error_summary_for_display,
     get_global_job_error_notifications,
     get_job_error_history,
+    get_pipeline_completion_notifications,
+    get_selected_video_id,
     get_unread_job_error_notifications,
+    record_pipeline_completion,
     record_job_error,
     set_selected_video_id,
 )
@@ -49,6 +54,11 @@ def _clear_job_error_notifications() -> None:
         SESSION_UNREAD_JOB_ERRORS,
     ):
         st.session_state.pop(key, None)
+
+
+def _clear_pipeline_completion_notifications() -> None:
+    st.session_state.pop(SESSION_PIPELINE_COMPLETIONS, None)
+    st.session_state.pop(SESSION_HANDLED_JOBS, None)
 
 
 def _load_unread_renderer(
@@ -374,6 +384,86 @@ def test_global_notice_dismiss_consumes_only_unread_and_keeps_global_summary() -
     _clear_job_error_notifications()
 
 
+def test_pipeline_completion_state_is_bounded_and_deduplicated_by_job() -> None:
+    _clear_pipeline_completion_notifications()
+    completed_at = datetime(2026, 8, 4, 1, 2, tzinfo=timezone.utc)
+
+    first = record_pipeline_completion(
+        "video-b",
+        "job-b",
+        "single",
+        "動画 B",
+        completed_at,
+    )
+    duplicate = record_pipeline_completion(
+        "wrong-video",
+        "job-b",
+        "single",
+        "重複通知",
+        completed_at + timedelta(seconds=1),
+    )
+
+    assert duplicate == first
+    assert get_pipeline_completion_notifications() == [first]
+    for offset, suffix in enumerate(("c", "d", "e"), start=2):
+        record_pipeline_completion(
+            f"video-{suffix}",
+            f"job-{suffix}",
+            "single",
+            f"動画 {suffix.upper()}",
+            completed_at + timedelta(seconds=offset),
+        )
+    assert [
+        notice.job_id for notice in get_pipeline_completion_notifications()
+    ] == ["job-e", "job-d", "job-c"]
+    _clear_pipeline_completion_notifications()
+
+
+def test_pipeline_completion_initial_render_is_read_only() -> None:
+    from yt_live_kit.ui.components import status_bar
+
+    _clear_pipeline_completion_notifications()
+    notice = record_pipeline_completion("video-b", "job-b", "single", "動画 B")
+
+    with (
+        patch.object(status_bar.st, "success") as success,
+        patch.object(status_bar.st, "button", return_value=False) as button,
+    ):
+        status_bar.render_pipeline_completion_notices(detail_page=object())
+
+    assert get_pipeline_completion_notifications() == [notice]
+    success.assert_called_once_with("「動画 B」の処理が完了しました。")
+    assert [call.args[0] for call in button.call_args_list] == [
+        "対象動画を開く",
+        "通知を閉じる",
+    ]
+    _clear_pipeline_completion_notifications()
+
+
+def test_pipeline_completion_for_video_b_opens_b_without_mixing_into_a() -> None:
+    from yt_live_kit.ui.components import status_bar
+
+    _clear_pipeline_completion_notifications()
+    set_selected_video_id("video-a")
+    record_pipeline_completion("video-b", "job-b", "single", "動画 B")
+    detail_page = object()
+
+    def click_target(label: str, **_kwargs) -> bool:
+        return label == "対象動画を開く"
+
+    with (
+        patch.object(status_bar.st, "success"),
+        patch.object(status_bar.st, "button", side_effect=click_target),
+        patch.object(status_bar.st, "switch_page", side_effect=_PageSwitch),
+    ):
+        with pytest.raises(_PageSwitch):
+            status_bar.render_pipeline_completion_notices(detail_page=detail_page)
+
+    assert get_selected_video_id() == "video-b"
+    assert get_pipeline_completion_notifications() == []
+    _clear_pipeline_completion_notifications()
+
+
 def test_status_summary_is_one_line_safe_and_bounded() -> None:
     from yt_live_kit.ui.components import status_bar
 
@@ -519,14 +609,16 @@ def test_handle_finished_job_loads_result_on_done() -> None:
         kind="single",
         status="done",
         result_ref="video1234567",
+        finished_at=datetime(2026, 8, 4, 1, 2, tzinfo=timezone.utc),
     )
-    mock_result = MagicMock()
+    mock_result = MagicMock(video_id="video1234567", title="動画 123")
 
     with (
         patch("yt_live_kit.ui.components.status_bar.is_job_handled", return_value=False),
         patch("yt_live_kit.ui.components.status_bar.mark_job_handled") as mark_handled,
         patch("yt_live_kit.ui.components.status_bar.load_result_from_disk", return_value=mock_result) as load_result,
-        patch("yt_live_kit.ui.components.status_bar.set_result") as set_result,
+        patch("yt_live_kit.ui.components.status_bar.record_pipeline_completion") as record_completion,
+        patch("yt_live_kit.ui.components.status_bar.clear_result") as clear_result,
         patch("yt_live_kit.ui.components.status_bar.clear_cut_result") as clear_cut,
         patch("yt_live_kit.ui.components.status_bar.clear_active_job_id") as clear_active,
         patch("yt_live_kit.ui.components.status_bar.st.rerun") as rerun,
@@ -534,11 +626,54 @@ def test_handle_finished_job_loads_result_on_done() -> None:
         status_bar._handle_finished_job(job)
 
     load_result.assert_called_once_with("video1234567", status_bar.get_settings())
-    set_result.assert_called_once_with(mock_result)
+    record_completion.assert_called_once_with(
+        "video1234567",
+        "done123",
+        "single",
+        "動画 123",
+        status_bar._job_finished_at(job),
+    )
+    clear_result.assert_called_once()
     clear_cut.assert_called_once()
     clear_active.assert_called_once()
     mark_handled.assert_called_once_with("done123")
     rerun.assert_called_once_with(scope="app")
+
+
+def test_finished_pipeline_notification_does_not_change_selected_video_and_handles_once() -> None:
+    from yt_live_kit.ui.components import status_bar
+
+    _clear_pipeline_completion_notifications()
+    set_selected_video_id("video-a")
+    job = JobState(
+        job_id="done-video-b",
+        kind="single",
+        status="done",
+        video_id="video-b",
+        result_ref="video-b",
+    )
+    result = MagicMock(video_id="video-b", title="動画 B")
+
+    with (
+        patch(
+            "yt_live_kit.ui.components.status_bar.load_result_from_disk",
+            return_value=result,
+        ) as load_result,
+        patch("yt_live_kit.ui.components.status_bar.clear_result"),
+        patch("yt_live_kit.ui.components.status_bar.clear_cut_result"),
+        patch("yt_live_kit.ui.components.status_bar.clear_active_job_id"),
+        patch("yt_live_kit.ui.components.status_bar.st.rerun"),
+    ):
+        status_bar._handle_finished_job(job)
+        status_bar._handle_finished_job(job)
+
+    assert load_result.call_count == 1
+    assert get_selected_video_id() == "video-a"
+    notices = get_pipeline_completion_notifications()
+    assert [(notice.video_id, notice.job_id) for notice in notices] == [
+        ("video-b", "done-video-b")
+    ]
+    _clear_pipeline_completion_notifications()
 
 
 def test_handle_finished_cut_clip_job_sets_cut_result(tmp_path) -> None:
@@ -830,7 +965,7 @@ def test_handle_finished_job_shows_error_when_result_missing() -> None:
         patch("yt_live_kit.ui.components.status_bar.is_job_handled", return_value=False),
         patch("yt_live_kit.ui.components.status_bar.mark_job_handled") as mark_handled,
         patch("yt_live_kit.ui.components.status_bar.load_result_from_disk", return_value=None),
-        patch("yt_live_kit.ui.components.status_bar.set_result") as set_result,
+        patch("yt_live_kit.ui.components.status_bar.record_pipeline_completion") as record_completion,
         patch("yt_live_kit.ui.components.status_bar.clear_active_job_id") as clear_active,
         patch("yt_live_kit.ui.components.status_bar.record_job_error") as record_error,
         patch("yt_live_kit.ui.components.status_bar.st.rerun") as rerun,
@@ -842,7 +977,7 @@ def test_handle_finished_job_shows_error_when_result_missing() -> None:
     assert "成果物を読み込めませんでした" in summary
     assert "meta.json" in detail
     assert "<" not in summary and ">" not in summary
-    set_result.assert_not_called()
+    record_completion.assert_not_called()
     clear_active.assert_called_once()
     mark_handled.assert_called_once_with("done-missing")
     rerun.assert_called_once_with(scope="app")

@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
-from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, Mapping
 
 import streamlit as st
 
@@ -33,6 +31,7 @@ from yt_live_kit.services.pipeline import (
 from yt_live_kit.services.storage import StorageError, format_bytes, purge_source
 from yt_live_kit.services.shorts_queue import (
     ShortsQueueError,
+    can_reserve_shorts_queue_item,
     load_latest_shorts_queue_result,
 )
 from yt_live_kit.services.youtube_api import (
@@ -47,6 +46,8 @@ from yt_live_kit.ui.components.short_cut import (
     S9_WHISPER_PROGRESS_PREFIX,
 )
 from yt_live_kit.ui.components.shorts_line import (
+    make_line_upload_adapter,
+    record_line_upload,
     render_main_line_summary,
     render_shorts_line,
     run_line_upload_transaction,
@@ -54,6 +55,12 @@ from yt_live_kit.ui.components.shorts_line import (
 )
 from yt_live_kit.ui.components.status_bar import job_display_label
 from yt_live_kit.ui.components.upload import render_upload_section
+from yt_live_kit.ui.queries import count_generated_shorts
+from yt_live_kit.ui.session_keys import (
+    candidate_transfer_key,
+    candidate_transfer_order_key,
+    detail_workspace_key,
+)
 from yt_live_kit.ui.state import (
     JOB_ERROR_HISTORY_LIMIT,
     JobErrorNotification,
@@ -68,13 +75,25 @@ from yt_live_kit.ui.views._local_settings import (
     mark_description_applied,
 )
 from yt_live_kit.ui.views.highlights import render_highlights_section
-from yt_live_kit.ui.views.library import count_shorts
 from yt_live_kit.ui.views.shorts import render_shorts_section
+from yt_live_kit.ui.view_models.video_detail import (
+    CandidateKey,
+    CandidateTransfer,
+    DetailSummary,
+    Workspace,
+    calculate_detail_summary,
+    choose_initial_workspace,
+    current_candidate_fingerprint,
+    make_candidate_fingerprint,
+    validate_candidate_transfer,
+)
 
 if TYPE_CHECKING:
     from streamlit.navigation.page import StreamlitPage
 
-Workspace = Literal["materials", "shorts", "publish"]
+# Compatibility export for callers that previously imported this query from the
+# detail view.  The implementation is shared with the library page.
+count_shorts = count_generated_shorts
 
 _BUSY_MESSAGE = "他の処理が実行中です。完了までお待ちください。"
 _WORKSPACES: tuple[Workspace, ...] = ("materials", "shorts", "publish")
@@ -88,68 +107,13 @@ _DESCRIPTION_SUCCESS_KEY = "detail_description_success"
 _MAX_DETAIL_JOB_ERROR_LOG_BYTES = 64 * 1024
 
 
-@dataclass(frozen=True)
-class DetailSummary:
-    """動画詳細の読み取り専用サマリー."""
-
-    candidate_count: int
-    generated_short_count: int
-    reservable_short_count: int
-    description_applied: bool
-
-
-def calculate_detail_summary(
-    *,
-    clip_count: int,
-    highlight_count: int,
-    generated_short_count: int,
-    reservable_short_count: int,
-    description_applied: bool,
-) -> DetailSummary:
-    """UI 入力から状態カードの値を副作用なく計算する."""
-    return DetailSummary(
-        candidate_count=max(0, clip_count) + max(0, highlight_count),
-        generated_short_count=max(0, generated_short_count),
-        reservable_short_count=max(0, reservable_short_count),
-        description_applied=description_applied,
-    )
-
-
-def choose_initial_workspace(
-    *,
-    video_id: str,
-    candidate_count: int,
-    reservable_short_count: int,
-    active_job: JobState | None = None,
-) -> Workspace:
-    """FR-17 v3.2 の優先順で初期ワークスペースを返す純粋関数."""
-    if (
-        active_job is not None
-        and active_job.status == "running"
-        and active_job.video_id == video_id
-    ):
-        if active_job.kind in {"upload"}:
-            return "publish"
-        if active_job.kind in {"shorts", "shorts_queue", "short_cut"}:
-            return "shorts"
-        if active_job.kind in {"highlights", "regenerate", "cut_clip"}:
-            return "materials"
-    if candidate_count <= 0:
-        return "materials"
-    if reservable_short_count <= 0:
-        return "shorts"
-    return "publish"
-
-
 def count_reservable_shorts(video_id: str, settings: Settings) -> int:
-    """最新の検証済み manifest にある実在成功出力だけを数える."""
+    """Count only items accepted by the same service gate used at reservation."""
     result = load_latest_shorts_queue_result(video_id, settings)
     if result is None or result.status != "done":
         return 0
     return sum(
-        item.status == "succeeded"
-        and item.output_path is not None
-        and item.output_path.is_file()
+        can_reserve_shorts_queue_item(result, item, settings)
         for item in result.items
     )
 
@@ -720,58 +684,12 @@ def _render_clips(
     )
 
 
-@dataclass(frozen=True)
-class CandidateTransfer:
-    """正式ライン開始前だけ session state に置く候補引き継ぎ."""
-
-    source: Literal["clips", "highlights"]
-    selected_ids: tuple[str, ...]
-    fingerprint: str
-
-
-CandidateKey = tuple[Literal["clips", "highlights"], str]
-
-
-def make_candidate_fingerprint(
-    source: Literal["clips", "highlights"],
-    candidates: list[ClipCandidate] | list[HighlightSegment],
-) -> str:
-    """候補ファイル全体と表示順を表す安定 fingerprint を返す."""
-    payload = {
-        "source": source,
-        "candidates": [candidate.model_dump(mode="json") for candidate in candidates],
-    }
-    canonical = json.dumps(
-        payload,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    )
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-
-
-def validate_candidate_transfer(
-    transfer: CandidateTransfer | None,
-    *,
-    current_fingerprint: str,
-    candidate_ids: set[str],
-) -> CandidateTransfer | None:
-    """候補変更・ID 欠落を検出し、安全な引き継ぎだけを返す."""
-    if transfer is None:
-        return None
-    if transfer.fingerprint != current_fingerprint:
-        return None
-    if not transfer.selected_ids or not set(transfer.selected_ids) <= candidate_ids:
-        return None
-    return transfer
-
-
 def _transfer_key(video_id: str, source: str) -> str:
-    return f"shorts_line_transfer_{video_id}_{source}"
+    return candidate_transfer_key(video_id, source)
 
 
 def _transfer_order_key(video_id: str) -> str:
-    return f"shorts_line_transfer_order_{video_id}"
+    return candidate_transfer_order_key(video_id)
 
 
 def _load_transfer_order(video_id: str) -> tuple[CandidateKey, ...]:
@@ -829,6 +747,7 @@ def _valid_transfer_candidates(
     *,
     clips: list[ClipCandidate],
     highlights: list[HighlightSegment],
+    candidate_fingerprints: Mapping[str, str] | None = None,
 ) -> tuple[CandidateKey, ...]:
     """全 workspace 描画前に引き継ぎを再検証し、stale 状態を破棄する."""
     valid: list[CandidateKey] = []
@@ -839,7 +758,12 @@ def _valid_transfer_candidates(
             continue
         current = validate_candidate_transfer(
             transfer,
-            current_fingerprint=make_candidate_fingerprint(source, candidates),
+            current_fingerprint=(
+                candidate_fingerprints[source]
+                if candidate_fingerprints is not None
+                and source in candidate_fingerprints
+                else make_candidate_fingerprint(source, candidates)
+            ),
             candidate_ids={candidate.id for candidate in candidates},
         )
         if current is None:
@@ -858,7 +782,7 @@ def _valid_transfer_candidates(
 
 def _set_workspace(video_id: str, workspace: Workspace) -> None:
     """widget callback 内で次 rerun の作業選択を更新する."""
-    st.session_state[f"detail_workspace_{video_id}"] = workspace
+    st.session_state[detail_workspace_key(video_id)] = workspace
 
 
 def _render_state_summary(summary: DetailSummary) -> None:
@@ -943,6 +867,31 @@ def _load_material_candidates(
     return clips, highlights
 
 
+def _load_material_candidate_fingerprints(
+    video_id: str,
+    settings: Settings,
+    *,
+    clips: list[ClipCandidate],
+    highlights: list[HighlightSegment],
+) -> dict[str, str]:
+    """Resolve saved clip lineage once, with legacy/highlight content fallback."""
+    try:
+        clip_document = load_candidates_file(video_id, settings)
+    except (OSError, UnicodeError, TypeError, ValueError):
+        clip_document = None
+    lineage = getattr(clip_document, "lineage", None)
+    return {
+        "clips": current_candidate_fingerprint(
+            "clips",
+            clips,
+            persisted_candidate_fingerprint=(
+                lineage.candidate_fingerprint if lineage is not None else None
+            ),
+        ),
+        "highlights": current_candidate_fingerprint("highlights", highlights),
+    }
+
+
 def _candidate_provenance_text(
     video_id: str,
     source: str,
@@ -971,6 +920,7 @@ def _render_materials_workspace(
     *,
     clips: list[ClipCandidate],
     highlights: list[HighlightSegment],
+    candidate_fingerprints: Mapping[str, str] | None = None,
 ) -> None:
     st.caption("候補を確認し、作成するショートへ同じ順序で引き継ぎます。")
     available: list[Literal["clips", "highlights"]] = []
@@ -1001,7 +951,11 @@ def _render_materials_workspace(
     candidates: list[ClipCandidate] | list[HighlightSegment] = (
         clips if source == "clips" else highlights
     )
-    fingerprint = make_candidate_fingerprint(source, candidates)
+    fingerprint = (
+        candidate_fingerprints[source]
+        if candidate_fingerprints is not None and source in candidate_fingerprints
+        else make_candidate_fingerprint(source, candidates)
+    )
     transfer = _load_transfer(result.video_id, source)
     valid_transfer = validate_candidate_transfer(
         transfer,
@@ -1099,28 +1053,14 @@ def _render_publish_workspace(
                 on_click=_set_workspace,
                 args=(video.video_id, "shorts"),
             )
-        else:
-            render_upload_section(
-                video.video_id,
-                settings,
-                before_preview=lambda clip_id, output_path: (
-                    validate_line_reservation(
-                        video.video_id,
-                        clip_id,
-                        output_path,
-                        settings,
-                    )
-                ),
-                reservation_transaction=lambda clip_id, output_path, start_upload: (
-                    run_line_upload_transaction(
-                        video.video_id,
-                        clip_id,
-                        output_path,
-                        settings,
-                        start_upload,
-                    )
-                ),
-            )
+        # Tracking is independent from whether the latest manifest currently has
+        # a new reservable item.  The adapter keeps both line safety callbacks as
+        # one required value so a layout refactor cannot accidentally drop one.
+        render_upload_section(
+            video.video_id,
+            settings,
+            line_adapter=make_line_upload_adapter(video.video_id, settings),
+        )
 
 
 def _render_details_and_regeneration(
@@ -1209,10 +1149,17 @@ def render_video_detail_page(
         return
 
     clips, highlights = _load_material_candidates(result, settings)
+    candidate_fingerprints = _load_material_candidate_fingerprints(
+        video.video_id,
+        settings,
+        clips=clips,
+        highlights=highlights,
+    )
     preferred_transfer_candidates = _valid_transfer_candidates(
         video.video_id,
         clips=clips,
         highlights=highlights,
+        candidate_fingerprints=candidate_fingerprints,
     )
     try:
         reservable_count = count_reservable_shorts(video.video_id, settings)
@@ -1244,7 +1191,7 @@ def render_video_detail_page(
         default=default_workspace,
         required=True,
         format_func=lambda value: _WORKSPACE_LABELS[value],
-        key=f"detail_workspace_{video.video_id}",
+        key=detail_workspace_key(video.video_id),
         width="stretch",
     )
     selected_workspace: Workspace = (
@@ -1257,6 +1204,7 @@ def render_video_detail_page(
             settings,
             clips=clips,
             highlights=highlights,
+            candidate_fingerprints=candidate_fingerprints,
         )
     elif selected_workspace == "shorts":
         render_shorts_line(

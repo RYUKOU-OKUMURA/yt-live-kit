@@ -22,6 +22,8 @@ from yt_live_kit.services.transcript_artifact import (
 from yt_live_kit.ui.components.short_cut import (
     LAYOUT_BLUR_LABEL,
     LAYOUT_CROP_LABEL,
+    ParentOption,
+    _render_plan,
     build_disabled_message,
     build_short_cut_job_target,
     checkbox_key,
@@ -35,15 +37,18 @@ from yt_live_kit.ui.components.short_cut import (
     load_transcript_cues_for_document,
     parse_cut_timestamp,
     resolve_transcript_bounds,
+    resolve_parent_option_identity,
     render_short_cut_section,
     S9_WHISPER_ERROR_PREFIX,
     S9_WHISPER_PROGRESS_PREFIX,
     _render_refine_preview,
     segments_to_pairs,
     short_cut_output_path,
+    short_cut_draft_identity,
     shift_cut_timestamp,
     start_key,
     suggest_short_cut_job_target,
+    sync_short_cut_editor_state,
 )
 
 
@@ -139,6 +144,46 @@ def test_collect_parent_options_keeps_only_long_candidates() -> None:
 def test_collect_parent_options_empty_when_all_short() -> None:
     clips = [_clip("clip_short", start="00:00:00", end="00:03:00", duration_sec=180)]
     assert collect_parent_options(clips, []) == []
+
+
+def test_parent_identity_survives_reorder_and_falls_back_after_delete() -> None:
+    first = ParentOption("切り抜き", _clip("clip_a"))
+    second = ParentOption("切り抜き", _clip("clip_b"))
+
+    assert (
+        resolve_parent_option_identity([second, first], first.identity)
+        == first.identity
+    )
+    assert resolve_parent_option_identity([second], first.identity) == second.identity
+    assert (
+        resolve_parent_option_identity(
+            [second, first],
+            "deleted:value",
+            preferred_candidate_ids=("clip_a",),
+        )
+        == first.identity
+    )
+
+
+def test_parent_identity_migrates_legacy_index_and_separates_sources() -> None:
+    clip = ParentOption("切り抜き", _clip("shared"))
+    highlight = ParentOption(
+        "ハイライト",
+        HighlightSegment(
+            id="shared",
+            title="山場",
+            start="00:05:00",
+            end="00:11:00",
+            duration_sec=360,
+            reason="理由",
+        ),
+    )
+
+    assert clip.identity == "clip:shared"
+    assert highlight.identity == "highlight:shared"
+    assert resolve_parent_option_identity([clip, highlight], 1) == highlight.identity
+    assert resolve_parent_option_identity([clip, highlight], 99) == clip.identity
+    assert resolve_parent_option_identity([clip, highlight], True) == clip.identity
 
 
 def test_layout_from_label() -> None:
@@ -259,6 +304,48 @@ def test_load_transcript_cues_parses_once_per_video_across_reruns(
     assert first[0] == (TimedCue(0.0, 1.0, "本文"),)
     assert first[1] is None
     parse.assert_called_once()
+    load_transcript_cues.clear()
+
+
+def test_load_transcript_cues_invalidates_missing_entry_when_vtt_is_created(
+    tmp_path: Path,
+) -> None:
+    load_transcript_cues.clear()
+    first = load_transcript_cues("video-new", tmp_path)
+    assert first[0] == ()
+    assert first[1] is not None and "見つからない" in first[1]
+
+    vtt_path = tmp_path / "video-new" / "subtitles" / "ja.vtt"
+    vtt_path.parent.mkdir(parents=True)
+    vtt_path.write_text(
+        "WEBVTT\n\n00:00:00.000 --> 00:00:01.000\n作成後\n",
+        encoding="utf-8",
+    )
+
+    second = load_transcript_cues("video-new", tmp_path)
+    assert second == ((TimedCue(0.0, 1.0, "作成後"),), None)
+    load_transcript_cues.clear()
+
+
+def test_load_transcript_cues_invalidates_cached_empty_result_after_update(
+    tmp_path: Path,
+) -> None:
+    vtt_path = tmp_path / "video-update" / "subtitles" / "ja.vtt"
+    vtt_path.parent.mkdir(parents=True)
+    vtt_path.write_text("WEBVTT\n", encoding="utf-8")
+    load_transcript_cues.clear()
+
+    empty = load_transcript_cues("video-update", tmp_path)
+    assert empty[0] == ()
+    assert empty[1] is not None and "表示できる内容がありません" in empty[1]
+
+    vtt_path.write_text(
+        "WEBVTT\n\n00:00:00.000 --> 00:00:01.000\n更新後の本文\n",
+        encoding="utf-8",
+    )
+    updated = load_transcript_cues("video-update", tmp_path)
+
+    assert updated == ((TimedCue(0.0, 1.0, "更新後の本文"),), None)
     load_transcript_cues.clear()
 
 
@@ -389,6 +476,188 @@ def test_collect_edited_segments_reports_bad_timestamp_and_order() -> None:
     assert segments == []
     assert any("cut_001: 開始時刻は HH:MM:SS" in error for error in errors)
     assert any("cut_002: 終了時刻は開始時刻より後" in error for error in errors)
+
+
+def test_editor_state_keeps_manual_values_for_same_document_identity() -> None:
+    document = _document()
+    state: dict[str, object] = {"unrelated": "keep"}
+    parent_identity = "clip:clip_002"
+    identity = sync_short_cut_editor_state(
+        document,
+        "vid",
+        parent_identity,
+        state,
+    )
+    candidate = document.candidates[0]
+    candidate_start_key = start_key(
+        "vid", candidate.id, parent_identity=parent_identity
+    )
+    candidate_checkbox_key = checkbox_key(
+        "vid", candidate.id, parent_identity=parent_identity
+    )
+    state[candidate_start_key] = "00:39:22"
+    state[candidate_checkbox_key] = False
+
+    same_identity = sync_short_cut_editor_state(
+        document,
+        "vid",
+        parent_identity,
+        state,
+    )
+
+    assert same_identity == identity == short_cut_draft_identity(document)
+    assert state[candidate_start_key] == "00:39:22"
+    assert state[candidate_checkbox_key] is False
+    assert state["unrelated"] == "keep"
+
+
+def test_same_artifact_new_proposal_resets_same_candidate_before_render(
+    tmp_path: Path,
+) -> None:
+    settings = Settings(data_dir=tmp_path)
+    artifact = _high_precision_artifact()
+    store = TranscriptArtifactStore("video-1", settings)
+    store.save(artifact)
+    document = _document().model_copy(
+        update={
+            "artifact_ref": store.artifact_ref(artifact),
+            "artifact_fingerprint": artifact.artifact_fingerprint,
+            "used_range_cue_digests": artifact.used_range_cue_digests,
+        }
+    )
+    changed_candidate = document.candidates[0].model_copy(
+        update={
+            "start": "00:39:15",
+            "end": "00:40:05",
+            "duration_sec": 50,
+        }
+    )
+    reproposal = document.model_copy(
+        update={"candidates": [changed_candidate, document.candidates[1]]}
+    )
+    parent_identity = "clip:clip_002"
+    state: dict[str, object] = {"unrelated": "keep"}
+    sync_short_cut_editor_state(document, "video-1", parent_identity, state)
+    candidate_start_key = start_key(
+        "video-1", "cut_001", parent_identity=parent_identity
+    )
+    candidate_checkbox_key = checkbox_key(
+        "video-1", "cut_001", parent_identity=parent_identity
+    )
+    state[candidate_start_key] = "00:39:55"
+    state[candidate_checkbox_key] = False
+    other_parent_identity = "clip:clip_other"
+    sync_short_cut_editor_state(
+        document.model_copy(update={"parent_id": "clip_other"}),
+        "video-1",
+        other_parent_identity,
+        state,
+    )
+    other_parent_start_key = start_key(
+        "video-1", "cut_001", parent_identity=other_parent_identity
+    )
+    state[other_parent_start_key] = "00:39:33"
+
+    new_identity = sync_short_cut_editor_state(
+        reproposal,
+        "video-1",
+        parent_identity,
+        state,
+    )
+
+    assert short_cut_draft_identity(document) != new_identity
+    assert reproposal.artifact_fingerprint == document.artifact_fingerprint
+    assert state[candidate_start_key] == "00:39:15"
+    assert state[candidate_checkbox_key] is True
+    assert state[other_parent_start_key] == "00:39:33"
+    assert state["unrelated"] == "keep"
+
+    other_artifact = _high_precision_artifact(suffix="two")
+    store.save(other_artifact)
+    lineage_changed = document.model_copy(
+        update={
+            "artifact_ref": store.artifact_ref(other_artifact),
+            "artifact_fingerprint": other_artifact.artifact_fingerprint,
+            "used_range_cue_digests": other_artifact.used_range_cue_digests,
+        }
+    )
+    assert short_cut_draft_identity(lineage_changed) != short_cut_draft_identity(
+        document
+    )
+
+
+def test_editor_state_isolated_across_parent_a_b_a_navigation() -> None:
+    document_a = _document().model_copy(update={"parent_id": "clip_a"})
+    document_b = _document().model_copy(update={"parent_id": "clip_b"})
+    parent_a = "clip:clip_a"
+    parent_b = "clip:clip_b"
+    state: dict[str, object] = {}
+
+    sync_short_cut_editor_state(document_a, "vid", parent_a, state)
+    key_a = start_key("vid", "cut_001", parent_identity=parent_a)
+    state[key_a] = "00:39:21"
+    sync_short_cut_editor_state(document_b, "vid", parent_b, state)
+    key_b = start_key("vid", "cut_001", parent_identity=parent_b)
+    state[key_b] = "00:39:31"
+    sync_short_cut_editor_state(document_a, "vid", parent_a, state)
+
+    assert key_a != key_b
+    assert state[key_a] == "00:39:21"
+    assert state[key_b] == "00:39:31"
+
+
+def test_render_plan_persists_conditionally_rendered_editor_widgets(
+    tmp_path: Path,
+) -> None:
+    settings = Settings(data_dir=tmp_path)
+    option = ParentOption("切り抜き", _clip())
+    state: dict[str, object] = {}
+    columns = [MagicMock(), MagicMock()]
+    with (
+        patch("yt_live_kit.ui.components.short_cut.st.session_state", state),
+        patch("yt_live_kit.ui.components.short_cut.st.markdown"),
+        patch("yt_live_kit.ui.components.short_cut.st.caption"),
+        patch("yt_live_kit.ui.components.short_cut.st.write"),
+        patch("yt_live_kit.ui.components.short_cut.st.warning"),
+        patch("yt_live_kit.ui.components.short_cut.st.checkbox") as checkbox,
+        patch("yt_live_kit.ui.components.short_cut.st.text_input") as text_input,
+        patch(
+            "yt_live_kit.ui.components.short_cut.st.radio",
+            return_value=LAYOUT_BLUR_LABEL,
+        ) as radio,
+        patch("yt_live_kit.ui.components.short_cut.st.button", return_value=False),
+        patch(
+            "yt_live_kit.ui.components.short_cut.st.columns",
+            return_value=columns,
+        ),
+        patch("yt_live_kit.ui.components.short_cut.st.container"),
+        patch(
+            "yt_live_kit.ui.components.short_cut.load_transcript_cues_for_document",
+            return_value=((), None),
+        ),
+        patch("yt_live_kit.ui.components.short_cut.render_cutplan_provenance"),
+        patch("yt_live_kit.ui.components.short_cut._render_refine_preview"),
+        patch("yt_live_kit.ui.components.short_cut.is_busy", return_value=False),
+    ):
+        _render_plan(
+            video_id="video-1",
+            title="動画",
+            option=option,
+            document=_document(),
+            settings=settings,
+        )
+
+    assert len(checkbox.call_args_list) == 2
+    assert all(
+        call.kwargs["persist_state"] == "session"
+        for call in checkbox.call_args_list
+    )
+    assert len(text_input.call_args_list) == 4
+    assert all(
+        call.kwargs["persist_state"] == "session"
+        for call in text_input.call_args_list
+    )
+    assert radio.call_args.kwargs["persist_state"] == "session"
 
 
 def test_segments_to_pairs_and_output_path_are_deterministic(tmp_path: Path) -> None:
@@ -714,6 +983,7 @@ def test_render_section_reloads_saved_cutplan_after_job_rerun(tmp_path: Path) ->
     settings = Settings(data_dir=tmp_path)
     option = MagicMock()
     option.id = "clip_002"
+    option.identity = "clip:clip_002"
     option.label = "切り抜き候補"
     option.candidate = _clip()
     document = _document()
@@ -731,7 +1001,9 @@ def test_render_section_reloads_saved_cutplan_after_job_rerun(tmp_path: Path) ->
         patch("yt_live_kit.ui.components.short_cut.is_busy", return_value=False),
         patch("yt_live_kit.ui.components.short_cut.st.session_state", session_state),
         patch("yt_live_kit.ui.components.short_cut.st.caption"),
-        patch("yt_live_kit.ui.components.short_cut.st.radio", return_value=0),
+        patch(
+            "yt_live_kit.ui.components.short_cut.st.radio", return_value=0
+        ) as radio,
         patch("yt_live_kit.ui.components.short_cut.st.button", return_value=False),
     ):
         render_short_cut_section(
@@ -745,3 +1017,6 @@ def test_render_section_reloads_saved_cutplan_after_job_rerun(tmp_path: Path) ->
 
     load.assert_called_once_with("video-1", "clip_002", settings)
     render_plan.assert_called_once()
+    assert session_state["short_cut_parent_video-1"] == "clip:clip_002"
+    assert radio.call_args.kwargs["persist_state"] == "session"
+    assert radio.call_args.args[1] == ("clip:clip_002",)

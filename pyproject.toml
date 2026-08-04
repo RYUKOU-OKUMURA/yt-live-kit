@@ -5,7 +5,7 @@ description = "YouTube ライブアーカイブから字幕・チャプター・
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "streamlit>=1.55.0",
+    "streamlit>=1.59.0",
     "pydantic>=2.0.0",
     "pydantic-settings>=2.0.0",
     "typer>=0.12.0",

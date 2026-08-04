@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -50,6 +51,16 @@ _MODE_LABELS = {"individual": "個別", "concat": "連結"}
 _BUSY_MESSAGE = "他の処理が実行中です。完了までお待ちください。"
 
 
+@dataclass(frozen=True)
+class PreparedLineSnapshot:
+    """Pure line-mode session projection installed after durable commit."""
+
+    video_id: str
+    target: ShortsQueueTarget
+    fingerprint: str
+    payload: Mapping[str, Any]
+
+
 def _safe_text(value: object) -> str:
     return str(value).replace("<", "〈").replace(">", "〉")
 
@@ -92,7 +103,7 @@ def _candidate_label(candidate: ClipCandidate | HighlightSegment) -> str:
     )
 
 
-def install_line_snapshot(
+def prepare_line_snapshot(
     *,
     video_id: str,
     source: str,
@@ -104,8 +115,8 @@ def install_line_snapshot(
     artifact_ref: TranscriptArtifactRef | None = None,
     artifact_fingerprint: str | None = None,
     used_range_cue_digests: Sequence[str] = (),
-) -> tuple[ShortsQueueTarget, str]:
-    """区間確定済みの 1 本を既存 S4 snapshot 契約へ載せる."""
+) -> PreparedLineSnapshot:
+    """Build the exact S4 line-mode projection without mutating session state."""
     normalized = normalize_queue_candidates(segments, source="highlights")
     targets = build_shorts_queue_targets(normalized, mode="concat")
     fingerprint = make_shorts_queue_fingerprint(
@@ -118,8 +129,7 @@ def install_line_snapshot(
         preset=preset,
         hook_preset=hook_preset,
     )
-    _clear_snapshot(video_id)
-    st.session_state[_state_key(video_id, "snapshot")] = {
+    payload = {
         "line_mode": True,
         "fingerprint": fingerprint,
         "source": source,
@@ -135,7 +145,47 @@ def install_line_snapshot(
         "artifact_fingerprint": artifact_fingerprint,
         "used_range_cue_digests": tuple(used_range_cue_digests),
     }
-    return targets[0], fingerprint
+    return PreparedLineSnapshot(video_id, targets[0], fingerprint, payload)
+
+
+def install_prepared_line_snapshot(prepared: PreparedLineSnapshot) -> None:
+    """Install a previously validated projection after durable line commit."""
+    if not isinstance(prepared, PreparedLineSnapshot):
+        raise ShortsQueueError("ライン snapshot の入力が正しくありません。")
+    _clear_snapshot(prepared.video_id)
+    st.session_state[_state_key(prepared.video_id, "snapshot")] = dict(
+        prepared.payload
+    )
+
+
+def install_line_snapshot(
+    *,
+    video_id: str,
+    source: str,
+    original_candidate: ClipCandidate | HighlightSegment,
+    segments: Sequence[HighlightSegment],
+    layout: str,
+    preset: str,
+    hook_preset: str,
+    artifact_ref: TranscriptArtifactRef | None = None,
+    artifact_fingerprint: str | None = None,
+    used_range_cue_digests: Sequence[str] = (),
+) -> tuple[ShortsQueueTarget, str]:
+    """Compatibility wrapper that prepares and immediately installs a snapshot."""
+    prepared = prepare_line_snapshot(
+        video_id=video_id,
+        source=source,
+        original_candidate=original_candidate,
+        segments=segments,
+        layout=layout,
+        preset=preset,
+        hook_preset=hook_preset,
+        artifact_ref=artifact_ref,
+        artifact_fingerprint=artifact_fingerprint,
+        used_range_cue_digests=used_range_cue_digests,
+    )
+    install_prepared_line_snapshot(prepared)
+    return prepared.target, prepared.fingerprint
 
 
 def install_line_confirmed_spec(
