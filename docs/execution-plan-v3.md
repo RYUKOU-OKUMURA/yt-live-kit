@@ -49,7 +49,7 @@
 | S9-5 | UI 設定・進捗・エラー・失効表示 | [x] 完了 |
 | T1-PLAN | テロップ行時刻同期計画（docs-only） | [x] 完了 |
 | T1 | テロップ行時刻同期・明示確認 | [~] 進行中 |
-| T1-1 | production 非変更 timing spike・評価 manifest | [ ] 未着手 |
+| T1-1 | production 非変更 timing spike・評価 manifest | [~] 進行中（corrected v3 manifest freeze・annotation packet ready、human gold 待ち） |
 | T1-2 | timing 保存契約・extractor | [ ] 未着手 |
 | T1-3 | pure aligner・telop・fingerprint 統合 | [ ] 未着手 |
 | T1-4 | Streamlit UI 時刻確認 gate | [ ] 未着手 |
@@ -1762,14 +1762,16 @@ data/{video_id}/ ...
 
 #### T1-1: production 非変更 timing spike と評価 manifest 固定
 
-**タスク状態:** [ ] 未着手。T1-PLAN 完了後の次の着手タスク。
+**タスク状態:** [~] 進行中。canonical predecessor は `d94a8c5`（corrected v3.5、候補測定0）、manifest-only freeze は `d152230`。corrected v3.7（fingerprint `b4f33f33c6b7f23be0d28c13bdb0bdde946659a7a8f9909894e8b0d4807a11ec`）と標準ライブラリ annotation packet / validator、source-MP4 playback smoke、d94→v3.7再現・focused testsは準備済みだが、64行の human audio onset gold が未入力のため候補測定は未実行。T1-1本体、T1-2以降、S9-6、AC-40 は未完了のまま保持する。
 **目的:** token timing alignment を production に導入する前に、固定 fixture と人音声 gold で現行・短 cue 候補・token timing alignment 候補を比較し、採用可否の根拠を production 非変更で得る。現行 artifact が raw token timing を保持しない場合は、固定した選択 span だけを隔離 temp へ bounded に whisper-cli 再実行し、raw full JSON と token timing 候補を benchmark input として取得する。
 **前提:** S9-1 の固定評価・S9-5 完了・T1-PLAN 完了。測定開始前に manifest、gold、coverage 分母、gate、実行環境を immutable に固定する。
+
+**T1-1 candidate freeze 記録（2026-08-04、manifest-only `d152230`）:** saved telop 59 unique tupleから artifact-backed 44行を long 20 / normal multi 20 / multi low-confidence holdout 4へ一意割当し、legacy LB4の15 saved lineを14 exact target＋1原文の2 manual subtarget（net 16）へ置換した。b5d既存VTT/ASS dialogue 4件をLB4 genuine VTT fallback 16件へ追加し、long / multi / fallback は20 / 24 / 20、合計64行、audio contextは15 span、bounded timing inputは8 span、max invocationは8・実績0に固定した。fallback内のLB4 16 targetは実在する非連続cut pair full context、b5d 4 targetはcutplan003の非連続3-part full contextを使う。b5d ASS event、production VTT delta、ASS concat→absolute mapping、VTT ±5ms / cut clamp、canonical clip ID、ffmpeg log inputを別々に機械検証する。manual subtargetは兄弟a/bを同時出力しない独立scenarioで、元行保存時刻はbaseline reference（goldではない）に限定した。artifact JSONはcue-only、raw token timingは未生成のまま pending。source MP4／configured ffmpeg-full 8.1.2のhashをbindし、既存LB4 1秒 smokeとcut1末尾2秒＋gap後cut2先頭3秒の2-part concat smoke（80000 frames、160044 bytes、output未commit）を再検証した。`24c777d`、corrected v2、`9e66122`、v3.6 working candidateはreview-rejected predecessorとしてmanifestのsupersedesに残し、候補測定は0回である。production before/after固定root、15-file live hash、manifest-bound 15 source／4 telop／3 artifact／b5d 4 evidence fileの再hash契約もvalidatorで固定する。
 **変更ファイル範囲:** `benchmarks/t1/` の専用 harness / fixture / manifest、`docs/benchmarks/` の T1-1 manifest・結果・再現記録、必要な benchmark 用 tests のみ。隔離 temp は repository 外または明示した一時 `data_dir` とし、`src/`、既存 `tests/`、既存 `data/`、production artifact / cache / output / hash、既存 S9-1 証跡は変更しない。
 
 **作業:**
 
-- [ ] T1-1-1. 長い単一 cue、multi / cross-cue、VTT fallback + 連結を各 20 行以上、全体 60 行以上含む評価 manifest を測定前に固定し、fixture fingerprint と変更禁止の記録を残す。manifest に有限の整数 `max_selected_spans` と `max_whisper_invocations` を各実行で明記し、実績が上限を超えないことを検証する
+- [x] T1-1-1. 長い単一 cue、multi / cross-cue、VTT fallback + 連結を各 20 行以上、全体 60 行以上含む評価 manifest を測定前に固定し、fixture fingerprint と変更禁止の記録を残す。manifest に有限の整数 `max_selected_spans` と `max_whisper_invocations` を各実行で明記し、実績が上限を超えないことを検証する（64行、fingerprint `b4f33f33c6b7f23be0d28c13bdb0bdde946659a7a8f9909894e8b0d4807a11ec`、manifest-only freeze `d152230`）
 - [ ] T1-1-2. gold は人が音声を聞いて付けた line onset だけとし、推測 token end、字幕 end、既存自動境界を gold に昇格しない
 - [ ] T1-1-3. 現行 artifact が raw token timing を持たない場合、manifest の `max_selected_spans` と `max_whisper_invocations` の範囲内で固定した選択 span を隔離 temp へ bounded に whisper-cli 再実行し、runtime / model / settings fingerprint、再現 command、raw full JSON の hash を記録する。production data / artifact / cache / output / hash は変更せず、全編処理・47 本 backfill は行わない
 - [ ] T1-1-4. 現行、短 cue 候補、token timing alignment 候補を同じ fixture・同じ policy で A/B 比較し、CER、固有名詞、cue 欠落 / 重複、wall time、peak memory も同じ証跡へ記録する

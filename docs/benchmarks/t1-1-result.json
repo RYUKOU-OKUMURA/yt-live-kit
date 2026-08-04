@@ -1,0 +1,215 @@
+{
+  "schema": "t1-1-timing-spike-result-v1",
+  "benchmark_id": "t1-1-timing-spike-20260804-corrected",
+  "manifest_fingerprint": "b4f33f33c6b7f23be0d28c13bdb0bdde946659a7a8f9909894e8b0d4807a11ec",
+  "manifest_freeze_commit": "d152230",
+  "status": "blocked_waiting_for_human_gold",
+  "measurement_status": "not_run",
+  "decision": "not_decidable_before_human_audio_annotation",
+  "go": null,
+  "no_go": null,
+  "t1_1_complete": false,
+  "t1_2_allowed": false,
+  "ac_40_update_allowed": false,
+  "fixture_counts": {
+    "long_single_cue": 20,
+    "multi_cross_cue": 24,
+    "vtt_fallback_concat": 20,
+    "saved_telop_unique_line_time_tuples": 59,
+    "artifact_backed_rows_available": 44,
+    "artifact_backed_rows_selected_for_alignment": 44,
+    "artifact_cross_cue_holdout_rows": 4,
+    "artifact_backed_rows_unused": 0,
+    "ass_dialogue_rows": 4,
+    "legacy_lb4_saved_source_lines": 15,
+    "legacy_lb4_exact_target_rows": 14,
+    "manual_split_base_lines": 1,
+    "manual_split_subtargets": 2,
+    "saved_target_rows_without_manual_split": 58,
+    "non_manual_target_rows": 62,
+    "total": 64
+  },
+  "limits": {
+    "max_selected_spans": 8,
+    "selected_span_count": 8,
+    "audio_context_span_count": 15,
+    "max_whisper_invocations": 8,
+    "whisper_invocation_count": 0
+  },
+  "human_gold": {
+    "status": "missing",
+    "required_rows": 64,
+    "complete_rows": 0,
+    "source": "human_audio_listening_line_onset_only",
+    "playback_receipts_required": true,
+    "onset_window_contract": "played_from_ms <= line_onset_ms < played_from_ms + played_duration_ms"
+  },
+  "timing_inputs": {
+    "artifact_json_raw_token_timing": false,
+    "selected_span_count": 8,
+    "max_whisper_invocations": 8,
+    "whisper_invocation_count": 0,
+    "status": "pending_bounded_whisper_before_candidate_measurement",
+    "output_root": "isolated_temp_only"
+  },
+  "ffmpeg_smoke": {
+    "status": "pass",
+    "source_span_ms": [
+      857000,
+      858000
+    ],
+    "frames": 16000,
+    "format": {
+      "channels": 1,
+      "sample_width": 2,
+      "sample_rate": 16000
+    },
+    "output_committed": false
+  },
+  "concat_playback_smoke": {
+    "status": "pass",
+    "row_id": "t1-fallback-001",
+    "played_from_ms": 16000,
+    "played_duration_ms": 5000,
+    "parts": 2,
+    "frames": 80000,
+    "bytes": 160044,
+    "format": {
+      "channels": 1,
+      "sample_width": 2,
+      "sample_rate": 16000
+    },
+    "receipt_revalidated": true,
+    "candidate_measurement": false,
+    "output_committed": false
+  },
+  "metrics": null,
+  "production_integrity": {
+    "before_artifact": "docs/benchmarks/s9-1-production-hash-before.json",
+    "before_artifact_bytes": 2134,
+    "before_artifact_sha256": "35ed5d9d624095a0ce3e39076bdd0c539488fc961e39697b62c0f5957a4a0faa",
+    "after_artifact": "docs/benchmarks/t1-1-production-hash-after.json",
+    "after_artifact_bytes": 2798,
+    "after_artifact_sha256": "9fa4de94e03eb8d250d1e39297923e294f9217016aca5e6494cee53abd153d26",
+    "after_matches_before": true,
+    "after_scope_file_count": 15,
+    "after_measurement_rehash_contract": {
+      "status_at_result": "pending_candidate_measurement",
+      "required_before_candidate_result_or_go_no_go": true,
+      "fail_closed_on_mismatch": true,
+      "bound_source_ids": [
+        "gza_415-cut_001-audio",
+        "gza_415-cut_002-audio",
+        "gza_415-cut_003-audio",
+        "gza_f0-cut_001-audio",
+        "gza_f0-cut_002-audio",
+        "hpe_8ad-cut_001-audio",
+        "hpe_8ad-cut_002-audio",
+        "hpe_8ad-cut_003-audio",
+        "lb4_b5d-cut_001-audio",
+        "lb4_b5d-cut_002-audio",
+        "lb4_b5d-cut_003-audio",
+        "lb4_e1ff-cut_001-audio",
+        "lb4_e1ff-cut_002-audio",
+        "lb4_e1ff-cut_003-audio",
+        "lb4_e1ff-cut_004-audio"
+      ],
+      "bound_telop_document_ids": [
+        "gza_415",
+        "gza_f0",
+        "hpe_8ad",
+        "lb4_e1ff"
+      ],
+      "bound_artifact_document_ids": [
+        "21d4e0873219abbf5cb41da32993cf0a4e7bf47607d262d7e3b3799353bb8fd7",
+        "340c6983e95b2ffb4c81413bb5322d80da651d7374cd69677762d3e95725bdc2",
+        "6f2935df54d8b34aca5c76e371168b579d64a310b6cebf8a7115e504f5db9acc"
+      ],
+      "bound_benchmark_evidence": {
+        "asset_id": "lb4_b5d345c4379e",
+        "canonical_clip_id": "b5d345c4379e",
+        "count": 4,
+        "files": [
+          {
+            "role": "ass",
+            "path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/LB4px1wRFnY/shorts/subtitles/short_b5d345c4379e.ass",
+            "bytes": 4638,
+            "sha256": "cde04f97ae351c77738e73673103d209de9c61f266547cf62d317b119341026a"
+          },
+          {
+            "role": "vtt",
+            "path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/LB4px1wRFnY/subtitles/ja.vtt",
+            "bytes": 353340,
+            "sha256": "cc6d7fe8f89ffe3ae22f411ece80dcba7c9ab48f96b90b13fa21e7b4216c3fb2"
+          },
+          {
+            "role": "cutplan",
+            "path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/LB4px1wRFnY/shorts/cutplan/cut_clip_003.json",
+            "bytes": 1123,
+            "sha256": "e2fc48665b85aae24164f163d12682442ec19150c702196dff30868f225f296d"
+          },
+          {
+            "role": "ffmpeg_log",
+            "path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/LB4px1wRFnY/shorts/output/short_b5d345c4379e.ffmpeg.log",
+            "bytes": 12512,
+            "sha256": "fc11f894d5f3475f31bc68e360f293b639e51f887b3843c3ddf5f47b4cbd1e02"
+          }
+        ],
+        "reproduction": {
+          "method": "isolated_temp_copy_vtt_build_concatenated_subtitle_telop_script_none",
+          "subtitle_font": "Hiragino Sans",
+          "generated_bytes": 4638,
+          "generated_sha256": "cde04f97ae351c77738e73673103d209de9c61f266547cf62d317b119341026a",
+          "byte_for_byte_match": true,
+          "production_write": false
+        }
+      },
+      "benchmark_evidence_rehash": {
+        "required": true,
+        "status_at_freeze": "pending_candidate_measurement",
+        "fail_closed_on_mismatch": true,
+        "binding": {
+          "asset_id": "lb4_b5d345c4379e",
+          "canonical_clip_id": "b5d345c4379e",
+          "count": 4,
+          "files": [
+            {
+              "role": "ass",
+              "path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/LB4px1wRFnY/shorts/subtitles/short_b5d345c4379e.ass",
+              "bytes": 4638,
+              "sha256": "cde04f97ae351c77738e73673103d209de9c61f266547cf62d317b119341026a"
+            },
+            {
+              "role": "vtt",
+              "path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/LB4px1wRFnY/subtitles/ja.vtt",
+              "bytes": 353340,
+              "sha256": "cc6d7fe8f89ffe3ae22f411ece80dcba7c9ab48f96b90b13fa21e7b4216c3fb2"
+            },
+            {
+              "role": "cutplan",
+              "path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/LB4px1wRFnY/shorts/cutplan/cut_clip_003.json",
+              "bytes": 1123,
+              "sha256": "e2fc48665b85aae24164f163d12682442ec19150c702196dff30868f225f296d"
+            },
+            {
+              "role": "ffmpeg_log",
+              "path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/LB4px1wRFnY/shorts/output/short_b5d345c4379e.ffmpeg.log",
+              "bytes": 12512,
+              "sha256": "fc11f894d5f3475f31bc68e360f293b639e51f887b3843c3ddf5f47b4cbd1e02"
+            }
+          ],
+          "reproduction": {
+            "method": "isolated_temp_copy_vtt_build_concatenated_subtitle_telop_script_none",
+            "subtitle_font": "Hiragino Sans",
+            "generated_bytes": 4638,
+            "generated_sha256": "cde04f97ae351c77738e73673103d209de9c61f266547cf62d317b119341026a",
+            "byte_for_byte_match": true,
+            "production_write": false
+          }
+        }
+      },
+      "after_measurement_artifact": null
+    }
+  },
+  "reason": "既存 S9 human audit は operational transcript reference / partial boundary audit であり、line onset gold ではない。candidate measurement と Go / No-Go は行わず、T1-2 へ進まない。"
+}
