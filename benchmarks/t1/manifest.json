@@ -1,7 +1,7 @@
 {
   "schema": "t1-1-timing-spike-manifest-v3",
   "benchmark_id": "t1-1-timing-spike-20260804-corrected",
-  "manifest_revision": "corrected_pre_measurement_freeze_v3_5",
+  "manifest_revision": "corrected_pre_measurement_freeze_v3_7",
   "status": "manifest_frozen_waiting_for_human_gold",
   "measurement_status": "not_run_gold_missing",
   "created_from_commit": "3396ab3",
@@ -55,13 +55,27 @@
         "status": "review_rejected_draft",
         "candidate_measurements_run": 0,
         "reason": "one manual split only, explicit artifact holdout rows, and adjacent noncontiguous LB4 cut-pair context supersede v3.4"
+      },
+      {
+        "commit": "d94a8c5",
+        "manifest_fingerprint": "64fa7b3b5cf26dbdfc956d516d06b7c526b2d4e558e24388c417aaa0d6ba9cba",
+        "status": "review_rejected_draft",
+        "candidate_measurements_run": 0,
+        "reason": "pre-freeze audit required generator source preflight, safe output/previous path allowlists, and explicit fallback-subtype policy wording"
+      },
+      {
+        "commit": "d94a8c5",
+        "manifest_fingerprint": "4ffd5b5ce0d30d4b42cdf0d13c61f595d9b51748ef7d2cff22cf36a42551228f",
+        "status": "review_rejected_draft",
+        "candidate_measurements_run": 0,
+        "reason": "artifact holdout 4 was not genuine VTT fallback plus concat; corrected v3.7 replaces it with b5d existing VTT/ASS evidence and moves the four artifact rows into multi low-confidence coverage"
       }
     ],
-    "replacement_reason": "v3.5 corrects the v3.4 fallback population and context: 15 saved LB4 VTT lines become 14 exact targets plus one explicit two-subtarget text-only split; four specified artifact cross-cue holdouts are coverage-excluded and low-confidence; all 40 remaining artifact rows use the fixed audit allocation; LB4 audio uses real adjacent noncontiguous bound cut pairs. Candidate measurements remain zero.",
+    "replacement_reason": "v3.7 replaces the rejected artifact-holdout fallback subtype with four independently bound existing VTT/ASS dialogues from the non-contiguous three-part b5d cutplan. The final contract is long_single_cue 20, multi_cross_cue 24 including four low-confidence artifact holdouts, and genuine VTT fallback concat 20 including four ASS/VTT scenarios. Candidate measurements and human gold remain zero.",
     "candidate_measurements_run": 0
   },
   "selection_policy": {
-    "source_scope": "pre_T1 immutable saved telop docs, 12 existing read-only audio context spans, existing VTT/cut ranges, cue-only artifact provenance, and bound LB4 source MP4",
+    "source_scope": "pre_T1 immutable saved telop docs, 15 distinct read-only audio context spans, existing VTT/cut ranges, cue-only artifact provenance, and bound LB4 source MP4 plus isolated b5d VTT/ASS evidence",
     "read_only_inputs": true,
     "candidate_results_seen_before_freeze": false,
     "whisper_segment_or_token_boundary_used_for_target_or_audio_span": false,
@@ -117,6 +131,7 @@
       "hpe_8ad:s2:l6:3604000-3608000",
       "hpe_8ad:s3:l3:3625460-3630000"
     ],
+    "artifact_holdout_rule": "the four known ambiguous artifact tuples remain in multi_cross_cue, are included in the 24-row coverage denominator, and must be flagged low-confidence while preserving draft time",
     "fallback_selection_rule": "15 genuine saved LB4 VTT line/time tuples are represented as 14 exact targets plus one original line replaced by two text-only subtargets; no other source line is split and the original is not separately counted",
     "manual_split_original": "lb4_e1ff:s4:l2:1113149-1116110",
     "manual_split_targets": [
@@ -124,28 +139,37 @@
       "止まってないね"
     ],
     "manual_split_delimiter_provenance": "、 is retained only in the explicit rejoin provenance; it is not copied into either subtarget gold text",
-    "fixture_allocation": "59 unique saved line/time tuples = 40 artifact alignment + 15 LB4 saved source lines + 4 artifact cross-cue holdouts; the one manual replacement contributes net +1 target for 60 rows."
+    "ass_fallback_dialogue_event_indices": [
+      2,
+      12,
+      35,
+      41
+    ],
+    "ass_fallback_asset_id": "lb4_b5d345c4379e",
+    "fixture_allocation": "59 unique saved line/time tuples = 44 artifact alignment + 15 LB4 saved source lines; the one manual replacement contributes net +1 target, and four existing b5d ASS/VTT dialogue scenarios add four non-telop target rows for 64 total rows."
   },
   "fixture_counts": {
     "long_single_cue": 20,
-    "multi_cross_cue": 20,
+    "multi_cross_cue": 24,
     "vtt_fallback_concat": 20,
     "saved_telop_unique_line_time_tuples": 59,
     "artifact_backed_rows_available": 44,
-    "artifact_backed_rows_selected_for_alignment": 40,
+    "artifact_backed_rows_selected_for_alignment": 44,
     "artifact_cross_cue_holdout_rows": 4,
     "artifact_backed_rows_unused": 0,
+    "ass_dialogue_rows": 4,
     "legacy_lb4_saved_source_lines": 15,
     "legacy_lb4_exact_target_rows": 14,
     "manual_split_base_lines": 1,
     "manual_split_subtargets": 2,
     "saved_target_rows_without_manual_split": 58,
-    "total": 60
+    "non_manual_target_rows": 62,
+    "total": 64
   },
   "limits": {
     "max_selected_spans": 8,
     "selected_span_count": 8,
-    "audio_context_span_count": 12,
+    "audio_context_span_count": 15,
     "max_whisper_invocations": 8,
     "whisper_invocation_count": 0
   },
@@ -177,10 +201,9 @@
   "policy": {
     "time_unit": "integer_ms",
     "onset_definition": "lineの意味ある発話が音声で最初に聞こえた時刻。VTT境界、token境界、cue境界、既存telop時刻、推測値はgoldにしない。",
-    "coverage_denominator": "human gold が揃った artifact alignment 40行。long 20とmulti 20を群別に判定し、artifact cross-cue holdout 4行はcoverage外でlow-confidence保持を判定する。",
+    "coverage_denominator": "human gold が揃った artifact alignment 44行。long 20とmulti 24を群別に判定し、multi 24には既知ambiguous artifact holdout 4行を含めてcoverageへ入れる。",
     "coverage_excluded": [
       "vtt_fallback_concat",
-      "artifact_cross_cue_holdout",
       "timing_missing_legacy"
     ],
     "provisional_gate": {
@@ -212,7 +235,7 @@
     "fallback_non_regression": {
       "required": "現行VTT fallback + 非連続cut連結と同等",
       "automatic_line_or_cross_cue_moves_max": 0,
-      "denominator": "all 20 vtt_fallback_concat rows; each manual subtarget is an independent one-subtarget scenario",
+      "denominator": "all 20 vtt_fallback_concat rows: LB4 16 targets plus four independently bound b5d ASS/VTT dialogue scenarios; each manual subtarget is an independent one-subtarget scenario",
       "manual_split_scenarios": {
         "included_in_vtt_non_regression_denominator": true,
         "scenario_model": "replace_original_line_with_this_subtarget_only",
@@ -242,14 +265,13 @@
     "threshold_policy": "結果後の閾値緩和は禁止。変更には別承認と理由が必要。",
     "fixture_validity": {
       "long_single_cue": "監査固定20件。同一artifact cue内の保存済みtelop行から後続14件とcue-start anchor 6件を含め、全体がcue開始発話だけにならないよう固定する。audio spanはartifact/token開始ではなく既存cut range全体。",
-      "multi_cross_cue": "監査固定20件。同一cut rangeに2つ以上のartifact cueが存在するline sequenceから選び、1行が必ず複数cueを跨ぐとは仮定しない。",
-      "artifact_cross_cue_holdout": "gZA f0 s1 l5/l6、hPe 8ad s2 l6、hPe 8ad s3 l3の4件。coverage外、expected low-confidence、元draft時刻維持、黙った移動0。",
-      "vtt_fallback_concat": "真正legacy LB4 VTTの15保存行を14 exact targetと1原文の2 text-only subtargetへ置換し、artifact行は入れない。各rowは実際に非連続な隣接bound cut pair full contextへ固定し、gap、concat offset、duration、target relative containmentを検証する。",
+      "multi_cross_cue": "監査固定24件。同一cut rangeに2つ以上のartifact cueが存在するline sequenceから通常20件を選び、既知ambiguous artifact cross-cue holdout 4件も同群のcoverage分母へ含める。1行が必ず複数cueを跨ぐとは仮定しない。holdout 4件はexpected low-confidence、元draft時刻維持、黙った移動0を判定する。",
+      "vtt_fallback_concat": "fallback 20件はLB4 genuine VTT 16 targetと、既存b5d VTTからisolated再現でbyte-for-byte bindしたASS Dialogue 4件で構成する。全20件をfallback非回帰分母へ含める。LB4 16 targetは実際に非連続な隣接bound cut pair full context、b5d 4件は非連続3-part cutplan全体を使い、gap、concat offset、duration、target relative containmentを検証する。",
       "manual_fixture": "manual subtargetは1原文のみ。targetは「やばい」/「止まってないね」、delimiter「、」はrejoin provenanceへ明示し、原文再結合時に文字欠落・重複がないことを検証する。各subtargetは兄弟を同時出力しない独立scenarioで、元行保存時刻はbaseline referenceのみでgoldではない。"
     },
     "human_containment_audit": {
-      "machine_check": "each fallback draft_reference telop interval must be within its target bound cut part and source MP4 concat span; this is containment provenance, never gold",
-      "human_check": "annotator must listen to the full adjacent noncontiguous bound cut-pair context and confirm the target utterance is present before entering onset; missing or ambiguous target fails closed",
+      "machine_check": "LB4 16 target draft_reference telop intervals must be within their target bound cut part and source MP4 concat span; b5d ASS/VTT 4 target intervals must satisfy ASS centisecond concat-to-absolute mapping and VTT cue/clamp containment; neither is gold",
+      "human_check": "LB4 fallback 16 targetはfull adjacent noncontiguous bound cut-pair contextを聞き、b5d ASS/VTT 4件はfull noncontiguous three-part contextを聞く。対象発話が存在しない、または曖昧ならonsetを入力せずfail closedとする。",
       "candidate_boundary_isolation": true
     }
   },
@@ -272,7 +294,7 @@
       "gold.annotated_at",
       "gold.audio_listened"
     ],
-    "completion_rule": "全60行で audio_listened=true、gold.line_onset_msが整数、timebaseがsource_audio_relative_ms、annotator_idとannotated_atが非空になるまで測定不可。",
+    "completion_rule": "全64行で audio_listened=true、gold.line_onset_msが整数、timebaseがsource_audio_relative_ms、annotator_idとannotated_atが非空になるまで測定不可。",
     "manual_subtarget_rule": "manual split subtargetのgoldも音声を実際に再生して決め、split位置や元行時刻を候補として入力しない。manual rowsは兄弟subtargetを同時出力しない独立scenarioで、元行保存時刻はbaseline referenceのみである。"
   },
   "runtime": {
@@ -923,6 +945,108 @@
       "source_coordinate_system": "source_audio_relative_ms",
       "audio_source_provenance": "pre_t1_saved_audio_cache_read_only",
       "timing_input_role": "bounded_whisper_input"
+    },
+    "lb4_b5d-cut_001": {
+      "source_id": "lb4_b5d-cut_001-audio",
+      "video_id": "LB4px1wRFnY",
+      "case_id": "lb4_b5d-cut_001",
+      "cut_id": "cut_001",
+      "audio_path": null,
+      "audio_bytes": null,
+      "audio_sha256": null,
+      "audio_duration_ms": 21000,
+      "audio_span_origin_ms": {
+        "start_ms": 3700000,
+        "end_ms": 3721000
+      },
+      "vtt_path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/LB4px1wRFnY/subtitles/ja.vtt",
+      "vtt_bytes": 353340,
+      "vtt_sha256": "cc6d7fe8f89ffe3ae22f411ece80dcba7c9ab48f96b90b13fa21e7b4216c3fb2",
+      "raw_timing_path": null,
+      "raw_timing_bytes": null,
+      "raw_timing_sha256": null,
+      "raw_timing_status": "not_applicable_legacy_vtt",
+      "artifact_document_id": null,
+      "source_provenance": "pre_t1_saved_cutplan003_source_mp4_bound_read_only",
+      "source_content_kind": "source_mp4",
+      "source_content_path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/LB4px1wRFnY/clips/source/LB4px1wRFnY.mp4",
+      "source_content_bytes": 502876028,
+      "source_content_sha256": "5f8e8187fd3520da8ae6186f851995346eb8213123a456fdeb608ead00476aed",
+      "media_path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/LB4px1wRFnY/clips/source/LB4px1wRFnY.mp4",
+      "media_bytes": 502876028,
+      "media_sha256": "5f8e8187fd3520da8ae6186f851995346eb8213123a456fdeb608ead00476aed",
+      "media_coordinate_system": "absolute_video_ms",
+      "source_coordinate_system": "absolute_video_ms",
+      "audio_source_provenance": "pre_t1_saved_cutplan003_source_mp4_bound_read_only",
+      "timing_input_role": "legacy_vtt_fallback_only"
+    },
+    "lb4_b5d-cut_002": {
+      "source_id": "lb4_b5d-cut_002-audio",
+      "video_id": "LB4px1wRFnY",
+      "case_id": "lb4_b5d-cut_002",
+      "cut_id": "cut_002",
+      "audio_path": null,
+      "audio_bytes": null,
+      "audio_sha256": null,
+      "audio_duration_ms": 37000,
+      "audio_span_origin_ms": {
+        "start_ms": 4015000,
+        "end_ms": 4052000
+      },
+      "vtt_path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/LB4px1wRFnY/subtitles/ja.vtt",
+      "vtt_bytes": 353340,
+      "vtt_sha256": "cc6d7fe8f89ffe3ae22f411ece80dcba7c9ab48f96b90b13fa21e7b4216c3fb2",
+      "raw_timing_path": null,
+      "raw_timing_bytes": null,
+      "raw_timing_sha256": null,
+      "raw_timing_status": "not_applicable_legacy_vtt",
+      "artifact_document_id": null,
+      "source_provenance": "pre_t1_saved_cutplan003_source_mp4_bound_read_only",
+      "source_content_kind": "source_mp4",
+      "source_content_path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/LB4px1wRFnY/clips/source/LB4px1wRFnY.mp4",
+      "source_content_bytes": 502876028,
+      "source_content_sha256": "5f8e8187fd3520da8ae6186f851995346eb8213123a456fdeb608ead00476aed",
+      "media_path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/LB4px1wRFnY/clips/source/LB4px1wRFnY.mp4",
+      "media_bytes": 502876028,
+      "media_sha256": "5f8e8187fd3520da8ae6186f851995346eb8213123a456fdeb608ead00476aed",
+      "media_coordinate_system": "absolute_video_ms",
+      "source_coordinate_system": "absolute_video_ms",
+      "audio_source_provenance": "pre_t1_saved_cutplan003_source_mp4_bound_read_only",
+      "timing_input_role": "legacy_vtt_fallback_only"
+    },
+    "lb4_b5d-cut_003": {
+      "source_id": "lb4_b5d-cut_003-audio",
+      "video_id": "LB4px1wRFnY",
+      "case_id": "lb4_b5d-cut_003",
+      "cut_id": "cut_003",
+      "audio_path": null,
+      "audio_bytes": null,
+      "audio_sha256": null,
+      "audio_duration_ms": 14000,
+      "audio_span_origin_ms": {
+        "start_ms": 4086000,
+        "end_ms": 4100000
+      },
+      "vtt_path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/LB4px1wRFnY/subtitles/ja.vtt",
+      "vtt_bytes": 353340,
+      "vtt_sha256": "cc6d7fe8f89ffe3ae22f411ece80dcba7c9ab48f96b90b13fa21e7b4216c3fb2",
+      "raw_timing_path": null,
+      "raw_timing_bytes": null,
+      "raw_timing_sha256": null,
+      "raw_timing_status": "not_applicable_legacy_vtt",
+      "artifact_document_id": null,
+      "source_provenance": "pre_t1_saved_cutplan003_source_mp4_bound_read_only",
+      "source_content_kind": "source_mp4",
+      "source_content_path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/LB4px1wRFnY/clips/source/LB4px1wRFnY.mp4",
+      "source_content_bytes": 502876028,
+      "source_content_sha256": "5f8e8187fd3520da8ae6186f851995346eb8213123a456fdeb608ead00476aed",
+      "media_path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/LB4px1wRFnY/clips/source/LB4px1wRFnY.mp4",
+      "media_bytes": 502876028,
+      "media_sha256": "5f8e8187fd3520da8ae6186f851995346eb8213123a456fdeb608ead00476aed",
+      "media_coordinate_system": "absolute_video_ms",
+      "source_coordinate_system": "absolute_video_ms",
+      "audio_source_provenance": "pre_t1_saved_cutplan003_source_mp4_bound_read_only",
+      "timing_input_role": "legacy_vtt_fallback_only"
     }
   },
   "rejected_legacy_audio_caches": [
@@ -1009,7 +1133,7 @@
   },
   "production_integrity_contract": {
     "bound_manifest_sources": {
-      "count": 12,
+      "count": 15,
       "source_ids": [
         "gza_415-cut_001-audio",
         "gza_415-cut_002-audio",
@@ -1019,6 +1143,9 @@
         "hpe_8ad-cut_001-audio",
         "hpe_8ad-cut_002-audio",
         "hpe_8ad-cut_003-audio",
+        "lb4_b5d-cut_001-audio",
+        "lb4_b5d-cut_002-audio",
+        "lb4_b5d-cut_003-audio",
         "lb4_e1ff-cut_001-audio",
         "lb4_e1ff-cut_002-audio",
         "lb4_e1ff-cut_003-audio",
@@ -1051,7 +1178,47 @@
         "candidate_measurement_result",
         "Go/No-Go",
         "AC-40"
-      ]
+      ],
+      "benchmark_evidence": "re-hash the bound b5d ASS, VTT, cutplan, and ffmpeg log bytes/SHA before candidate measurement and after measurement"
+    },
+    "bound_benchmark_evidence": {
+      "asset_id": "lb4_b5d345c4379e",
+      "canonical_clip_id": "b5d345c4379e",
+      "count": 4,
+      "files": [
+        {
+          "role": "ass",
+          "path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/LB4px1wRFnY/shorts/subtitles/short_b5d345c4379e.ass",
+          "bytes": 4638,
+          "sha256": "cde04f97ae351c77738e73673103d209de9c61f266547cf62d317b119341026a"
+        },
+        {
+          "role": "vtt",
+          "path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/LB4px1wRFnY/subtitles/ja.vtt",
+          "bytes": 353340,
+          "sha256": "cc6d7fe8f89ffe3ae22f411ece80dcba7c9ab48f96b90b13fa21e7b4216c3fb2"
+        },
+        {
+          "role": "cutplan",
+          "path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/LB4px1wRFnY/shorts/cutplan/cut_clip_003.json",
+          "bytes": 1123,
+          "sha256": "e2fc48665b85aae24164f163d12682442ec19150c702196dff30868f225f296d"
+        },
+        {
+          "role": "ffmpeg_log",
+          "path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/LB4px1wRFnY/shorts/output/short_b5d345c4379e.ffmpeg.log",
+          "bytes": 12512,
+          "sha256": "fc11f894d5f3475f31bc68e360f293b639e51f887b3843c3ddf5f47b4cbd1e02"
+        }
+      ],
+      "reproduction": {
+        "method": "isolated_temp_copy_vtt_build_concatenated_subtitle_telop_script_none",
+        "subtitle_font": "Hiragino Sans",
+        "generated_bytes": 4638,
+        "generated_sha256": "cde04f97ae351c77738e73673103d209de9c61f266547cf62d317b119341026a",
+        "byte_for_byte_match": true,
+        "production_write": false
+      }
     }
   },
   "rows": [
@@ -4384,6 +4551,409 @@
       }
     },
     {
+      "row_id": "t1-multi-021",
+      "fixture_group": "multi_cross_cue",
+      "audio_source_id": "gza_f0-cut_001-audio",
+      "source_hashes": {
+        "vtt_sha256": "805a3dcc2c0b94c352843d91b398537608f74c777b213458cb2c184b7197ca9f",
+        "raw_timing_sha256": null,
+        "source_content_sha256": "bdedaea372bc08229a74e3c0a8253a987a448a1d9b95b28edaaff0388f96cb06"
+      },
+      "source_boundary_basis": "existing_cut_range_whole_audio_source_not_telop_or_whisper_boundary",
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 25000
+      },
+      "absolute_video_span_ms": {
+        "start_ms": 3477000,
+        "end_ms": 3502000
+      },
+      "vtt_cue_ids": [
+        "2017",
+        "2018"
+      ],
+      "target_text": "なぜAIに関しては",
+      "draft_reference": {
+        "kind": "immutable_telop_line",
+        "telop_document_id": "gza_f0",
+        "telop_document_path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/gZAoIbp4lBc/shorts/telop/telop_f0e28ecf6638.json",
+        "telop_document_sha256": "adfa8942aec4b78b6c087f80bfecfc62bd4d89996eaed5aefec2ef850e295c20",
+        "telop_segment_index": 1,
+        "telop_line_index": 5,
+        "telop_line_start_ms": 3494040,
+        "telop_line_end_ms": 3498000,
+        "text_source": "saved_production_telop_document",
+        "source_cut_id": "cut_001",
+        "source_boundary_basis": "existing_cut_range",
+        "candidate_boundary_used": false,
+        "gold_must_ignore_telop_time": true,
+        "artifact_context": {
+          "artifact_document_id": "6f2935df54d8b34aca5c76e371168b579d64a310b6cebf8a7115e504f5db9acc",
+          "artifact_fingerprint": "6f2935df54d8b34aca5c76e371168b579d64a310b6cebf8a7115e504f5db9acc",
+          "artifact_cue_index": 2,
+          "artifact_cue_start_ms": 3494040,
+          "artifact_cue_end_ms": 3502000,
+          "artifact_cue_line_position": 1,
+          "artifact_cue_line_count": 2,
+          "selection_only_not_gold_or_audio_boundary": true,
+          "raw_token_timing_present": false,
+          "artifact_json_role": "cue_only_provenance_not_raw_token_timing"
+        }
+      },
+      "timing_source": "bounded_whisper_cli_output_pending_in_isolated_temp",
+      "raw_timing_available": false,
+      "candidate_or_boundary_fields_are_not_gold": true,
+      "source_telop_line_tuple_id": "gza_f0:s1:l5:3494040-3498000",
+      "manual_pre_measurement_fixture": false,
+      "coverage_excluded": false,
+      "fallback_non_regression_required": false,
+      "gold": {
+        "line_onset_ms": null,
+        "timebase": "source_audio_relative_ms",
+        "annotator_id": null,
+        "annotated_at": null,
+        "audio_listened": false
+      },
+      "gold_provenance": "missing_human_audio_annotation",
+      "raw_timing_status": "pending_bounded_whisper_cli",
+      "timing_input_source_id": "gza_f0-cut_001-audio",
+      "multi_cross_cue_context": {
+        "contract": "artifact_cue_boundary_sequence_same_cut_range",
+        "artifact_cue_indices_in_same_cut": [
+          0,
+          1,
+          2
+        ],
+        "line_is_not_required_to_span_two_artifact_cues": true,
+        "selection_basis": "saved_telop_line_sequence_in_cut_with_multiple_artifact_cues",
+        "selection_does_not_use_artifact_or_token_start_as_audio_start": true,
+        "expected_low_confidence": true,
+        "expected_policy_action": "flag_low_confidence_preserve_draft_time",
+        "known_ambiguous_review_candidate": true,
+        "holdout_subtype": "artifact_cross_cue_holdout"
+      },
+      "artifact_cross_cue_holdout_context": {
+        "subtype": "artifact_cross_cue_holdout",
+        "coverage_excluded": false,
+        "expected_low_confidence": true,
+        "expected_policy_action": "flag_low_confidence_preserve_draft_time",
+        "candidate_results_seen": false,
+        "artifact_cue_indices_in_same_cut": [
+          0,
+          1,
+          2
+        ],
+        "selection_basis": "known_ambiguous_cross_cue_multi_rows_from_pre_measurement_audit",
+        "target_text_is_saved_telop_line": true,
+        "audio_span_basis": "whole_existing_cut_range",
+        "coverage_denominator": "multi_cross_cue_24"
+      }
+    },
+    {
+      "row_id": "t1-multi-022",
+      "fixture_group": "multi_cross_cue",
+      "audio_source_id": "gza_f0-cut_001-audio",
+      "source_hashes": {
+        "vtt_sha256": "805a3dcc2c0b94c352843d91b398537608f74c777b213458cb2c184b7197ca9f",
+        "raw_timing_sha256": null,
+        "source_content_sha256": "bdedaea372bc08229a74e3c0a8253a987a448a1d9b95b28edaaff0388f96cb06"
+      },
+      "source_boundary_basis": "existing_cut_range_whole_audio_source_not_telop_or_whisper_boundary",
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 25000
+      },
+      "absolute_video_span_ms": {
+        "start_ms": 3477000,
+        "end_ms": 3502000
+      },
+      "vtt_cue_ids": [
+        "2019"
+      ],
+      "target_text": "セキュリティと言うのか",
+      "draft_reference": {
+        "kind": "immutable_telop_line",
+        "telop_document_id": "gza_f0",
+        "telop_document_path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/gZAoIbp4lBc/shorts/telop/telop_f0e28ecf6638.json",
+        "telop_document_sha256": "adfa8942aec4b78b6c087f80bfecfc62bd4d89996eaed5aefec2ef850e295c20",
+        "telop_segment_index": 1,
+        "telop_line_index": 6,
+        "telop_line_start_ms": 3498000,
+        "telop_line_end_ms": 3502000,
+        "text_source": "saved_production_telop_document",
+        "source_cut_id": "cut_001",
+        "source_boundary_basis": "existing_cut_range",
+        "candidate_boundary_used": false,
+        "gold_must_ignore_telop_time": true,
+        "artifact_context": {
+          "artifact_document_id": "6f2935df54d8b34aca5c76e371168b579d64a310b6cebf8a7115e504f5db9acc",
+          "artifact_fingerprint": "6f2935df54d8b34aca5c76e371168b579d64a310b6cebf8a7115e504f5db9acc",
+          "artifact_cue_index": 2,
+          "artifact_cue_start_ms": 3494040,
+          "artifact_cue_end_ms": 3502000,
+          "artifact_cue_line_position": 2,
+          "artifact_cue_line_count": 2,
+          "selection_only_not_gold_or_audio_boundary": true,
+          "raw_token_timing_present": false,
+          "artifact_json_role": "cue_only_provenance_not_raw_token_timing"
+        }
+      },
+      "timing_source": "bounded_whisper_cli_output_pending_in_isolated_temp",
+      "raw_timing_available": false,
+      "candidate_or_boundary_fields_are_not_gold": true,
+      "source_telop_line_tuple_id": "gza_f0:s1:l6:3498000-3502000",
+      "manual_pre_measurement_fixture": false,
+      "coverage_excluded": false,
+      "fallback_non_regression_required": false,
+      "gold": {
+        "line_onset_ms": null,
+        "timebase": "source_audio_relative_ms",
+        "annotator_id": null,
+        "annotated_at": null,
+        "audio_listened": false
+      },
+      "gold_provenance": "missing_human_audio_annotation",
+      "raw_timing_status": "pending_bounded_whisper_cli",
+      "timing_input_source_id": "gza_f0-cut_001-audio",
+      "multi_cross_cue_context": {
+        "contract": "artifact_cue_boundary_sequence_same_cut_range",
+        "artifact_cue_indices_in_same_cut": [
+          0,
+          1,
+          2
+        ],
+        "line_is_not_required_to_span_two_artifact_cues": true,
+        "selection_basis": "saved_telop_line_sequence_in_cut_with_multiple_artifact_cues",
+        "selection_does_not_use_artifact_or_token_start_as_audio_start": true,
+        "expected_low_confidence": true,
+        "expected_policy_action": "flag_low_confidence_preserve_draft_time",
+        "known_ambiguous_review_candidate": true,
+        "holdout_subtype": "artifact_cross_cue_holdout"
+      },
+      "artifact_cross_cue_holdout_context": {
+        "subtype": "artifact_cross_cue_holdout",
+        "coverage_excluded": false,
+        "expected_low_confidence": true,
+        "expected_policy_action": "flag_low_confidence_preserve_draft_time",
+        "candidate_results_seen": false,
+        "artifact_cue_indices_in_same_cut": [
+          0,
+          1,
+          2
+        ],
+        "selection_basis": "known_ambiguous_cross_cue_multi_rows_from_pre_measurement_audit",
+        "target_text_is_saved_telop_line": true,
+        "audio_span_basis": "whole_existing_cut_range",
+        "coverage_denominator": "multi_cross_cue_24"
+      }
+    },
+    {
+      "row_id": "t1-multi-023",
+      "fixture_group": "multi_cross_cue",
+      "audio_source_id": "hpe_8ad-cut_002-audio",
+      "source_hashes": {
+        "vtt_sha256": "d9baff5fff1d4851584d5c2526a85efc6a35e2ac8a5639f5e897028aab45b7fd",
+        "raw_timing_sha256": null,
+        "source_content_sha256": "544c739f09738bb0deb1040b00d46795c97b2657c67f47543a1abf239438da75"
+      },
+      "source_boundary_basis": "existing_cut_range_whole_audio_source_not_telop_or_whisper_boundary",
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 27000
+      },
+      "absolute_video_span_ms": {
+        "start_ms": 3581000,
+        "end_ms": 3608000
+      },
+      "vtt_cue_ids": [
+        "1817"
+      ],
+      "target_text": "これでいけるってことでしょ？",
+      "draft_reference": {
+        "kind": "immutable_telop_line",
+        "telop_document_id": "hpe_8ad",
+        "telop_document_path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/hPeRSA9YVIM/shorts/telop/telop_8ad3b1c9bd32.json",
+        "telop_document_sha256": "370b6b6125965fda1323277043c63a897468183882b66d024772ffdda7f332c2",
+        "telop_segment_index": 2,
+        "telop_line_index": 6,
+        "telop_line_start_ms": 3604000,
+        "telop_line_end_ms": 3608000,
+        "text_source": "saved_production_telop_document",
+        "source_cut_id": "cut_002",
+        "source_boundary_basis": "existing_cut_range",
+        "candidate_boundary_used": false,
+        "gold_must_ignore_telop_time": true,
+        "artifact_context": {
+          "artifact_document_id": "21d4e0873219abbf5cb41da32993cf0a4e7bf47607d262d7e3b3799353bb8fd7",
+          "artifact_fingerprint": "21d4e0873219abbf5cb41da32993cf0a4e7bf47607d262d7e3b3799353bb8fd7",
+          "artifact_cue_index": 7,
+          "artifact_cue_start_ms": 3604000,
+          "artifact_cue_end_ms": 3608000,
+          "artifact_cue_line_position": 1,
+          "artifact_cue_line_count": 1,
+          "selection_only_not_gold_or_audio_boundary": true,
+          "raw_token_timing_present": false,
+          "artifact_json_role": "cue_only_provenance_not_raw_token_timing"
+        }
+      },
+      "timing_source": "bounded_whisper_cli_output_pending_in_isolated_temp",
+      "raw_timing_available": false,
+      "candidate_or_boundary_fields_are_not_gold": true,
+      "source_telop_line_tuple_id": "hpe_8ad:s2:l6:3604000-3608000",
+      "manual_pre_measurement_fixture": false,
+      "coverage_excluded": false,
+      "fallback_non_regression_required": false,
+      "gold": {
+        "line_onset_ms": null,
+        "timebase": "source_audio_relative_ms",
+        "annotator_id": null,
+        "annotated_at": null,
+        "audio_listened": false
+      },
+      "gold_provenance": "missing_human_audio_annotation",
+      "raw_timing_status": "pending_bounded_whisper_cli",
+      "timing_input_source_id": "hpe_8ad-cut_002-audio",
+      "multi_cross_cue_context": {
+        "contract": "artifact_cue_boundary_sequence_same_cut_range",
+        "artifact_cue_indices_in_same_cut": [
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ],
+        "line_is_not_required_to_span_two_artifact_cues": true,
+        "selection_basis": "saved_telop_line_sequence_in_cut_with_multiple_artifact_cues",
+        "selection_does_not_use_artifact_or_token_start_as_audio_start": true,
+        "expected_low_confidence": true,
+        "expected_policy_action": "flag_low_confidence_preserve_draft_time",
+        "known_ambiguous_review_candidate": true,
+        "holdout_subtype": "artifact_cross_cue_holdout"
+      },
+      "artifact_cross_cue_holdout_context": {
+        "subtype": "artifact_cross_cue_holdout",
+        "coverage_excluded": false,
+        "expected_low_confidence": true,
+        "expected_policy_action": "flag_low_confidence_preserve_draft_time",
+        "candidate_results_seen": false,
+        "artifact_cue_indices_in_same_cut": [
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ],
+        "selection_basis": "known_ambiguous_cross_cue_multi_rows_from_pre_measurement_audit",
+        "target_text_is_saved_telop_line": true,
+        "audio_span_basis": "whole_existing_cut_range",
+        "coverage_denominator": "multi_cross_cue_24"
+      }
+    },
+    {
+      "row_id": "t1-multi-024",
+      "fixture_group": "multi_cross_cue",
+      "audio_source_id": "hpe_8ad-cut_003-audio",
+      "source_hashes": {
+        "vtt_sha256": "d9baff5fff1d4851584d5c2526a85efc6a35e2ac8a5639f5e897028aab45b7fd",
+        "raw_timing_sha256": null,
+        "source_content_sha256": "9c0200aceed5860a93a9809c605a0c8c13e02143c0909841feddb64370f41306"
+      },
+      "source_boundary_basis": "existing_cut_range_whole_audio_source_not_telop_or_whisper_boundary",
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 27000
+      },
+      "absolute_video_span_ms": {
+        "start_ms": 3611000,
+        "end_ms": 3638000
+      },
+      "vtt_cue_ids": [
+        "1829",
+        "1830",
+        "1831"
+      ],
+      "target_text": "文字起こしの精度と速度は？",
+      "draft_reference": {
+        "kind": "immutable_telop_line",
+        "telop_document_id": "hpe_8ad",
+        "telop_document_path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/hPeRSA9YVIM/shorts/telop/telop_8ad3b1c9bd32.json",
+        "telop_document_sha256": "370b6b6125965fda1323277043c63a897468183882b66d024772ffdda7f332c2",
+        "telop_segment_index": 3,
+        "telop_line_index": 3,
+        "telop_line_start_ms": 3625460,
+        "telop_line_end_ms": 3630000,
+        "text_source": "saved_production_telop_document",
+        "source_cut_id": "cut_003",
+        "source_boundary_basis": "existing_cut_range",
+        "candidate_boundary_used": false,
+        "gold_must_ignore_telop_time": true,
+        "artifact_context": {
+          "artifact_document_id": "21d4e0873219abbf5cb41da32993cf0a4e7bf47607d262d7e3b3799353bb8fd7",
+          "artifact_fingerprint": "21d4e0873219abbf5cb41da32993cf0a4e7bf47607d262d7e3b3799353bb8fd7",
+          "artifact_cue_index": 9,
+          "artifact_cue_start_ms": 3625460,
+          "artifact_cue_end_ms": 3638000,
+          "artifact_cue_line_position": 1,
+          "artifact_cue_line_count": 3,
+          "selection_only_not_gold_or_audio_boundary": true,
+          "raw_token_timing_present": false,
+          "artifact_json_role": "cue_only_provenance_not_raw_token_timing"
+        }
+      },
+      "timing_source": "bounded_whisper_cli_output_pending_in_isolated_temp",
+      "raw_timing_available": false,
+      "candidate_or_boundary_fields_are_not_gold": true,
+      "source_telop_line_tuple_id": "hpe_8ad:s3:l3:3625460-3630000",
+      "manual_pre_measurement_fixture": false,
+      "coverage_excluded": false,
+      "fallback_non_regression_required": false,
+      "gold": {
+        "line_onset_ms": null,
+        "timebase": "source_audio_relative_ms",
+        "annotator_id": null,
+        "annotated_at": null,
+        "audio_listened": false
+      },
+      "gold_provenance": "missing_human_audio_annotation",
+      "raw_timing_status": "pending_bounded_whisper_cli",
+      "timing_input_source_id": "hpe_8ad-cut_003-audio",
+      "multi_cross_cue_context": {
+        "contract": "artifact_cue_boundary_sequence_same_cut_range",
+        "artifact_cue_indices_in_same_cut": [
+          8,
+          9
+        ],
+        "line_is_not_required_to_span_two_artifact_cues": true,
+        "selection_basis": "saved_telop_line_sequence_in_cut_with_multiple_artifact_cues",
+        "selection_does_not_use_artifact_or_token_start_as_audio_start": true,
+        "expected_low_confidence": true,
+        "expected_policy_action": "flag_low_confidence_preserve_draft_time",
+        "known_ambiguous_review_candidate": true,
+        "holdout_subtype": "artifact_cross_cue_holdout"
+      },
+      "artifact_cross_cue_holdout_context": {
+        "subtype": "artifact_cross_cue_holdout",
+        "coverage_excluded": false,
+        "expected_low_confidence": true,
+        "expected_policy_action": "flag_low_confidence_preserve_draft_time",
+        "candidate_results_seen": false,
+        "artifact_cue_indices_in_same_cut": [
+          8,
+          9
+        ],
+        "selection_basis": "known_ambiguous_cross_cue_multi_rows_from_pre_measurement_audit",
+        "target_text_is_saved_telop_line": true,
+        "audio_span_basis": "whole_existing_cut_range",
+        "coverage_denominator": "multi_cross_cue_24"
+      }
+    },
+    {
       "row_id": "t1-fallback-001",
       "fixture_group": "vtt_fallback_concat",
       "audio_source_id": "lb4_e1ff-cut_001-audio",
@@ -6034,61 +6604,67 @@
     {
       "row_id": "t1-fallback-017",
       "fixture_group": "vtt_fallback_concat",
-      "audio_source_id": "gza_f0-cut_001-audio",
+      "audio_source_id": "lb4_b5d-cut_001-audio",
       "source_hashes": {
-        "vtt_sha256": "805a3dcc2c0b94c352843d91b398537608f74c777b213458cb2c184b7197ca9f",
+        "vtt_sha256": "cc6d7fe8f89ffe3ae22f411ece80dcba7c9ab48f96b90b13fa21e7b4216c3fb2",
         "raw_timing_sha256": null,
-        "source_content_sha256": "bdedaea372bc08229a74e3c0a8253a987a448a1d9b95b28edaaff0388f96cb06"
+        "source_content_sha256": "5f8e8187fd3520da8ae6186f851995346eb8213123a456fdeb608ead00476aed"
       },
-      "source_boundary_basis": "existing_cut_range_whole_audio_source_not_telop_or_whisper_boundary",
+      "source_boundary_basis": "existing_vtt_generated_ass_dialogue_full_noncontiguous_cutplan_context_non_candidate",
       "source_span": {
-        "kind": "single_source_audio",
-        "start_ms": 0,
-        "end_ms": 25000
+        "kind": "concatenated_source_video_audio",
+        "coordinate_system": "absolute_video_ms",
+        "parts": [
+          {
+            "start_ms": 3700000,
+            "end_ms": 3721000,
+            "concat_offset_ms": 0
+          },
+          {
+            "start_ms": 4015000,
+            "end_ms": 4052000,
+            "concat_offset_ms": 21000
+          },
+          {
+            "start_ms": 4086000,
+            "end_ms": 4100000,
+            "concat_offset_ms": 58000
+          }
+        ],
+        "duration_ms": 72000
       },
       "absolute_video_span_ms": {
-        "start_ms": 3477000,
-        "end_ms": 3502000
+        "coordinate_system": "absolute_video_ms",
+        "start_ms": 3700000,
+        "end_ms": 3721000
       },
       "vtt_cue_ids": [
-        "2017",
-        "2018"
+        "1198"
       ],
-      "target_text": "なぜAIに関しては",
+      "target_text": "の人が使っちゃダメなやつっすね。",
       "draft_reference": {
-        "kind": "immutable_telop_line",
-        "telop_document_id": "gza_f0",
-        "telop_document_path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/gZAoIbp4lBc/shorts/telop/telop_f0e28ecf6638.json",
-        "telop_document_sha256": "adfa8942aec4b78b6c087f80bfecfc62bd4d89996eaed5aefec2ef850e295c20",
-        "telop_segment_index": 1,
-        "telop_line_index": 5,
-        "telop_line_start_ms": 3494040,
-        "telop_line_end_ms": 3498000,
-        "text_source": "saved_production_telop_document",
-        "source_cut_id": "cut_001",
-        "source_boundary_basis": "existing_cut_range",
+        "kind": "immutable_ass_dialogue",
+        "asset_id": "lb4_b5d345c4379e",
+        "ass_path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/LB4px1wRFnY/shorts/subtitles/short_b5d345c4379e.ass",
+        "ass_bytes": 4638,
+        "ass_sha256": "cde04f97ae351c77738e73673103d209de9c61f266547cf62d317b119341026a",
+        "canonical_clip_id": "b5d345c4379e",
+        "event_index": 2,
+        "concat_start_ms": 600,
+        "concat_end_ms": 5230,
+        "vtt_cue_index": 1198,
+        "vtt_start_ms": 3700599,
+        "vtt_end_ms": 3705230,
+        "source_absolute_start_ms": 3700600,
+        "source_absolute_end_ms": 3705230,
+        "text_source": "existing_vtt_generated_ass_dialogue",
         "candidate_boundary_used": false,
-        "gold_must_ignore_telop_time": true,
-        "artifact_context": {
-          "artifact_document_id": "6f2935df54d8b34aca5c76e371168b579d64a310b6cebf8a7115e504f5db9acc",
-          "artifact_fingerprint": "6f2935df54d8b34aca5c76e371168b579d64a310b6cebf8a7115e504f5db9acc",
-          "artifact_cue_index": 2,
-          "artifact_cue_start_ms": 3494040,
-          "artifact_cue_end_ms": 3502000,
-          "artifact_cue_line_position": 1,
-          "artifact_cue_line_count": 2,
-          "selection_only_not_gold_or_audio_boundary": true,
-          "raw_token_timing_present": false,
-          "artifact_json_role": "cue_only_provenance_not_raw_token_timing"
-        }
+        "gold_must_ignore_ass_event_time": true
       },
-      "timing_source": "bounded_whisper_cli_output_pending_in_isolated_temp",
-      "raw_timing_available": false,
-      "candidate_or_boundary_fields_are_not_gold": true,
-      "source_telop_line_tuple_id": "gza_f0:s1:l5:3494040-3498000",
+      "source_telop_line_tuple_id": "lb4_b5d345c4379e:event2:3700600-3705230",
       "manual_pre_measurement_fixture": false,
       "coverage_excluded": true,
-      "fallback_non_regression_required": false,
+      "fallback_non_regression_required": true,
       "gold": {
         "line_onset_ms": null,
         "timebase": "source_audio_relative_ms",
@@ -6097,95 +6673,119 @@
         "audio_listened": false
       },
       "gold_provenance": "missing_human_audio_annotation",
-      "raw_timing_status": "pending_bounded_whisper_cli",
-      "timing_input_source_id": "gza_f0-cut_001-audio",
-      "multi_cross_cue_context": {
-        "contract": "artifact_cue_boundary_sequence_same_cut_range",
-        "artifact_cue_indices_in_same_cut": [
-          0,
-          1,
-          2
-        ],
-        "line_is_not_required_to_span_two_artifact_cues": true,
-        "selection_basis": "saved_telop_line_sequence_in_cut_with_multiple_artifact_cues",
-        "selection_does_not_use_artifact_or_token_start_as_audio_start": true,
-        "expected_low_confidence": false,
-        "expected_policy_action": "evaluate_normal_alignment_policy",
-        "known_ambiguous_review_candidate": false
+      "timing_source": "legacy_vtt_fallback_no_raw_timing",
+      "raw_timing_available": false,
+      "candidate_or_boundary_fields_are_not_gold": true,
+      "raw_timing_status": "not_applicable_legacy_vtt",
+      "timing_input_source_id": null,
+      "ass_dialogue_context": {
+        "event_index": 2,
+        "concat_start_ms": 600,
+        "concat_end_ms": 5230,
+        "source_absolute_start_ms": 3700600,
+        "source_absolute_end_ms": 3705230,
+        "text": "の人が使っちゃダメなやつっすね。",
+        "vtt_cue_index": 1198,
+        "vtt_start_ms": 3700599,
+        "vtt_end_ms": 3705230
       },
-      "artifact_cross_cue_holdout_context": {
-        "subtype": "artifact_cross_cue_holdout",
-        "coverage_excluded": true,
-        "expected_low_confidence": true,
-        "expected_policy_action": "flag_low_confidence_preserve_draft_time",
-        "candidate_results_seen": false,
-        "artifact_cue_indices_in_same_cut": [
-          0,
-          1,
-          2
+      "ass_concat_context": {
+        "contract": "existing_vtt_generated_ass_dialogue_full_noncontiguous_cutplan_context",
+        "asset_id": "lb4_b5d345c4379e",
+        "canonical_clip_id": "b5d345c4379e",
+        "source_part_source_ids": [
+          "lb4_b5d-cut_001-audio",
+          "lb4_b5d-cut_002-audio",
+          "lb4_b5d-cut_003-audio"
         ],
-        "selection_basis": "known_ambiguous_cross_cue_holdout_from_pre_measurement_audit",
-        "target_text_is_saved_telop_line": true,
-        "audio_span_basis": "whole_existing_cut_range"
+        "gap_ms": [
+          294000,
+          34000
+        ],
+        "concat_duration_ms": 72000,
+        "target_source_id": "lb4_b5d-cut_001-audio",
+        "target_part_index": 0,
+        "target_relative_span_ms": {
+          "start_ms": 600,
+          "end_ms": 5230
+        },
+        "candidate_boundary_used": false,
+        "telop_script": null
+      },
+      "vtt_fallback_context": {
+        "contract": "legacy_vtt_target_cues_with_existing_ass_concat_context",
+        "raw_timing_absent": true,
+        "audio_source_is_bound_source_mp4": true,
+        "candidate_boundary_used": false,
+        "automatic_line_or_cross_cue_moves_max": 0,
+        "audio_context_is_full_bound_source_mp4_cutplan_three_part": true,
+        "human_containment_check_required": true
       }
     },
     {
       "row_id": "t1-fallback-018",
       "fixture_group": "vtt_fallback_concat",
-      "audio_source_id": "gza_f0-cut_001-audio",
+      "audio_source_id": "lb4_b5d-cut_002-audio",
       "source_hashes": {
-        "vtt_sha256": "805a3dcc2c0b94c352843d91b398537608f74c777b213458cb2c184b7197ca9f",
+        "vtt_sha256": "cc6d7fe8f89ffe3ae22f411ece80dcba7c9ab48f96b90b13fa21e7b4216c3fb2",
         "raw_timing_sha256": null,
-        "source_content_sha256": "bdedaea372bc08229a74e3c0a8253a987a448a1d9b95b28edaaff0388f96cb06"
+        "source_content_sha256": "5f8e8187fd3520da8ae6186f851995346eb8213123a456fdeb608ead00476aed"
       },
-      "source_boundary_basis": "existing_cut_range_whole_audio_source_not_telop_or_whisper_boundary",
+      "source_boundary_basis": "existing_vtt_generated_ass_dialogue_full_noncontiguous_cutplan_context_non_candidate",
       "source_span": {
-        "kind": "single_source_audio",
-        "start_ms": 0,
-        "end_ms": 25000
+        "kind": "concatenated_source_video_audio",
+        "coordinate_system": "absolute_video_ms",
+        "parts": [
+          {
+            "start_ms": 3700000,
+            "end_ms": 3721000,
+            "concat_offset_ms": 0
+          },
+          {
+            "start_ms": 4015000,
+            "end_ms": 4052000,
+            "concat_offset_ms": 21000
+          },
+          {
+            "start_ms": 4086000,
+            "end_ms": 4100000,
+            "concat_offset_ms": 58000
+          }
+        ],
+        "duration_ms": 72000
       },
       "absolute_video_span_ms": {
-        "start_ms": 3477000,
-        "end_ms": 3502000
+        "coordinate_system": "absolute_video_ms",
+        "start_ms": 4015000,
+        "end_ms": 4052000
       },
       "vtt_cue_ids": [
-        "2019"
+        "1322"
       ],
-      "target_text": "セキュリティと言うのか",
+      "target_text": "トクン効率自体は良くなってるらしいんす",
       "draft_reference": {
-        "kind": "immutable_telop_line",
-        "telop_document_id": "gza_f0",
-        "telop_document_path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/gZAoIbp4lBc/shorts/telop/telop_f0e28ecf6638.json",
-        "telop_document_sha256": "adfa8942aec4b78b6c087f80bfecfc62bd4d89996eaed5aefec2ef850e295c20",
-        "telop_segment_index": 1,
-        "telop_line_index": 6,
-        "telop_line_start_ms": 3498000,
-        "telop_line_end_ms": 3502000,
-        "text_source": "saved_production_telop_document",
-        "source_cut_id": "cut_001",
-        "source_boundary_basis": "existing_cut_range",
+        "kind": "immutable_ass_dialogue",
+        "asset_id": "lb4_b5d345c4379e",
+        "ass_path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/LB4px1wRFnY/shorts/subtitles/short_b5d345c4379e.ass",
+        "ass_bytes": 4638,
+        "ass_sha256": "cde04f97ae351c77738e73673103d209de9c61f266547cf62d317b119341026a",
+        "canonical_clip_id": "b5d345c4379e",
+        "event_index": 12,
+        "concat_start_ms": 21120,
+        "concat_end_ms": 23870,
+        "vtt_cue_index": 1322,
+        "vtt_start_ms": 4015119,
+        "vtt_end_ms": 4017870,
+        "source_absolute_start_ms": 4015120,
+        "source_absolute_end_ms": 4017870,
+        "text_source": "existing_vtt_generated_ass_dialogue",
         "candidate_boundary_used": false,
-        "gold_must_ignore_telop_time": true,
-        "artifact_context": {
-          "artifact_document_id": "6f2935df54d8b34aca5c76e371168b579d64a310b6cebf8a7115e504f5db9acc",
-          "artifact_fingerprint": "6f2935df54d8b34aca5c76e371168b579d64a310b6cebf8a7115e504f5db9acc",
-          "artifact_cue_index": 2,
-          "artifact_cue_start_ms": 3494040,
-          "artifact_cue_end_ms": 3502000,
-          "artifact_cue_line_position": 2,
-          "artifact_cue_line_count": 2,
-          "selection_only_not_gold_or_audio_boundary": true,
-          "raw_token_timing_present": false,
-          "artifact_json_role": "cue_only_provenance_not_raw_token_timing"
-        }
+        "gold_must_ignore_ass_event_time": true
       },
-      "timing_source": "bounded_whisper_cli_output_pending_in_isolated_temp",
-      "raw_timing_available": false,
-      "candidate_or_boundary_fields_are_not_gold": true,
-      "source_telop_line_tuple_id": "gza_f0:s1:l6:3498000-3502000",
+      "source_telop_line_tuple_id": "lb4_b5d345c4379e:event12:4015120-4017870",
       "manual_pre_measurement_fixture": false,
       "coverage_excluded": true,
-      "fallback_non_regression_required": false,
+      "fallback_non_regression_required": true,
       "gold": {
         "line_onset_ms": null,
         "timebase": "source_audio_relative_ms",
@@ -6194,95 +6794,119 @@
         "audio_listened": false
       },
       "gold_provenance": "missing_human_audio_annotation",
-      "raw_timing_status": "pending_bounded_whisper_cli",
-      "timing_input_source_id": "gza_f0-cut_001-audio",
-      "multi_cross_cue_context": {
-        "contract": "artifact_cue_boundary_sequence_same_cut_range",
-        "artifact_cue_indices_in_same_cut": [
-          0,
-          1,
-          2
-        ],
-        "line_is_not_required_to_span_two_artifact_cues": true,
-        "selection_basis": "saved_telop_line_sequence_in_cut_with_multiple_artifact_cues",
-        "selection_does_not_use_artifact_or_token_start_as_audio_start": true,
-        "expected_low_confidence": false,
-        "expected_policy_action": "evaluate_normal_alignment_policy",
-        "known_ambiguous_review_candidate": false
+      "timing_source": "legacy_vtt_fallback_no_raw_timing",
+      "raw_timing_available": false,
+      "candidate_or_boundary_fields_are_not_gold": true,
+      "raw_timing_status": "not_applicable_legacy_vtt",
+      "timing_input_source_id": null,
+      "ass_dialogue_context": {
+        "event_index": 12,
+        "concat_start_ms": 21120,
+        "concat_end_ms": 23870,
+        "source_absolute_start_ms": 4015120,
+        "source_absolute_end_ms": 4017870,
+        "text": "トクン効率自体は良くなってるらしいんす",
+        "vtt_cue_index": 1322,
+        "vtt_start_ms": 4015119,
+        "vtt_end_ms": 4017870
       },
-      "artifact_cross_cue_holdout_context": {
-        "subtype": "artifact_cross_cue_holdout",
-        "coverage_excluded": true,
-        "expected_low_confidence": true,
-        "expected_policy_action": "flag_low_confidence_preserve_draft_time",
-        "candidate_results_seen": false,
-        "artifact_cue_indices_in_same_cut": [
-          0,
-          1,
-          2
+      "ass_concat_context": {
+        "contract": "existing_vtt_generated_ass_dialogue_full_noncontiguous_cutplan_context",
+        "asset_id": "lb4_b5d345c4379e",
+        "canonical_clip_id": "b5d345c4379e",
+        "source_part_source_ids": [
+          "lb4_b5d-cut_001-audio",
+          "lb4_b5d-cut_002-audio",
+          "lb4_b5d-cut_003-audio"
         ],
-        "selection_basis": "known_ambiguous_cross_cue_holdout_from_pre_measurement_audit",
-        "target_text_is_saved_telop_line": true,
-        "audio_span_basis": "whole_existing_cut_range"
+        "gap_ms": [
+          294000,
+          34000
+        ],
+        "concat_duration_ms": 72000,
+        "target_source_id": "lb4_b5d-cut_002-audio",
+        "target_part_index": 1,
+        "target_relative_span_ms": {
+          "start_ms": 120,
+          "end_ms": 2870
+        },
+        "candidate_boundary_used": false,
+        "telop_script": null
+      },
+      "vtt_fallback_context": {
+        "contract": "legacy_vtt_target_cues_with_existing_ass_concat_context",
+        "raw_timing_absent": true,
+        "audio_source_is_bound_source_mp4": true,
+        "candidate_boundary_used": false,
+        "automatic_line_or_cross_cue_moves_max": 0,
+        "audio_context_is_full_bound_source_mp4_cutplan_three_part": true,
+        "human_containment_check_required": true
       }
     },
     {
       "row_id": "t1-fallback-019",
       "fixture_group": "vtt_fallback_concat",
-      "audio_source_id": "hpe_8ad-cut_002-audio",
+      "audio_source_id": "lb4_b5d-cut_003-audio",
       "source_hashes": {
-        "vtt_sha256": "d9baff5fff1d4851584d5c2526a85efc6a35e2ac8a5639f5e897028aab45b7fd",
+        "vtt_sha256": "cc6d7fe8f89ffe3ae22f411ece80dcba7c9ab48f96b90b13fa21e7b4216c3fb2",
         "raw_timing_sha256": null,
-        "source_content_sha256": "544c739f09738bb0deb1040b00d46795c97b2657c67f47543a1abf239438da75"
+        "source_content_sha256": "5f8e8187fd3520da8ae6186f851995346eb8213123a456fdeb608ead00476aed"
       },
-      "source_boundary_basis": "existing_cut_range_whole_audio_source_not_telop_or_whisper_boundary",
+      "source_boundary_basis": "existing_vtt_generated_ass_dialogue_full_noncontiguous_cutplan_context_non_candidate",
       "source_span": {
-        "kind": "single_source_audio",
-        "start_ms": 0,
-        "end_ms": 27000
+        "kind": "concatenated_source_video_audio",
+        "coordinate_system": "absolute_video_ms",
+        "parts": [
+          {
+            "start_ms": 3700000,
+            "end_ms": 3721000,
+            "concat_offset_ms": 0
+          },
+          {
+            "start_ms": 4015000,
+            "end_ms": 4052000,
+            "concat_offset_ms": 21000
+          },
+          {
+            "start_ms": 4086000,
+            "end_ms": 4100000,
+            "concat_offset_ms": 58000
+          }
+        ],
+        "duration_ms": 72000
       },
       "absolute_video_span_ms": {
-        "start_ms": 3581000,
-        "end_ms": 3608000
+        "coordinate_system": "absolute_video_ms",
+        "start_ms": 4086000,
+        "end_ms": 4100000
       },
       "vtt_cue_ids": [
-        "1817"
+        "1358"
       ],
-      "target_text": "これでいけるってことでしょ？",
+      "target_text": "じゃあ同じ200ドルを払うとして",
       "draft_reference": {
-        "kind": "immutable_telop_line",
-        "telop_document_id": "hpe_8ad",
-        "telop_document_path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/hPeRSA9YVIM/shorts/telop/telop_8ad3b1c9bd32.json",
-        "telop_document_sha256": "370b6b6125965fda1323277043c63a897468183882b66d024772ffdda7f332c2",
-        "telop_segment_index": 2,
-        "telop_line_index": 6,
-        "telop_line_start_ms": 3604000,
-        "telop_line_end_ms": 3608000,
-        "text_source": "saved_production_telop_document",
-        "source_cut_id": "cut_002",
-        "source_boundary_basis": "existing_cut_range",
+        "kind": "immutable_ass_dialogue",
+        "asset_id": "lb4_b5d345c4379e",
+        "ass_path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/LB4px1wRFnY/shorts/subtitles/short_b5d345c4379e.ass",
+        "ass_bytes": 4638,
+        "ass_sha256": "cde04f97ae351c77738e73673103d209de9c61f266547cf62d317b119341026a",
+        "canonical_clip_id": "b5d345c4379e",
+        "event_index": 35,
+        "concat_start_ms": 58280,
+        "concat_end_ms": 61430,
+        "vtt_cue_index": 1358,
+        "vtt_start_ms": 4086279,
+        "vtt_end_ms": 4089430,
+        "source_absolute_start_ms": 4086280,
+        "source_absolute_end_ms": 4089430,
+        "text_source": "existing_vtt_generated_ass_dialogue",
         "candidate_boundary_used": false,
-        "gold_must_ignore_telop_time": true,
-        "artifact_context": {
-          "artifact_document_id": "21d4e0873219abbf5cb41da32993cf0a4e7bf47607d262d7e3b3799353bb8fd7",
-          "artifact_fingerprint": "21d4e0873219abbf5cb41da32993cf0a4e7bf47607d262d7e3b3799353bb8fd7",
-          "artifact_cue_index": 7,
-          "artifact_cue_start_ms": 3604000,
-          "artifact_cue_end_ms": 3608000,
-          "artifact_cue_line_position": 1,
-          "artifact_cue_line_count": 1,
-          "selection_only_not_gold_or_audio_boundary": true,
-          "raw_token_timing_present": false,
-          "artifact_json_role": "cue_only_provenance_not_raw_token_timing"
-        }
+        "gold_must_ignore_ass_event_time": true
       },
-      "timing_source": "bounded_whisper_cli_output_pending_in_isolated_temp",
-      "raw_timing_available": false,
-      "candidate_or_boundary_fields_are_not_gold": true,
-      "source_telop_line_tuple_id": "hpe_8ad:s2:l6:3604000-3608000",
+      "source_telop_line_tuple_id": "lb4_b5d345c4379e:event35:4086280-4089430",
       "manual_pre_measurement_fixture": false,
       "coverage_excluded": true,
-      "fallback_non_regression_required": false,
+      "fallback_non_regression_required": true,
       "gold": {
         "line_onset_ms": null,
         "timebase": "source_audio_relative_ms",
@@ -6291,103 +6915,119 @@
         "audio_listened": false
       },
       "gold_provenance": "missing_human_audio_annotation",
-      "raw_timing_status": "pending_bounded_whisper_cli",
-      "timing_input_source_id": "hpe_8ad-cut_002-audio",
-      "multi_cross_cue_context": {
-        "contract": "artifact_cue_boundary_sequence_same_cut_range",
-        "artifact_cue_indices_in_same_cut": [
-          2,
-          3,
-          4,
-          5,
-          6,
-          7
-        ],
-        "line_is_not_required_to_span_two_artifact_cues": true,
-        "selection_basis": "saved_telop_line_sequence_in_cut_with_multiple_artifact_cues",
-        "selection_does_not_use_artifact_or_token_start_as_audio_start": true,
-        "expected_low_confidence": false,
-        "expected_policy_action": "evaluate_normal_alignment_policy",
-        "known_ambiguous_review_candidate": false
+      "timing_source": "legacy_vtt_fallback_no_raw_timing",
+      "raw_timing_available": false,
+      "candidate_or_boundary_fields_are_not_gold": true,
+      "raw_timing_status": "not_applicable_legacy_vtt",
+      "timing_input_source_id": null,
+      "ass_dialogue_context": {
+        "event_index": 35,
+        "concat_start_ms": 58280,
+        "concat_end_ms": 61430,
+        "source_absolute_start_ms": 4086280,
+        "source_absolute_end_ms": 4089430,
+        "text": "じゃあ同じ200ドルを払うとして",
+        "vtt_cue_index": 1358,
+        "vtt_start_ms": 4086279,
+        "vtt_end_ms": 4089430
       },
-      "artifact_cross_cue_holdout_context": {
-        "subtype": "artifact_cross_cue_holdout",
-        "coverage_excluded": true,
-        "expected_low_confidence": true,
-        "expected_policy_action": "flag_low_confidence_preserve_draft_time",
-        "candidate_results_seen": false,
-        "artifact_cue_indices_in_same_cut": [
-          2,
-          3,
-          4,
-          5,
-          6,
-          7
+      "ass_concat_context": {
+        "contract": "existing_vtt_generated_ass_dialogue_full_noncontiguous_cutplan_context",
+        "asset_id": "lb4_b5d345c4379e",
+        "canonical_clip_id": "b5d345c4379e",
+        "source_part_source_ids": [
+          "lb4_b5d-cut_001-audio",
+          "lb4_b5d-cut_002-audio",
+          "lb4_b5d-cut_003-audio"
         ],
-        "selection_basis": "known_ambiguous_cross_cue_holdout_from_pre_measurement_audit",
-        "target_text_is_saved_telop_line": true,
-        "audio_span_basis": "whole_existing_cut_range"
+        "gap_ms": [
+          294000,
+          34000
+        ],
+        "concat_duration_ms": 72000,
+        "target_source_id": "lb4_b5d-cut_003-audio",
+        "target_part_index": 2,
+        "target_relative_span_ms": {
+          "start_ms": 280,
+          "end_ms": 3430
+        },
+        "candidate_boundary_used": false,
+        "telop_script": null
+      },
+      "vtt_fallback_context": {
+        "contract": "legacy_vtt_target_cues_with_existing_ass_concat_context",
+        "raw_timing_absent": true,
+        "audio_source_is_bound_source_mp4": true,
+        "candidate_boundary_used": false,
+        "automatic_line_or_cross_cue_moves_max": 0,
+        "audio_context_is_full_bound_source_mp4_cutplan_three_part": true,
+        "human_containment_check_required": true
       }
     },
     {
       "row_id": "t1-fallback-020",
       "fixture_group": "vtt_fallback_concat",
-      "audio_source_id": "hpe_8ad-cut_003-audio",
+      "audio_source_id": "lb4_b5d-cut_003-audio",
       "source_hashes": {
-        "vtt_sha256": "d9baff5fff1d4851584d5c2526a85efc6a35e2ac8a5639f5e897028aab45b7fd",
+        "vtt_sha256": "cc6d7fe8f89ffe3ae22f411ece80dcba7c9ab48f96b90b13fa21e7b4216c3fb2",
         "raw_timing_sha256": null,
-        "source_content_sha256": "9c0200aceed5860a93a9809c605a0c8c13e02143c0909841feddb64370f41306"
+        "source_content_sha256": "5f8e8187fd3520da8ae6186f851995346eb8213123a456fdeb608ead00476aed"
       },
-      "source_boundary_basis": "existing_cut_range_whole_audio_source_not_telop_or_whisper_boundary",
+      "source_boundary_basis": "existing_vtt_generated_ass_dialogue_full_noncontiguous_cutplan_context_non_candidate",
       "source_span": {
-        "kind": "single_source_audio",
-        "start_ms": 0,
-        "end_ms": 27000
+        "kind": "concatenated_source_video_audio",
+        "coordinate_system": "absolute_video_ms",
+        "parts": [
+          {
+            "start_ms": 3700000,
+            "end_ms": 3721000,
+            "concat_offset_ms": 0
+          },
+          {
+            "start_ms": 4015000,
+            "end_ms": 4052000,
+            "concat_offset_ms": 21000
+          },
+          {
+            "start_ms": 4086000,
+            "end_ms": 4100000,
+            "concat_offset_ms": 58000
+          }
+        ],
+        "duration_ms": 72000
       },
       "absolute_video_span_ms": {
-        "start_ms": 3611000,
-        "end_ms": 3638000
+        "coordinate_system": "absolute_video_ms",
+        "start_ms": 4086000,
+        "end_ms": 4100000
       },
       "vtt_cue_ids": [
-        "1829",
-        "1830",
-        "1831"
+        "1364"
       ],
-      "target_text": "文字起こしの精度と速度は？",
+      "target_text": "今んところチャットGPT優勢なんだよな",
       "draft_reference": {
-        "kind": "immutable_telop_line",
-        "telop_document_id": "hpe_8ad",
-        "telop_document_path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/hPeRSA9YVIM/shorts/telop/telop_8ad3b1c9bd32.json",
-        "telop_document_sha256": "370b6b6125965fda1323277043c63a897468183882b66d024772ffdda7f332c2",
-        "telop_segment_index": 3,
-        "telop_line_index": 3,
-        "telop_line_start_ms": 3625460,
-        "telop_line_end_ms": 3630000,
-        "text_source": "saved_production_telop_document",
-        "source_cut_id": "cut_003",
-        "source_boundary_basis": "existing_cut_range",
+        "kind": "immutable_ass_dialogue",
+        "asset_id": "lb4_b5d345c4379e",
+        "ass_path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/LB4px1wRFnY/shorts/subtitles/short_b5d345c4379e.ass",
+        "ass_bytes": 4638,
+        "ass_sha256": "cde04f97ae351c77738e73673103d209de9c61f266547cf62d317b119341026a",
+        "canonical_clip_id": "b5d345c4379e",
+        "event_index": 41,
+        "concat_start_ms": 69760,
+        "concat_end_ms": 72000,
+        "vtt_cue_index": 1364,
+        "vtt_start_ms": 4097759,
+        "vtt_end_ms": 4101950,
+        "source_absolute_start_ms": 4097760,
+        "source_absolute_end_ms": 4100000,
+        "text_source": "existing_vtt_generated_ass_dialogue",
         "candidate_boundary_used": false,
-        "gold_must_ignore_telop_time": true,
-        "artifact_context": {
-          "artifact_document_id": "21d4e0873219abbf5cb41da32993cf0a4e7bf47607d262d7e3b3799353bb8fd7",
-          "artifact_fingerprint": "21d4e0873219abbf5cb41da32993cf0a4e7bf47607d262d7e3b3799353bb8fd7",
-          "artifact_cue_index": 9,
-          "artifact_cue_start_ms": 3625460,
-          "artifact_cue_end_ms": 3638000,
-          "artifact_cue_line_position": 1,
-          "artifact_cue_line_count": 3,
-          "selection_only_not_gold_or_audio_boundary": true,
-          "raw_token_timing_present": false,
-          "artifact_json_role": "cue_only_provenance_not_raw_token_timing"
-        }
+        "gold_must_ignore_ass_event_time": true
       },
-      "timing_source": "bounded_whisper_cli_output_pending_in_isolated_temp",
-      "raw_timing_available": false,
-      "candidate_or_boundary_fields_are_not_gold": true,
-      "source_telop_line_tuple_id": "hpe_8ad:s3:l3:3625460-3630000",
+      "source_telop_line_tuple_id": "lb4_b5d345c4379e:event41:4097760-4100000",
       "manual_pre_measurement_fixture": false,
       "coverage_excluded": true,
-      "fallback_non_regression_required": false,
+      "fallback_non_regression_required": true,
       "gold": {
         "line_onset_ms": null,
         "timebase": "source_audio_relative_ms",
@@ -6396,46 +7036,165 @@
         "audio_listened": false
       },
       "gold_provenance": "missing_human_audio_annotation",
-      "raw_timing_status": "pending_bounded_whisper_cli",
-      "timing_input_source_id": "hpe_8ad-cut_003-audio",
-      "multi_cross_cue_context": {
-        "contract": "artifact_cue_boundary_sequence_same_cut_range",
-        "artifact_cue_indices_in_same_cut": [
-          8,
-          9
-        ],
-        "line_is_not_required_to_span_two_artifact_cues": true,
-        "selection_basis": "saved_telop_line_sequence_in_cut_with_multiple_artifact_cues",
-        "selection_does_not_use_artifact_or_token_start_as_audio_start": true,
-        "expected_low_confidence": false,
-        "expected_policy_action": "evaluate_normal_alignment_policy",
-        "known_ambiguous_review_candidate": false
+      "timing_source": "legacy_vtt_fallback_no_raw_timing",
+      "raw_timing_available": false,
+      "candidate_or_boundary_fields_are_not_gold": true,
+      "raw_timing_status": "not_applicable_legacy_vtt",
+      "timing_input_source_id": null,
+      "ass_dialogue_context": {
+        "event_index": 41,
+        "concat_start_ms": 69760,
+        "concat_end_ms": 72000,
+        "source_absolute_start_ms": 4097760,
+        "source_absolute_end_ms": 4100000,
+        "text": "今んところチャットGPT優勢なんだよな",
+        "vtt_cue_index": 1364,
+        "vtt_start_ms": 4097759,
+        "vtt_end_ms": 4101950
       },
-      "artifact_cross_cue_holdout_context": {
-        "subtype": "artifact_cross_cue_holdout",
-        "coverage_excluded": true,
-        "expected_low_confidence": true,
-        "expected_policy_action": "flag_low_confidence_preserve_draft_time",
-        "candidate_results_seen": false,
-        "artifact_cue_indices_in_same_cut": [
-          8,
-          9
+      "ass_concat_context": {
+        "contract": "existing_vtt_generated_ass_dialogue_full_noncontiguous_cutplan_context",
+        "asset_id": "lb4_b5d345c4379e",
+        "canonical_clip_id": "b5d345c4379e",
+        "source_part_source_ids": [
+          "lb4_b5d-cut_001-audio",
+          "lb4_b5d-cut_002-audio",
+          "lb4_b5d-cut_003-audio"
         ],
-        "selection_basis": "known_ambiguous_cross_cue_holdout_from_pre_measurement_audit",
-        "target_text_is_saved_telop_line": true,
-        "audio_span_basis": "whole_existing_cut_range"
+        "gap_ms": [
+          294000,
+          34000
+        ],
+        "concat_duration_ms": 72000,
+        "target_source_id": "lb4_b5d-cut_003-audio",
+        "target_part_index": 2,
+        "target_relative_span_ms": {
+          "start_ms": 11760,
+          "end_ms": 14000
+        },
+        "candidate_boundary_used": false,
+        "telop_script": null
+      },
+      "vtt_fallback_context": {
+        "contract": "legacy_vtt_target_cues_with_existing_ass_concat_context",
+        "raw_timing_absent": true,
+        "audio_source_is_bound_source_mp4": true,
+        "candidate_boundary_used": false,
+        "automatic_line_or_cross_cue_moves_max": 0,
+        "audio_context_is_full_bound_source_mp4_cutplan_three_part": true,
+        "human_containment_check_required": true
       }
     }
   ],
   "notes": [
-    "24c777d、9822ff2、9e66122を含む従前draftは候補測定0のreview-rejected draftであり、corrected v3.5だけを正式pre-measurement freeze候補とする。",
-    "artifact 44件の重複なし割当は監査固定のlong 20 / multi 20 / artifact cross-cue holdout 4。holdout 4件はcoverage外でlow-confidence、元draft時刻維持、黙った移動0を判定する。",
+    "24c777d、9822ff2、9e66122、d94a8c5、4ffd5b5ce0d30d4b42cdf0d13c61f595d9b51748ef7d2cff22cf36a42551228fを含む従前draftは候補測定0のreview-rejected draftであり、corrected v3.7だけを正式pre-measurement freeze候補とする。",
+    "artifact 44件の重複なし割当は監査固定のlong 20 / multi通常20 / multi low-confidence holdout 4。holdout 4件はmulti coverage分母へ含め、low-confidence、元draft時刻維持、黙った移動0を判定する。",
     "configured ffmpeg の subprocess 直前hash再検証とLB4 source MP4の1000 ms isolated smoke（16000 frames、mono 16 kHz PCM、出力未commit）はPASS済み。",
     "artifact JSONはcue-onlyでraw token timingを保持しない。8 artifact-backed WAV spanはmanifest固定後にbounded whisper-cliをisolated tempで予定するが、freeze時点のinvocation_countは0。",
-    "音声bytesはcommitしない。12 audio context spanのうちgZA/hPe 8 spanだけが将来のbounded Whisper入力、LB4 4 spanはsource MP4からのisolated extraction playback契約に固定する。",
+    "音声bytesはcommitしない。15 audio context spanのうちgZA/hPe 8 spanだけが将来のbounded Whisper入力、LB4旧4 spanとb5d cutplan003 3 spanはsource MP4からのisolated extraction playback契約に固定する。",
     "LB4旧audio_cache WAVは要求spanと実測durationが異なるlegacy cacheとしてrejected evidenceに留め、gold context・playbackには使用しない。requested_duration_msとactual_audio_duration_msを分離し、source MP4 SHA-256をbindする。",
     "LB4 fallbackはcut1+cut2、cut2+cut3、cut3+cut4の実在non-contiguous adjacent pairを使う。gap>0、target relative span、concat durationを機械検証し、候補境界やVTT cueで音声を切らない。",
-    "human goldが60行揃い、bounded timing入力が契約どおり生成されるまで候補測定、Go/No-Go、T1-2着手、AC-40更新は行わない。"
+    "b5d fallback 4行は既存ASS Dialogue event、production VTT delta cue、cutplan003の3 part absolute mapping、canonical clip ID、ffmpeg logを別々に機械検証し、ASS centisecond時刻とVTT millisecond時刻を混同しない。",
+    "human goldが64行揃い、bounded timing入力が契約どおり生成されるまで候補測定、Go/No-Go、T1-2着手、AC-40更新は行わない。"
   ],
-  "manifest_fingerprint": "64fa7b3b5cf26dbdfc956d516d06b7c526b2d4e558e24388c417aaa0d6ba9cba"
+  "vtt_fallback_evidence": {
+    "asset_id": "lb4_b5d345c4379e",
+    "canonical_clip_id": "b5d345c4379e",
+    "ass_path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/LB4px1wRFnY/shorts/subtitles/short_b5d345c4379e.ass",
+    "ass_bytes": 4638,
+    "ass_sha256": "cde04f97ae351c77738e73673103d209de9c61f266547cf62d317b119341026a",
+    "vtt_path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/LB4px1wRFnY/subtitles/ja.vtt",
+    "vtt_bytes": 353340,
+    "vtt_sha256": "cc6d7fe8f89ffe3ae22f411ece80dcba7c9ab48f96b90b13fa21e7b4216c3fb2",
+    "cutplan_path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/LB4px1wRFnY/shorts/cutplan/cut_clip_003.json",
+    "cutplan_bytes": 1123,
+    "cutplan_sha256": "e2fc48665b85aae24164f163d12682442ec19150c702196dff30868f225f296d",
+    "ffmpeg_log_path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/LB4px1wRFnY/shorts/output/short_b5d345c4379e.ffmpeg.log",
+    "ffmpeg_log_bytes": 12512,
+    "ffmpeg_log_sha256": "fc11f894d5f3475f31bc68e360f293b639e51f887b3843c3ddf5f47b4cbd1e02",
+    "source_content_path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/LB4px1wRFnY/clips/source/LB4px1wRFnY.mp4",
+    "source_content_bytes": 502876028,
+    "source_content_sha256": "5f8e8187fd3520da8ae6186f851995346eb8213123a456fdeb608ead00476aed",
+    "source_ids": [
+      "lb4_b5d-cut_001-audio",
+      "lb4_b5d-cut_002-audio",
+      "lb4_b5d-cut_003-audio"
+    ],
+    "segments": [
+      {
+        "cut_id": "cut_001",
+        "start_ms": 3700000,
+        "end_ms": 3721000,
+        "duration_ms": 21000
+      },
+      {
+        "cut_id": "cut_002",
+        "start_ms": 4015000,
+        "end_ms": 4052000,
+        "duration_ms": 37000
+      },
+      {
+        "cut_id": "cut_003",
+        "start_ms": 4086000,
+        "end_ms": 4100000,
+        "duration_ms": 14000
+      }
+    ],
+    "telop_script": null,
+    "reproduction": {
+      "method": "isolated_temp_copy_vtt_build_concatenated_subtitle_telop_script_none",
+      "subtitle_font": "Hiragino Sans",
+      "generated_bytes": 4638,
+      "generated_sha256": "cde04f97ae351c77738e73673103d209de9c61f266547cf62d317b119341026a",
+      "byte_for_byte_match": true,
+      "production_write": false
+    },
+    "dialogues": [
+      {
+        "event_index": 2,
+        "concat_start_ms": 600,
+        "concat_end_ms": 5230,
+        "source_absolute_start_ms": 3700600,
+        "source_absolute_end_ms": 3705230,
+        "text": "の人が使っちゃダメなやつっすね。",
+        "vtt_cue_index": 1198,
+        "vtt_start_ms": 3700599,
+        "vtt_end_ms": 3705230
+      },
+      {
+        "event_index": 12,
+        "concat_start_ms": 21120,
+        "concat_end_ms": 23870,
+        "source_absolute_start_ms": 4015120,
+        "source_absolute_end_ms": 4017870,
+        "text": "トクン効率自体は良くなってるらしいんす",
+        "vtt_cue_index": 1322,
+        "vtt_start_ms": 4015119,
+        "vtt_end_ms": 4017870
+      },
+      {
+        "event_index": 35,
+        "concat_start_ms": 58280,
+        "concat_end_ms": 61430,
+        "source_absolute_start_ms": 4086280,
+        "source_absolute_end_ms": 4089430,
+        "text": "じゃあ同じ200ドルを払うとして",
+        "vtt_cue_index": 1358,
+        "vtt_start_ms": 4086279,
+        "vtt_end_ms": 4089430
+      },
+      {
+        "event_index": 41,
+        "concat_start_ms": 69760,
+        "concat_end_ms": 72000,
+        "source_absolute_start_ms": 4097760,
+        "source_absolute_end_ms": 4100000,
+        "text": "今んところチャットGPT優勢なんだよな",
+        "vtt_cue_index": 1364,
+        "vtt_start_ms": 4097759,
+        "vtt_end_ms": 4101950
+      }
+    ]
+  },
+  "manifest_fingerprint": "b4f33f33c6b7f23be0d28c13bdb0bdde946659a7a8f9909894e8b0d4807a11ec"
 }
