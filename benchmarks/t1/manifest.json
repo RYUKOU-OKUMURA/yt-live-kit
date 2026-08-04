@@ -1,0 +1,3111 @@
+{
+  "schema": "t1-1-timing-spike-manifest-v1",
+  "benchmark_id": "t1-1-timing-spike-20260804",
+  "status": "manifest_frozen_waiting_for_human_gold",
+  "measurement_status": "not_run_gold_missing",
+  "created_from_commit": "3396ab30b69a5557ad116d8f252f25ea7d966daa",
+  "selection_policy": "existing_s9_readonly_inputs_only_no_t1_candidate_results",
+  "fixture_counts": {
+    "long_single_cue": 20,
+    "multi_cross_cue": 20,
+    "vtt_fallback_concat": 20,
+    "total": 60
+  },
+  "limits": {
+    "max_selected_spans": 4,
+    "max_whisper_invocations": 0,
+    "selected_span_count": 4,
+    "whisper_invocation_count": 0
+  },
+  "policy": {
+    "time_unit": "integer_ms",
+    "onset_definition": "lineの意味ある発話が音声で最初に聞こえた時刻。VTT境界、token境界、cue境界、推測値はgoldにしない。",
+    "coverage_denominator": "検証済みraw token timingを持ちalignment対象になり得るlong_single_cueとmulti_cross_cueの全行。",
+    "coverage_excluded": [
+      "vtt_fallback_concat",
+      "timing_missing_legacy"
+    ],
+    "provisional_gate": {
+      "pooled": {
+        "coverage_min": 0.8,
+        "absolute_onset_median_max_ms": 250,
+        "p90_max_ms": 500,
+        "max_error_max_ms": 1000,
+        "signed_median_bias_abs_max_ms": 200,
+        "wrong_line_or_cross_cue_moves_max": 0
+      },
+      "long_single_cue": {
+        "coverage_min": 0.8,
+        "absolute_onset_median_max_ms": 250,
+        "p90_max_ms": 500,
+        "max_error_max_ms": 1000,
+        "signed_median_bias_abs_max_ms": 200,
+        "wrong_line_or_cross_cue_moves_max": 0
+      },
+      "multi_cross_cue": {
+        "coverage_min": 0.8,
+        "absolute_onset_median_max_ms": 250,
+        "p90_max_ms": 500,
+        "max_error_max_ms": 1000,
+        "signed_median_bias_abs_max_ms": 200,
+        "wrong_line_or_cross_cue_moves_max": 0
+      }
+    },
+    "fallback_non_regression": {
+      "required": "現行VTT fallback + 連結と同等",
+      "automatic_line_or_cross_cue_moves_max": 0
+    },
+    "low_confidence": {
+      "flag_all": true,
+      "preserve_draft_time": true,
+      "silent_move_max": 0
+    },
+    "validity": {
+      "owning_cue_or_range_clamp": true,
+      "chronological": true,
+      "non_overlapping": true,
+      "minimum_display_ms": 500
+    },
+    "additional_metrics": [
+      "cer",
+      "glossary_exact_match",
+      "cue_missing_duplicate",
+      "wall_time_ms",
+      "peak_memory_bytes"
+    ],
+    "threshold_policy": "結果後の閾値緩和は禁止。変更には別承認と理由が必要。"
+  },
+  "human_gold": {
+    "status": "missing_waiting_for_human_annotation",
+    "source": "human_audio_listening_line_onset_only",
+    "forbidden_sources": [
+      "whisper_token_timing",
+      "vtt_cue_start_or_end",
+      "existing_telop_time",
+      "machine_candidate",
+      "text_boundary_guess"
+    ],
+    "required_per_row": [
+      "gold.line_onset_ms",
+      "gold.annotator_id",
+      "gold.annotated_at",
+      "gold.audio_listened"
+    ],
+    "completion_rule": "全60行で audio_listened=true、gold.line_onset_msが整数、annotator_idとannotated_atが非空になるまで測定不可。"
+  },
+  "runtime": {
+    "binary": {
+      "path": "/opt/homebrew/Cellar/whisper-cpp/1.9.1/bin/whisper-cli",
+      "bytes": 658608,
+      "sha256": "1fbabb51a45906bd36684695de9025eab63618a6eedc26971c47fa5affc5fe49",
+      "version": "1.9.1"
+    },
+    "model": {
+      "path": "/Users/ryukouokumura/Library/Caches/whisper.cpp/models/ggml-large-v3-turbo-q5_0.bin",
+      "bytes": 574041195,
+      "sha256": "394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2",
+      "name": "ggml-large-v3-turbo-q5_0"
+    },
+    "settings": {
+      "language": "ja",
+      "initial_prompt": "日本語のライブ配信。固有名詞は Claude、Codex、Whisper、Ollama、Together AI、DirectX、Microsoft、Windows、Steam、DX12、iMac、Apple II、HHKB、macOS を含む。",
+      "padding_ms": 0,
+      "decode": {
+        "temperature": 0.0,
+        "beam_size": 5,
+        "best_of": 5,
+        "threads": 8,
+        "processors": 1,
+        "no_fallback": false,
+        "vad": false
+      },
+      "output_schema": "whisper-cli-json-full-v1"
+    },
+    "timing_input_policy": "raw timing is reused from existing S9 full JSON; no T1 Whisper run is allowed by this frozen manifest."
+  },
+  "sources": {
+    "lb4": {
+      "source_id": "lb4-audio",
+      "video_id": "LB4px1wRFnY",
+      "case_id": "lb4-clip002-short-proper-nouns",
+      "audio_path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/LB4px1wRFnY-2853160-2910000.wav",
+      "audio_bytes": 1818958,
+      "audio_sha256": "da80cdd933fb8738dc6ee7aa980b8ca64a4f8143d5fcbf7a971b058adb5c4687",
+      "audio_span_origin_ms": {
+        "start_ms": 2853160,
+        "end_ms": 2910000
+      },
+      "vtt_path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/LB4px1wRFnY/subtitles/ja.vtt",
+      "vtt_bytes": 353340,
+      "vtt_sha256": "cc6d7fe8f89ffe3ae22f411ece80dcba7c9ab48f96b90b13fa21e7b4216c3fb2",
+      "raw_timing_path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/cold-audit-apply/whisper/lb4-clip002-short-proper-nouns/cold.json",
+      "raw_timing_bytes": 59029,
+      "raw_timing_sha256": "c81341873032e831e19d78831dcdefa6f207a7e792b386f057e1e92d0081a62d",
+      "raw_timing_status": "existing_s9_readonly_full_json"
+    },
+    "mkw": {
+      "source_id": "mkw-audio",
+      "video_id": "mKwn-93gg90",
+      "case_id": "mkw-long-local-asr",
+      "audio_path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/mKwn-93gg90-1120-1300.16k.wav",
+      "audio_bytes": 5760114,
+      "audio_sha256": "aa8cd9dd543a3e6b84c25319aeed2c8fdc7bf1761aa45dcade65db179977d4ba",
+      "audio_span_origin_ms": {
+        "start_ms": 1120000,
+        "end_ms": 1300000
+      },
+      "vtt_path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/mKwn-93gg90/subtitles/ja.vtt",
+      "vtt_bytes": 334317,
+      "vtt_sha256": "402f98815be4a087802b3a6314c19a37660392a63cc1611ab0f2eb71e953971c",
+      "raw_timing_path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/cold-audit-apply/whisper/mkw-long-local-asr/cold.json",
+      "raw_timing_bytes": 90420,
+      "raw_timing_sha256": "ac420f3efa30a4446de6e36c99ec86230b40a3a63a38f80a0e2d5429963a44b0",
+      "raw_timing_status": "existing_s9_readonly_full_json"
+    },
+    "cgal": {
+      "source_id": "cgal-audio",
+      "video_id": "CGalA8SISPE",
+      "case_id": "cgal-proper-nouns",
+      "audio_path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/CGalA8SISPE-4220-4340.16k.wav",
+      "audio_bytes": 3840102,
+      "audio_sha256": "b3341ee5bbe1288e9919eacb3b94c4aa7fb49001dfd9d5ee8f39a48736e427ba",
+      "audio_span_origin_ms": {
+        "start_ms": 4220000,
+        "end_ms": 4340000
+      },
+      "vtt_path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/CGalA8SISPE/subtitles/ja.vtt",
+      "vtt_bytes": 586766,
+      "vtt_sha256": "0d5a200a43a5325dc4799a45f4c23fc6580a140e5d56f2f188e542f72b269676",
+      "raw_timing_path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/cold-audit-apply/whisper/cgal-proper-nouns/cold.json",
+      "raw_timing_bytes": 97304,
+      "raw_timing_sha256": "de267dee31466642360c4072cb7227b578f6fbb41353547862d3391239294e5b",
+      "raw_timing_status": "existing_s9_readonly_full_json"
+    },
+    "hpe": {
+      "source_id": "hpe-audio",
+      "video_id": "hPeRSA9YVIM",
+      "case_id": "hpe-audio-variation",
+      "audio_path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/hPeRSA9YVIM-8640-8730.16k.wav",
+      "audio_bytes": 2880078,
+      "audio_sha256": "1eb008e4a05f87877304474f9d65c4b22658a384ea84e6bff2165ff2b9f5d18e",
+      "audio_span_origin_ms": {
+        "start_ms": 8640000,
+        "end_ms": 8730000
+      },
+      "vtt_path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/hPeRSA9YVIM/subtitles/ja.vtt",
+      "vtt_bytes": 852527,
+      "vtt_sha256": "d9baff5fff1d4851584d5c2526a85efc6a35e2ac8a5639f5e897028aab45b7fd",
+      "raw_timing_path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark/runs/q5/cold-audit-apply/whisper/hpe-audio-variation/cold.json",
+      "raw_timing_bytes": 44577,
+      "raw_timing_sha256": "168e3a22ec89d5e3e8e0e9039c3f5a99c3a5f6d6939c96f76c238ea3a8394562",
+      "raw_timing_status": "existing_s9_readonly_full_json"
+    }
+  },
+  "production_hash_baseline": {
+    "artifact_path": "docs/benchmarks/s9-1-production-hash-before.json",
+    "artifact_sha256": "35ed5d9d624095a0ce3e39076bdd0c539488fc961e39697b62c0f5957a4a0faa",
+    "root": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data",
+    "file_count": 15,
+    "purpose": "T1開始前のread-only baseline。測定後に同一15 file setを再hashし、変更があればfail closed。"
+  },
+  "rows": [
+    {
+      "row_id": "t1-long-001",
+      "fixture_group": "long_single_cue",
+      "audio_source_id": "lb4-audio",
+      "source_hashes": {
+        "audio_sha256": "da80cdd933fb8738dc6ee7aa980b8ca64a4f8143d5fcbf7a971b058adb5c4687",
+        "vtt_sha256": "cc6d7fe8f89ffe3ae22f411ece80dcba7c9ab48f96b90b13fa21e7b4216c3fb2",
+        "raw_timing_sha256": "c81341873032e831e19d78831dcdefa6f207a7e792b386f057e1e92d0081a62d"
+      },
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 3990
+      },
+      "absolute_video_span_ms": {
+        "start_ms": 2853160,
+        "end_ms": 2857150
+      },
+      "vtt_cue_ids": [
+        "839"
+      ],
+      "target_text": "いうのがあるからすね。なんか 僕の個人的な感覚すけど、フロードの方が",
+      "draft_reference": {
+        "kind": "existing_vtt_cue",
+        "start_ms": 0,
+        "end_ms": 3990,
+        "cue_id": "839"
+      },
+      "timing_source": "existing_s9_vtt_and_raw_timing",
+      "raw_timing_available": true,
+      "gold": {
+        "line_onset_ms": null,
+        "annotator_id": null,
+        "annotated_at": null,
+        "audio_listened": false
+      },
+      "gold_provenance": "missing_human_audio_annotation",
+      "candidate_or_boundary_fields_are_not_gold": true
+    },
+    {
+      "row_id": "t1-long-002",
+      "fixture_group": "long_single_cue",
+      "audio_source_id": "lb4-audio",
+      "source_hashes": {
+        "audio_sha256": "da80cdd933fb8738dc6ee7aa980b8ca64a4f8143d5fcbf7a971b058adb5c4687",
+        "vtt_sha256": "cc6d7fe8f89ffe3ae22f411ece80dcba7c9ab48f96b90b13fa21e7b4216c3fb2",
+        "raw_timing_sha256": "c81341873032e831e19d78831dcdefa6f207a7e792b386f057e1e92d0081a62d"
+      },
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 4000,
+        "end_ms": 5949
+      },
+      "absolute_video_span_ms": {
+        "start_ms": 2857160,
+        "end_ms": 2859109
+      },
+      "vtt_cue_ids": [
+        "841"
+      ],
+      "target_text": "僕の個人的な感覚すけど、フロードの方が なんか割と",
+      "draft_reference": {
+        "kind": "existing_vtt_cue",
+        "start_ms": 4000,
+        "end_ms": 5949,
+        "cue_id": "841"
+      },
+      "timing_source": "existing_s9_vtt_and_raw_timing",
+      "raw_timing_available": true,
+      "gold": {
+        "line_onset_ms": null,
+        "annotator_id": null,
+        "annotated_at": null,
+        "audio_listened": false
+      },
+      "gold_provenance": "missing_human_audio_annotation",
+      "candidate_or_boundary_fields_are_not_gold": true
+    },
+    {
+      "row_id": "t1-long-003",
+      "fixture_group": "long_single_cue",
+      "audio_source_id": "lb4-audio",
+      "source_hashes": {
+        "audio_sha256": "da80cdd933fb8738dc6ee7aa980b8ca64a4f8143d5fcbf7a971b058adb5c4687",
+        "vtt_sha256": "cc6d7fe8f89ffe3ae22f411ece80dcba7c9ab48f96b90b13fa21e7b4216c3fb2",
+        "raw_timing_sha256": "c81341873032e831e19d78831dcdefa6f207a7e792b386f057e1e92d0081a62d"
+      },
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 5959,
+        "end_ms": 10830
+      },
+      "absolute_video_span_ms": {
+        "start_ms": 2859119,
+        "end_ms": 2863990
+      },
+      "vtt_cue_ids": [
+        "843"
+      ],
+      "target_text": "なんか割と 本質的な話ができるっていうか、",
+      "draft_reference": {
+        "kind": "existing_vtt_cue",
+        "start_ms": 5959,
+        "end_ms": 10830,
+        "cue_id": "843"
+      },
+      "timing_source": "existing_s9_vtt_and_raw_timing",
+      "raw_timing_available": true,
+      "gold": {
+        "line_onset_ms": null,
+        "annotator_id": null,
+        "annotated_at": null,
+        "audio_listened": false
+      },
+      "gold_provenance": "missing_human_audio_annotation",
+      "candidate_or_boundary_fields_are_not_gold": true
+    },
+    {
+      "row_id": "t1-long-004",
+      "fixture_group": "long_single_cue",
+      "audio_source_id": "lb4-audio",
+      "source_hashes": {
+        "audio_sha256": "da80cdd933fb8738dc6ee7aa980b8ca64a4f8143d5fcbf7a971b058adb5c4687",
+        "vtt_sha256": "cc6d7fe8f89ffe3ae22f411ece80dcba7c9ab48f96b90b13fa21e7b4216c3fb2",
+        "raw_timing_sha256": "c81341873032e831e19d78831dcdefa6f207a7e792b386f057e1e92d0081a62d"
+      },
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 10840,
+        "end_ms": 12790
+      },
+      "absolute_video_span_ms": {
+        "start_ms": 2864000,
+        "end_ms": 2865950
+      },
+      "vtt_cue_ids": [
+        "845"
+      ],
+      "target_text": "本質的な話ができるっていうか、 なんて言ったらいいかな。やっぱり",
+      "draft_reference": {
+        "kind": "existing_vtt_cue",
+        "start_ms": 10840,
+        "end_ms": 12790,
+        "cue_id": "845"
+      },
+      "timing_source": "existing_s9_vtt_and_raw_timing",
+      "raw_timing_available": true,
+      "gold": {
+        "line_onset_ms": null,
+        "annotator_id": null,
+        "annotated_at": null,
+        "audio_listened": false
+      },
+      "gold_provenance": "missing_human_audio_annotation",
+      "candidate_or_boundary_fields_are_not_gold": true
+    },
+    {
+      "row_id": "t1-long-005",
+      "fixture_group": "long_single_cue",
+      "audio_source_id": "lb4-audio",
+      "source_hashes": {
+        "audio_sha256": "da80cdd933fb8738dc6ee7aa980b8ca64a4f8143d5fcbf7a971b058adb5c4687",
+        "vtt_sha256": "cc6d7fe8f89ffe3ae22f411ece80dcba7c9ab48f96b90b13fa21e7b4216c3fb2",
+        "raw_timing_sha256": "c81341873032e831e19d78831dcdefa6f207a7e792b386f057e1e92d0081a62d"
+      },
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 12800,
+        "end_ms": 16189
+      },
+      "absolute_video_span_ms": {
+        "start_ms": 2865960,
+        "end_ms": 2869349
+      },
+      "vtt_cue_ids": [
+        "847"
+      ],
+      "target_text": "なんて言ったらいいかな。やっぱり まだまだなんだかんだあの自分はこういう",
+      "draft_reference": {
+        "kind": "existing_vtt_cue",
+        "start_ms": 12800,
+        "end_ms": 16189,
+        "cue_id": "847"
+      },
+      "timing_source": "existing_s9_vtt_and_raw_timing",
+      "raw_timing_available": true,
+      "gold": {
+        "line_onset_ms": null,
+        "annotator_id": null,
+        "annotated_at": null,
+        "audio_listened": false
+      },
+      "gold_provenance": "missing_human_audio_annotation",
+      "candidate_or_boundary_fields_are_not_gold": true
+    },
+    {
+      "row_id": "t1-long-006",
+      "fixture_group": "long_single_cue",
+      "audio_source_id": "lb4-audio",
+      "source_hashes": {
+        "audio_sha256": "da80cdd933fb8738dc6ee7aa980b8ca64a4f8143d5fcbf7a971b058adb5c4687",
+        "vtt_sha256": "cc6d7fe8f89ffe3ae22f411ece80dcba7c9ab48f96b90b13fa21e7b4216c3fb2",
+        "raw_timing_sha256": "c81341873032e831e19d78831dcdefa6f207a7e792b386f057e1e92d0081a62d"
+      },
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 16199,
+        "end_ms": 19790
+      },
+      "absolute_video_span_ms": {
+        "start_ms": 2869359,
+        "end_ms": 2872950
+      },
+      "vtt_cue_ids": [
+        "849"
+      ],
+      "target_text": "まだまだなんだかんだあの自分はこういう のを作りたいんだよねの抽象的なところで",
+      "draft_reference": {
+        "kind": "existing_vtt_cue",
+        "start_ms": 16199,
+        "end_ms": 19790,
+        "cue_id": "849"
+      },
+      "timing_source": "existing_s9_vtt_and_raw_timing",
+      "raw_timing_available": true,
+      "gold": {
+        "line_onset_ms": null,
+        "annotator_id": null,
+        "annotated_at": null,
+        "audio_listened": false
+      },
+      "gold_provenance": "missing_human_audio_annotation",
+      "candidate_or_boundary_fields_are_not_gold": true
+    },
+    {
+      "row_id": "t1-long-007",
+      "fixture_group": "long_single_cue",
+      "audio_source_id": "lb4-audio",
+      "source_hashes": {
+        "audio_sha256": "da80cdd933fb8738dc6ee7aa980b8ca64a4f8143d5fcbf7a971b058adb5c4687",
+        "vtt_sha256": "cc6d7fe8f89ffe3ae22f411ece80dcba7c9ab48f96b90b13fa21e7b4216c3fb2",
+        "raw_timing_sha256": "c81341873032e831e19d78831dcdefa6f207a7e792b386f057e1e92d0081a62d"
+      },
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 19800,
+        "end_ms": 22750
+      },
+      "absolute_video_span_ms": {
+        "start_ms": 2872960,
+        "end_ms": 2875910
+      },
+      "vtt_cue_ids": [
+        "851"
+      ],
+      "target_text": "のを作りたいんだよねの抽象的なところで 壁打ちをしていってなんでそれが作りたい",
+      "draft_reference": {
+        "kind": "existing_vtt_cue",
+        "start_ms": 19800,
+        "end_ms": 22750,
+        "cue_id": "851"
+      },
+      "timing_source": "existing_s9_vtt_and_raw_timing",
+      "raw_timing_available": true,
+      "gold": {
+        "line_onset_ms": null,
+        "annotator_id": null,
+        "annotated_at": null,
+        "audio_listened": false
+      },
+      "gold_provenance": "missing_human_audio_annotation",
+      "candidate_or_boundary_fields_are_not_gold": true
+    },
+    {
+      "row_id": "t1-long-008",
+      "fixture_group": "long_single_cue",
+      "audio_source_id": "lb4-audio",
+      "source_hashes": {
+        "audio_sha256": "da80cdd933fb8738dc6ee7aa980b8ca64a4f8143d5fcbf7a971b058adb5c4687",
+        "vtt_sha256": "cc6d7fe8f89ffe3ae22f411ece80dcba7c9ab48f96b90b13fa21e7b4216c3fb2",
+        "raw_timing_sha256": "c81341873032e831e19d78831dcdefa6f207a7e792b386f057e1e92d0081a62d"
+      },
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 22760,
+        "end_ms": 26310
+      },
+      "absolute_video_span_ms": {
+        "start_ms": 2875920,
+        "end_ms": 2879470
+      },
+      "vtt_cue_ids": [
+        "853"
+      ],
+      "target_text": "壁打ちをしていってなんでそれが作りたい のみたいなこう本質的な問いを深めてい",
+      "draft_reference": {
+        "kind": "existing_vtt_cue",
+        "start_ms": 22760,
+        "end_ms": 26310,
+        "cue_id": "853"
+      },
+      "timing_source": "existing_s9_vtt_and_raw_timing",
+      "raw_timing_available": true,
+      "gold": {
+        "line_onset_ms": null,
+        "annotator_id": null,
+        "annotated_at": null,
+        "audio_listened": false
+      },
+      "gold_provenance": "missing_human_audio_annotation",
+      "candidate_or_boundary_fields_are_not_gold": true
+    },
+    {
+      "row_id": "t1-long-009",
+      "fixture_group": "long_single_cue",
+      "audio_source_id": "lb4-audio",
+      "source_hashes": {
+        "audio_sha256": "da80cdd933fb8738dc6ee7aa980b8ca64a4f8143d5fcbf7a971b058adb5c4687",
+        "vtt_sha256": "cc6d7fe8f89ffe3ae22f411ece80dcba7c9ab48f96b90b13fa21e7b4216c3fb2",
+        "raw_timing_sha256": "c81341873032e831e19d78831dcdefa6f207a7e792b386f057e1e92d0081a62d"
+      },
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 26320,
+        "end_ms": 28630
+      },
+      "absolute_video_span_ms": {
+        "start_ms": 2879480,
+        "end_ms": 2881790
+      },
+      "vtt_cue_ids": [
+        "855"
+      ],
+      "target_text": "のみたいなこう本質的な問いを深めてい くっていうのはクロードの方がやりやすい",
+      "draft_reference": {
+        "kind": "existing_vtt_cue",
+        "start_ms": 26320,
+        "end_ms": 28630,
+        "cue_id": "855"
+      },
+      "timing_source": "existing_s9_vtt_and_raw_timing",
+      "raw_timing_available": true,
+      "gold": {
+        "line_onset_ms": null,
+        "annotator_id": null,
+        "annotated_at": null,
+        "audio_listened": false
+      },
+      "gold_provenance": "missing_human_audio_annotation",
+      "candidate_or_boundary_fields_are_not_gold": true
+    },
+    {
+      "row_id": "t1-long-010",
+      "fixture_group": "long_single_cue",
+      "audio_source_id": "lb4-audio",
+      "source_hashes": {
+        "audio_sha256": "da80cdd933fb8738dc6ee7aa980b8ca64a4f8143d5fcbf7a971b058adb5c4687",
+        "vtt_sha256": "cc6d7fe8f89ffe3ae22f411ece80dcba7c9ab48f96b90b13fa21e7b4216c3fb2",
+        "raw_timing_sha256": "c81341873032e831e19d78831dcdefa6f207a7e792b386f057e1e92d0081a62d"
+      },
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 28640,
+        "end_ms": 32550
+      },
+      "absolute_video_span_ms": {
+        "start_ms": 2881800,
+        "end_ms": 2885710
+      },
+      "vtt_cue_ids": [
+        "857"
+      ],
+      "target_text": "くっていうのはクロードの方がやりやすい んすよね。で、コデックスは本当に実装と",
+      "draft_reference": {
+        "kind": "existing_vtt_cue",
+        "start_ms": 28640,
+        "end_ms": 32550,
+        "cue_id": "857"
+      },
+      "timing_source": "existing_s9_vtt_and_raw_timing",
+      "raw_timing_available": true,
+      "gold": {
+        "line_onset_ms": null,
+        "annotator_id": null,
+        "annotated_at": null,
+        "audio_listened": false
+      },
+      "gold_provenance": "missing_human_audio_annotation",
+      "candidate_or_boundary_fields_are_not_gold": true
+    },
+    {
+      "row_id": "t1-long-011",
+      "fixture_group": "long_single_cue",
+      "audio_source_id": "lb4-audio",
+      "source_hashes": {
+        "audio_sha256": "da80cdd933fb8738dc6ee7aa980b8ca64a4f8143d5fcbf7a971b058adb5c4687",
+        "vtt_sha256": "cc6d7fe8f89ffe3ae22f411ece80dcba7c9ab48f96b90b13fa21e7b4216c3fb2",
+        "raw_timing_sha256": "c81341873032e831e19d78831dcdefa6f207a7e792b386f057e1e92d0081a62d"
+      },
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 32560,
+        "end_ms": 36270
+      },
+      "absolute_video_span_ms": {
+        "start_ms": 2885720,
+        "end_ms": 2889430
+      },
+      "vtt_cue_ids": [
+        "859"
+      ],
+      "target_text": "んすよね。で、コデックスは本当に実装と かさせたらマジでエラー少なくやって",
+      "draft_reference": {
+        "kind": "existing_vtt_cue",
+        "start_ms": 32560,
+        "end_ms": 36270,
+        "cue_id": "859"
+      },
+      "timing_source": "existing_s9_vtt_and_raw_timing",
+      "raw_timing_available": true,
+      "gold": {
+        "line_onset_ms": null,
+        "annotator_id": null,
+        "annotated_at": null,
+        "audio_listened": false
+      },
+      "gold_provenance": "missing_human_audio_annotation",
+      "candidate_or_boundary_fields_are_not_gold": true
+    },
+    {
+      "row_id": "t1-long-012",
+      "fixture_group": "long_single_cue",
+      "audio_source_id": "lb4-audio",
+      "source_hashes": {
+        "audio_sha256": "da80cdd933fb8738dc6ee7aa980b8ca64a4f8143d5fcbf7a971b058adb5c4687",
+        "vtt_sha256": "cc6d7fe8f89ffe3ae22f411ece80dcba7c9ab48f96b90b13fa21e7b4216c3fb2",
+        "raw_timing_sha256": "c81341873032e831e19d78831dcdefa6f207a7e792b386f057e1e92d0081a62d"
+      },
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 36280,
+        "end_ms": 38630
+      },
+      "absolute_video_span_ms": {
+        "start_ms": 2889440,
+        "end_ms": 2891790
+      },
+      "vtt_cue_ids": [
+        "861"
+      ],
+      "target_text": "かさせたらマジでエラー少なくやって くれるんで、",
+      "draft_reference": {
+        "kind": "existing_vtt_cue",
+        "start_ms": 36280,
+        "end_ms": 38630,
+        "cue_id": "861"
+      },
+      "timing_source": "existing_s9_vtt_and_raw_timing",
+      "raw_timing_available": true,
+      "gold": {
+        "line_onset_ms": null,
+        "annotator_id": null,
+        "annotated_at": null,
+        "audio_listened": false
+      },
+      "gold_provenance": "missing_human_audio_annotation",
+      "candidate_or_boundary_fields_are_not_gold": true
+    },
+    {
+      "row_id": "t1-long-013",
+      "fixture_group": "long_single_cue",
+      "audio_source_id": "lb4-audio",
+      "source_hashes": {
+        "audio_sha256": "da80cdd933fb8738dc6ee7aa980b8ca64a4f8143d5fcbf7a971b058adb5c4687",
+        "vtt_sha256": "cc6d7fe8f89ffe3ae22f411ece80dcba7c9ab48f96b90b13fa21e7b4216c3fb2",
+        "raw_timing_sha256": "c81341873032e831e19d78831dcdefa6f207a7e792b386f057e1e92d0081a62d"
+      },
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 38640,
+        "end_ms": 41510
+      },
+      "absolute_video_span_ms": {
+        "start_ms": 2891800,
+        "end_ms": 2894670
+      },
+      "vtt_cue_ids": [
+        "863"
+      ],
+      "target_text": "くれるんで、 ま、理想はね、使い分けるがいいん",
+      "draft_reference": {
+        "kind": "existing_vtt_cue",
+        "start_ms": 38640,
+        "end_ms": 41510,
+        "cue_id": "863"
+      },
+      "timing_source": "existing_s9_vtt_and_raw_timing",
+      "raw_timing_available": true,
+      "gold": {
+        "line_onset_ms": null,
+        "annotator_id": null,
+        "annotated_at": null,
+        "audio_listened": false
+      },
+      "gold_provenance": "missing_human_audio_annotation",
+      "candidate_or_boundary_fields_are_not_gold": true
+    },
+    {
+      "row_id": "t1-long-014",
+      "fixture_group": "long_single_cue",
+      "audio_source_id": "lb4-audio",
+      "source_hashes": {
+        "audio_sha256": "da80cdd933fb8738dc6ee7aa980b8ca64a4f8143d5fcbf7a971b058adb5c4687",
+        "vtt_sha256": "cc6d7fe8f89ffe3ae22f411ece80dcba7c9ab48f96b90b13fa21e7b4216c3fb2",
+        "raw_timing_sha256": "c81341873032e831e19d78831dcdefa6f207a7e792b386f057e1e92d0081a62d"
+      },
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 41520,
+        "end_ms": 43750
+      },
+      "absolute_video_span_ms": {
+        "start_ms": 2894680,
+        "end_ms": 2896910
+      },
+      "vtt_cue_ids": [
+        "865"
+      ],
+      "target_text": "ま、理想はね、使い分けるがいいん でしょうけど、またその要件定義とかを",
+      "draft_reference": {
+        "kind": "existing_vtt_cue",
+        "start_ms": 41520,
+        "end_ms": 43750,
+        "cue_id": "865"
+      },
+      "timing_source": "existing_s9_vtt_and_raw_timing",
+      "raw_timing_available": true,
+      "gold": {
+        "line_onset_ms": null,
+        "annotator_id": null,
+        "annotated_at": null,
+        "audio_listened": false
+      },
+      "gold_provenance": "missing_human_audio_annotation",
+      "candidate_or_boundary_fields_are_not_gold": true
+    },
+    {
+      "row_id": "t1-long-015",
+      "fixture_group": "long_single_cue",
+      "audio_source_id": "lb4-audio",
+      "source_hashes": {
+        "audio_sha256": "da80cdd933fb8738dc6ee7aa980b8ca64a4f8143d5fcbf7a971b058adb5c4687",
+        "vtt_sha256": "cc6d7fe8f89ffe3ae22f411ece80dcba7c9ab48f96b90b13fa21e7b4216c3fb2",
+        "raw_timing_sha256": "c81341873032e831e19d78831dcdefa6f207a7e792b386f057e1e92d0081a62d"
+      },
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 43760,
+        "end_ms": 47470
+      },
+      "absolute_video_span_ms": {
+        "start_ms": 2896920,
+        "end_ms": 2900630
+      },
+      "vtt_cue_ids": [
+        "867"
+      ],
+      "target_text": "でしょうけど、またその要件定義とかを 書く時に自分でしっかりと頭の中整理し",
+      "draft_reference": {
+        "kind": "existing_vtt_cue",
+        "start_ms": 43760,
+        "end_ms": 47470,
+        "cue_id": "867"
+      },
+      "timing_source": "existing_s9_vtt_and_raw_timing",
+      "raw_timing_available": true,
+      "gold": {
+        "line_onset_ms": null,
+        "annotator_id": null,
+        "annotated_at": null,
+        "audio_listened": false
+      },
+      "gold_provenance": "missing_human_audio_annotation",
+      "candidate_or_boundary_fields_are_not_gold": true
+    },
+    {
+      "row_id": "t1-long-016",
+      "fixture_group": "long_single_cue",
+      "audio_source_id": "lb4-audio",
+      "source_hashes": {
+        "audio_sha256": "da80cdd933fb8738dc6ee7aa980b8ca64a4f8143d5fcbf7a971b058adb5c4687",
+        "vtt_sha256": "cc6d7fe8f89ffe3ae22f411ece80dcba7c9ab48f96b90b13fa21e7b4216c3fb2",
+        "raw_timing_sha256": "c81341873032e831e19d78831dcdefa6f207a7e792b386f057e1e92d0081a62d"
+      },
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 47480,
+        "end_ms": 50350
+      },
+      "absolute_video_span_ms": {
+        "start_ms": 2900640,
+        "end_ms": 2903510
+      },
+      "vtt_cue_ids": [
+        "869"
+      ],
+      "target_text": "書く時に自分でしっかりと頭の中整理し ながらかける人だったらもう黒いらずに",
+      "draft_reference": {
+        "kind": "existing_vtt_cue",
+        "start_ms": 47480,
+        "end_ms": 50350,
+        "cue_id": "869"
+      },
+      "timing_source": "existing_s9_vtt_and_raw_timing",
+      "raw_timing_available": true,
+      "gold": {
+        "line_onset_ms": null,
+        "annotator_id": null,
+        "annotated_at": null,
+        "audio_listened": false
+      },
+      "gold_provenance": "missing_human_audio_annotation",
+      "candidate_or_boundary_fields_are_not_gold": true
+    },
+    {
+      "row_id": "t1-long-017",
+      "fixture_group": "long_single_cue",
+      "audio_source_id": "lb4-audio",
+      "source_hashes": {
+        "audio_sha256": "da80cdd933fb8738dc6ee7aa980b8ca64a4f8143d5fcbf7a971b058adb5c4687",
+        "vtt_sha256": "cc6d7fe8f89ffe3ae22f411ece80dcba7c9ab48f96b90b13fa21e7b4216c3fb2",
+        "raw_timing_sha256": "c81341873032e831e19d78831dcdefa6f207a7e792b386f057e1e92d0081a62d"
+      },
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 50360,
+        "end_ms": 53098
+      },
+      "absolute_video_span_ms": {
+        "start_ms": 2903520,
+        "end_ms": 2906258
+      },
+      "vtt_cue_ids": [
+        "871"
+      ],
+      "target_text": "ながらかける人だったらもう黒いらずに 実装だけコーデックスに任せるとかでも",
+      "draft_reference": {
+        "kind": "existing_vtt_cue",
+        "start_ms": 50360,
+        "end_ms": 53098,
+        "cue_id": "871"
+      },
+      "timing_source": "existing_s9_vtt_and_raw_timing",
+      "raw_timing_available": true,
+      "gold": {
+        "line_onset_ms": null,
+        "annotator_id": null,
+        "annotated_at": null,
+        "audio_listened": false
+      },
+      "gold_provenance": "missing_human_audio_annotation",
+      "candidate_or_boundary_fields_are_not_gold": true
+    },
+    {
+      "row_id": "t1-long-018",
+      "fixture_group": "long_single_cue",
+      "audio_source_id": "lb4-audio",
+      "source_hashes": {
+        "audio_sha256": "da80cdd933fb8738dc6ee7aa980b8ca64a4f8143d5fcbf7a971b058adb5c4687",
+        "vtt_sha256": "cc6d7fe8f89ffe3ae22f411ece80dcba7c9ab48f96b90b13fa21e7b4216c3fb2",
+        "raw_timing_sha256": "c81341873032e831e19d78831dcdefa6f207a7e792b386f057e1e92d0081a62d"
+      },
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 53108,
+        "end_ms": 56830
+      },
+      "absolute_video_span_ms": {
+        "start_ms": 2906268,
+        "end_ms": 2909990
+      },
+      "vtt_cue_ids": [
+        "873"
+      ],
+      "target_text": "実装だけコーデックスに任せるとかでも [音楽]いいような気もするんすけどね。",
+      "draft_reference": {
+        "kind": "existing_vtt_cue",
+        "start_ms": 53108,
+        "end_ms": 56830,
+        "cue_id": "873"
+      },
+      "timing_source": "existing_s9_vtt_and_raw_timing",
+      "raw_timing_available": true,
+      "gold": {
+        "line_onset_ms": null,
+        "annotator_id": null,
+        "annotated_at": null,
+        "audio_listened": false
+      },
+      "gold_provenance": "missing_human_audio_annotation",
+      "candidate_or_boundary_fields_are_not_gold": true
+    },
+    {
+      "row_id": "t1-long-019",
+      "fixture_group": "long_single_cue",
+      "audio_source_id": "mkw-audio",
+      "source_hashes": {
+        "audio_sha256": "aa8cd9dd543a3e6b84c25319aeed2c8fdc7bf1761aa45dcade65db179977d4ba",
+        "vtt_sha256": "402f98815be4a087802b3a6314c19a37660392a63cc1611ab0f2eb71e953971c",
+        "raw_timing_sha256": "ac420f3efa30a4446de6e36c99ec86230b40a3a63a38f80a0e2d5429963a44b0"
+      },
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 320,
+        "end_ms": 18630
+      },
+      "absolute_video_span_ms": {
+        "start_ms": 1120320,
+        "end_ms": 1138630
+      },
+      "vtt_cue_ids": [
+        "183"
+      ],
+      "target_text": "よくわかんないけど。これ ワンチャンローカルで使えんかな。",
+      "draft_reference": {
+        "kind": "existing_vtt_cue",
+        "start_ms": 320,
+        "end_ms": 18630,
+        "cue_id": "183"
+      },
+      "timing_source": "existing_s9_vtt_and_raw_timing",
+      "raw_timing_available": true,
+      "gold": {
+        "line_onset_ms": null,
+        "annotator_id": null,
+        "annotated_at": null,
+        "audio_listened": false
+      },
+      "gold_provenance": "missing_human_audio_annotation",
+      "candidate_or_boundary_fields_are_not_gold": true
+    },
+    {
+      "row_id": "t1-long-020",
+      "fixture_group": "long_single_cue",
+      "audio_source_id": "mkw-audio",
+      "source_hashes": {
+        "audio_sha256": "aa8cd9dd543a3e6b84c25319aeed2c8fdc7bf1761aa45dcade65db179977d4ba",
+        "vtt_sha256": "402f98815be4a087802b3a6314c19a37660392a63cc1611ab0f2eb71e953971c",
+        "raw_timing_sha256": "ac420f3efa30a4446de6e36c99ec86230b40a3a63a38f80a0e2d5429963a44b0"
+      },
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 25880,
+        "end_ms": 29350
+      },
+      "absolute_video_span_ms": {
+        "start_ms": 1145880,
+        "end_ms": 1149350
+      },
+      "vtt_cue_ids": [
+        "185"
+      ],
+      "target_text": "えっと、 オラマとかでローカルLLMを立ち上げて",
+      "draft_reference": {
+        "kind": "existing_vtt_cue",
+        "start_ms": 25880,
+        "end_ms": 29350,
+        "cue_id": "185"
+      },
+      "timing_source": "existing_s9_vtt_and_raw_timing",
+      "raw_timing_available": true,
+      "gold": {
+        "line_onset_ms": null,
+        "annotator_id": null,
+        "annotated_at": null,
+        "audio_listened": false
+      },
+      "gold_provenance": "missing_human_audio_annotation",
+      "candidate_or_boundary_fields_are_not_gold": true
+    },
+    {
+      "row_id": "t1-cross-001",
+      "fixture_group": "multi_cross_cue",
+      "audio_source_id": "mkw-audio",
+      "source_hashes": {
+        "audio_sha256": "aa8cd9dd543a3e6b84c25319aeed2c8fdc7bf1761aa45dcade65db179977d4ba",
+        "vtt_sha256": "402f98815be4a087802b3a6314c19a37660392a63cc1611ab0f2eb71e953971c",
+        "raw_timing_sha256": "ac420f3efa30a4446de6e36c99ec86230b40a3a63a38f80a0e2d5429963a44b0"
+      },
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 2280
+      },
+      "absolute_video_span_ms": {
+        "start_ms": 1120000,
+        "end_ms": 1122280
+      },
+      "vtt_cue_ids": [
+        "181",
+        "182",
+        "183"
+      ],
+      "target_text": "ワンチャン、ローカルで使えんかな。",
+      "draft_reference": {
+        "kind": "existing_s9_whisper_segment",
+        "start_ms": 0,
+        "end_ms": 2280,
+        "segment_index": 0
+      },
+      "timing_source": "existing_s9_raw_full_json_token_timing",
+      "raw_timing_available": true,
+      "gold": {
+        "line_onset_ms": null,
+        "annotator_id": null,
+        "annotated_at": null,
+        "audio_listened": false
+      },
+      "gold_provenance": "missing_human_audio_annotation",
+      "candidate_or_boundary_fields_are_not_gold": true
+    },
+    {
+      "row_id": "t1-cross-002",
+      "fixture_group": "multi_cross_cue",
+      "audio_source_id": "mkw-audio",
+      "source_hashes": {
+        "audio_sha256": "aa8cd9dd543a3e6b84c25319aeed2c8fdc7bf1761aa45dcade65db179977d4ba",
+        "vtt_sha256": "402f98815be4a087802b3a6314c19a37660392a63cc1611ab0f2eb71e953971c",
+        "raw_timing_sha256": "ac420f3efa30a4446de6e36c99ec86230b40a3a63a38f80a0e2d5429963a44b0"
+      },
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 25400,
+        "end_ms": 34760
+      },
+      "absolute_video_span_ms": {
+        "start_ms": 1145400,
+        "end_ms": 1154760
+      },
+      "vtt_cue_ids": [
+        "184",
+        "185",
+        "186",
+        "187",
+        "188",
+        "189"
+      ],
+      "target_text": "オラマとかでローカルLLMを立ち上げて、そのモデルを設定して使うことって可能です?",
+      "draft_reference": {
+        "kind": "existing_s9_whisper_segment",
+        "start_ms": 25400,
+        "end_ms": 34760,
+        "segment_index": 1
+      },
+      "timing_source": "existing_s9_raw_full_json_token_timing",
+      "raw_timing_available": true,
+      "gold": {
+        "line_onset_ms": null,
+        "annotator_id": null,
+        "annotated_at": null,
+        "audio_listened": false
+      },
+      "gold_provenance": "missing_human_audio_annotation",
+      "candidate_or_boundary_fields_are_not_gold": true
+    },
+    {
+      "row_id": "t1-cross-003",
+      "fixture_group": "multi_cross_cue",
+      "audio_source_id": "mkw-audio",
+      "source_hashes": {
+        "audio_sha256": "aa8cd9dd543a3e6b84c25319aeed2c8fdc7bf1761aa45dcade65db179977d4ba",
+        "vtt_sha256": "402f98815be4a087802b3a6314c19a37660392a63cc1611ab0f2eb71e953971c",
+        "raw_timing_sha256": "ac420f3efa30a4446de6e36c99ec86230b40a3a63a38f80a0e2d5429963a44b0"
+      },
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 50340,
+        "end_ms": 53840
+      },
+      "absolute_video_span_ms": {
+        "start_ms": 1170340,
+        "end_ms": 1173840
+      },
+      "vtt_cue_ids": [
+        "189",
+        "190",
+        "191"
+      ],
+      "target_text": "これワンチャンローカルでいけるんだったらマジありだよな。",
+      "draft_reference": {
+        "kind": "existing_s9_whisper_segment",
+        "start_ms": 50340,
+        "end_ms": 53840,
+        "segment_index": 2
+      },
+      "timing_source": "existing_s9_raw_full_json_token_timing",
+      "raw_timing_available": true,
+      "gold": {
+        "line_onset_ms": null,
+        "annotator_id": null,
+        "annotated_at": null,
+        "audio_listened": false
+      },
+      "gold_provenance": "missing_human_audio_annotation",
+      "candidate_or_boundary_fields_are_not_gold": true
+    },
+    {
+      "row_id": "t1-cross-004",
+      "fixture_group": "multi_cross_cue",
+      "audio_source_id": "mkw-audio",
+      "source_hashes": {
+        "audio_sha256": "aa8cd9dd543a3e6b84c25319aeed2c8fdc7bf1761aa45dcade65db179977d4ba",
+        "vtt_sha256": "402f98815be4a087802b3a6314c19a37660392a63cc1611ab0f2eb71e953971c",
+        "raw_timing_sha256": "ac420f3efa30a4446de6e36c99ec86230b40a3a63a38f80a0e2d5429963a44b0"
+      },
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 55400,
+        "end_ms": 61740
+      },
+      "absolute_video_span_ms": {
+        "start_ms": 1175400,
+        "end_ms": 1181740
+      },
+      "vtt_cue_ids": [
+        "191",
+        "192",
+        "193"
+      ],
+      "target_text": "トゥギャザーAIの料金が分かんねえな。",
+      "draft_reference": {
+        "kind": "existing_s9_whisper_segment",
+        "start_ms": 55400,
+        "end_ms": 61740,
+        "segment_index": 3
+      },
+      "timing_source": "existing_s9_raw_full_json_token_timing",
+      "raw_timing_available": true,
+      "gold": {
+        "line_onset_ms": null,
+        "annotator_id": null,
+        "annotated_at": null,
+        "audio_listened": false
+      },
+      "gold_provenance": "missing_human_audio_annotation",
+      "candidate_or_boundary_fields_are_not_gold": true
+    },
+    {
+      "row_id": "t1-cross-005",
+      "fixture_group": "multi_cross_cue",
+      "audio_source_id": "mkw-audio",
+      "source_hashes": {
+        "audio_sha256": "aa8cd9dd543a3e6b84c25319aeed2c8fdc7bf1761aa45dcade65db179977d4ba",
+        "vtt_sha256": "402f98815be4a087802b3a6314c19a37660392a63cc1611ab0f2eb71e953971c",
+        "raw_timing_sha256": "ac420f3efa30a4446de6e36c99ec86230b40a3a63a38f80a0e2d5429963a44b0"
+      },
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 71220,
+        "end_ms": 72380
+      },
+      "absolute_video_span_ms": {
+        "start_ms": 1191220,
+        "end_ms": 1192380
+      },
+      "vtt_cue_ids": [
+        "195",
+        "196",
+        "197"
+      ],
+      "target_text": "あ、え?",
+      "draft_reference": {
+        "kind": "existing_s9_whisper_segment",
+        "start_ms": 71220,
+        "end_ms": 72380,
+        "segment_index": 9
+      },
+      "timing_source": "existing_s9_raw_full_json_token_timing",
+      "raw_timing_available": true,
+      "gold": {
+        "line_onset_ms": null,
+        "annotator_id": null,
+        "annotated_at": null,
+        "audio_listened": false
+      },
+      "gold_provenance": "missing_human_audio_annotation",
+      "candidate_or_boundary_fields_are_not_gold": true
+    },
+    {
+      "row_id": "t1-cross-006",
+      "fixture_group": "multi_cross_cue",
+      "audio_source_id": "mkw-audio",
+      "source_hashes": {
+        "audio_sha256": "aa8cd9dd543a3e6b84c25319aeed2c8fdc7bf1761aa45dcade65db179977d4ba",
+        "vtt_sha256": "402f98815be4a087802b3a6314c19a37660392a63cc1611ab0f2eb71e953971c",
+        "raw_timing_sha256": "ac420f3efa30a4446de6e36c99ec86230b40a3a63a38f80a0e2d5429963a44b0"
+      },
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 74380,
+        "end_ms": 77520
+      },
+      "absolute_video_span_ms": {
+        "start_ms": 1194380,
+        "end_ms": 1197520
+      },
+      "vtt_cue_ids": [
+        "197",
+        "198",
+        "199"
+      ],
+      "target_text": "0.0015ドル。",
+      "draft_reference": {
+        "kind": "existing_s9_whisper_segment",
+        "start_ms": 74380,
+        "end_ms": 77520,
+        "segment_index": 10
+      },
+      "timing_source": "existing_s9_raw_full_json_token_timing",
+      "raw_timing_available": true,
+      "gold": {
+        "line_onset_ms": null,
+        "annotator_id": null,
+        "annotated_at": null,
+        "audio_listened": false
+      },
+      "gold_provenance": "missing_human_audio_annotation",
+      "candidate_or_boundary_fields_are_not_gold": true
+    },
+    {
+      "row_id": "t1-cross-007",
+      "fixture_group": "multi_cross_cue",
+      "audio_source_id": "mkw-audio",
+      "source_hashes": {
+        "audio_sha256": "aa8cd9dd543a3e6b84c25319aeed2c8fdc7bf1761aa45dcade65db179977d4ba",
+        "vtt_sha256": "402f98815be4a087802b3a6314c19a37660392a63cc1611ab0f2eb71e953971c",
+        "raw_timing_sha256": "ac420f3efa30a4446de6e36c99ec86230b40a3a63a38f80a0e2d5429963a44b0"
+      },
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 80300,
+        "end_ms": 83240
+      },
+      "absolute_video_span_ms": {
+        "start_ms": 1200300,
+        "end_ms": 1203240
+      },
+      "vtt_cue_ids": [
+        "200",
+        "201"
+      ],
+      "target_text": "1分あたり0.0015ドル。",
+      "draft_reference": {
+        "kind": "existing_s9_whisper_segment",
+        "start_ms": 80300,
+        "end_ms": 83240,
+        "segment_index": 11
+      },
+      "timing_source": "existing_s9_raw_full_json_token_timing",
+      "raw_timing_available": true,
+      "gold": {
+        "line_onset_ms": null,
+        "annotator_id": null,
+        "annotated_at": null,
+        "audio_listened": false
+      },
+      "gold_provenance": "missing_human_audio_annotation",
+      "candidate_or_boundary_fields_are_not_gold": true
+    },
+    {
+      "row_id": "t1-cross-008",
+      "fixture_group": "multi_cross_cue",
+      "audio_source_id": "mkw-audio",
+      "source_hashes": {
+        "audio_sha256": "aa8cd9dd543a3e6b84c25319aeed2c8fdc7bf1761aa45dcade65db179977d4ba",
+        "vtt_sha256": "402f98815be4a087802b3a6314c19a37660392a63cc1611ab0f2eb71e953971c",
+        "raw_timing_sha256": "ac420f3efa30a4446de6e36c99ec86230b40a3a63a38f80a0e2d5429963a44b0"
+      },
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 90620,
+        "end_ms": 91920
+      },
+      "absolute_video_span_ms": {
+        "start_ms": 1210620,
+        "end_ms": 1211920
+      },
+      "vtt_cue_ids": [
+        "204",
+        "205"
+      ],
+      "target_text": "まあ、地率もだけど。",
+      "draft_reference": {
+        "kind": "existing_s9_whisper_segment",
+        "start_ms": 90620,
+        "end_ms": 91920,
+        "segment_index": 14
+      },
+      "timing_source": "existing_s9_raw_full_json_token_timing",
+      "raw_timing_available": true,
+      "gold": {
+        "line_onset_ms": null,
+        "annotator_id": null,
+        "annotated_at": null,
+        "audio_listened": false
+      },
+      "gold_provenance": "missing_human_audio_annotation",
+      "candidate_or_boundary_fields_are_not_gold": true
+    },
+    {
+      "row_id": "t1-cross-009",
+      "fixture_group": "multi_cross_cue",
+      "audio_source_id": "mkw-audio",
+      "source_hashes": {
+        "audio_sha256": "aa8cd9dd543a3e6b84c25319aeed2c8fdc7bf1761aa45dcade65db179977d4ba",
+        "vtt_sha256": "402f98815be4a087802b3a6314c19a37660392a63cc1611ab0f2eb71e953971c",
+        "raw_timing_sha256": "ac420f3efa30a4446de6e36c99ec86230b40a3a63a38f80a0e2d5429963a44b0"
+      },
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 122720,
+        "end_ms": 125120
+      },
+      "absolute_video_span_ms": {
+        "start_ms": 1242720,
+        "end_ms": 1245120
+      },
+      "vtt_cue_ids": [
+        "206",
+        "207"
+      ],
+      "target_text": "そういうのやってる人いそうだよな。",
+      "draft_reference": {
+        "kind": "existing_s9_whisper_segment",
+        "start_ms": 122720,
+        "end_ms": 125120,
+        "segment_index": 18
+      },
+      "timing_source": "existing_s9_raw_full_json_token_timing",
+      "raw_timing_available": true,
+      "gold": {
+        "line_onset_ms": null,
+        "annotator_id": null,
+        "annotated_at": null,
+        "audio_listened": false
+      },
+      "gold_provenance": "missing_human_audio_annotation",
+      "candidate_or_boundary_fields_are_not_gold": true
+    },
+    {
+      "row_id": "t1-cross-010",
+      "fixture_group": "multi_cross_cue",
+      "audio_source_id": "mkw-audio",
+      "source_hashes": {
+        "audio_sha256": "aa8cd9dd543a3e6b84c25319aeed2c8fdc7bf1761aa45dcade65db179977d4ba",
+        "vtt_sha256": "402f98815be4a087802b3a6314c19a37660392a63cc1611ab0f2eb71e953971c",
+        "raw_timing_sha256": "ac420f3efa30a4446de6e36c99ec86230b40a3a63a38f80a0e2d5429963a44b0"
+      },
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 131600,
+        "end_ms": 135800
+      },
+      "absolute_video_span_ms": {
+        "start_ms": 1251600,
+        "end_ms": 1255800
+      },
+      "vtt_cue_ids": [
+        "207",
+        "208",
+        "209"
+      ],
+      "target_text": "そういうのやれなくはないんじゃないかな。",
+      "draft_reference": {
+        "kind": "existing_s9_whisper_segment",
+        "start_ms": 131600,
+        "end_ms": 135800,
+        "segment_index": 19
+      },
+      "timing_source": "existing_s9_raw_full_json_token_timing",
+      "raw_timing_available": true,
+      "gold": {
+        "line_onset_ms": null,
+        "annotator_id": null,
+        "annotated_at": null,
+        "audio_listened": false
+      },
+      "gold_provenance": "missing_human_audio_annotation",
+      "candidate_or_boundary_fields_are_not_gold": true
+    },
+    {
+      "row_id": "t1-cross-011",
+      "fixture_group": "multi_cross_cue",
+      "audio_source_id": "mkw-audio",
+      "source_hashes": {
+        "audio_sha256": "aa8cd9dd543a3e6b84c25319aeed2c8fdc7bf1761aa45dcade65db179977d4ba",
+        "vtt_sha256": "402f98815be4a087802b3a6314c19a37660392a63cc1611ab0f2eb71e953971c",
+        "raw_timing_sha256": "ac420f3efa30a4446de6e36c99ec86230b40a3a63a38f80a0e2d5429963a44b0"
+      },
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 142360,
+        "end_ms": 143100
+      },
+      "absolute_video_span_ms": {
+        "start_ms": 1262360,
+        "end_ms": 1263100
+      },
+      "vtt_cue_ids": [
+        "210",
+        "211"
+      ],
+      "target_text": "いつもありがとうございます。",
+      "draft_reference": {
+        "kind": "existing_s9_whisper_segment",
+        "start_ms": 142360,
+        "end_ms": 143100,
+        "segment_index": 21
+      },
+      "timing_source": "existing_s9_raw_full_json_token_timing",
+      "raw_timing_available": true,
+      "gold": {
+        "line_onset_ms": null,
+        "annotator_id": null,
+        "annotated_at": null,
+        "audio_listened": false
+      },
+      "gold_provenance": "missing_human_audio_annotation",
+      "candidate_or_boundary_fields_are_not_gold": true
+    },
+    {
+      "row_id": "t1-cross-012",
+      "fixture_group": "multi_cross_cue",
+      "audio_source_id": "mkw-audio",
+      "source_hashes": {
+        "audio_sha256": "aa8cd9dd543a3e6b84c25319aeed2c8fdc7bf1761aa45dcade65db179977d4ba",
+        "vtt_sha256": "402f98815be4a087802b3a6314c19a37660392a63cc1611ab0f2eb71e953971c",
+        "raw_timing_sha256": "ac420f3efa30a4446de6e36c99ec86230b40a3a63a38f80a0e2d5429963a44b0"
+      },
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 144840,
+        "end_ms": 146460
+      },
+      "absolute_video_span_ms": {
+        "start_ms": 1264840,
+        "end_ms": 1266460
+      },
+      "vtt_cue_ids": [
+        "211",
+        "212",
+        "213"
+      ],
+      "target_text": "そして明日もよろしくお願いします。",
+      "draft_reference": {
+        "kind": "existing_s9_whisper_segment",
+        "start_ms": 144840,
+        "end_ms": 146460,
+        "segment_index": 22
+      },
+      "timing_source": "existing_s9_raw_full_json_token_timing",
+      "raw_timing_available": true,
+      "gold": {
+        "line_onset_ms": null,
+        "annotator_id": null,
+        "annotated_at": null,
+        "audio_listened": false
+      },
+      "gold_provenance": "missing_human_audio_annotation",
+      "candidate_or_boundary_fields_are_not_gold": true
+    },
+    {
+      "row_id": "t1-cross-013",
+      "fixture_group": "multi_cross_cue",
+      "audio_source_id": "mkw-audio",
+      "source_hashes": {
+        "audio_sha256": "aa8cd9dd543a3e6b84c25319aeed2c8fdc7bf1761aa45dcade65db179977d4ba",
+        "vtt_sha256": "402f98815be4a087802b3a6314c19a37660392a63cc1611ab0f2eb71e953971c",
+        "raw_timing_sha256": "ac420f3efa30a4446de6e36c99ec86230b40a3a63a38f80a0e2d5429963a44b0"
+      },
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 158260,
+        "end_ms": 159780
+      },
+      "absolute_video_span_ms": {
+        "start_ms": 1278260,
+        "end_ms": 1279780
+      },
+      "vtt_cue_ids": [
+        "216",
+        "217"
+      ],
+      "target_text": "あー、いいっすね。",
+      "draft_reference": {
+        "kind": "existing_s9_whisper_segment",
+        "start_ms": 158260,
+        "end_ms": 159780,
+        "segment_index": 26
+      },
+      "timing_source": "existing_s9_raw_full_json_token_timing",
+      "raw_timing_available": true,
+      "gold": {
+        "line_onset_ms": null,
+        "annotator_id": null,
+        "annotated_at": null,
+        "audio_listened": false
+      },
+      "gold_provenance": "missing_human_audio_annotation",
+      "candidate_or_boundary_fields_are_not_gold": true
+    },
+    {
+      "row_id": "t1-cross-014",
+      "fixture_group": "multi_cross_cue",
+      "audio_source_id": "mkw-audio",
+      "source_hashes": {
+        "audio_sha256": "aa8cd9dd543a3e6b84c25319aeed2c8fdc7bf1761aa45dcade65db179977d4ba",
+        "vtt_sha256": "402f98815be4a087802b3a6314c19a37660392a63cc1611ab0f2eb71e953971c",
+        "raw_timing_sha256": "ac420f3efa30a4446de6e36c99ec86230b40a3a63a38f80a0e2d5429963a44b0"
+      },
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 159780,
+        "end_ms": 162380
+      },
+      "absolute_video_span_ms": {
+        "start_ms": 1279780,
+        "end_ms": 1282380
+      },
+      "vtt_cue_ids": [
+        "217",
+        "218",
+        "219"
+      ],
+      "target_text": "だから、新しいガジェットっていいっすよね。",
+      "draft_reference": {
+        "kind": "existing_s9_whisper_segment",
+        "start_ms": 159780,
+        "end_ms": 162380,
+        "segment_index": 27
+      },
+      "timing_source": "existing_s9_raw_full_json_token_timing",
+      "raw_timing_available": true,
+      "gold": {
+        "line_onset_ms": null,
+        "annotator_id": null,
+        "annotated_at": null,
+        "audio_listened": false
+      },
+      "gold_provenance": "missing_human_audio_annotation",
+      "candidate_or_boundary_fields_are_not_gold": true
+    },
+    {
+      "row_id": "t1-cross-015",
+      "fixture_group": "multi_cross_cue",
+      "audio_source_id": "mkw-audio",
+      "source_hashes": {
+        "audio_sha256": "aa8cd9dd543a3e6b84c25319aeed2c8fdc7bf1761aa45dcade65db179977d4ba",
+        "vtt_sha256": "402f98815be4a087802b3a6314c19a37660392a63cc1611ab0f2eb71e953971c",
+        "raw_timing_sha256": "ac420f3efa30a4446de6e36c99ec86230b40a3a63a38f80a0e2d5429963a44b0"
+      },
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 178780,
+        "end_ms": 179260
+      },
+      "absolute_video_span_ms": {
+        "start_ms": 1298780,
+        "end_ms": 1299260
+      },
+      "vtt_cue_ids": [
+        "220",
+        "221"
+      ],
+      "target_text": "なるほど。",
+      "draft_reference": {
+        "kind": "existing_s9_whisper_segment",
+        "start_ms": 178780,
+        "end_ms": 179260,
+        "segment_index": 31
+      },
+      "timing_source": "existing_s9_raw_full_json_token_timing",
+      "raw_timing_available": true,
+      "gold": {
+        "line_onset_ms": null,
+        "annotator_id": null,
+        "annotated_at": null,
+        "audio_listened": false
+      },
+      "gold_provenance": "missing_human_audio_annotation",
+      "candidate_or_boundary_fields_are_not_gold": true
+    },
+    {
+      "row_id": "t1-cross-016",
+      "fixture_group": "multi_cross_cue",
+      "audio_source_id": "cgal-audio",
+      "source_hashes": {
+        "audio_sha256": "b3341ee5bbe1288e9919eacb3b94c4aa7fb49001dfd9d5ee8f39a48736e427ba",
+        "vtt_sha256": "0d5a200a43a5325dc4799a45f4c23fc6580a140e5d56f2f188e542f72b269676",
+        "raw_timing_sha256": "de267dee31466642360c4072cb7227b578f6fbb41353547862d3391239294e5b"
+      },
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 13480
+      },
+      "absolute_video_span_ms": {
+        "start_ms": 4220000,
+        "end_ms": 4233480
+      },
+      "vtt_cue_ids": [
+        "1856",
+        "1857",
+        "1858",
+        "1859",
+        "1860"
+      ],
+      "target_text": "最近のiGPUも高性能になってきているので、そんなハードなゲームでなければそこそこ楽しめるのでは?",
+      "draft_reference": {
+        "kind": "existing_s9_whisper_segment",
+        "start_ms": 0,
+        "end_ms": 13480,
+        "segment_index": 0
+      },
+      "timing_source": "existing_s9_raw_full_json_token_timing",
+      "raw_timing_available": true,
+      "gold": {
+        "line_onset_ms": null,
+        "annotator_id": null,
+        "annotated_at": null,
+        "audio_listened": false
+      },
+      "gold_provenance": "missing_human_audio_annotation",
+      "candidate_or_boundary_fields_are_not_gold": true
+    },
+    {
+      "row_id": "t1-cross-017",
+      "fixture_group": "multi_cross_cue",
+      "audio_source_id": "cgal-audio",
+      "source_hashes": {
+        "audio_sha256": "b3341ee5bbe1288e9919eacb3b94c4aa7fb49001dfd9d5ee8f39a48736e427ba",
+        "vtt_sha256": "0d5a200a43a5325dc4799a45f4c23fc6580a140e5d56f2f188e542f72b269676",
+        "raw_timing_sha256": "de267dee31466642360c4072cb7227b578f6fbb41353547862d3391239294e5b"
+      },
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 14760,
+        "end_ms": 20440
+      },
+      "absolute_video_span_ms": {
+        "start_ms": 4234760,
+        "end_ms": 4240440
+      },
+      "vtt_cue_ids": [
+        "1860",
+        "1861",
+        "1862",
+        "1863",
+        "1864"
+      ],
+      "target_text": "いけるんすかね?いけるんすかね?あ、これか。",
+      "draft_reference": {
+        "kind": "existing_s9_whisper_segment",
+        "start_ms": 14760,
+        "end_ms": 20440,
+        "segment_index": 1
+      },
+      "timing_source": "existing_s9_raw_full_json_token_timing",
+      "raw_timing_available": true,
+      "gold": {
+        "line_onset_ms": null,
+        "annotator_id": null,
+        "annotated_at": null,
+        "audio_listened": false
+      },
+      "gold_provenance": "missing_human_audio_annotation",
+      "candidate_or_boundary_fields_are_not_gold": true
+    },
+    {
+      "row_id": "t1-cross-018",
+      "fixture_group": "multi_cross_cue",
+      "audio_source_id": "cgal-audio",
+      "source_hashes": {
+        "audio_sha256": "b3341ee5bbe1288e9919eacb3b94c4aa7fb49001dfd9d5ee8f39a48736e427ba",
+        "vtt_sha256": "0d5a200a43a5325dc4799a45f4c23fc6580a140e5d56f2f188e542f72b269676",
+        "raw_timing_sha256": "de267dee31466642360c4072cb7227b578f6fbb41353547862d3391239294e5b"
+      },
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 20800,
+        "end_ms": 30720
+      },
+      "absolute_video_span_ms": {
+        "start_ms": 4240800,
+        "end_ms": 4250720
+      },
+      "vtt_cue_ids": [
+        "1864",
+        "1865",
+        "1866",
+        "1867",
+        "1868",
+        "1869",
+        "1870"
+      ],
+      "target_text": "DirectXは、Microsoftが開発した、Windows向けのゲームや映像、音声処理で使われるAPIの集合です。",
+      "draft_reference": {
+        "kind": "existing_s9_whisper_segment",
+        "start_ms": 20800,
+        "end_ms": 30720,
+        "segment_index": 2
+      },
+      "timing_source": "existing_s9_raw_full_json_token_timing",
+      "raw_timing_available": true,
+      "gold": {
+        "line_onset_ms": null,
+        "annotator_id": null,
+        "annotated_at": null,
+        "audio_listened": false
+      },
+      "gold_provenance": "missing_human_audio_annotation",
+      "candidate_or_boundary_fields_are_not_gold": true
+    },
+    {
+      "row_id": "t1-cross-019",
+      "fixture_group": "multi_cross_cue",
+      "audio_source_id": "cgal-audio",
+      "source_hashes": {
+        "audio_sha256": "b3341ee5bbe1288e9919eacb3b94c4aa7fb49001dfd9d5ee8f39a48736e427ba",
+        "vtt_sha256": "0d5a200a43a5325dc4799a45f4c23fc6580a140e5d56f2f188e542f72b269676",
+        "raw_timing_sha256": "de267dee31466642360c4072cb7227b578f6fbb41353547862d3391239294e5b"
+      },
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 35880,
+        "end_ms": 44080
+      },
+      "absolute_video_span_ms": {
+        "start_ms": 4255880,
+        "end_ms": 4264080
+      },
+      "vtt_cue_ids": [
+        "1872",
+        "1873",
+        "1874",
+        "1875",
+        "1876",
+        "1877",
+        "1878"
+      ],
+      "target_text": "DirectXを使うと、ゲーム側はPCごとに違うCPUやGPUの細かい違いをあまり意識せずにグラフィックが必要になります。",
+      "draft_reference": {
+        "kind": "existing_s9_whisper_segment",
+        "start_ms": 35880,
+        "end_ms": 44080,
+        "segment_index": 3
+      },
+      "timing_source": "existing_s9_raw_full_json_token_timing",
+      "raw_timing_available": true,
+      "gold": {
+        "line_onset_ms": null,
+        "annotator_id": null,
+        "annotated_at": null,
+        "audio_listened": false
+      },
+      "gold_provenance": "missing_human_audio_annotation",
+      "candidate_or_boundary_fields_are_not_gold": true
+    },
+    {
+      "row_id": "t1-cross-020",
+      "fixture_group": "multi_cross_cue",
+      "audio_source_id": "cgal-audio",
+      "source_hashes": {
+        "audio_sha256": "b3341ee5bbe1288e9919eacb3b94c4aa7fb49001dfd9d5ee8f39a48736e427ba",
+        "vtt_sha256": "0d5a200a43a5325dc4799a45f4c23fc6580a140e5d56f2f188e542f72b269676",
+        "raw_timing_sha256": "de267dee31466642360c4072cb7227b578f6fbb41353547862d3391239294e5b"
+      },
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 48080,
+        "end_ms": 56080
+      },
+      "absolute_video_span_ms": {
+        "start_ms": 4268080,
+        "end_ms": 4276080
+      },
+      "vtt_cue_ids": [
+        "1879",
+        "1880",
+        "1881",
+        "1882",
+        "1883",
+        "1884"
+      ],
+      "target_text": "WindowsのPCゲームでは、DirectXが前提になっていることが多く、ハードウェアの性能を効率よく引き出すために使われます。",
+      "draft_reference": {
+        "kind": "existing_s9_whisper_segment",
+        "start_ms": 48080,
+        "end_ms": 56080,
+        "segment_index": 4
+      },
+      "timing_source": "existing_s9_raw_full_json_token_timing",
+      "raw_timing_available": true,
+      "gold": {
+        "line_onset_ms": null,
+        "annotator_id": null,
+        "annotated_at": null,
+        "audio_listened": false
+      },
+      "gold_provenance": "missing_human_audio_annotation",
+      "candidate_or_boundary_fields_are_not_gold": true
+    },
+    {
+      "row_id": "t1-fallback-001",
+      "fixture_group": "vtt_fallback_concat",
+      "audio_source_id": "hpe-audio",
+      "source_hashes": {
+        "audio_sha256": "1eb008e4a05f87877304474f9d65c4b22658a384ea84e6bff2165ff2b9f5d18e",
+        "vtt_sha256": "d9baff5fff1d4851584d5c2526a85efc6a35e2ac8a5639f5e897028aab45b7fd",
+        "raw_timing_sha256": null
+      },
+      "source_span": {
+        "kind": "concatenated_source_audio",
+        "parts": [
+          {
+            "start_ms": 9399,
+            "end_ms": 12309,
+            "concat_offset_ms": 0
+          },
+          {
+            "start_ms": 12319,
+            "end_ms": 14670,
+            "concat_offset_ms": 2910
+          }
+        ],
+        "duration_ms": 5261
+      },
+      "absolute_video_span_ms": {
+        "parts": [
+          {
+            "start_ms": 8649399,
+            "end_ms": 8652309
+          },
+          {
+            "start_ms": 8652319,
+            "end_ms": 8654670
+          }
+        ]
+      },
+      "vtt_cue_ids": [
+        "3153",
+        "3155"
+      ],
+      "target_text": "MacでHHKBを最大限に利用するには HHKBの物理的なファンクションキーと HHKBの物理的なファンクションキーと は別にMacOSOS固有の",
+      "draft_reference": {
+        "kind": "vtt_cue_pair_concat",
+        "start_ms": 0,
+        "end_ms": 5261,
+        "cue_ids": [
+          "3153",
+          "3155"
+        ]
+      },
+      "timing_source": "vtt_fallback_only",
+      "raw_timing_available": false,
+      "gold": {
+        "line_onset_ms": null,
+        "annotator_id": null,
+        "annotated_at": null,
+        "audio_listened": false
+      },
+      "gold_provenance": "missing_human_audio_annotation",
+      "candidate_or_boundary_fields_are_not_gold": true,
+      "coverage_excluded": true,
+      "fallback_non_regression_required": true
+    },
+    {
+      "row_id": "t1-fallback-002",
+      "fixture_group": "vtt_fallback_concat",
+      "audio_source_id": "hpe-audio",
+      "source_hashes": {
+        "audio_sha256": "1eb008e4a05f87877304474f9d65c4b22658a384ea84e6bff2165ff2b9f5d18e",
+        "vtt_sha256": "d9baff5fff1d4851584d5c2526a85efc6a35e2ac8a5639f5e897028aab45b7fd",
+        "raw_timing_sha256": null
+      },
+      "source_span": {
+        "kind": "concatenated_source_audio",
+        "parts": [
+          {
+            "start_ms": 12319,
+            "end_ms": 14670,
+            "concat_offset_ms": 0
+          },
+          {
+            "start_ms": 14680,
+            "end_ms": 16349,
+            "concat_offset_ms": 2351
+          }
+        ],
+        "duration_ms": 4020
+      },
+      "absolute_video_span_ms": {
+        "parts": [
+          {
+            "start_ms": 8652319,
+            "end_ms": 8654670
+          },
+          {
+            "start_ms": 8654680,
+            "end_ms": 8656349
+          }
+        ]
+      },
+      "vtt_cue_ids": [
+        "3155",
+        "3157"
+      ],
+      "target_text": "HHKBの物理的なファンクションキーと は別にMacOSOS固有の は別にMacOSOS固有の ファンクション",
+      "draft_reference": {
+        "kind": "vtt_cue_pair_concat",
+        "start_ms": 0,
+        "end_ms": 4020,
+        "cue_ids": [
+          "3155",
+          "3157"
+        ]
+      },
+      "timing_source": "vtt_fallback_only",
+      "raw_timing_available": false,
+      "gold": {
+        "line_onset_ms": null,
+        "annotator_id": null,
+        "annotated_at": null,
+        "audio_listened": false
+      },
+      "gold_provenance": "missing_human_audio_annotation",
+      "candidate_or_boundary_fields_are_not_gold": true,
+      "coverage_excluded": true,
+      "fallback_non_regression_required": true
+    },
+    {
+      "row_id": "t1-fallback-003",
+      "fixture_group": "vtt_fallback_concat",
+      "audio_source_id": "hpe-audio",
+      "source_hashes": {
+        "audio_sha256": "1eb008e4a05f87877304474f9d65c4b22658a384ea84e6bff2165ff2b9f5d18e",
+        "vtt_sha256": "d9baff5fff1d4851584d5c2526a85efc6a35e2ac8a5639f5e897028aab45b7fd",
+        "raw_timing_sha256": null
+      },
+      "source_span": {
+        "kind": "concatenated_source_audio",
+        "parts": [
+          {
+            "start_ms": 14680,
+            "end_ms": 16349,
+            "concat_offset_ms": 0
+          },
+          {
+            "start_ms": 16359,
+            "end_ms": 22670,
+            "concat_offset_ms": 1669
+          }
+        ],
+        "duration_ms": 7980
+      },
+      "absolute_video_span_ms": {
+        "parts": [
+          {
+            "start_ms": 8654680,
+            "end_ms": 8656349
+          },
+          {
+            "start_ms": 8656359,
+            "end_ms": 8662670
+          }
+        ]
+      },
+      "vtt_cue_ids": [
+        "3157",
+        "3159"
+      ],
+      "target_text": "は別にMacOSOS固有の ファンクション ファンクション うん。地球技の地球技をHHKB上のどこ",
+      "draft_reference": {
+        "kind": "vtt_cue_pair_concat",
+        "start_ms": 0,
+        "end_ms": 7980,
+        "cue_ids": [
+          "3157",
+          "3159"
+        ]
+      },
+      "timing_source": "vtt_fallback_only",
+      "raw_timing_available": false,
+      "gold": {
+        "line_onset_ms": null,
+        "annotator_id": null,
+        "annotated_at": null,
+        "audio_listened": false
+      },
+      "gold_provenance": "missing_human_audio_annotation",
+      "candidate_or_boundary_fields_are_not_gold": true,
+      "coverage_excluded": true,
+      "fallback_non_regression_required": true
+    },
+    {
+      "row_id": "t1-fallback-004",
+      "fixture_group": "vtt_fallback_concat",
+      "audio_source_id": "hpe-audio",
+      "source_hashes": {
+        "audio_sha256": "1eb008e4a05f87877304474f9d65c4b22658a384ea84e6bff2165ff2b9f5d18e",
+        "vtt_sha256": "d9baff5fff1d4851584d5c2526a85efc6a35e2ac8a5639f5e897028aab45b7fd",
+        "raw_timing_sha256": null
+      },
+      "source_span": {
+        "kind": "concatenated_source_audio",
+        "parts": [
+          {
+            "start_ms": 16359,
+            "end_ms": 22670,
+            "concat_offset_ms": 0
+          },
+          {
+            "start_ms": 22680,
+            "end_ms": 25870,
+            "concat_offset_ms": 6311
+          }
+        ],
+        "duration_ms": 9501
+      },
+      "absolute_video_span_ms": {
+        "parts": [
+          {
+            "start_ms": 8656359,
+            "end_ms": 8662670
+          },
+          {
+            "start_ms": 8662680,
+            "end_ms": 8665870
+          }
+        ]
+      },
+      "vtt_cue_ids": [
+        "3159",
+        "3161"
+      ],
+      "target_text": "ファンクション うん。地球技の地球技をHHKB上のどこ うん。地球技の地球技をHHKB上のどこ かのキーに割り当てるのが最も最も",
+      "draft_reference": {
+        "kind": "vtt_cue_pair_concat",
+        "start_ms": 0,
+        "end_ms": 9501,
+        "cue_ids": [
+          "3159",
+          "3161"
+        ]
+      },
+      "timing_source": "vtt_fallback_only",
+      "raw_timing_available": false,
+      "gold": {
+        "line_onset_ms": null,
+        "annotator_id": null,
+        "annotated_at": null,
+        "audio_listened": false
+      },
+      "gold_provenance": "missing_human_audio_annotation",
+      "candidate_or_boundary_fields_are_not_gold": true,
+      "coverage_excluded": true,
+      "fallback_non_regression_required": true
+    },
+    {
+      "row_id": "t1-fallback-005",
+      "fixture_group": "vtt_fallback_concat",
+      "audio_source_id": "hpe-audio",
+      "source_hashes": {
+        "audio_sha256": "1eb008e4a05f87877304474f9d65c4b22658a384ea84e6bff2165ff2b9f5d18e",
+        "vtt_sha256": "d9baff5fff1d4851584d5c2526a85efc6a35e2ac8a5639f5e897028aab45b7fd",
+        "raw_timing_sha256": null
+      },
+      "source_span": {
+        "kind": "concatenated_source_audio",
+        "parts": [
+          {
+            "start_ms": 22680,
+            "end_ms": 25870,
+            "concat_offset_ms": 0
+          },
+          {
+            "start_ms": 25880,
+            "end_ms": 28630,
+            "concat_offset_ms": 3190
+          }
+        ],
+        "duration_ms": 5940
+      },
+      "absolute_video_span_ms": {
+        "parts": [
+          {
+            "start_ms": 8662680,
+            "end_ms": 8665870
+          },
+          {
+            "start_ms": 8665880,
+            "end_ms": 8668630
+          }
+        ]
+      },
+      "vtt_cue_ids": [
+        "3161",
+        "3163"
+      ],
+      "target_text": "うん。地球技の地球技をHHKB上のどこ かのキーに割り当てるのが最も最も かのキーに割り当てるのが最も最も スマートな方法です。",
+      "draft_reference": {
+        "kind": "vtt_cue_pair_concat",
+        "start_ms": 0,
+        "end_ms": 5940,
+        "cue_ids": [
+          "3161",
+          "3163"
+        ]
+      },
+      "timing_source": "vtt_fallback_only",
+      "raw_timing_available": false,
+      "gold": {
+        "line_onset_ms": null,
+        "annotator_id": null,
+        "annotated_at": null,
+        "audio_listened": false
+      },
+      "gold_provenance": "missing_human_audio_annotation",
+      "candidate_or_boundary_fields_are_not_gold": true,
+      "coverage_excluded": true,
+      "fallback_non_regression_required": true
+    },
+    {
+      "row_id": "t1-fallback-006",
+      "fixture_group": "vtt_fallback_concat",
+      "audio_source_id": "hpe-audio",
+      "source_hashes": {
+        "audio_sha256": "1eb008e4a05f87877304474f9d65c4b22658a384ea84e6bff2165ff2b9f5d18e",
+        "vtt_sha256": "d9baff5fff1d4851584d5c2526a85efc6a35e2ac8a5639f5e897028aab45b7fd",
+        "raw_timing_sha256": null
+      },
+      "source_span": {
+        "kind": "concatenated_source_audio",
+        "parts": [
+          {
+            "start_ms": 25880,
+            "end_ms": 28630,
+            "concat_offset_ms": 0
+          },
+          {
+            "start_ms": 28640,
+            "end_ms": 31790,
+            "concat_offset_ms": 2750
+          }
+        ],
+        "duration_ms": 5900
+      },
+      "absolute_video_span_ms": {
+        "parts": [
+          {
+            "start_ms": 8665880,
+            "end_ms": 8668630
+          },
+          {
+            "start_ms": 8668640,
+            "end_ms": 8671790
+          }
+        ]
+      },
+      "vtt_cue_ids": [
+        "3163",
+        "3165"
+      ],
+      "target_text": "かのキーに割り当てるのが最も最も スマートな方法です。 スマートな方法です。 これがしたいんだよね。",
+      "draft_reference": {
+        "kind": "vtt_cue_pair_concat",
+        "start_ms": 0,
+        "end_ms": 5900,
+        "cue_ids": [
+          "3163",
+          "3165"
+        ]
+      },
+      "timing_source": "vtt_fallback_only",
+      "raw_timing_available": false,
+      "gold": {
+        "line_onset_ms": null,
+        "annotator_id": null,
+        "annotated_at": null,
+        "audio_listened": false
+      },
+      "gold_provenance": "missing_human_audio_annotation",
+      "candidate_or_boundary_fields_are_not_gold": true,
+      "coverage_excluded": true,
+      "fallback_non_regression_required": true
+    },
+    {
+      "row_id": "t1-fallback-007",
+      "fixture_group": "vtt_fallback_concat",
+      "audio_source_id": "hpe-audio",
+      "source_hashes": {
+        "audio_sha256": "1eb008e4a05f87877304474f9d65c4b22658a384ea84e6bff2165ff2b9f5d18e",
+        "vtt_sha256": "d9baff5fff1d4851584d5c2526a85efc6a35e2ac8a5639f5e897028aab45b7fd",
+        "raw_timing_sha256": null
+      },
+      "source_span": {
+        "kind": "concatenated_source_audio",
+        "parts": [
+          {
+            "start_ms": 28640,
+            "end_ms": 31790,
+            "concat_offset_ms": 0
+          },
+          {
+            "start_ms": 31800,
+            "end_ms": 38830,
+            "concat_offset_ms": 3150
+          }
+        ],
+        "duration_ms": 10180
+      },
+      "absolute_video_span_ms": {
+        "parts": [
+          {
+            "start_ms": 8668640,
+            "end_ms": 8671790
+          },
+          {
+            "start_ms": 8671800,
+            "end_ms": 8678830
+          }
+        ]
+      },
+      "vtt_cue_ids": [
+        "3165",
+        "3167"
+      ],
+      "target_text": "スマートな方法です。 これがしたいんだよね。 これがしたいんだよね。 そう、それがしたいんだよね。",
+      "draft_reference": {
+        "kind": "vtt_cue_pair_concat",
+        "start_ms": 0,
+        "end_ms": 10180,
+        "cue_ids": [
+          "3165",
+          "3167"
+        ]
+      },
+      "timing_source": "vtt_fallback_only",
+      "raw_timing_available": false,
+      "gold": {
+        "line_onset_ms": null,
+        "annotator_id": null,
+        "annotated_at": null,
+        "audio_listened": false
+      },
+      "gold_provenance": "missing_human_audio_annotation",
+      "candidate_or_boundary_fields_are_not_gold": true,
+      "coverage_excluded": true,
+      "fallback_non_regression_required": true
+    },
+    {
+      "row_id": "t1-fallback-008",
+      "fixture_group": "vtt_fallback_concat",
+      "audio_source_id": "hpe-audio",
+      "source_hashes": {
+        "audio_sha256": "1eb008e4a05f87877304474f9d65c4b22658a384ea84e6bff2165ff2b9f5d18e",
+        "vtt_sha256": "d9baff5fff1d4851584d5c2526a85efc6a35e2ac8a5639f5e897028aab45b7fd",
+        "raw_timing_sha256": null
+      },
+      "source_span": {
+        "kind": "concatenated_source_audio",
+        "parts": [
+          {
+            "start_ms": 31800,
+            "end_ms": 38830,
+            "concat_offset_ms": 0
+          },
+          {
+            "start_ms": 41680,
+            "end_ms": 45030,
+            "concat_offset_ms": 7030
+          }
+        ],
+        "duration_ms": 10380
+      },
+      "absolute_video_span_ms": {
+        "parts": [
+          {
+            "start_ms": 8671800,
+            "end_ms": 8678830
+          },
+          {
+            "start_ms": 8681680,
+            "end_ms": 8685030
+          }
+        ]
+      },
+      "vtt_cue_ids": [
+        "3167",
+        "3169"
+      ],
+      "target_text": "これがしたいんだよね。 そう、それがしたいんだよね。 ただ ファンクションキーを押してるとこうなる",
+      "draft_reference": {
+        "kind": "vtt_cue_pair_concat",
+        "start_ms": 0,
+        "end_ms": 10380,
+        "cue_ids": [
+          "3167",
+          "3169"
+        ]
+      },
+      "timing_source": "vtt_fallback_only",
+      "raw_timing_available": false,
+      "gold": {
+        "line_onset_ms": null,
+        "annotator_id": null,
+        "annotated_at": null,
+        "audio_listened": false
+      },
+      "gold_provenance": "missing_human_audio_annotation",
+      "candidate_or_boundary_fields_are_not_gold": true,
+      "coverage_excluded": true,
+      "fallback_non_regression_required": true
+    },
+    {
+      "row_id": "t1-fallback-009",
+      "fixture_group": "vtt_fallback_concat",
+      "audio_source_id": "hpe-audio",
+      "source_hashes": {
+        "audio_sha256": "1eb008e4a05f87877304474f9d65c4b22658a384ea84e6bff2165ff2b9f5d18e",
+        "vtt_sha256": "d9baff5fff1d4851584d5c2526a85efc6a35e2ac8a5639f5e897028aab45b7fd",
+        "raw_timing_sha256": null
+      },
+      "source_span": {
+        "kind": "concatenated_source_audio",
+        "parts": [
+          {
+            "start_ms": 41680,
+            "end_ms": 45030,
+            "concat_offset_ms": 0
+          },
+          {
+            "start_ms": 45040,
+            "end_ms": 60070,
+            "concat_offset_ms": 3350
+          }
+        ],
+        "duration_ms": 18380
+      },
+      "absolute_video_span_ms": {
+        "parts": [
+          {
+            "start_ms": 8681680,
+            "end_ms": 8685030
+          },
+          {
+            "start_ms": 8685040,
+            "end_ms": 8700070
+          }
+        ]
+      },
+      "vtt_cue_ids": [
+        "3169",
+        "3171"
+      ],
+      "target_text": "ただ ファンクションキーを押してるとこうなる ファンクションキーを押してるとこうなる よってことなんだよね。",
+      "draft_reference": {
+        "kind": "vtt_cue_pair_concat",
+        "start_ms": 0,
+        "end_ms": 18380,
+        "cue_ids": [
+          "3169",
+          "3171"
+        ]
+      },
+      "timing_source": "vtt_fallback_only",
+      "raw_timing_available": false,
+      "gold": {
+        "line_onset_ms": null,
+        "annotator_id": null,
+        "annotated_at": null,
+        "audio_listened": false
+      },
+      "gold_provenance": "missing_human_audio_annotation",
+      "candidate_or_boundary_fields_are_not_gold": true,
+      "coverage_excluded": true,
+      "fallback_non_regression_required": true
+    },
+    {
+      "row_id": "t1-fallback-010",
+      "fixture_group": "vtt_fallback_concat",
+      "audio_source_id": "hpe-audio",
+      "source_hashes": {
+        "audio_sha256": "1eb008e4a05f87877304474f9d65c4b22658a384ea84e6bff2165ff2b9f5d18e",
+        "vtt_sha256": "d9baff5fff1d4851584d5c2526a85efc6a35e2ac8a5639f5e897028aab45b7fd",
+        "raw_timing_sha256": null
+      },
+      "source_span": {
+        "kind": "concatenated_source_audio",
+        "parts": [
+          {
+            "start_ms": 45040,
+            "end_ms": 60070,
+            "concat_offset_ms": 0
+          },
+          {
+            "start_ms": 71080,
+            "end_ms": 73750,
+            "concat_offset_ms": 15030
+          }
+        ],
+        "duration_ms": 17700
+      },
+      "absolute_video_span_ms": {
+        "parts": [
+          {
+            "start_ms": 8685040,
+            "end_ms": 8700070
+          },
+          {
+            "start_ms": 8711080,
+            "end_ms": 8713750
+          }
+        ]
+      },
+      "vtt_cue_ids": [
+        "3171",
+        "3173"
+      ],
+      "target_text": "ファンクションキーを押してるとこうなる よってことなんだよね。 ま、みんなこんな感じのことをやってるの か。",
+      "draft_reference": {
+        "kind": "vtt_cue_pair_concat",
+        "start_ms": 0,
+        "end_ms": 17700,
+        "cue_ids": [
+          "3171",
+          "3173"
+        ]
+      },
+      "timing_source": "vtt_fallback_only",
+      "raw_timing_available": false,
+      "gold": {
+        "line_onset_ms": null,
+        "annotator_id": null,
+        "annotated_at": null,
+        "audio_listened": false
+      },
+      "gold_provenance": "missing_human_audio_annotation",
+      "candidate_or_boundary_fields_are_not_gold": true,
+      "coverage_excluded": true,
+      "fallback_non_regression_required": true
+    },
+    {
+      "row_id": "t1-fallback-011",
+      "fixture_group": "vtt_fallback_concat",
+      "audio_source_id": "cgal-audio",
+      "source_hashes": {
+        "audio_sha256": "b3341ee5bbe1288e9919eacb3b94c4aa7fb49001dfd9d5ee8f39a48736e427ba",
+        "vtt_sha256": "0d5a200a43a5325dc4799a45f4c23fc6580a140e5d56f2f188e542f72b269676",
+        "raw_timing_sha256": null
+      },
+      "source_span": {
+        "kind": "concatenated_source_audio",
+        "parts": [
+          {
+            "start_ms": 10120,
+            "end_ms": 12149,
+            "concat_offset_ms": 0
+          },
+          {
+            "start_ms": 12159,
+            "end_ms": 14910,
+            "concat_offset_ms": 2029
+          }
+        ],
+        "duration_ms": 4780
+      },
+      "absolute_video_span_ms": {
+        "parts": [
+          {
+            "start_ms": 4230120,
+            "end_ms": 4232149
+          },
+          {
+            "start_ms": 4232159,
+            "end_ms": 4234910
+          }
+        ]
+      },
+      "vtt_cue_ids": [
+        "1858",
+        "1860"
+      ],
+      "target_text": "最近のIGPUも高性能になってきてるの で、そんなハードなゲームでなければ で、そんなハードなゲームでなければ そこそこ楽しめるのでは",
+      "draft_reference": {
+        "kind": "vtt_cue_pair_concat",
+        "start_ms": 0,
+        "end_ms": 4780,
+        "cue_ids": [
+          "1858",
+          "1860"
+        ]
+      },
+      "timing_source": "vtt_fallback_only",
+      "raw_timing_available": false,
+      "gold": {
+        "line_onset_ms": null,
+        "annotator_id": null,
+        "annotated_at": null,
+        "audio_listened": false
+      },
+      "gold_provenance": "missing_human_audio_annotation",
+      "candidate_or_boundary_fields_are_not_gold": true,
+      "coverage_excluded": true,
+      "fallback_non_regression_required": true
+    },
+    {
+      "row_id": "t1-fallback-012",
+      "fixture_group": "vtt_fallback_concat",
+      "audio_source_id": "cgal-audio",
+      "source_hashes": {
+        "audio_sha256": "b3341ee5bbe1288e9919eacb3b94c4aa7fb49001dfd9d5ee8f39a48736e427ba",
+        "vtt_sha256": "0d5a200a43a5325dc4799a45f4c23fc6580a140e5d56f2f188e542f72b269676",
+        "raw_timing_sha256": null
+      },
+      "source_span": {
+        "kind": "concatenated_source_audio",
+        "parts": [
+          {
+            "start_ms": 12159,
+            "end_ms": 14910,
+            "concat_offset_ms": 0
+          },
+          {
+            "start_ms": 14920,
+            "end_ms": 18270,
+            "concat_offset_ms": 2751
+          }
+        ],
+        "duration_ms": 6101
+      },
+      "absolute_video_span_ms": {
+        "parts": [
+          {
+            "start_ms": 4232159,
+            "end_ms": 4234910
+          },
+          {
+            "start_ms": 4234920,
+            "end_ms": 4238270
+          }
+        ]
+      },
+      "vtt_cue_ids": [
+        "1860",
+        "1862"
+      ],
+      "target_text": "で、そんなハードなゲームでなければ そこそこ楽しめるのでは そこそこ楽しめるのでは 行けるんすかね?",
+      "draft_reference": {
+        "kind": "vtt_cue_pair_concat",
+        "start_ms": 0,
+        "end_ms": 6101,
+        "cue_ids": [
+          "1860",
+          "1862"
+        ]
+      },
+      "timing_source": "vtt_fallback_only",
+      "raw_timing_available": false,
+      "gold": {
+        "line_onset_ms": null,
+        "annotator_id": null,
+        "annotated_at": null,
+        "audio_listened": false
+      },
+      "gold_provenance": "missing_human_audio_annotation",
+      "candidate_or_boundary_fields_are_not_gold": true,
+      "coverage_excluded": true,
+      "fallback_non_regression_required": true
+    },
+    {
+      "row_id": "t1-fallback-013",
+      "fixture_group": "vtt_fallback_concat",
+      "audio_source_id": "cgal-audio",
+      "source_hashes": {
+        "audio_sha256": "b3341ee5bbe1288e9919eacb3b94c4aa7fb49001dfd9d5ee8f39a48736e427ba",
+        "vtt_sha256": "0d5a200a43a5325dc4799a45f4c23fc6580a140e5d56f2f188e542f72b269676",
+        "raw_timing_sha256": null
+      },
+      "source_span": {
+        "kind": "concatenated_source_audio",
+        "parts": [
+          {
+            "start_ms": 14920,
+            "end_ms": 18270,
+            "concat_offset_ms": 0
+          },
+          {
+            "start_ms": 18280,
+            "end_ms": 21870,
+            "concat_offset_ms": 3350
+          }
+        ],
+        "duration_ms": 6940
+      },
+      "absolute_video_span_ms": {
+        "parts": [
+          {
+            "start_ms": 4234920,
+            "end_ms": 4238270
+          },
+          {
+            "start_ms": 4238280,
+            "end_ms": 4241870
+          }
+        ]
+      },
+      "vtt_cue_ids": [
+        "1862",
+        "1864"
+      ],
+      "target_text": "そこそこ楽しめるのでは 行けるんすかね? 行けるんすかね? 行けるんすかね?あ、これか。ダイレクト",
+      "draft_reference": {
+        "kind": "vtt_cue_pair_concat",
+        "start_ms": 0,
+        "end_ms": 6940,
+        "cue_ids": [
+          "1862",
+          "1864"
+        ]
+      },
+      "timing_source": "vtt_fallback_only",
+      "raw_timing_available": false,
+      "gold": {
+        "line_onset_ms": null,
+        "annotator_id": null,
+        "annotated_at": null,
+        "audio_listened": false
+      },
+      "gold_provenance": "missing_human_audio_annotation",
+      "candidate_or_boundary_fields_are_not_gold": true,
+      "coverage_excluded": true,
+      "fallback_non_regression_required": true
+    },
+    {
+      "row_id": "t1-fallback-014",
+      "fixture_group": "vtt_fallback_concat",
+      "audio_source_id": "cgal-audio",
+      "source_hashes": {
+        "audio_sha256": "b3341ee5bbe1288e9919eacb3b94c4aa7fb49001dfd9d5ee8f39a48736e427ba",
+        "vtt_sha256": "0d5a200a43a5325dc4799a45f4c23fc6580a140e5d56f2f188e542f72b269676",
+        "raw_timing_sha256": null
+      },
+      "source_span": {
+        "kind": "concatenated_source_audio",
+        "parts": [
+          {
+            "start_ms": 18280,
+            "end_ms": 21870,
+            "concat_offset_ms": 0
+          },
+          {
+            "start_ms": 21880,
+            "end_ms": 24550,
+            "concat_offset_ms": 3590
+          }
+        ],
+        "duration_ms": 6260
+      },
+      "absolute_video_span_ms": {
+        "parts": [
+          {
+            "start_ms": 4238280,
+            "end_ms": 4241870
+          },
+          {
+            "start_ms": 4241880,
+            "end_ms": 4244550
+          }
+        ]
+      },
+      "vtt_cue_ids": [
+        "1864",
+        "1866"
+      ],
+      "target_text": "行けるんすかね? 行けるんすかね?あ、これか。ダイレクト 行けるんすかね?あ、これか。ダイレクト XはMicクrosoftが開発した",
+      "draft_reference": {
+        "kind": "vtt_cue_pair_concat",
+        "start_ms": 0,
+        "end_ms": 6260,
+        "cue_ids": [
+          "1864",
+          "1866"
+        ]
+      },
+      "timing_source": "vtt_fallback_only",
+      "raw_timing_available": false,
+      "gold": {
+        "line_onset_ms": null,
+        "annotator_id": null,
+        "annotated_at": null,
+        "audio_listened": false
+      },
+      "gold_provenance": "missing_human_audio_annotation",
+      "candidate_or_boundary_fields_are_not_gold": true,
+      "coverage_excluded": true,
+      "fallback_non_regression_required": true
+    },
+    {
+      "row_id": "t1-fallback-015",
+      "fixture_group": "vtt_fallback_concat",
+      "audio_source_id": "cgal-audio",
+      "source_hashes": {
+        "audio_sha256": "b3341ee5bbe1288e9919eacb3b94c4aa7fb49001dfd9d5ee8f39a48736e427ba",
+        "vtt_sha256": "0d5a200a43a5325dc4799a45f4c23fc6580a140e5d56f2f188e542f72b269676",
+        "raw_timing_sha256": null
+      },
+      "source_span": {
+        "kind": "concatenated_source_audio",
+        "parts": [
+          {
+            "start_ms": 21880,
+            "end_ms": 24550,
+            "concat_offset_ms": 0
+          },
+          {
+            "start_ms": 24560,
+            "end_ms": 28430,
+            "concat_offset_ms": 2670
+          }
+        ],
+        "duration_ms": 6540
+      },
+      "absolute_video_span_ms": {
+        "parts": [
+          {
+            "start_ms": 4241880,
+            "end_ms": 4244550
+          },
+          {
+            "start_ms": 4244560,
+            "end_ms": 4248430
+          }
+        ]
+      },
+      "vtt_cue_ids": [
+        "1866",
+        "1868"
+      ],
+      "target_text": "行けるんすかね?あ、これか。ダイレクト XはMicクrosoftが開発した XはMicクrosoftが開発した Windows向けのゲームや映像音声",
+      "draft_reference": {
+        "kind": "vtt_cue_pair_concat",
+        "start_ms": 0,
+        "end_ms": 6540,
+        "cue_ids": [
+          "1866",
+          "1868"
+        ]
+      },
+      "timing_source": "vtt_fallback_only",
+      "raw_timing_available": false,
+      "gold": {
+        "line_onset_ms": null,
+        "annotator_id": null,
+        "annotated_at": null,
+        "audio_listened": false
+      },
+      "gold_provenance": "missing_human_audio_annotation",
+      "candidate_or_boundary_fields_are_not_gold": true,
+      "coverage_excluded": true,
+      "fallback_non_regression_required": true
+    },
+    {
+      "row_id": "t1-fallback-016",
+      "fixture_group": "vtt_fallback_concat",
+      "audio_source_id": "cgal-audio",
+      "source_hashes": {
+        "audio_sha256": "b3341ee5bbe1288e9919eacb3b94c4aa7fb49001dfd9d5ee8f39a48736e427ba",
+        "vtt_sha256": "0d5a200a43a5325dc4799a45f4c23fc6580a140e5d56f2f188e542f72b269676",
+        "raw_timing_sha256": null
+      },
+      "source_span": {
+        "kind": "concatenated_source_audio",
+        "parts": [
+          {
+            "start_ms": 24560,
+            "end_ms": 28430,
+            "concat_offset_ms": 0
+          },
+          {
+            "start_ms": 28440,
+            "end_ms": 32430,
+            "concat_offset_ms": 3870
+          }
+        ],
+        "duration_ms": 7860
+      },
+      "absolute_video_span_ms": {
+        "parts": [
+          {
+            "start_ms": 4244560,
+            "end_ms": 4248430
+          },
+          {
+            "start_ms": 4248440,
+            "end_ms": 4252430
+          }
+        ]
+      },
+      "vtt_cue_ids": [
+        "1868",
+        "1870"
+      ],
+      "target_text": "XはMicクrosoftが開発した Windows向けのゲームや映像音声 Windows向けのゲームや映像音声 処理で使われるAPIの集合です。API",
+      "draft_reference": {
+        "kind": "vtt_cue_pair_concat",
+        "start_ms": 0,
+        "end_ms": 7860,
+        "cue_ids": [
+          "1868",
+          "1870"
+        ]
+      },
+      "timing_source": "vtt_fallback_only",
+      "raw_timing_available": false,
+      "gold": {
+        "line_onset_ms": null,
+        "annotator_id": null,
+        "annotated_at": null,
+        "audio_listened": false
+      },
+      "gold_provenance": "missing_human_audio_annotation",
+      "candidate_or_boundary_fields_are_not_gold": true,
+      "coverage_excluded": true,
+      "fallback_non_regression_required": true
+    },
+    {
+      "row_id": "t1-fallback-017",
+      "fixture_group": "vtt_fallback_concat",
+      "audio_source_id": "cgal-audio",
+      "source_hashes": {
+        "audio_sha256": "b3341ee5bbe1288e9919eacb3b94c4aa7fb49001dfd9d5ee8f39a48736e427ba",
+        "vtt_sha256": "0d5a200a43a5325dc4799a45f4c23fc6580a140e5d56f2f188e542f72b269676",
+        "raw_timing_sha256": null
+      },
+      "source_span": {
+        "kind": "concatenated_source_audio",
+        "parts": [
+          {
+            "start_ms": 28440,
+            "end_ms": 32430,
+            "concat_offset_ms": 0
+          },
+          {
+            "start_ms": 32440,
+            "end_ms": 36270,
+            "concat_offset_ms": 3990
+          }
+        ],
+        "duration_ms": 7820
+      },
+      "absolute_video_span_ms": {
+        "parts": [
+          {
+            "start_ms": 4248440,
+            "end_ms": 4252430
+          },
+          {
+            "start_ms": 4252440,
+            "end_ms": 4256270
+          }
+        ]
+      },
+      "vtt_cue_ids": [
+        "1870",
+        "1872"
+      ],
+      "target_text": "Windows向けのゲームや映像音声 処理で使われるAPIの集合です。API 処理で使われるAPIの集合です。API の集合です。",
+      "draft_reference": {
+        "kind": "vtt_cue_pair_concat",
+        "start_ms": 0,
+        "end_ms": 7820,
+        "cue_ids": [
+          "1870",
+          "1872"
+        ]
+      },
+      "timing_source": "vtt_fallback_only",
+      "raw_timing_available": false,
+      "gold": {
+        "line_onset_ms": null,
+        "annotator_id": null,
+        "annotated_at": null,
+        "audio_listened": false
+      },
+      "gold_provenance": "missing_human_audio_annotation",
+      "candidate_or_boundary_fields_are_not_gold": true,
+      "coverage_excluded": true,
+      "fallback_non_regression_required": true
+    },
+    {
+      "row_id": "t1-fallback-018",
+      "fixture_group": "vtt_fallback_concat",
+      "audio_source_id": "cgal-audio",
+      "source_hashes": {
+        "audio_sha256": "b3341ee5bbe1288e9919eacb3b94c4aa7fb49001dfd9d5ee8f39a48736e427ba",
+        "vtt_sha256": "0d5a200a43a5325dc4799a45f4c23fc6580a140e5d56f2f188e542f72b269676",
+        "raw_timing_sha256": null
+      },
+      "source_span": {
+        "kind": "concatenated_source_audio",
+        "parts": [
+          {
+            "start_ms": 32440,
+            "end_ms": 36270,
+            "concat_offset_ms": 0
+          },
+          {
+            "start_ms": 38960,
+            "end_ms": 41430,
+            "concat_offset_ms": 3830
+          }
+        ],
+        "duration_ms": 6300
+      },
+      "absolute_video_span_ms": {
+        "parts": [
+          {
+            "start_ms": 4252440,
+            "end_ms": 4256270
+          },
+          {
+            "start_ms": 4258960,
+            "end_ms": 4261430
+          }
+        ]
+      },
+      "vtt_cue_ids": [
+        "1872",
+        "1874"
+      ],
+      "target_text": "処理で使われるAPIの集合です。API の集合です。 ダイレクトXを使うとゲーム側はPCごと に違うCPUやGPUの細かい違いを",
+      "draft_reference": {
+        "kind": "vtt_cue_pair_concat",
+        "start_ms": 0,
+        "end_ms": 6300,
+        "cue_ids": [
+          "1872",
+          "1874"
+        ]
+      },
+      "timing_source": "vtt_fallback_only",
+      "raw_timing_available": false,
+      "gold": {
+        "line_onset_ms": null,
+        "annotator_id": null,
+        "annotated_at": null,
+        "audio_listened": false
+      },
+      "gold_provenance": "missing_human_audio_annotation",
+      "candidate_or_boundary_fields_are_not_gold": true,
+      "coverage_excluded": true,
+      "fallback_non_regression_required": true
+    },
+    {
+      "row_id": "t1-fallback-019",
+      "fixture_group": "vtt_fallback_concat",
+      "audio_source_id": "cgal-audio",
+      "source_hashes": {
+        "audio_sha256": "b3341ee5bbe1288e9919eacb3b94c4aa7fb49001dfd9d5ee8f39a48736e427ba",
+        "vtt_sha256": "0d5a200a43a5325dc4799a45f4c23fc6580a140e5d56f2f188e542f72b269676",
+        "raw_timing_sha256": null
+      },
+      "source_span": {
+        "kind": "concatenated_source_audio",
+        "parts": [
+          {
+            "start_ms": 38960,
+            "end_ms": 41430,
+            "concat_offset_ms": 0
+          },
+          {
+            "start_ms": 41440,
+            "end_ms": 43910,
+            "concat_offset_ms": 2470
+          }
+        ],
+        "duration_ms": 4940
+      },
+      "absolute_video_span_ms": {
+        "parts": [
+          {
+            "start_ms": 4258960,
+            "end_ms": 4261430
+          },
+          {
+            "start_ms": 4261440,
+            "end_ms": 4263910
+          }
+        ]
+      },
+      "vtt_cue_ids": [
+        "1874",
+        "1876"
+      ],
+      "target_text": "ダイレクトXを使うとゲーム側はPCごと に違うCPUやGPUの細かい違いを に違うCPUやGPUの細かい違いを あまり意識せずにグラフィック症となり",
+      "draft_reference": {
+        "kind": "vtt_cue_pair_concat",
+        "start_ms": 0,
+        "end_ms": 4940,
+        "cue_ids": [
+          "1874",
+          "1876"
+        ]
+      },
+      "timing_source": "vtt_fallback_only",
+      "raw_timing_available": false,
+      "gold": {
+        "line_onset_ms": null,
+        "annotator_id": null,
+        "annotated_at": null,
+        "audio_listened": false
+      },
+      "gold_provenance": "missing_human_audio_annotation",
+      "candidate_or_boundary_fields_are_not_gold": true,
+      "coverage_excluded": true,
+      "fallback_non_regression_required": true
+    },
+    {
+      "row_id": "t1-fallback-020",
+      "fixture_group": "vtt_fallback_concat",
+      "audio_source_id": "cgal-audio",
+      "source_hashes": {
+        "audio_sha256": "b3341ee5bbe1288e9919eacb3b94c4aa7fb49001dfd9d5ee8f39a48736e427ba",
+        "vtt_sha256": "0d5a200a43a5325dc4799a45f4c23fc6580a140e5d56f2f188e542f72b269676",
+        "raw_timing_sha256": null
+      },
+      "source_span": {
+        "kind": "concatenated_source_audio",
+        "parts": [
+          {
+            "start_ms": 41440,
+            "end_ms": 43910,
+            "concat_offset_ms": 0
+          },
+          {
+            "start_ms": 43920,
+            "end_ms": 47870,
+            "concat_offset_ms": 2470
+          }
+        ],
+        "duration_ms": 6420
+      },
+      "absolute_video_span_ms": {
+        "parts": [
+          {
+            "start_ms": 4261440,
+            "end_ms": 4263910
+          },
+          {
+            "start_ms": 4263920,
+            "end_ms": 4267870
+          }
+        ]
+      },
+      "vtt_cue_ids": [
+        "1876",
+        "1878"
+      ],
+      "target_text": "に違うCPUやGPUの細かい違いを あまり意識せずにグラフィック症となり あまり意識せずにグラフィック症となり ます。",
+      "draft_reference": {
+        "kind": "vtt_cue_pair_concat",
+        "start_ms": 0,
+        "end_ms": 6420,
+        "cue_ids": [
+          "1876",
+          "1878"
+        ]
+      },
+      "timing_source": "vtt_fallback_only",
+      "raw_timing_available": false,
+      "gold": {
+        "line_onset_ms": null,
+        "annotator_id": null,
+        "annotated_at": null,
+        "audio_listened": false
+      },
+      "gold_provenance": "missing_human_audio_annotation",
+      "candidate_or_boundary_fields_are_not_gold": true,
+      "coverage_excluded": true,
+      "fallback_non_regression_required": true
+    }
+  ],
+  "notes": [
+    "音声bytesはcommitしない。manifestのsource hashとspanで外部read-only cacheを識別する。",
+    "target_text と draft_reference は固定入力または既存S9の参照でありgoldではない。",
+    "T1-1 benchmark候補測定、candidate差替え、Go/No-Go判定はhuman gold入力後まで実行しない。"
+  ],
+  "manifest_fingerprint": "b931e386300aa8e32e15986c163ec3e05101c58471e48858b6aca23448281743"
+}
