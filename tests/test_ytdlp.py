@@ -19,7 +19,9 @@ from yt_live_kit.services.ytdlp import (
     MISSING_YTDLP_BINARY_IDENTITY,
     YtdlpError,
     _download_subtitles,
+    _check_audio_ffmpeg,
     _find_subtitle_file,
+    _resolve_audio_ffmpeg,
     _run_ytdlp,
     extract_video_id,
     fetch,
@@ -53,6 +55,151 @@ def _wav_bytes(*, sample_rate: int = 16_000, channels: int = 1) -> bytes:
         wav.setframerate(sample_rate)
         wav.writeframes(b"\x00\x00" * channels * 160)
     return buffer.getvalue()
+
+
+def _fake_ffmpeg(tmp_path, *, name: str = "ffmpeg"):
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    path = tmp_path / name
+    path.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    path.chmod(0o755)
+    return path
+
+
+def test_resolve_audio_ffmpeg_accepts_command_name_and_uses_resolved_path(
+    monkeypatch,
+    tmp_path,
+):
+    ffmpeg = _fake_ffmpeg(tmp_path, name="ffmpeg command")
+    monkeypatch.setattr(
+        "yt_live_kit.services.ytdlp.shutil.which",
+        lambda value: str(ffmpeg) if value == "ffmpeg-test" else None,
+    )
+
+    assert _resolve_audio_ffmpeg("ffmpeg-test") == ffmpeg.resolve()
+
+
+def test_resolve_audio_ffmpeg_accepts_absolute_path_with_spaces(tmp_path):
+    ffmpeg = _fake_ffmpeg(tmp_path / "bin with spaces")
+
+    assert _resolve_audio_ffmpeg(str(ffmpeg)) == ffmpeg.resolve()
+
+
+def test_resolve_audio_ffmpeg_rejects_missing_command(monkeypatch):
+    monkeypatch.setattr(
+        "yt_live_kit.services.ytdlp.shutil.which", lambda _value: None
+    )
+
+    with pytest.raises(AudioSpanError, match="FFmpeg が見つかりません"):
+        _resolve_audio_ffmpeg("missing-ffmpeg")
+
+
+def test_resolve_audio_ffmpeg_rejects_empty_path():
+    with pytest.raises(AudioSpanError, match="パスが空"):
+        _resolve_audio_ffmpeg("  ")
+
+
+def test_resolve_audio_ffmpeg_rejects_missing_absolute_path(tmp_path):
+    with pytest.raises(AudioSpanError, match="FFmpeg を確認できません"):
+        _resolve_audio_ffmpeg(str(tmp_path / "missing" / "ffmpeg"))
+
+
+def test_resolve_audio_ffmpeg_rejects_non_executable_file(tmp_path):
+    ffmpeg = tmp_path / "ffmpeg"
+    ffmpeg.write_bytes(b"not executable")
+    ffmpeg.chmod(0o644)
+
+    with pytest.raises(AudioSpanError, match="実行権限"):
+        _resolve_audio_ffmpeg(str(ffmpeg))
+
+
+def test_resolve_audio_ffmpeg_rejects_directory(tmp_path):
+    directory = tmp_path / "ffmpeg-dir"
+    directory.mkdir()
+
+    with pytest.raises(AudioSpanError, match="通常のファイル"):
+        _resolve_audio_ffmpeg(str(directory))
+
+
+def test_check_audio_ffmpeg_rejects_unlaunchable_executable(tmp_path):
+    ffmpeg = tmp_path / "ffmpeg"
+    ffmpeg.write_text("#!/bin/sh\nexit 7\n", encoding="utf-8")
+    ffmpeg.chmod(0o755)
+
+    with pytest.raises(AudioSpanError, match="起動確認に失敗"):
+        _check_audio_ffmpeg(ffmpeg, Settings(ffmpeg_timeout=5))
+
+
+def test_prepare_audio_span_uses_configured_ffmpeg_when_path_ffmpeg_is_broken(
+    monkeypatch,
+    tmp_path,
+):
+    good_ffmpeg = _fake_ffmpeg(tmp_path / "configured ffmpeg")
+    broken_bin = tmp_path / "broken-bin"
+    broken_bin.mkdir()
+    broken_ffmpeg = _fake_ffmpeg(broken_bin)
+    broken_ffmpeg.write_text("#!/bin/sh\nexit 7\n", encoding="utf-8")
+    broken_ffmpeg.chmod(0o755)
+    monkeypatch.setenv("PATH", str(broken_bin))
+    settings = Settings(
+        data_dir=tmp_path / "data",
+        ytdlp_path="yt-dlp-test",
+        ffmpeg_path=str(good_ffmpeg),
+    )
+    content = _wav_bytes()
+    calls: list[list[str]] = []
+
+    monkeypatch.setattr(
+        "yt_live_kit.services.ytdlp.shutil.which",
+        lambda value: "/usr/bin/yt-dlp" if value == "yt-dlp-test" else None,
+    )
+
+    def fake_run(args, _settings, *, timeout=None, pass_fds=(), cwd_fd=None):
+        calls.append(list(args))
+        current_fd = os.open(".", os.O_RDONLY)
+        try:
+            os.fchdir(cwd_fd)
+            __import__("pathlib").Path("span.wav").write_bytes(content)
+        finally:
+            os.fchdir(current_fd)
+            os.close(current_fd)
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr("yt_live_kit.services.ytdlp._run_ytdlp", fake_run)
+
+    prepare_audio_span("IJvd6k6ZmUo", (1_000, 2_000), settings)
+
+    assert calls
+    command = calls[0]
+    assert command[command.index("--ffmpeg-location") + 1] == str(
+        good_ffmpeg.resolve()
+    )
+    assert str(broken_bin) not in command
+
+
+def test_prepare_audio_span_rejects_unlaunchable_ffmpeg_before_ytdlp(
+    monkeypatch,
+    tmp_path,
+):
+    broken_ffmpeg = _fake_ffmpeg(tmp_path)
+    broken_ffmpeg.write_text("#!/bin/sh\nexit 7\n", encoding="utf-8")
+    broken_ffmpeg.chmod(0o755)
+    settings = Settings(
+        data_dir=tmp_path / "data",
+        ytdlp_path="yt-dlp-test",
+        ffmpeg_path=str(broken_ffmpeg),
+    )
+    monkeypatch.setattr(
+        "yt_live_kit.services.ytdlp.shutil.which",
+        lambda value: "/usr/bin/yt-dlp" if value == "yt-dlp-test" else None,
+    )
+
+    def fail_if_called(*_args, **_kwargs):
+        raise AssertionError("FFmpeg fail closed 前に yt-dlp を呼び出してはいけない")
+
+    monkeypatch.setattr("yt_live_kit.services.ytdlp._run_ytdlp", fail_if_called)
+
+    with pytest.raises(AudioSpanError, match="起動確認に失敗"):
+        prepare_audio_span("IJvd6k6ZmUo", (1_000, 2_000), settings)
 
 
 def _mock_fetch_dependencies(monkeypatch, metadata: dict) -> None:
@@ -532,6 +679,7 @@ def test_prepare_audio_span_uses_selected_audio_only_range_and_persistent_cache(
         data_dir=tmp_path,
         ytdlp_path="yt-dlp-test",
         ytdlp_timeout=17,
+        ffmpeg_path=str(_fake_ffmpeg(tmp_path)),
     )
     calls: list[list[str]] = []
     content = _wav_bytes()
@@ -574,6 +722,9 @@ def test_prepare_audio_span_uses_selected_audio_only_range_and_persistent_cache(
     assert len(calls) == 1
     command = calls[0]
     assert command[command.index("-f") + 1] == "bestaudio"
+    assert command[command.index("--ffmpeg-location") + 1] == str(
+        _fake_ffmpeg(tmp_path).resolve()
+    )
     assert "--download-sections" in command
     section = command[command.index("--download-sections") + 1]
     assert section == "*00:00:12.095-00:00:23.956"
@@ -595,7 +746,11 @@ def test_prepare_audio_span_uses_selected_audio_only_range_and_persistent_cache(
 
 
 def test_prepare_audio_span_corrupt_cache_is_a_miss(monkeypatch, tmp_path):
-    settings = Settings(data_dir=tmp_path, ytdlp_path="yt-dlp-test")
+    settings = Settings(
+        data_dir=tmp_path,
+        ytdlp_path="yt-dlp-test",
+        ffmpeg_path=str(_fake_ffmpeg(tmp_path)),
+    )
     monkeypatch.setattr(
         "yt_live_kit.services.ytdlp.shutil.which",
         lambda value: "/usr/bin/yt-dlp" if value == "yt-dlp-test" else value,
@@ -631,7 +786,11 @@ def test_prepare_audio_span_invalid_wav_cache_is_quarantined_and_regenerated(
     monkeypatch,
     tmp_path,
 ):
-    settings = Settings(data_dir=tmp_path, ytdlp_path="yt-dlp-test")
+    settings = Settings(
+        data_dir=tmp_path,
+        ytdlp_path="yt-dlp-test",
+        ffmpeg_path=str(_fake_ffmpeg(tmp_path)),
+    )
     monkeypatch.setattr(
         "yt_live_kit.services.ytdlp.shutil.which",
         lambda value: "/usr/bin/yt-dlp" if value == "yt-dlp-test" else value,
@@ -666,7 +825,11 @@ def test_prepare_audio_span_rejects_invalid_generated_wav_with_audio_only_diagno
     monkeypatch,
     tmp_path,
 ):
-    settings = Settings(data_dir=tmp_path, ytdlp_path="yt-dlp-test")
+    settings = Settings(
+        data_dir=tmp_path,
+        ytdlp_path="yt-dlp-test",
+        ffmpeg_path=str(_fake_ffmpeg(tmp_path)),
+    )
     monkeypatch.setattr(
         "yt_live_kit.services.ytdlp.shutil.which",
         lambda value: "/usr/bin/yt-dlp" if value == "yt-dlp-test" else value,
@@ -688,7 +851,11 @@ def test_prepare_audio_span_rejects_invalid_generated_wav_with_audio_only_diagno
 
 
 def test_prepare_audio_span_does_not_fallback_to_video_format(monkeypatch, tmp_path):
-    settings = Settings(data_dir=tmp_path, ytdlp_path="yt-dlp-test")
+    settings = Settings(
+        data_dir=tmp_path,
+        ytdlp_path="yt-dlp-test",
+        ffmpeg_path=str(_fake_ffmpeg(tmp_path)),
+    )
     monkeypatch.setattr(
         "yt_live_kit.services.ytdlp.shutil.which",
         lambda value: "/usr/bin/yt-dlp" if value == "yt-dlp-test" else value,

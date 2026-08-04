@@ -101,6 +101,7 @@ _AUDIO_FORMAT_SETTINGS: dict[str, Any] = {
     "seek": "yt-dlp-download-sections",
     "cue_inclusion_rule": "half_open_overlap",
 }
+_AUDIO_FFMPEG_CHECK_TIMEOUT = 30
 
 
 @dataclass(frozen=True)
@@ -539,7 +540,90 @@ def _read_audio_cache(
         return None
 
 
-def _audio_download_argv(video_id: str, item: AudioSpanRange) -> list[str]:
+def _resolve_audio_ffmpeg(ffmpeg_path: str) -> Path:
+    """設定値から音声取得に使う FFmpeg 実体を解決する.
+
+    S9 の音声 span は yt-dlp の ``--download-sections`` と後処理で FFmpeg
+    を使う。PATH 上の別実体へ暗黙に切り替わると、字幕精査の入力が作れず
+    fail closed にならないため、設定値をここで絶対パスへ固定する。
+    """
+
+    configured = ffmpeg_path.strip()
+    if not configured:
+        raise AudioSpanError(
+            "FFmpeg のパスが空です。設定ページで YTLK_FFMPEG_PATH に"
+            "実行可能な FFmpeg のパスを設定してください。"
+        )
+
+    try:
+        configured_path = Path(configured).expanduser()
+        has_path_component = configured_path.is_absolute() or os.sep in configured
+        resolved_command = None if has_path_component else shutil.which(configured)
+        if resolved_command is None and not has_path_component:
+            raise AudioSpanError(
+                f"FFmpeg が見つかりません（設定: {configured}）。"
+                "設定ページで YTLK_FFMPEG_PATH を確認してください。"
+            )
+        candidate = configured_path if has_path_component else Path(resolved_command)
+        resolved = candidate.resolve(strict=True)
+        stat_result = resolved.stat()
+    except AudioSpanError:
+        raise
+    except (OSError, RuntimeError, TypeError, ValueError) as exc:
+        raise AudioSpanError(
+            f"FFmpeg を確認できません（設定: {configured}）。"
+            "設定ページで YTLK_FFMPEG_PATH に実行可能な FFmpeg のパスを設定してください。"
+        ) from exc
+
+    if not stat.S_ISREG(stat_result.st_mode):
+        raise AudioSpanError(
+            f"FFmpeg が通常のファイルではありません（設定: {configured}）。"
+            "設定ページで実行ファイルのパスを指定してください。"
+        )
+    if not os.access(resolved, os.X_OK):
+        raise AudioSpanError(
+            f"FFmpeg に実行権限がありません（設定: {configured}）。"
+            "設定ページで実行権限と YTLK_FFMPEG_PATH を確認してください。"
+        )
+    return resolved
+
+
+def _check_audio_ffmpeg(ffmpeg_path: Path, settings: Settings) -> None:
+    """FFmpeg 実体が起動できることをネットワーク前に確認する."""
+
+    try:
+        result = subprocess.run(
+            [str(ffmpeg_path), "-hide_banner", "-version"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=min(settings.ffmpeg_timeout, _AUDIO_FFMPEG_CHECK_TIMEOUT),
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise AudioSpanError(
+            "FFmpeg の起動確認がタイムアウトしました。"
+            "設定ページで YTLK_FFMPEG_PATH の実体を確認してください。"
+        ) from exc
+    except OSError as exc:
+        raise AudioSpanError(
+            "FFmpeg を実行できません。設定ページで YTLK_FFMPEG_PATH の"
+            "実行権限と実体を確認してください。"
+        ) from exc
+    if result.returncode != 0:
+        detail = _sanitize_diagnostic(result.stderr or result.stdout)
+        raise AudioSpanError(
+            f"FFmpeg の起動確認に失敗しました（終了コード: {result.returncode}）。"
+            "設定ページで YTLK_FFMPEG_PATH に実行可能な FFmpeg のパスを設定してください。"
+            + (f"（詳細: {detail}）" if detail else "")
+        )
+
+
+def _audio_download_argv(
+    video_id: str,
+    item: AudioSpanRange,
+    *,
+    ffmpeg_path: Path,
+) -> list[str]:
     url = f"https://www.youtube.com/watch?v={video_id}"
     section = (
         f"*{_format_audio_seek_ms(item.requested_start_ms)}-"
@@ -560,6 +644,8 @@ def _audio_download_argv(video_id: str, item: AudioSpanRange) -> list[str]:
         "--download-sections",
         section,
         "--extract-audio",
+        "--ffmpeg-location",
+        str(ffmpeg_path),
         "--audio-format",
         "wav",
         "--audio-quality",
@@ -673,6 +759,9 @@ def prepare_audio_span(
         return cached
     _quarantine_audio_cache(audio_path, metadata_path, settings)
 
+    resolved_ffmpeg = _resolve_audio_ffmpeg(settings.ffmpeg_path)
+    _check_audio_ffmpeg(resolved_ffmpeg, settings)
+
     if shutil.which(settings.ytdlp_path) is None:
         raise AudioSpanError(
             f"yt-dlp が見つかりません（パス: {settings.ytdlp_path}）。"
@@ -697,7 +786,11 @@ def prepare_audio_span(
             | getattr(os, "O_NOFOLLOW", 0),
         )
         result = _run_ytdlp(
-            _audio_download_argv(video_id, item),
+            _audio_download_argv(
+                video_id,
+                item,
+                ffmpeg_path=resolved_ffmpeg,
+            ),
             settings,
             timeout=settings.ytdlp_timeout,
             pass_fds=(directory_descriptor,),
