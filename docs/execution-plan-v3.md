@@ -64,6 +64,7 @@
 | P6-5 | P6 統合受け入れ・回帰 | [x] 完了 |
 | P6 | Shorts 投稿メタデータ品質ゲート + 関連動画確認追跡 | [x] 完了 |
 | R2 | UI 大幅刷新前の境界整理・回帰リスク監査 | [x] 完了 |
+| U9 | UI 視覚刷新（テーマ適用 + shell 刷新） | [ ] 未着手 |
 
 **状態の書き方:** `[ ] 未着手` / `[~] 進行中` / `[x] 完了`
 
@@ -252,6 +253,7 @@ data/{video_id}/ ...
 | **P6-5** | P6 統合受け入れ・回帰 | API mock、全件テスト、scope guard、独立レビュー | AC-38, AC-39 |
 | **P6** | Shorts 投稿メタデータ品質ゲート + 関連動画確認追跡 | タイトル 3 方向、必須概要欄、upload 後の関連動画人確認 | FR-37, FR-38, AC-38, AC-39 |
 | **R2** | UI 大幅刷新前の境界整理・回帰リスク監査 | UI view model、widget state 契約、候補 lineage、投稿安全境界の characterization | 既存 FR / NFR / AC の非回帰 |
+| **U9** | UI 視覚刷新（テーマ適用 + shell 刷新） | ネイティブテーマ適用、AppTest 視覚回帰スモーク、sidebar / header / KPI カード / 工程 bar の shell 刷新 | FR-33、AC-35、既存 FR / NFR / AC の非回帰 |
 
 各タスクは「実装 → 単体確認 → Done 条件チェック → **タスク完了コミット**」で閉じる。フェーズ末（U5 / S5 / P3）は「フェーズ受け入れ」も兼ねる。P4 / S6 は v3 受け入れ（P3）完了後に追加された要件であり、P3 の証跡・版数には手を入れない。
 
@@ -2132,6 +2134,47 @@ data/{video_id}/ ...
 
 ---
 
+### U9: UI 視覚刷新（テーマ適用 + shell 刷新）
+
+**目的:** `docs/references/u6-short-production-line-v3.2.png` の視覚階層へ、R2 で整理した表示・session state・永続 state の境界を壊さずに近づける。第 1 弾は Streamlit ネイティブテーマ（案 A+）のみを `.streamlit/config.toml` で適用し Python コードを 0 行に保つ。第 2 弾はサイドバー・ヘッダ・KPI カード・ワークスペース切替・6 工程ステッパーの shell 刷新を行う。テロップ編集器の刷新（第 3 弾）は本フェーズに含めず、T1（テロップ行時刻同期）の `T1-4` に合流させる。
+
+**フェーズ状態:** [ ] 未着手
+
+**前提・制約:** R2（`docs/ui-refactor-review-2026-08-04.md`）が 2026-08-04 に完了し、旧結果混入・session snapshot 復元・draft revision・親候補 index 依存・予約可能件数不一致の P1 / P2 は解消済みであることを前提とする。U6 は完了・M15 達成済みで、現在の回帰基準は `1694 tests collected` である。導入版 Streamlit は 1.60.0、`pyproject.toml` の宣言は `streamlit>=1.59.0`。第 2 弾で限定 CSS 注入（案 B）の要否を判断するのは、第 1 弾（A+）適用後に残差を実測してからとする。第 3 弾（テロップ編集器の刷新）は独立フェーズとせず、`docs/execution-plan-v3.md:1836` / `:1849` の指示どおり T1 contract 確定後の `T1-4` へ合流させ、本フェーズでは新規タスク ID を振らない。
+
+**変更ファイル範囲:** 第 1 弾は `.streamlit/config.toml` のみ。AppTest 視覚回帰スモークは新規 `tests/test_ui_visual_smoke.py`。第 2 弾は `src/yt_live_kit/ui/` の該当 view / component（`app.py`、`views/video_detail.py`、`components/shorts_line.py`、`components/status_bar.py` 等の刷新対象）と対応する既存 `tests/test_ui_*.py`。掃除対象として `src/yt_live_kit/ui/views/video_detail.py`、`src/yt_live_kit/ui/components/shorts_queue.py`、`src/yt_live_kit/ui/pages/` の `__pycache__`。文書は `docs/execution-plan-v3.md` の進捗チェックと、U9-4 の残差実測・U9-5 の案 B 判断を記録する `docs/ui-visual-refresh-plan-2026-08-05.md` を許可する。`services/`、`docs/requirements-v3.md`、`docs/ui-refactor-review-2026-08-04.md`、production `data/` は read-only とする。
+
+**追加の不変条件:** R2 監査文書 §5「変更してはいけない安全境界」を全項目継承する。`st.tabs` への単純な置換を行わず、3 ワークスペースの conditional rendering（`st.segmented_control`）を維持する。worker thread / target から `st.*` を呼ばない。確認 dialog より前に upload、概要欄更新、削除、再生成を起動しない。service transaction を view ファイルへコピーせず、既存 controller / adapter の呼び出し点を保ったまま presentation だけを交換する。
+
+**作業:**
+
+- [ ] U9-1. `.streamlit/config.toml` に `[theme]` セクションを追加し、23 オプションのうちリファレンス画像に合わせる配色・文字・形状・チャート項目を設定する。Python コードは変更しない
+- [ ] U9-2. `[theme] base = "dark"` でダークを既定に固定し、`[theme.sidebar]` でサイドバーを本体と別配色にする。`[theme.light]` / `[theme.dark]` は `[theme]` を拡張する mode 別上書きであり定義すると mode 追従が前提になるため、ダーク前提のリファレンスに合わせる本フェーズでは定義しない
+- [ ] U9-3. 新規 `tests/test_ui_visual_smoke.py` を追加し、`streamlit.testing` / `AppTest` でライブラリ・詳細・設定ページを起動し、例外なく描画できることを検証する。第 2 弾着手前の安全網として先に導入する
+- [ ] U9-4. A+ 適用後の実装とリファレンス画像の残差を実測し、差分一覧を更新する。丸数字ステッパー + 接続線 + 鍵アイコン、赤い波下線、KPI カード内の左アイコン配置など「形」の差分を確認する
+- [ ] U9-5. U9-4 の残差実測を踏まえ、限定 CSS 注入（案 B）の要否を判断する。ステッパーを `st.badge` のまま妥協する選択肢を含めて判断を記録する
+- [ ] U9-6. サイドバーに「作成中のショート」カード・進捗バー・日次カウンタを追加する。`shorts_line.py:947-966` の `st.write` / `st.caption` 実装を置き換える
+- [ ] U9-7. ヘッダと KPI カード 3 枚を刷新する
+- [ ] U9-8. ワークスペース切替の見た目を下線タブ風に整える。`video_detail.py:1188` の `st.segmented_control` による conditional rendering は維持し、`st.tabs` へ置換しない
+- [ ] U9-9. 6 工程ステッパーを刷新する。`shorts_line.py:933-944` の `st.badge` 横並びを置き換える。U9-5 で案 B が必要と判断された場合のみ限定 CSS を用いる
+- [ ] U9-10. `video_detail.py:653` の呼び出し箇所ゼロの `_render_clips` を削除する
+- [ ] U9-11. `shorts_queue.py:502` の候補選択チェックボックス key を配列 index 依存から `source + .id` へ改め、R2-4 の契約に合わせる
+- [ ] U9-12. `src/yt_live_kit/ui/pages/` に残存する `__pycache__` を削除する。`.gitignore` に `__pycache__/` があり `git ls-files src/yt_live_kit/ui/pages/` は空、すなわち git 管理外であるため、この削除はコミット差分の発生しないローカル整理として実施し、コミット境界には含めない
+
+**Done 条件:**
+
+- [ ] `.streamlit/config.toml` の `[theme]` 系設定のみで A+ が適用され、Python コード差分がゼロである
+- [ ] 新規 `tests/test_ui_visual_smoke.py` が AppTest で主要ページの無例外描画を検証し、全件テストに組み込まれている
+- [ ] A+ 適用後の残差実測が記録され、案 B の要否判断（採否いずれでも可）が記録されている
+- [ ] サイドバーの「作成中のショート」カード・進捗バー・日次カウンタ、ヘッダ、KPI カード、ワークスペース切替、6 工程ステッパーが刷新され、`st.segmented_control` の conditional rendering が維持されている
+- [ ] `_render_clips` デッドコードと `shorts_queue.py` の index 依存 key が解消されている。`ui/pages/` の `__pycache__` は git 管理外のローカル整理であり、コミット対象の Done 条件には含めない
+- [ ] R2 §5 の安全境界（transaction 順序、確認 dialog、worker thread からの `st.*` 禁止、`st.tabs` への単純置換禁止）に変更が無い
+- [ ] 全件 `uv run pytest` が変更前の基準から回帰せずに通る
+
+**コミット境界:** テーマ適用（第 1 弾、`.streamlit/config.toml` のみ）を最初のコミットとする。AppTest 視覚回帰スモークの追加を次のコミットとする。shell 刷新（第 2 弾）を独立コミットとする。デッドコード（`_render_clips` の削除）と `shorts_queue.py` の index 依存 key 修正の掃除は最後のコミットに分ける。`ui/pages/` の `__pycache__` は git 管理外でコミット差分が発生しないため、この掃除コミットの対象に含めない。テロップ編集器の刷新（第 3 弾）は `T1-4` に合流するため、本フェーズのコミットには含めない。
+
+---
+
 ## 7. 出力ディレクトリ・ソースコード構成（v3 追加分）
 
 ### 7.1 ソースコード構成
@@ -2506,6 +2549,7 @@ S9 初版で実装するのは、既存 YouTube `video_id` の良好な VTT を�
 14. ~~**P6-1 / P6-2 / P6-3 を分離 worktree で並行実装し、個別レビュー後に main へ統合する。**~~ 完了。P6-1 を S9-4 より先に統合・依存元へ報告し、P6-4 → P6-5 まで独立レビュー後に閉じた
 15. ~~**R2 を完了する。**~~ 完了。手動 E2E 済みの現行挙動を基準に、UI 大幅刷新前の page / session / durable state / upload gate を整理し、監査文書・characterization test・独立レビューで固定した
 16. ~~**T1-PLAN を docs-only で完了する。**~~ 完了。FR-39 / AC-40、T1-1〜T1-5 の独立境界、S9-6 最終受け入れ順、R2 安全境界を 4 docs に反映した。**次は T1-1 の production 非変更 spike と評価 manifest 固定。**
+17. **U9（UI 視覚刷新）を第 1 弾から進める。** R2 で境界整理が完了し、残るのは視覚レイヤーのみ。`.streamlit/config.toml` のネイティブテーマ適用（案 A+）を最初のコミットとし、AppTest 視覚回帰スモークを挟んでから shell 刷新へ進む。限定 CSS 注入（案 B）の要否は A+ 適用後の残差実測で判断する。テロップ編集器の刷新は T1-4 へ合流させ、U9 には含めない。
 
 ---
 
@@ -2513,6 +2557,7 @@ S9 初版で実装するのは、既存 YouTube `video_id` の良好な VTT を�
 
 | 日付 | 内容 |
 |------|------|
+| 2026-08-05 | **U9（UI 視覚刷新）を計画。** R2 完了により残るのは視覚レイヤーのみと確認し、実行計画に未定義だったフェーズを追加した。Streamlit 1.60 のネイティブテーマ 23 オプションを使い切る案 A+ を第 1 弾、限定 CSS 注入の案 B を A+ 適用後の残差実測まで保留、カスタムコンポーネントの案 C は不採用と決めた。AppTest による視覚回帰スモークを第 2 弾の前提として追加し、テロップ編集器の刷新は T1-4 へ合流させて U9 に含めない。R2 §5 の安全境界を全項目継承し、`st.tabs` への単純置換禁止を不変条件として明記した。調査根拠は `docs/ui-visual-refresh-plan-2026-08-05.md` に分離した。 |
 | 2026-08-04 | **T1-PLAN 親レビュー指摘を反映。** T1-1 に固定選択 span の隔離 bounded whisper-cli benchmark を許可し、pooled / 長い単一 cue / multi-cross-cue の群別 gate、VTT fallback + 連結の非回帰、再現 fingerprint を追加した。T1-5 を同期 component acceptance、S9-6 を formal phase acceptance と明記し、隔離 preview、production 不変、T1-5 evidence の条件付き再利用、AC-40 を S9-6 formal PASS 時だけ完了する規約、T1-1〜T1-5 の進捗行、標準 ADR path を反映した。 |
 | 2026-08-04 | **T1-PLAN を docs-only で完了。** S9-6 を受け入れ専用の未完了状態で保持し、S9-5 → T1-PLAN → T1-1 → T1-2 → T1-3 → T1-4 → T1-5 → S9-6 の依存を追加した。固定 manifest と人音声 gold による production 非変更 spike、timing payload 保存 ADR、pure aligner、独立 timing confirmation、R2 の UI 安全境界、AC-40 の同期受け入れを計画し、次の未着手を T1-1 とした。 |
 | 2026-08-04 | **R2 完了。** 旧 global result、描画時 session 復元、再生成時 widget state、候補 lineage、ライン開始の部分保存、投稿 tracking と reservation gate の不整合を pure view model、query、session key、必須 adapter、rollback-safe command へ分離した。変更前 `1645 passed, 2 skipped` から変更後 `1692 passed, 2 skipped`、lock / sync / diff / compile、隔離ブラウザ確認を通過し、独立最終レビューは残存 P0 / P1 / P2 なしで PASS。見た目は変更せず、巨大 renderer、canonical gate の再計算、legacy read migration、queue snapshot、library paging を視覚刷新側の P3 として監査文書に残した。実 upload、外部 write、追加 Codex / Whisper、動画生成、成果物削除は行っていない。 |
