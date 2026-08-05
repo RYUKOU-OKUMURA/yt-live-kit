@@ -231,8 +231,14 @@ def _render_related_video_status(
                 "確認日時: "
                 + operation.related_video_confirmed_at.isoformat()
             )
-        if operation.state != "uploaded" or not operation.video_id:
+        if operation.state != "uploaded":
             st.caption("アップロード成功後に Studio の関連動画確認を行えます。")
+            return
+        if not operation.video_id:
+            st.warning(
+                "関連動画確認対象の Shorts ID が不足しているため、"
+                "確認操作を停止しました。投稿キューを手動修復してください。"
+            )
             return
 
         st.write(f"設定対象の元動画 ID: {_safe_text(operation.source_video_id)}")
@@ -247,14 +253,26 @@ def _render_related_video_status(
         )
         if operation.related_video_status != "pending":
             return
-        st.caption(
-            "確認待ち一覧と確定ボタンは、上部の「関連動画の Studio 手動確認"
-            "（全投稿）」パネルに表示しています。"
-        )
+        if st.button(
+            "Studioで関連動画を設定済みとして確認",
+            type="secondary",
+            key=f"related_video_open_{operation.operation_id}",
+        ):
+            related_video_confirm_dialog(
+                operation.operation_id,
+                operation.source_video_id,
+                operation.video_id,
+                settings,
+                uuid.uuid4().hex,
+            )
 
 
-def _render_related_video_summary_panel(settings: Settings) -> None:
-    """最新 shorts manifest に依存しない全体の確認待ち追跡パネル."""
+def _render_related_video_summary_panel(
+    settings: Settings,
+    *,
+    current_video_id: str | None = None,
+) -> None:
+    """現在の動画**以外**の確認待ちを、最新 manifest と独立に追跡し続ける入口."""
     try:
         summary = get_related_video_summary(settings)
     except UploadQueueError:
@@ -263,51 +281,63 @@ def _render_related_video_summary_panel(settings: Settings) -> None:
             "確認操作を停止しました。投稿キューを手動修復してください。"
         )
         return
-    if summary.pending_count == 0:
+    pending = tuple(
+        item
+        for item in summary.operations
+        if item.source_video_id != current_video_id
+    )
+    if not pending:
         return
-    with st.container(border=True):
-        st.markdown("**関連動画の Studio 手動確認（全投稿）**")
-        st.write(f"未確認件数: {summary.pending_count} 件")
-        for pending in summary.operations:
-            pending_video_id = pending.video_id or ""
-            st.write(
-                "状態: "
-                + _RELATED_STATUS_LABELS.get(
-                    pending.related_video_status,
-                    _safe_text(pending.related_video_status),
+    with st.expander(f"他の動画の確認待ち（{len(pending)} 件）", expanded=False):
+        st.caption(
+            "いま開いている動画とは別の元動画から投稿したショートです。"
+            "再起動後や、過去の生成結果が最新の一覧から消えた後も、ここから確認できます。"
+        )
+        for item in pending:
+            with st.container(border=True):
+                st.write(
+                    f"元動画 {_safe_text(item.source_video_id)} のショート"
+                    f"「{_safe_text(item.content.title)}」"
                 )
-            )
-            st.write(
-                f"operation {_safe_text(pending.operation_id)} / "
-                f"設定対象の元動画 ID: {_safe_text(pending.source_video_id)} / "
-                f"対象 Shorts video ID: {_safe_text(pending_video_id or '未取得')}"
-            )
-            if not pending_video_id:
-                st.warning(
-                    "関連動画確認対象の Shorts ID が不足しているため、"
-                    "確認操作を停止しました。投稿キューを手動修復してください。"
+                pending_video_id = item.video_id or ""
+                st.write(
+                    "状態: "
+                    + _RELATED_STATUS_LABELS.get(
+                        item.related_video_status,
+                        _safe_text(item.related_video_status),
+                    )
                 )
-                continue
-            st.markdown(
-                f"[YouTube Studio の編集画面を開く]"
-                f"({_studio_video_edit_url(pending_video_id)})"
-            )
-            st.write(
-                "手順: Studio の編集画面で関連動画に元動画 ID を設定し、"
-                "保存後にこの確認欄を明示的に確定してください。"
-            )
-            if st.button(
-                "Studioで関連動画を設定済みとして確認",
-                type="secondary",
-                key=f"related_video_open_global_{pending.operation_id}",
-            ):
-                related_video_confirm_dialog(
-                    pending.operation_id,
-                    pending.source_video_id,
-                    pending_video_id,
-                    settings,
-                    uuid.uuid4().hex,
+                st.write(
+                    f"operation {_safe_text(item.operation_id)} / "
+                    f"設定対象の元動画 ID: {_safe_text(item.source_video_id)} / "
+                    f"対象 Shorts video ID: {_safe_text(pending_video_id or '未取得')}"
                 )
+                if not pending_video_id:
+                    st.warning(
+                        "関連動画確認対象の Shorts ID が不足しているため、"
+                        "確認操作を停止しました。投稿キューを手動修復してください。"
+                    )
+                    continue
+                st.markdown(
+                    f"[YouTube Studio の編集画面を開く]"
+                    f"({_studio_video_edit_url(pending_video_id)})"
+                )
+                st.write(
+                    "手順: Studio の編集画面で関連動画に元動画 ID を設定し、"
+                    "保存後にこの確認欄を明示的に確定してください。"
+                )
+                if st.button(
+                    "Studioで関連動画を設定済みとして確認",
+                    type="secondary",
+                    key=f"related_video_open_global_{item.operation_id}",
+                ):
+                    related_video_confirm_dialog(
+                        item.operation_id,
+                        item.source_video_id,
+                        pending_video_id,
+                        settings,
+                        uuid.uuid4().hex,
+                    )
 
 
 def render_upload_operation(
@@ -389,16 +419,13 @@ def render_upload_operation(
             _render_related_video_status(operation, settings)
 
 
-def _render_persisted_source_operations(
+def _load_source_operations(
     video_id: str,
     settings: Settings,
 ) -> SourceOperationProjection | None:
-    """Render durable tracking before consulting the latest generation manifest."""
+    """予約 gate と追跡表示が同じ 1 回の queue 読み出しを共有する."""
     try:
-        projection = project_source_operations(
-            list_operations(settings),
-            video_id,
-        )
+        projection = project_source_operations(list_operations(settings), video_id)
     except UploadQueueError:
         st.error(
             "投稿キューを安全に読み込めないため、永続した投稿状態を表示できず、"
@@ -406,12 +433,6 @@ def _render_persisted_source_operations(
             "投稿キューを手動修復してください。"
         )
         return None
-    if not projection.operations:
-        return projection
-
-    st.markdown("**この動画から開始した投稿の追跡**")
-    for operation in projection.operations:
-        render_upload_operation(operation, settings=settings)
     return projection
 
 
@@ -884,8 +905,12 @@ def render_upload_section(
         Callable[[str, Path, Callable[[], UploadOperation]], UploadOperation] | None
     ) = None,
     line_adapter: LineUploadAdapter | None = None,
-) -> None:
-    """最新の検証済み shorts queue から成功 item の投稿入口を描画する."""
+) -> SourceOperationProjection | None:
+    """最新の検証済み shorts queue から成功 item の投稿入口だけを描画する.
+
+    投稿後の追跡は `render_post_upload_followup` が別の時間軸として描く。
+    戻り値の projection を渡して queue の二重読み出しを避ける。
+    """
     if line_adapter is not None and any(
         callback is not None
         for callback in (
@@ -899,41 +924,34 @@ def render_upload_section(
     post_start_error = _pop_post_start_error(video_id)
     if post_start_error:
         st.error(post_start_error)
-    st.caption(
-        "生成済みショートを private 固定・通知なしでアップロードし、"
-        "次の空き枠へ予約します。"
-    )
-    # これは最新 shorts manifest の存在・状態・成果物とは独立した P6-3 の
-    # 永続追跡入口。再起動後や過去 clip が manifest から消えた場合も残す。
-    _render_related_video_summary_panel(settings)
-    source_operations = _render_persisted_source_operations(video_id, settings)
+    source_operations = _load_source_operations(video_id, settings)
     if source_operations is None:
-        return
+        return None
     try:
         result = load_latest_shorts_queue_result(video_id, settings)
     except ShortsQueueError as exc:
         st.error(_safe_text(exc))
-        return
+        return source_operations
     if result is None:
         st.info("まとめて生成したショートがありません。先にショートを生成してください。")
-        return
+        return source_operations
     if result.status == "interrupted":
         st.error(
             "ショート生成は前回の処理中に中断されました。"
             "途中の成果物は予約対象ではありません。"
             "ショート生成画面で内容を確認し、明示的に再実行してください。"
         )
-        return
+        return source_operations
     if result.status != "done":
         st.info(
             "ショート生成が完了していないため、まだ予約投稿できません。"
             "生成の完了後にもう一度確認してください。"
         )
-        return
+        return source_operations
     succeeded = tuple(item for item in result.items if item.status == "succeeded")
     if not succeeded:
         st.info("予約投稿できる生成済みショートがありません。")
-        return
+        return source_operations
     try:
         policy, initial_publish_at = get_next_upload_slot(
             settings,
@@ -941,7 +959,7 @@ def render_upload_section(
         )
     except ScheduleError as exc:
         st.error(_safe_text(exc))
-        return
+        return source_operations
     template_path = get_shorts_template_path(settings)
     if not template_path.is_file():
         st.info(
@@ -1031,3 +1049,31 @@ def render_upload_section(
                     p6_quality_gate=True,
                     line_adapter=line_adapter,
                 )
+    return source_operations
+
+
+def render_post_upload_followup(
+    video_id: str,
+    settings: Settings,
+    *,
+    projection: SourceOperationProjection | None,
+) -> None:
+    """投稿後の追跡だけを、最新 shorts manifest の状態と無関係に描画する.
+
+    これは最新 manifest の存在・状態・成果物とは独立した P6-3 の永続追跡入口。
+    再起動後や過去 clip が manifest から消えた場合も残す。`render_upload_section`
+    が manifest 都合で早期 return しても、この関数は呼び出し元から必ず呼ばれる。
+    """
+    if projection is None:
+        # queue 読み出しの失敗は render_upload_section が既にエラー表示済み。
+        return
+    if projection.operations:
+        st.markdown("**この動画から開始した投稿の追跡**")
+        for operation in projection.operations:
+            render_upload_operation(operation, settings=settings)
+    else:
+        st.caption(
+            "この動画から投稿したショートはまだありません。"
+            "予約投稿すると、投稿状態と YouTube Studio の関連動画確認がここに並びます。"
+        )
+    _render_related_video_summary_panel(settings, current_video_id=video_id)

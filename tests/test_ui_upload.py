@@ -304,7 +304,6 @@ def test_upload_section_blocks_new_reservation_for_older_upload_behind_newer_fai
 
     with (
         patch.object(upload, "list_operations", return_value=(newer, older)) as list_ops,
-        patch.object(upload, "_render_related_video_summary_panel"),
         patch.object(upload, "load_latest_shorts_queue_result", return_value=result),
         patch.object(upload, "get_next_upload_slot", return_value=(policy, requested)),
         patch.object(upload, "can_reserve_shorts_queue_item", return_value=True),
@@ -333,10 +332,17 @@ def test_upload_section_blocks_new_reservation_for_older_upload_behind_newer_fai
         patch.object(upload.st, "warning") as warning,
         patch.object(upload.st, "button", return_value=True) as button,
     ):
-        upload.render_upload_section("source-1", settings)
+        projection = upload.render_upload_section("source-1", settings)
 
     list_ops.assert_called_once_with(settings)
-    assert render_operation.call_count == 2
+    # 追跡描画は render_upload_section から render_post_upload_followup へ
+    # 移った。ここでは projection が両 operation を保持することだけ確認する。
+    assert projection is not None
+    assert {operation.operation_id for operation in projection.operations} == {
+        older.operation_id,
+        newer.operation_id,
+    }
+    render_operation.assert_not_called()
     resolve.assert_not_called()
     assert metadata.call_args.kwargs["disabled"] is True
     assert schedule.call_args.kwargs["disabled"] is True
@@ -1307,50 +1313,39 @@ def test_upload_section_renders_durable_operation_without_latest_manifest(
 
     with (
         patch.object(upload, "load_latest_shorts_queue_result", return_value=None),
-        patch.object(upload, "_render_related_video_summary_panel"),
-        patch.object(upload, "render_upload_operation") as render_operation,
         patch.object(upload.st, "caption"),
         patch.object(upload.st, "markdown"),
         patch.object(upload.st, "info"),
     ):
-        upload.render_upload_section("source-1", settings)
+        projection = upload.render_upload_section("source-1", settings)
+
+    # 追跡描画は render_upload_section から render_post_upload_followup へ
+    # 移った。ここではその新しい経路を検証する。
+    with (
+        patch.object(upload, "render_upload_operation") as render_operation,
+        patch.object(upload, "_render_related_video_summary_panel"),
+    ):
+        upload.render_post_upload_followup("source-1", settings, projection=projection)
 
     render_operation.assert_called_once_with(operation, settings=settings)
 
 
-@pytest.mark.parametrize("manifest_kind", ["none", "interrupted", "done-empty"])
-def test_upload_section_keeps_global_related_pending_reachable_without_latest_manifest(
-    tmp_path: Path, manifest_kind: str
+def test_render_related_video_status_offers_confirm_button_for_pending_operation(
+    tmp_path: Path,
 ) -> None:
+    """現在の動画の pending 確認は _render_related_video_status の確定ボタンが唯一の入口."""
     settings = Settings(data_dir=tmp_path)
     operation = _operation(tmp_path, state="uploaded")
-    summary = RelatedVideoSummary(pending_count=1, operations=(operation,))
-    if manifest_kind == "none":
-        result = None
-    elif manifest_kind == "interrupted":
-        result = MagicMock(
-            status="interrupted",
-            items=(),
-            job_id="interrupted-job",
-        )
-    else:
-        result = MagicMock(status="done", items=(), job_id="stale-job")
     with (
-        patch.object(upload, "load_latest_shorts_queue_result", return_value=result),
-        patch.object(upload, "get_related_video_summary", return_value=summary) as get_summary,
         patch.object(upload, "related_video_confirm_dialog") as dialog,
         patch.object(upload.st, "container", side_effect=_container),
-        patch.object(upload.st, "caption"),
         patch.object(upload.st, "markdown"),
         patch.object(upload.st, "write") as write,
-        patch.object(upload.st, "button", return_value=True),
-        patch.object(upload.st, "info"),
-        patch.object(upload.st, "error"),
-        patch.object(upload, "_open_preview") as open_preview,
+        patch.object(upload.st, "caption"),
+        patch.object(upload.st, "button", return_value=True) as button,
     ):
-        upload.render_upload_section("source-1", settings)
+        upload._render_related_video_status(operation, settings)
 
-    get_summary.assert_called_once_with(settings)
     dialog.assert_called_once_with(
         operation.operation_id,
         operation.source_video_id,
@@ -1358,10 +1353,189 @@ def test_upload_section_keeps_global_related_pending_reachable_without_latest_ma
         settings,
         dialog.call_args.args[4],
     )
-    open_preview.assert_not_called()
+    button.assert_called_once_with(
+        "Studioで関連動画を設定済みとして確認",
+        type="secondary",
+        key=f"related_video_open_{operation.operation_id}",
+    )
     rendered = "\n".join(str(item.args[0]) for item in write.call_args_list)
     assert "設定対象の元動画 ID: source-1" in rendered
     assert "対象 Shorts video ID: youtube-1" in rendered
+
+
+def test_related_video_status_has_no_self_referential_caption(tmp_path: Path) -> None:
+    settings = Settings(data_dir=tmp_path)
+    operation = _operation(tmp_path, state="uploaded")
+    with (
+        patch.object(upload, "related_video_confirm_dialog"),
+        patch.object(upload.st, "container", side_effect=_container),
+        patch.object(upload.st, "markdown"),
+        patch.object(upload.st, "write"),
+        patch.object(upload.st, "button", return_value=False),
+        patch.object(upload.st, "caption") as caption,
+    ):
+        upload._render_related_video_status(operation, settings)
+
+    assert all(
+        "上部の" not in str(call.args[0]) for call in caption.call_args_list
+    )
+
+
+def test_related_video_status_warns_when_uploaded_without_video_id(
+    tmp_path: Path,
+) -> None:
+    settings = Settings(data_dir=tmp_path)
+    operation = _operation(tmp_path, state="uploaded").model_copy(
+        update={"video_id": None}
+    )
+    with (
+        patch.object(upload.st, "container", side_effect=_container),
+        patch.object(upload.st, "markdown"),
+        patch.object(upload.st, "write"),
+        patch.object(upload.st, "caption") as caption,
+        patch.object(upload.st, "warning") as warning,
+    ):
+        upload._render_related_video_status(operation, settings)
+
+    assert not any(
+        "アップロード成功後に" in str(call.args[0]) for call in caption.call_args_list
+    )
+    assert any(
+        "Shorts ID が不足" in str(call.args[0]) for call in warning.call_args_list
+    )
+
+
+def test_related_video_summary_panel_excludes_current_video_pending(
+    tmp_path: Path,
+) -> None:
+    settings = Settings(data_dir=tmp_path)
+    operation = _operation(tmp_path, state="uploaded")
+    summary = RelatedVideoSummary(pending_count=1, operations=(operation,))
+    with (
+        patch.object(upload, "get_related_video_summary", return_value=summary),
+        patch.object(upload.st, "expander") as expander,
+    ):
+        upload._render_related_video_summary_panel(settings, current_video_id="source-1")
+
+    expander.assert_not_called()
+
+
+def test_related_video_summary_panel_shows_other_video_pending_with_identity(
+    tmp_path: Path,
+) -> None:
+    settings = Settings(data_dir=tmp_path)
+    operation = _operation(tmp_path, state="uploaded").model_copy(
+        update={"source_video_id": "other-video"}
+    )
+    summary = RelatedVideoSummary(pending_count=1, operations=(operation,))
+    with (
+        patch.object(upload, "get_related_video_summary", return_value=summary),
+        patch.object(upload.st, "expander", side_effect=_container) as expander,
+        patch.object(upload.st, "container", side_effect=_container),
+        patch.object(upload.st, "caption"),
+        patch.object(upload.st, "markdown"),
+        patch.object(upload.st, "write") as write,
+        patch.object(upload.st, "button", return_value=False),
+    ):
+        upload._render_related_video_summary_panel(settings, current_video_id="source-1")
+
+    expander.assert_called_once()
+    assert "1 件" in expander.call_args.args[0]
+    rendered = "\n".join(str(item.args[0]) for item in write.call_args_list)
+    assert "元動画 other-video" in rendered
+    assert "予約タイトル" in rendered
+
+
+def test_related_video_summary_panel_keeps_only_other_video_pending_when_mixed(
+    tmp_path: Path,
+) -> None:
+    settings = Settings(data_dir=tmp_path)
+    current = _operation(tmp_path, state="uploaded")
+    other = _operation(tmp_path, state="uploaded").model_copy(
+        update={"operation_id": "operation-other", "source_video_id": "other-video"}
+    )
+    summary = RelatedVideoSummary(pending_count=2, operations=(current, other))
+    with (
+        patch.object(upload, "get_related_video_summary", return_value=summary),
+        patch.object(upload.st, "expander", side_effect=_container) as expander,
+        patch.object(upload.st, "container", side_effect=_container),
+        patch.object(upload.st, "caption"),
+        patch.object(upload.st, "markdown"),
+        patch.object(upload.st, "write") as write,
+        patch.object(upload.st, "button", return_value=False),
+    ):
+        upload._render_related_video_summary_panel(settings, current_video_id="source-1")
+
+    assert "1 件" in expander.call_args.args[0]
+    rendered = "\n".join(str(item.args[0]) for item in write.call_args_list)
+    assert "元動画 other-video" in rendered
+    assert "設定対象の元動画 ID: source-1" not in rendered
+
+
+@pytest.mark.parametrize(
+    "manifest_kind",
+    ["none", "interrupted", "done-empty"],
+)
+def test_render_upload_section_returns_projection_for_post_upload_followup(
+    tmp_path: Path, manifest_kind: str
+) -> None:
+    """最重要回帰ガード: 追跡行の描画順序が manifest 状態に左右されないこと."""
+    settings = Settings(data_dir=tmp_path)
+    operation = _operation(tmp_path, state="reserved")
+    save_reserved_operation(operation, settings)
+    if manifest_kind == "none":
+        result = None
+    elif manifest_kind == "interrupted":
+        result = MagicMock(status="interrupted", items=(), job_id="interrupted-job")
+    else:
+        result = MagicMock(status="done", items=(), job_id="stale-job")
+
+    with (
+        patch.object(upload, "load_latest_shorts_queue_result", return_value=result),
+        patch.object(upload.st, "caption"),
+        patch.object(upload.st, "markdown"),
+        patch.object(upload.st, "info"),
+        patch.object(upload.st, "error"),
+    ):
+        projection = upload.render_upload_section("source-1", settings)
+
+    assert projection is not None
+    assert operation in projection.operations
+
+    with (
+        patch.object(upload, "render_upload_operation") as render_operation,
+        patch.object(upload, "_render_related_video_summary_panel"),
+    ):
+        upload.render_post_upload_followup("source-1", settings, projection=projection)
+
+    render_operation.assert_called_once_with(operation, settings=settings)
+
+
+def test_render_upload_section_returns_none_on_queue_error_and_followup_stays_silent(
+    tmp_path: Path,
+) -> None:
+    settings = Settings(data_dir=tmp_path)
+    with (
+        patch.object(upload, "list_operations", side_effect=UploadQueueError("破損")),
+        patch.object(upload.st, "error") as error,
+    ):
+        projection = upload.render_upload_section("source-1", settings)
+
+    assert projection is None
+    error.assert_called_once()
+
+    with (
+        patch.object(upload, "render_upload_operation") as render_operation,
+        patch.object(upload, "_render_related_video_summary_panel") as summary_panel,
+        patch.object(upload.st, "markdown") as markdown,
+        patch.object(upload.st, "caption") as caption,
+    ):
+        upload.render_post_upload_followup("source-1", settings, projection=None)
+
+    render_operation.assert_not_called()
+    summary_panel.assert_not_called()
+    markdown.assert_not_called()
+    caption.assert_not_called()
 
 
 @pytest.mark.parametrize("output_kind", ["none", "missing"])
@@ -1383,9 +1557,7 @@ def test_upload_section_restores_uploaded_operation_before_output_gate(
     with (
         patch.object(upload, "load_latest_shorts_queue_result", return_value=result),
         patch.object(upload, "get_next_upload_slot", return_value=(policy, requested)),
-        patch.object(upload, "_render_related_video_summary_panel"),
         patch.object(upload, "list_operations", return_value=(operation,)) as list_ops,
-        patch.object(upload, "render_upload_operation") as render_operation,
         patch.object(upload, "_open_preview") as open_preview,
         patch.object(upload.st, "container", side_effect=_container),
         patch.object(upload.st, "caption"),
@@ -1393,10 +1565,13 @@ def test_upload_section_restores_uploaded_operation_before_output_gate(
         patch.object(upload.st, "warning") as warning,
         patch.object(upload.st, "button") as button,
     ):
-        upload.render_upload_section("source-1", settings)
+        projection = upload.render_upload_section("source-1", settings)
 
     list_ops.assert_called_once_with(settings)
-    render_operation.assert_called_once_with(operation, settings=settings)
+    # 追跡描画は render_post_upload_followup へ移った。ここでは restored
+    # operation が projection に反映され、予約 gate をブロックすることのみ確認する。
+    assert projection is not None
+    assert operation in projection.operations
     open_preview.assert_not_called()
     button.assert_not_called()
     assert any("予約投稿せず" in call.args[0] for call in warning.call_args_list)
@@ -1653,13 +1828,29 @@ def test_uploaded_operation_starts_publication_poll_from_explicit_cta(
         patch.object(upload.st, "rerun"),
         patch.object(upload, "start_publication_poll", return_value="poll-job") as start,
         patch.object(upload, "set_active_job_id") as set_job,
+        # 関連動画確認ボタンも同じ operation で pending のため、この
+        # dialog は poll CTA と独立に検証する。
+        patch.object(upload, "related_video_confirm_dialog") as related_dialog,
     ):
         datetime_cls.now.return_value = NOW
         upload.render_upload_operation(operation, settings=settings)
 
     start.assert_called_once_with(operation.operation_id, settings, now=NOW)
     set_job.assert_called_once_with("poll-job")
-    button.assert_called_once()
+    poll_button_calls = [
+        call
+        for call in button.call_args_list
+        if call.kwargs.get("key")
+        == f"upload_publication_poll_{operation.operation_id}"
+    ]
+    assert len(poll_button_calls) == 1
+    related_dialog.assert_called_once_with(
+        operation.operation_id,
+        operation.source_video_id,
+        operation.video_id,
+        settings,
+        related_dialog.call_args.args[4],
+    )
 
 
 def test_uploaded_operation_does_not_offer_api_cta_before_publish_time(
@@ -1673,13 +1864,21 @@ def test_uploaded_operation_does_not_offer_api_cta_before_publish_time(
         patch.object(upload.st, "markdown"),
         patch.object(upload.st, "caption") as caption,
         patch.object(upload.st, "write"),
-        patch.object(upload.st, "button") as button,
+        # 関連動画確認ボタンは publish_at と無関係に描かれるため False にして
+        # ダイアログを開かせない。
+        patch.object(upload.st, "button", return_value=False) as button,
         patch.object(upload, "start_publication_poll") as start,
     ):
         datetime_cls.now.return_value = NOW
         upload.render_upload_operation(operation, settings=settings)
 
-    button.assert_not_called()
+    poll_button_calls = [
+        call
+        for call in button.call_args_list
+        if call.kwargs.get("key")
+        == f"upload_publication_poll_{operation.operation_id}"
+    ]
+    assert poll_button_calls == []
     start.assert_not_called()
     assert any("公開予定時刻までは" in item.args[0] for item in caption.call_args_list)
 

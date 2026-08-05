@@ -54,7 +54,10 @@ from yt_live_kit.ui.components.shorts_line import (
     validate_line_reservation,
 )
 from yt_live_kit.ui.components.status_bar import job_display_label
-from yt_live_kit.ui.components.upload import render_upload_section
+from yt_live_kit.ui.components.upload import (
+    render_post_upload_followup,
+    render_upload_section,
+)
 from yt_live_kit.ui.queries import count_generated_shorts
 from yt_live_kit.ui.session_keys import (
     candidate_transfer_key,
@@ -1017,12 +1020,50 @@ def _render_publish_workspace(
     busy: bool,
     summary: DetailSummary,
 ) -> None:
+    st.markdown("#### ショートの予約投稿")
+    st.caption(
+        "ショート制作ラインの工程 6 です。生成済みショートを private 固定・"
+        "通知なしでアップロードし、次の空き枠へ予約します。"
+    )
+    # Tracking is independent from whether the latest manifest currently has
+    # a new reservable item.  The adapter keeps both line safety callbacks as
+    # one required value so a layout refactor cannot accidentally drop one.
+    projection = render_upload_section(
+        video.video_id,
+        settings,
+        line_adapter=make_line_upload_adapter(video.video_id, settings),
+    )
+    # 予約対象が無い理由は render_upload_section が manifest の状態から診断済み。
+    # ここではその診断を繰り返さず、ラインへ戻る出口だけを足して行き止まりを防ぐ。
+    # 「生成済みだが予約対象に入っていない」だけは manifest から導けないため残す。
+    if summary.reservable_short_count == 0:
+        if summary.generated_short_count:
+            st.info(
+                "生成済みですが予約対象に追加されていません。"
+                "ショート生産ラインで最終確認まで進めてください。"
+            )
+        st.button(
+            "ショート生産ラインへ",
+            key=f"publish_to_shorts_{video.video_id}",
+            on_click=_set_workspace,
+            args=(video.video_id, "shorts"),
+        )
+
+    st.divider()
+    st.markdown("#### 投稿後のフォローアップ")
+    st.caption(
+        "予約・投稿が済んだショートの追跡と、YouTube Studio での関連動画設定です。"
+    )
+    render_post_upload_followup(video.video_id, settings, projection=projection)
+
+    st.divider()
+    st.markdown("#### 元動画の概要欄")
+    st.caption("ショート制作ラインとは別の作業です。元動画の説明にチャプターを反映します。")
     validation = validate_chapters(result.chapters_text)
     chapter_count = len(
         [line for line in result.chapters_text.splitlines() if line.strip()]
     )
     with st.container(border=True):
-        st.markdown("**元動画の概要欄**")
         if not result.chapters_text.strip():
             st.info("チャプターは未生成です。")
         elif validation.ok:
@@ -1035,31 +1076,6 @@ def _render_publish_workspace(
             result.chapters_text,
             settings,
             busy=busy or not validation.ok,
-        )
-
-    with st.container(border=True):
-        st.markdown("**ショートの予約投稿**")
-        if summary.reservable_short_count == 0:
-            if summary.generated_short_count:
-                st.info(
-                    "生成済みですが予約対象に追加されていません。"
-                    "ショート生産ラインで最終確認まで進めてください。"
-                )
-            else:
-                st.info("先にショートを作成してください。")
-            st.button(
-                "ショート生産ラインへ",
-                key=f"publish_to_shorts_{video.video_id}",
-                on_click=_set_workspace,
-                args=(video.video_id, "shorts"),
-            )
-        # Tracking is independent from whether the latest manifest currently has
-        # a new reservable item.  The adapter keeps both line safety callbacks as
-        # one required value so a layout refactor cannot accidentally drop one.
-        render_upload_section(
-            video.video_id,
-            settings,
-            line_adapter=make_line_upload_adapter(video.video_id, settings),
         )
 
 

@@ -450,6 +450,7 @@ def test_publish_to_shorts_callback_preserves_job_transfer_and_confirmed_line(
         patch.object(video_detail.st, "rerun") as rerun,
         patch.object(video_detail, "_render_description_control"),
         patch.object(video_detail, "render_upload_section") as upload_section,
+        patch.object(video_detail, "render_post_upload_followup") as followup,
         patch.object(video_detail, "run_line_upload_transaction") as transaction,
         patch.object(video_detail, "start_job") as start_job,
     ):
@@ -483,8 +484,88 @@ def test_publish_to_shorts_callback_preserves_job_transfer_and_confirmed_line(
         video_detail.make_line_upload_adapter("vid1234567", settings).__class__,
     )
     transaction.assert_not_called()
+    followup.assert_called_once_with(
+        "vid1234567", settings, projection=upload_section.return_value
+    )
     start_job.assert_not_called()
     rerun.assert_not_called()
+
+
+def test_publish_workspace_renders_headings_in_time_order(tmp_path: Path) -> None:
+    """3つの時間軸見出しが、制作ライン→フォローアップ→別トラックの順で並ぶこと."""
+    settings = Settings(data_dir=tmp_path)
+    video = _video(transcript=True, chapters=True, clips=True)
+    result = _result(tmp_path, chapters=_VALID_CHAPTERS)
+    with (
+        patch.object(video_detail.st, "markdown") as markdown,
+        patch.object(video_detail.st, "caption"),
+        patch.object(video_detail.st, "container", return_value=nullcontext()),
+        patch.object(video_detail.st, "divider"),
+        patch.object(video_detail.st, "info"),
+        patch.object(video_detail.st, "success"),
+        patch.object(video_detail.st, "button"),
+        patch.object(video_detail, "_render_description_control"),
+        patch.object(video_detail, "render_upload_section", return_value=MagicMock()),
+        patch.object(video_detail, "render_post_upload_followup"),
+    ):
+        video_detail._render_publish_workspace(
+            video,
+            result,
+            settings,
+            busy=False,
+            summary=video_detail.DetailSummary(1, 1, 1, False),
+        )
+
+    headings = [
+        markdown_call.args[0]
+        for markdown_call in markdown.call_args_list
+        if isinstance(markdown_call.args[0], str)
+        and markdown_call.args[0].startswith("#### ")
+    ]
+    assert headings == [
+        "#### ショートの予約投稿",
+        "#### 投稿後のフォローアップ",
+        "#### 元動画の概要欄",
+    ]
+
+
+def test_publish_workspace_leaves_no_reservable_diagnosis_to_upload_section(
+    tmp_path: Path,
+) -> None:
+    """未生成の理由は render_upload_section が診断する。ここは出口だけを足す."""
+    settings = Settings(data_dir=tmp_path)
+    video = _video(transcript=True, chapters=True, clips=True)
+    result = _result(tmp_path, chapters=_VALID_CHAPTERS)
+    with (
+        patch.object(video_detail.st, "markdown"),
+        patch.object(video_detail.st, "caption"),
+        patch.object(video_detail.st, "container", return_value=nullcontext()),
+        patch.object(video_detail.st, "divider"),
+        patch.object(video_detail.st, "info") as info,
+        patch.object(video_detail.st, "success"),
+        patch.object(video_detail.st, "button") as button,
+        patch.object(video_detail, "_render_description_control"),
+        patch.object(video_detail, "render_upload_section", return_value=MagicMock()),
+        patch.object(video_detail, "render_post_upload_followup"),
+    ):
+        video_detail._render_publish_workspace(
+            video,
+            result,
+            settings,
+            busy=False,
+            summary=video_detail.DetailSummary(1, 0, 0, False),
+        )
+
+    # render_upload_section 側の「まとめて生成したショートがありません…」と
+    # 同じ内容を二重に出さない。
+    assert not any(
+        "先にショートを作成してください" in str(call.args[0])
+        for call in info.call_args_list
+    )
+    # 行き止まりにしないため、ラインへ戻る出口は残す。
+    assert any(
+        call.args[0] == "ショート生産ラインへ" for call in button.call_args_list
+    )
 
 
 def test_workspace_widget_key_is_only_written_inside_callback_helper() -> None:
