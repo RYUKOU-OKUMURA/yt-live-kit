@@ -9,7 +9,7 @@
 
 ## 1. 結論
 
-視覚刷新は Streamlit ネイティブテーマ（案 A+）を先に適用し、限定 CSS 注入（案 B）は保留する。カスタム React コンポーネント（案 C）は採らない。A+ は `.streamlit/config.toml` のみで Python コードを 0 行に保てるため回帰リスクが実質ゼロであり、B の適用範囲は A+ 適用後の残差を実測してから判断する。実装順は「第 1 弾: テーマ適用（A+）」「AppTest 視覚回帰スモークの追加」「第 2 弾: shell 刷新」「第 3 弾: テロップ編集器の刷新」の 3 弾構成とし、第 3 弾は独立フェーズとせず T1（テロップ行時刻同期）の `T1-4` に合流させる。
+視覚刷新は Streamlit ネイティブテーマ（案 A+）を適用し、限定 CSS 注入（案 B）とカスタム React コンポーネント（案 C）は採らない。A+ は `.streamlit/config.toml` のみで Python コードを 0 行に保てるため回帰リスクが実質ゼロである。2026-08-05 の A+ 適用後実測では、CSS だけで追加できる主要差分は精巧な丸数字ステッパー、完全な下線タブ、赤い波下線だった。一方、工程ステッパーは U9-6 のネイティブ縦表示で現在地・一本道・次の一手を満たし、赤い波下線を含むテロップ編集器は T1（テロップ行時刻同期）の `T1-4` へ合流済みである。`unsafe_allow_html` 0 件を崩し Streamlit 内部 DOM 依存を持つだけの便益はないため、案 B は不採用とする。
 
 ## 2. 現在地
 
@@ -54,12 +54,12 @@ R2（UI 大幅刷新前の境界整理・回帰リスク監査）は 2026-08-04 
 
 A+ で届かないのは色や余白ではなく「形」に絞られる。丸数字ステッパー + 接続線 + 鍵アイコン、赤い波下線、KPI カード内の左アイコン配置である。
 
-### スタイリング方針の現状（実測）
+### スタイリング方針の現状（A+ 適用後実測）
 
 - `src/` 全体で `unsafe_allow_html` が 0 件。`<style>` 注入も 0 件
 - `st.data_editor` は 0 件
 - `streamlit.components.v1.html` は `src/yt_live_kit/ui/components/clipboard.py:62` の 1 箇所のみ（クリップボード用）
-- `.streamlit/config.toml` は `[server] address = "127.0.0.1"` のみで `[theme]` セクションが存在しない。ダーク表示は OS / ブラウザ設定への完全依存である
+- `.streamlit/config.toml` の `[theme]` に Streamlit 1.60 の 23 オプションを設定済みで、`base = "dark"` と `[theme.sidebar]` によりダーク配色・文字・形状・チャート・サイドバー配色を固定している
 - 導入版 Streamlit は 1.60.0、`pyproject.toml` の宣言は `streamlit>=1.59.0`
 
 Streamlit 1.60 のネイティブテーマ機能は実測で 23 オプションある。配色: `base`, `primaryColor`, `backgroundColor`, `secondaryBackgroundColor`, `textColor`, `linkColor`, `codeBackgroundColor`。文字: `font`, `baseFontSize`, `headingFont`, `headingFontSizes`, `headingFontWeights`, `codeFont`, `codeFontSize`, `codeFontWeight`。形状: `baseRadius`, `buttonRadius`, `borderColor`, `dataframeBorderColor`, `showWidgetBorder`, `showSidebarBorder`。チャート: `chartCategoricalColors`, `chartSequentialColors`。セクションは `[theme]` / `[theme.sidebar]` / `[theme.light]` / `[theme.dark]` / `[theme.light.sidebar]` / `[theme.dark.sidebar]` が利用可能で、サイドバーを本体と別配色にできる。
@@ -72,14 +72,19 @@ Streamlit 1.60 のネイティブテーマ機能は実測で 23 オプション�
 
 | 項目 | 現行実装 | リファレンス画像 |
 |---|---|---|
-| 6 工程ステッパー | `src/yt_live_kit/ui/components/shorts_line.py:933-944` の `st.badge` 横並び（例「3. テロップ確認・進行中」） | 丸数字 + 接続線 + 鍵アイコン |
-| テロップ確認テーブル | `shorts_line.py:745-780` で行ごとに `st.container(border=True)` + `st.text_input`（本文）+ `st.number_input` × 2（開始秒・終了秒）+ `st.toggle`（強調）の縦積み | 時間を `00:00 - 00:02` のレンジ表記した表形式 |
-| AI 案からの変更差分 | `shorts_line.py:775-780` の `st.caption("AI案から変更")` という静的フラグのみ | 具体的な旧→新テキスト |
-| 赤い波下線のスペルチェック風表現 | 不在（CSS 必須） | あり |
-| 検証チップ | `shorts_line.py:1393-1405` で「自動ハード判定」「自動警告」の 2 行集約 | 個別 3 チップ |
-| サイドバーの進捗バー | 不在（`shorts_line.py:947-966` は `st.write` / `st.caption` のみ） | あり |
+| 6 工程ステッパー | U9-6 でメインの横並び `st.badge` を削除し、サイドバーのネイティブ縦ステッパーへ一本化。完了 ✅ / 現在 ◉ / 未到達 🔒、接続線、次の一手を表示する | 丸数字 + 接続線 + 鍵アイコン。円形の精巧さだけを意図的な残差として許容する |
+| テロップ確認テーブル | 行ごとの native widget 縦積み。T1 の時刻同期契約と同時に扱う必要があるため `T1-4` へ延期 | 時間を `00:00 - 00:02` のレンジ表記した表形式 |
+| AI 案からの変更差分 | `AI案から変更` の静的フラグ。編集器全体とともに `T1-4` へ延期 | 具体的な旧→新テキスト |
+| 赤い波下線のスペルチェック風表現 | 不在。限定 CSS が必要だが `T1-4` の編集器判断へ延期 | あり |
+| 検証チップ | 「自動ハード判定」「自動警告」の native 表示。編集器全体とともに `T1-4` へ延期 | 個別 3 チップ |
+| サイドバーの進捗表示 | U9-6 の縦ステッパー + 日次カウンタ + 次の一手で解消。割合だけの進捗バーは使わない | 進捗バー + 日次カウンタ |
 | 「下書きを保存」ボタン | 不在。全 widget が `persist_state="session"` で自動永続化されるため概念自体が無い | あり |
-| ワークスペース切替 | `src/yt_live_kit/ui/views/video_detail.py:1188` の `st.segmented_control` | 下線タブ |
+| ヘッダ / KPI カード | native の header / border container で情報は揃う。左アイコンと値の視覚階層は native container / Material icon で仕上げ可能 | 左アイコン付き KPI カード 3 枚 |
+| ワークスペース切替 | `st.segmented_control` の conditional rendering を維持。完全な下線だけは CSS が必要 | 下線タブ |
+
+### 案 B の最終判断（U9-5）
+
+**限定 CSS 注入は採らない。** U9-6 の縦ステッパーは FR-33 / AC-35 が要求する現在地・一本道・次の一手を native UI だけで満たし、完全な下線タブは見た目だけの差である。赤い波下線とテロップ表は `T1-4` の契約確定後に編集器全体として判断する。現時点で `unsafe_allow_html` 0 件の一貫性と Streamlit 内部 DOM 非依存を捨てる合理性はない。U9-7 / U9-8 は native container、columns、Material icon、`st.segmented_control` の範囲で仕上げる。
 
 ## 6. 実装順（3 弾構成）
 
@@ -87,7 +92,7 @@ R2 監査文書 `docs/ui-refactor-review-2026-08-04.md` §6「リファレンス
 
 - **第 1 弾: テーマ適用（A+）** — `config.toml` のみ。R2 §6 の手順 1 に対応する
 - **（間に挟む）AppTest 視覚回帰スモークの追加** — 第 2 弾の安全網。第 1 弾は config のみなので安全網なしで通せるが、第 2 弾は widget 構成を組み替えるため必須とする
-- **第 2 弾: shell 刷新** — サイドバーの「作成中のショート」カード・進捗バー・日次カウンタ、ヘッダ、KPI カード 3 枚、ワークスペース切替、6 工程ステッパー。R2 §6 の手順 2〜4 に対応する。ここで初めて B（限定 CSS 注入）の要否を判断する。B を使わずステッパーを `st.badge` のまま妥協して終える選択肢も残す
+- **第 2 弾: shell 刷新** — サイドバーの「作成中のショート」縦ステッパー・日次カウンタ、ヘッダ、KPI カード 3 枚、ワークスペース切替。R2 §6 の手順 2〜4 に対応する。U9-4 の実測により B（限定 CSS 注入）は不採用とし、native UI で仕上げる
 - **第 3 弾: テロップ編集器の刷新** — R2 §6 の手順 5 に対応する。A / B の判断とは独立に T1（テロップ行時刻同期）の契約確定を待つ。`docs/execution-plan-v3.md:1836` および `:1849` が「ページ shell〜工程 bar の刷新は計画更新後の別 diff とし、telop editor の刷新は T1 contract 後に分離する」と既に指示しているため、`T1-4` に合流させる。第 3 弾には新規タスク ID を振らない
 
 ## 7. 継承する安全境界
