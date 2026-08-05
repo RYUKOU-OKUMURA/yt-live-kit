@@ -14,7 +14,12 @@ from datetime import datetime, timezone
 import fcntl
 import os
 from pathlib import Path
+import sys
 from typing import Any, Mapping
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
 from benchmarks.t1 import annotation_packet as packet_tool
 
@@ -53,7 +58,11 @@ def load_review_session(
     """source hash を毎回確認して packet を fail-closed で読み込む。"""
 
     packet_tool._assert_isolated_packet_path(packet_path)
-    manifest = packet_tool.load_manifest(manifest_path, check_sources=True)
+    manifest = packet_tool.load_manifest(
+        manifest_path,
+        check_sources=True,
+        check_runtime_sources=False,
+    )
     if not packet_path.exists():
         packet_tool._write_json_atomic(packet_path, packet_tool.create_packet(manifest))
     packet = packet_tool._read_json(packet_path)
@@ -61,6 +70,7 @@ def load_review_session(
         packet,
         manifest,
         check_sources=True,
+        check_runtime_sources=False,
         packet_path=packet_path,
     )
     return ReviewSession(manifest=manifest, packet=packet, validation=validation)
@@ -84,6 +94,21 @@ def unfinished_row_index(packet: Mapping[str, Any]) -> int | None:
         if isinstance(row, Mapping) and not packet_tool._validate_gold(row, require_complete=False):
             return index
     return None
+
+
+def next_unfinished_row_index(packet: Mapping[str, Any], after_index: int) -> int | None:
+    """保存後の遷移先。手前にスキップした行より、現在位置より後の未完了行を優先する。"""
+
+    rows = packet.get("rows")
+    if not isinstance(rows, list):
+        raise packet_tool.AnnotationError("packet rows がありません。")
+    if after_index < -1 or after_index >= len(rows):
+        raise packet_tool.AnnotationError("after_index が不正です。")
+    for index in range(after_index + 1, len(rows)):
+        row = rows[index]
+        if isinstance(row, Mapping) and not packet_tool._validate_gold(row, require_complete=False):
+            return index
+    return unfinished_row_index(packet)
 
 
 def row_at(packet: Mapping[str, Any], index: int) -> Mapping[str, Any]:
@@ -172,6 +197,29 @@ def _validate_existing_playback(
         wav_path=wav_path,
         wav_bytes=wav_path.read_bytes(),
         is_existing=True,
+    )
+
+
+def ensure_default_playback(
+    session: ReviewSession,
+    row_id: str,
+    packet_path: Path = DEFAULT_PACKET_PATH,
+    *,
+    cached: PreparedPlayback | None = None,
+) -> PreparedPlayback:
+    """未準備行は先頭から行末までの既定再生窓を自動で用意する。"""
+
+    if cached is not None and cached.row_id == row_id:
+        return cached
+    existing = existing_playback(session, row_id, packet_path)
+    if existing is not None:
+        return existing
+    return prepare_playback(
+        session,
+        row_id,
+        from_ms=0,
+        duration_ms=None,
+        packet_path=packet_path,
     )
 
 
@@ -335,6 +383,7 @@ def commit_annotation(
             candidate,
             current.manifest,
             check_sources=True,
+            check_runtime_sources=False,
             packet_path=packet_path,
         )
         packet_tool._write_json_atomic(packet_path, candidate)
@@ -351,5 +400,6 @@ def complete_validation(
         session.manifest,
         require_complete=True,
         check_sources=True,
+        check_runtime_sources=False,
         packet_path=packet_path,
     )

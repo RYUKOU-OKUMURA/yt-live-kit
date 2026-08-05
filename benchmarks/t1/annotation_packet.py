@@ -1346,7 +1346,12 @@ def _validate_artifact_holdout(row: Mapping[str, Any], source: Mapping[str, Any]
         raise AnnotationError(f"{row_id} の artifact holdout coverage policy が不正です。")
 
 
-def validate_manifest(manifest: Mapping[str, Any], *, check_sources: bool = False) -> dict[str, Any]:
+def validate_manifest(
+    manifest: Mapping[str, Any],
+    *,
+    check_sources: bool = False,
+    check_runtime_sources: bool = True,
+) -> dict[str, Any]:
     if manifest.get("schema") != MANIFEST_SCHEMA:
         raise AnnotationError("T1-1 manifest schema が不正です。")
     actual_fingerprint = manifest_fingerprint(manifest)
@@ -1753,21 +1758,22 @@ def validate_manifest(manifest: Mapping[str, Any], *, check_sources: bool = Fals
             _check_source_file(document.get("path"), document.get("bytes"), document.get("sha256"), label="telop document")
         for document in manifest.get("artifact_documents", {}).values():
             _check_source_file(document.get("path"), document.get("bytes"), document.get("sha256"), label="artifact document")
-        runtime = manifest.get("runtime")
-        if not isinstance(runtime, Mapping):
-            raise AnnotationError("runtime がありません。")
-        _check_source_file(runtime.get("binary", {}).get("path"), runtime.get("binary", {}).get("bytes"), runtime.get("binary", {}).get("sha256"), label="runtime binary")
-        _check_source_file(runtime.get("model", {}).get("path"), runtime.get("model", {}).get("bytes"), runtime.get("model", {}).get("sha256"), label="runtime model")
-        ffmpeg = runtime.get("ffmpeg")
-        if not isinstance(ffmpeg, Mapping):
-            raise AnnotationError("runtime.ffmpeg がありません。")
-        _check_source_file(ffmpeg.get("path"), ffmpeg.get("bytes"), ffmpeg.get("sha256"), label="ffmpeg")
-        baseline = manifest.get("production_hash_baseline")
-        if isinstance(baseline, Mapping):
-            baseline_path = Path(str(baseline.get("artifact_path", "")))
-            if not baseline_path.is_absolute():
-                baseline_path = Path(__file__).resolve().parents[2] / baseline_path
-            _check_source_file(baseline_path, baseline.get("artifact_bytes"), baseline.get("artifact_sha256"), label="production hash baseline")
+        if check_runtime_sources:
+            runtime = manifest.get("runtime")
+            if not isinstance(runtime, Mapping):
+                raise AnnotationError("runtime がありません。")
+            _check_source_file(runtime.get("binary", {}).get("path"), runtime.get("binary", {}).get("bytes"), runtime.get("binary", {}).get("sha256"), label="runtime binary")
+            _check_source_file(runtime.get("model", {}).get("path"), runtime.get("model", {}).get("bytes"), runtime.get("model", {}).get("sha256"), label="runtime model")
+            ffmpeg = runtime.get("ffmpeg")
+            if not isinstance(ffmpeg, Mapping):
+                raise AnnotationError("runtime.ffmpeg がありません。")
+            _check_source_file(ffmpeg.get("path"), ffmpeg.get("bytes"), ffmpeg.get("sha256"), label="ffmpeg")
+            baseline = manifest.get("production_hash_baseline")
+            if isinstance(baseline, Mapping):
+                baseline_path = Path(str(baseline.get("artifact_path", "")))
+                if not baseline_path.is_absolute():
+                    baseline_path = Path(__file__).resolve().parents[2] / baseline_path
+                _check_source_file(baseline_path, baseline.get("artifact_bytes"), baseline.get("artifact_sha256"), label="production hash baseline")
 
     return {
         "manifest_fingerprint": actual_fingerprint,
@@ -1902,9 +1908,14 @@ def validate_result(result: Mapping[str, Any], manifest: Mapping[str, Any]) -> d
     }
 
 
-def load_manifest(path: Path, *, check_sources: bool = False) -> dict[str, Any]:
+def load_manifest(
+    path: Path,
+    *,
+    check_sources: bool = False,
+    check_runtime_sources: bool = True,
+) -> dict[str, Any]:
     manifest = _read_json(path)
-    validate_manifest(manifest, check_sources=check_sources)
+    validate_manifest(manifest, check_sources=check_sources, check_runtime_sources=check_runtime_sources)
     return manifest
 
 
@@ -2095,11 +2106,12 @@ def validate_packet(
     *,
     require_complete: bool = False,
     check_sources: bool = False,
+    check_runtime_sources: bool = True,
     packet_path: Path | None = None,
 ) -> dict[str, Any]:
     if packet_path is not None:
         _assert_isolated_packet_path(packet_path)
-    validate_manifest(manifest, check_sources=check_sources)
+    validate_manifest(manifest, check_sources=check_sources, check_runtime_sources=check_runtime_sources)
     if set(packet) != PACKET_TOP_LEVEL_FIELDS:
         raise AnnotationError("annotation packet の top-level fields が固定契約と一致しません。")
     if packet.get("schema") != PACKET_SCHEMA or packet.get("benchmark_id") != manifest.get("benchmark_id"):

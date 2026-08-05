@@ -12,8 +12,10 @@ from benchmarks.t1.review_helpers import (
     PreparedPlayback,
     commit_annotation,
     configured_packet_path,
+    ensure_default_playback,
     existing_playback,
     load_review_session,
+    next_unfinished_row_index,
     prepare_playback,
     unfinished_row_index,
 )
@@ -32,6 +34,34 @@ def _write_test_wav(path: Path, duration_ms: int) -> dict[str, int | str]:
         writer.setframerate(16000)
         writer.writeframes(b"\x00\x00" * (duration_ms * 16))
     return packet_tool._wav_output_info(path)
+
+
+def test_next_unfinished_row_index_prefers_rows_after_current() -> None:
+    span = {"kind": "single_source_audio", "start_ms": 0, "end_ms": 10000}
+    complete_gold = {
+        "line_onset_ms": 1000,
+        "timebase": "source_audio_relative_ms",
+        "annotator_id": "ryukou",
+        "annotated_at": "2026-08-05T00:00:00+00:00",
+        "audio_listened": True,
+    }
+    packet = {
+        "rows": [
+            {"row_id": "done", "source_span": span, "gold": complete_gold},
+            {"row_id": "skipped", "source_span": span, "gold": dict(packet_tool.GOLD_PLACEHOLDER)},
+            {"row_id": "done-2", "source_span": span, "gold": complete_gold},
+            {"row_id": "next", "source_span": span, "gold": dict(packet_tool.GOLD_PLACEHOLDER)},
+        ]
+    }
+    assert next_unfinished_row_index(packet, 2) == 3
+    assert next_unfinished_row_index(packet, 3) == 1
+
+
+def test_load_review_session_skips_whisper_runtime_model_check(tmp_path: Path) -> None:
+    packet_path = tmp_path / "human-gold.json"
+    session = load_review_session(MANIFEST_PATH, packet_path)
+    assert session.validation["row_count"] == 64
+    assert packet_path.is_file()
 
 
 def test_review_app_uses_the_fixed_default_packet_contract(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -116,9 +146,35 @@ def test_review_helper_rejects_onset_outside_playback_window_without_packet_writ
     assert packet_path.read_bytes() == original_bytes
 
 
+def test_review_helpers_auto_prepare_default_window(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    packet_path = tmp_path / "human-gold.json"
+    session = load_review_session(MANIFEST_PATH, packet_path)
+    row = session.packet["rows"][0]
+    row_id = row["row_id"]
+    expected_duration = packet_tool._row_duration_ms(row)
+
+    def fake_write(source, source_span, output_path, **kwargs):
+        duration_ms = packet_tool._row_duration_ms({"row_id": "browser-playback", "source_span": source_span})
+        return _write_test_wav(output_path, duration_ms)
+
+    monkeypatch.setattr(packet_tool, "write_source_span_wav", fake_write)
+    prepared = ensure_default_playback(session, row_id, packet_path)
+    assert prepared.is_existing is False
+    assert prepared.receipt["played_from_ms"] == 0
+    assert prepared.receipt["played_duration_ms"] == expected_duration
+
+
 def test_review_app_initial_render_is_local_and_blind(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     packet_path = tmp_path / "app-test-human-gold.json"
     monkeypatch.setenv("T1_REVIEW_PACKET_PATH", str(packet_path))
+
+    def fake_write(source, source_span, output_path, **kwargs):
+        duration_ms = packet_tool._row_duration_ms({"row_id": "browser-playback", "source_span": source_span})
+        return _write_test_wav(output_path, duration_ms)
+
+    monkeypatch.setattr(packet_tool, "write_source_span_wav", fake_write)
     app = AppTest.from_file(str(APP_PATH)).run(timeout=60)
 
     assert not app.exception
@@ -127,6 +183,9 @@ def test_review_app_initial_render_is_local_and_blind(monkeypatch: pytest.Monkey
         for collection in (app.title, app.header, app.subheader, app.markdown, app.caption)
         for item in collection
     )
+    assert "再生窓: 開始 0 ms" in rendered_text
+    assert "波形" in rendered_text
+    assert "全体波形" in rendered_text
     assert "1 / 64" in rendered_text
     assert "t1-long-001" in rendered_text
     assert "long_single_cue" in rendered_text
@@ -139,6 +198,12 @@ def test_review_app_save_gate_requires_listening_and_keeps_packet_bytes(
 ) -> None:
     packet_path = tmp_path / "app-test-save-gate.json"
     monkeypatch.setenv("T1_REVIEW_PACKET_PATH", str(packet_path))
+
+    def fake_write(source, source_span, output_path, **kwargs):
+        duration_ms = packet_tool._row_duration_ms({"row_id": "browser-playback", "source_span": source_span})
+        return _write_test_wav(output_path, duration_ms)
+
+    monkeypatch.setattr(packet_tool, "write_source_span_wav", fake_write)
     app = AppTest.from_file(str(APP_PATH)).run(timeout=60)
     original_bytes = packet_path.read_bytes()
 
@@ -146,4 +211,4 @@ def test_review_app_save_gate_requires_listening_and_keeps_packet_bytes(
     app.button(key="t1_review:t1-long-001:save").click().run(timeout=60)
 
     assert packet_path.read_bytes() == original_bytes
-    assert any("先に音声を再生・確認してください" in item.value for item in app.error)
+    assert any("音声を実際に確認した" in item.value for item in app.error)

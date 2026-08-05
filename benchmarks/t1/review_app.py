@@ -8,8 +8,15 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from typing import Any
+
+# ``uv run streamlit run benchmarks/t1/review_app.py`` では script 配下だけが
+# sys.path に入るため、repository root を先に足して harness を import する。
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
 import streamlit as st
 
@@ -20,12 +27,20 @@ from benchmarks.t1.review_helpers import (
     commit_annotation,
     complete_validation,
     configured_packet_path,
+    ensure_default_playback,
     existing_playback,
     load_review_session,
     prepare_playback,
     row_at,
-    row_position,
+    next_unfinished_row_index,
     unfinished_row_index,
+)
+from benchmarks.t1.waveform import (
+    chart_columns,
+    overview_and_zoom,
+    read_mono_pcm16,
+    row_onset_from_playback_position,
+    zoom_bounds,
 )
 
 
@@ -93,6 +108,47 @@ def _parse_onset(raw: str) -> int:
     return int(value)
 
 
+def _load_pcm_samples(prepared: PreparedPlayback) -> tuple[list[int], int]:
+    cache_key = _session_key(prepared.row_id, f"samples:{prepared.receipt['playback_wav_sha256']}")
+    cached = st.session_state.get(cache_key)
+    if isinstance(cached, tuple) and len(cached) == 2:
+        samples, sample_rate = cached
+        if isinstance(samples, list) and isinstance(sample_rate, int):
+            return samples, sample_rate
+    samples, sample_rate = read_mono_pcm16(prepared.wav_path)
+    st.session_state[cache_key] = (samples, sample_rate)
+    return samples, sample_rate
+
+
+def _render_waveform(prepared: PreparedPlayback, onset_key: str) -> None:
+    played_duration = int(prepared.receipt["played_duration_ms"])
+    cursor_key = _session_key(prepared.row_id, "waveform_cursor_ms")
+    st.session_state.setdefault(cursor_key, 0)
+    cursor_ms = st.slider(
+        "波形上の位置 (ms、再生窓内)",
+        min_value=0,
+        max_value=max(0, played_duration - 1),
+        step=1,
+        key=cursor_key,
+    )
+
+    samples, sample_rate = _load_pcm_samples(prepared)
+    overview, zoom, _ = overview_and_zoom(samples, sample_rate, cursor_ms=int(cursor_ms))
+
+    st.caption("全体波形（最大振幅を間引き表示。候補時刻ではなく生信号です）")
+    st.area_chart(chart_columns(overview), x="ms", y="amp", width="stretch")
+
+    zoom_start, zoom_end = zoom_bounds(played_duration, int(cursor_ms))
+    st.caption(f"拡大表示: {zoom_start} ms 〜 {zoom_end} ms")
+    st.area_chart(chart_columns(zoom), x="ms", y="amp", width="stretch")
+
+    row_onset_ms = row_onset_from_playback_position(prepared.receipt, int(cursor_ms))
+    st.caption(f"選択位置の row 内 onset 換算: {row_onset_ms} ms")
+    if st.button("この位置を onset に入れる", key=_session_key(prepared.row_id, "apply_waveform_onset")):
+        st.session_state[onset_key] = str(row_onset_ms)
+        st.rerun()
+
+
 def _render_navigation(session: ReviewSession, index: int) -> None:
     rows = session.packet["rows"]
     with st.container(horizontal=True, horizontal_alignment="distribute"):
@@ -154,23 +210,54 @@ def main() -> None:
 
     _render_navigation(session, index)
 
+    listened_key = _session_key(row_id, "listened")
+    st.session_state.setdefault(listened_key, False)
     try:
-        prepared = _get_prepared(session, row, packet_path)
+        cached = _get_prepared(session, row, packet_path)
     except (packet_tool.AnnotationError, OSError) as exc:
         st.error(f"既存 playback receipt の検証に失敗しました。処理を停止します。\n\n{exc}")
         st.stop()
 
+    try:
+        with st.spinner("音声を準備しています..."):
+            prepared = ensure_default_playback(
+                session,
+                row_id,
+                packet_path,
+                cached=cached,
+            )
+        if cached is None:
+            _store_prepared(prepared)
+    except (packet_tool.AnnotationError, OSError) as exc:
+        st.error(f"音声の準備に失敗しました。packet は変更していません。\n\n{exc}")
+        st.stop()
+
     with st.container(border=True):
         st.subheader("音声")
-        st.caption("ブラウザの音声操作で再生・一時停止・聞き直しを行ってください。再生位置は候補時刻ではなく音声の再生位置です。")
-        if prepared is not None:
-            st.audio(prepared.wav_bytes, format="audio/wav")
-            st.caption(
-                f"再生窓: 開始 {prepared.receipt['played_from_ms']} ms / 長さ {prepared.receipt['played_duration_ms']} ms"
-            )
-        else:
-            st.info("再生窓を準備してから音声を確認してください。")
+        st.caption(
+            "行を開くと先頭から行末までの再生窓を自動で用意します。"
+            "ブラウザの音声操作で再生・一時停止・聞き直しを行ってください。"
+        )
+        st.audio(prepared.wav_bytes, format="audio/wav")
+        st.caption(
+            f"再生窓: 開始 {prepared.receipt['played_from_ms']} ms / 長さ {prepared.receipt['played_duration_ms']} ms"
+        )
 
+    existing_gold = row["gold"] if packet_tool._validate_gold(row, require_complete=False) else packet_tool.GOLD_PLACEHOLDER
+    default_onset = "" if existing_gold is packet_tool.GOLD_PLACEHOLDER else str(existing_gold["line_onset_ms"])
+    onset_key = _session_key(row_id, "onset")
+    annotator_key = _session_key(row_id, "annotator")
+    st.session_state.setdefault(onset_key, default_onset)
+    st.session_state.setdefault(annotator_key, "ryukou")
+
+    with st.container(border=True):
+        st.subheader("波形")
+        st.caption("生信号の振幅です。スライダーで位置を選び、必要なら拡大表示で確認してから onset に入れてください。")
+        _render_waveform(prepared, onset_key)
+
+    with st.container(border=True):
+        st.subheader("短い再生窓での最終確認")
+        st.caption("耳での確認が必要なときだけ、再生窓を狭めて聞き直してください。")
         row_duration = packet_tool._row_duration_ms(row)
         from_key = _session_key(row_id, "from_ms")
         short_key = _session_key(row_id, "short_window")
@@ -199,7 +286,7 @@ def main() -> None:
                 step=100,
                 key=duration_key,
             )
-        if st.button("再生窓を準備／聞き直す", type="secondary", key=_session_key(row_id, "prepare")):
+        if st.button("再生窓を変更して聞き直す", type="secondary", key=_session_key(row_id, "prepare")):
             try:
                 prepared = prepare_playback(
                     session,
@@ -209,18 +296,11 @@ def main() -> None:
                     packet_path=packet_path,
                 )
                 _store_prepared(prepared)
+                st.session_state[listened_key] = False
                 st.rerun()
             except (packet_tool.AnnotationError, OSError) as exc:
                 st.error(f"音声の準備に失敗しました。packet は変更していません。\n\n{exc}")
 
-    existing_gold = row["gold"] if packet_tool._validate_gold(row, require_complete=False) else packet_tool.GOLD_PLACEHOLDER
-    default_onset = "" if existing_gold is packet_tool.GOLD_PLACEHOLDER else str(existing_gold["line_onset_ms"])
-    onset_key = _session_key(row_id, "onset")
-    annotator_key = _session_key(row_id, "annotator")
-    listened_key = _session_key(row_id, "listened")
-    st.session_state.setdefault(onset_key, default_onset)
-    st.session_state.setdefault(annotator_key, "ryukou")
-    st.session_state.setdefault(listened_key, False)
     with st.form(_session_key(row_id, "annotation_form"), clear_on_submit=False):
         onset_raw = st.text_input(
             "発話開始位置 (ms、row内相対)",
@@ -236,27 +316,24 @@ def main() -> None:
         )
 
     if save:
-        if prepared is None:
-            st.error("先に音声を再生・確認してください。")
-        else:
-            try:
-                commit_annotation(
-                    session,
-                    row_id,
-                    _parse_onset(onset_raw),
-                    annotator,
-                    listened,
-                    prepared,
-                    packet_path=packet_path,
-                )
-                latest = load_review_session(packet_path=packet_path)
-                target = unfinished_row_index(latest.packet)
-                _clear_prepared(row_id)
-                if target is not None:
-                    _set_index(target, len(latest.packet["rows"]))
-                st.rerun()
-            except (packet_tool.AnnotationError, OSError) as exc:
-                st.error(f"保存できませんでした。元の packet は変更していません。\n\n{exc}")
+        try:
+            commit_annotation(
+                session,
+                row_id,
+                _parse_onset(onset_raw),
+                annotator,
+                listened,
+                prepared,
+                packet_path=packet_path,
+            )
+            latest = load_review_session(packet_path=packet_path)
+            target = next_unfinished_row_index(latest.packet, index)
+            _clear_prepared(row_id)
+            if target is not None:
+                _set_index(target, len(latest.packet["rows"]))
+            st.rerun()
+        except (packet_tool.AnnotationError, OSError) as exc:
+            st.error(f"保存できませんでした。元の packet は変更していません。\n\n{exc}")
 
     if unfinished_row_index(session.packet) is None:
         _render_complete(session, packet_path)
