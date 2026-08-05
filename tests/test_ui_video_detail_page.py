@@ -1773,9 +1773,7 @@ def test_s9_candidate_card_uses_saved_coarse_vtt_provenance() -> None:
     with patch.object(detail, "load_candidates_file", return_value=document):
         value = detail._candidate_provenance_text("video-1", "clips", MagicMock())
 
-    assert "coarse VTT" in value
-    assert "a" * 64 in value
-    assert "b" * 64 in value
+    assert value == "自動字幕から抽出した候補です（抽出記録を保存済み）。"
 
 
 def test_s9_candidate_card_fails_closed_when_coarse_lineage_is_missing() -> None:
@@ -1791,5 +1789,50 @@ def test_s9_candidate_card_fails_closed_when_coarse_lineage_is_missing() -> None
     ):
         value = detail._candidate_provenance_text("video-1", "clips", MagicMock())
 
-    assert "coarse VTT" in value
-    assert "lineage 未確認" in value
+    assert value == "自動字幕から抽出した候補です（抽出記録は未保存）。"
+
+
+def test_s9_candidate_provenance_details_shows_fingerprints_in_expander() -> None:
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock, patch
+
+    from yt_live_kit.ui.views import video_detail as detail
+
+    document = SimpleNamespace(
+        lineage=SimpleNamespace(
+            candidate_fingerprint="a" * 64,
+            coarse_vtt_artifact_fingerprint="b" * 64,
+        )
+    )
+    with (
+        patch.object(detail, "load_candidates_file", return_value=document),
+        patch.object(detail.st, "expander", return_value=_ExpanderStub(False)) as expander,
+        patch.object(detail.st, "write") as write,
+    ):
+        detail._render_candidate_provenance_details("video-1", "clips", MagicMock())
+
+    expander.assert_called_once()
+    rendered = " ".join(str(call.args[0]) for call in write.call_args_list)
+    assert "a" * 64 in rendered
+    assert "b" * 64 in rendered
+
+
+def test_s9_candidate_provenance_details_no_op_without_lineage() -> None:
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock, patch
+
+    from yt_live_kit.ui.views import video_detail as detail
+
+    with (
+        patch.object(
+            detail,
+            "load_candidates_file",
+            return_value=SimpleNamespace(lineage=None),
+        ),
+        patch.object(detail.st, "expander") as expander,
+        patch.object(detail.st, "write") as write,
+    ):
+        detail._render_candidate_provenance_details("video-1", "clips", MagicMock())
+
+    expander.assert_not_called()
+    write.assert_not_called()

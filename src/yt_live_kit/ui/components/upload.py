@@ -241,16 +241,21 @@ def _render_related_video_status(
             )
             return
 
-        st.write(f"設定対象の元動画 ID: {_safe_text(operation.source_video_id)}")
-        st.write(f"対象 Shorts video ID: {_safe_text(operation.video_id)}")
         st.markdown(
             f"[YouTube Studio の編集画面を開く]"
             f"({_studio_video_edit_url(operation.video_id)})"
         )
-        st.write(
-            "手順: Studio の編集画面で関連動画を設定し、保存後に"
-            "「Studioで関連動画を設定済み」と明示確定してください。"
-        )
+        with st.expander(
+            "Studio で設定する ID と手順",
+            expanded=False,
+            key=f"related_video_ids_{operation.operation_id}",
+        ):
+            st.write(f"設定対象の元動画 ID: {_safe_text(operation.source_video_id)}")
+            st.write(f"対象 Shorts video ID: {_safe_text(operation.video_id)}")
+            st.write(
+                "手順: Studio の編集画面で関連動画を設定し、保存後に"
+                "「Studioで関連動画を設定済み」と明示確定してください。"
+            )
         if operation.related_video_status != "pending":
             return
         if st.button(
@@ -307,9 +312,8 @@ def _render_related_video_summary_panel(
                         _safe_text(item.related_video_status),
                     )
                 )
-                st.write(
+                st.caption(
                     f"operation {_safe_text(item.operation_id)} / "
-                    f"設定対象の元動画 ID: {_safe_text(item.source_video_id)} / "
                     f"対象 Shorts video ID: {_safe_text(pending_video_id or '未取得')}"
                 )
                 if not pending_video_id:
@@ -346,10 +350,6 @@ def render_upload_operation(
     """upload operation だけを pipeline result と混同せず表示する."""
     with st.container(border=True):
         st.markdown(f"**投稿状態: {_STATE_LABELS[operation.state]}**")
-        st.caption(
-            f"operation {_safe_text(operation.operation_id)} / "
-            f"job {_safe_text(operation.job_id)}"
-        )
         if operation.content.requirements is None:
             st.warning(
                 "この投稿内容は legacy 形式で概要欄要件 snapshot がありません。"
@@ -363,8 +363,6 @@ def render_upload_operation(
                 _safe_text(operation.publication_eligibility),
             )
         )
-        if operation.video_id:
-            st.write(f"YouTube video ID: {_safe_text(operation.video_id)}")
         if operation.error:
             if operation.state == "needs_reconciliation":
                 st.error(
@@ -378,6 +376,17 @@ def render_upload_operation(
                 f"最終確認 {latest.polled_at.isoformat()} / "
                 f"{_POLL_CLASSIFICATION_LABELS[latest.classification]}"
             )
+        with st.expander(
+            "この投稿の内部 ID",
+            expanded=False,
+            key=f"upload_operation_ids_{operation.operation_id}",
+        ):
+            st.caption(
+                f"operation {_safe_text(operation.operation_id)} / "
+                f"job {_safe_text(operation.job_id)}"
+            )
+            if operation.video_id:
+                st.write(f"YouTube video ID: {_safe_text(operation.video_id)}")
         if settings is not None and operation.state == "uploaded" and operation.video_id:
             latest_publication = next(
                 (
@@ -972,7 +981,14 @@ def render_upload_section(
             st.markdown(
                 f"**{_safe_text(candidates[0] if candidates else 'タイトル未設定')}**"
             )
-            st.caption(_safe_text(item.target_id))
+            # clip_id は人が読んで意味を取れないため主導線に出さない。
+            # 同名タイトルの取り違えを追える程度に折り畳みへ残す。
+            with st.expander(
+                "このショートの内部 ID",
+                expanded=False,
+                key=f"upload_target_id_{item.target_id}",
+            ):
+                st.caption(_safe_text(item.target_id))
             # 既存 operation の復元・関連動画追跡は、ローカル成果物の欠損や
             # stale manifest に依存させない。ここから下は新規 preview 用の gate。
             if item.output_path is None:

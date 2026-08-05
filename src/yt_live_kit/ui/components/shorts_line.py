@@ -163,10 +163,11 @@ def _inspect_artifact_lineage(
 def _render_telop_provenance_header(draft: TelopScriptDocument) -> None:
     payload = artifact_provenance_payload(draft)
     if payload is None:
-        st.caption("telop editor provenance: coarse VTT fallback（高精度 artifact なし）")
+        st.caption("テロップの時刻は自動字幕（通常精度）に合わせています。")
         return
-    st.caption("telop editor provenance: refined artifact（同一 ref / digest 配列）")
-    st.code(json.dumps(payload, ensure_ascii=False, indent=2))
+    st.caption("テロップの時刻は高精度字幕に合わせています。")
+    with st.expander("字幕の照合データ", expanded=False):
+        st.code(json.dumps(payload, ensure_ascii=False, indent=2))
 
 
 def _candidate_handoff_label(
@@ -1550,7 +1551,10 @@ def render_shorts_line(
             st.error(_safe(exc))
 
     if output_path is None:
-        st.caption("生成条件: ハード判定通過 + 人確認済み + fingerprint 一致")
+        st.caption(
+            "生成できる条件: 自動チェックを通過・台本を人が確認済み・"
+            "確認したあとに内容が変わっていない"
+        )
         if st.button(
             "台本を確定して生成へ",
             type="primary",
@@ -1593,16 +1597,16 @@ def render_shorts_line(
     st.subheader("完成動画を最終確認")
     if not lineage_current:
         st.error(
-            "最終確認 banner: 高精度字幕の失効理由を確認してください。"
-            f"対象 clip: {state.clip_id}。次 gate: 台本を再確認してください。"
+            "高精度字幕の失効理由を確認してください。"
+            f"対象 clip: {state.clip_id}。次にやること: 台本を再確認してください。"
         )
     elif state.artifact_ref is None:
         st.warning(
-            "最終確認 banner: coarse VTT fallback です。"
-            "高精度成功とは表示せず、境界を人が確認してください。"
+            "この動画の時刻は自動字幕（通常精度）に基づいています。"
+            "高精度で作れたとは表示せず、区切りを人が確認してください。"
         )
     else:
-        st.info("最終確認 banner: refined artifact lineage を使用しています。")
+        st.info("この動画の時刻は高精度字幕に基づいています。")
     with st.container(width=360):
         st.video(output_path)
     preview_current = (

@@ -1822,12 +1822,37 @@ def test_s9_telop_header_reuses_artifact_ref_and_digest_array() -> None:
     with (
         patch.object(shorts_line.st, "caption") as caption,
         patch.object(shorts_line.st, "code") as code,
+        patch.object(
+            shorts_line.st, "expander", return_value=_ExpanderStub(False)
+        ) as expander,
     ):
         shorts_line._render_telop_provenance_header(draft)
 
-    assert "同一 ref / digest 配列" in caption.call_args.args[0]
+    assert "高精度字幕に合わせています" in caption.call_args.args[0]
+    expander.assert_called_once()
     rendered = code.call_args.args[0]
     assert "transcripts/artifacts/ref.json" in rendered
     assert "a" * 64 in rendered
     assert "b" * 64 in rendered
     assert "c" * 64 in rendered
+
+
+def test_s9_telop_header_skips_expander_when_no_artifact() -> None:
+    from types import SimpleNamespace
+    from unittest.mock import patch
+
+    from yt_live_kit.ui.components import shorts_line
+
+    draft = SimpleNamespace(
+        artifact_ref=None,
+        artifact_fingerprint=None,
+        used_range_cue_digests=(),
+    )
+    with (
+        patch.object(shorts_line.st, "caption") as caption,
+        patch.object(shorts_line.st, "expander") as expander,
+    ):
+        shorts_line._render_telop_provenance_header(draft)
+
+    assert "自動字幕（通常精度）に合わせています" in caption.call_args.args[0]
+    expander.assert_not_called()

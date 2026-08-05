@@ -1363,6 +1363,33 @@ def test_render_related_video_status_offers_confirm_button_for_pending_operation
     assert "対象 Shorts video ID: youtube-1" in rendered
 
 
+def test_render_related_video_status_ids_render_inside_expander(
+    tmp_path: Path,
+) -> None:
+    """U10-3: Studio 手動確認の 2 つの正本 ID は折り畳みの内側でのみ描画される."""
+    settings = Settings(data_dir=tmp_path)
+    operation = _operation(tmp_path, state="uploaded")
+    with (
+        patch.object(upload, "related_video_confirm_dialog"),
+        patch.object(upload.st, "container", side_effect=_container),
+        patch.object(upload.st, "expander", side_effect=_container) as expander,
+        patch.object(upload.st, "markdown"),
+        patch.object(upload.st, "write") as write,
+        patch.object(upload.st, "caption"),
+        patch.object(upload.st, "button", return_value=False),
+    ):
+        upload._render_related_video_status(operation, settings)
+
+    expander.assert_called_once_with(
+        "Studio で設定する ID と手順",
+        expanded=False,
+        key=f"related_video_ids_{operation.operation_id}",
+    )
+    rendered = "\n".join(str(item.args[0]) for item in write.call_args_list)
+    assert "設定対象の元動画 ID: source-1" in rendered
+    assert "対象 Shorts video ID: youtube-1" in rendered
+
+
 def test_related_video_status_has_no_self_referential_caption(tmp_path: Path) -> None:
     settings = Settings(data_dir=tmp_path)
     operation = _operation(tmp_path, state="uploaded")
@@ -1727,6 +1754,99 @@ def test_invalid_schedule_or_unclicked_button_creates_no_preview_operation_or_jo
     reservation_transaction.assert_not_called()
 
 
+def test_upload_section_moves_target_id_into_expander(tmp_path: Path) -> None:
+    """U10-3: 予約投稿カードの clip_id は主導線に出さず折り畳みへ格納する."""
+    item = MagicMock(
+        status="succeeded",
+        output_path=None,
+        title_candidates=("検索明快なタイトル",),
+        target_id="clip-1",
+    )
+    result = MagicMock(status="done", items=(item,), job_id="shorts-job", clip_specs=())
+    settings = Settings(data_dir=tmp_path)
+    policy = SchedulePolicy(daily_times=["09:00"])
+    requested = datetime(2026, 8, 5, 15, 45, tzinfo=ZoneInfo(policy.timezone))
+    events: list[str] = []
+
+    @contextmanager
+    def _tracking_expander(*args: object, **kwargs: object):
+        events.append("expander_enter")
+        yield
+        events.append("expander_exit")
+
+    def _tracking_caption(text: str, *args: object, **kwargs: object) -> None:
+        events.append(f"caption:{text}")
+
+    with (
+        patch.object(upload, "load_latest_shorts_queue_result", return_value=result),
+        patch.object(upload, "get_next_upload_slot", return_value=(policy, requested)),
+        patch.object(upload, "list_operations", return_value=()),
+        patch.object(upload.st, "container", side_effect=_container),
+        patch.object(upload.st, "expander", side_effect=_tracking_expander) as expander,
+        patch.object(upload.st, "caption", side_effect=_tracking_caption),
+        patch.object(upload.st, "markdown"),
+        patch.object(upload.st, "warning"),
+        patch.object(upload.st, "button", return_value=False),
+    ):
+        upload.render_upload_section("source-1", settings)
+
+    expander.assert_called_once_with(
+        "このショートの内部 ID",
+        expanded=False,
+        key="upload_target_id_clip-1",
+    )
+    enter_index = events.index("expander_enter")
+    exit_index = events.index("expander_exit")
+    id_index = events.index("caption:clip-1")
+    assert enter_index < id_index < exit_index
+
+
+def test_render_upload_operation_moves_internal_ids_into_expander(
+    tmp_path: Path,
+) -> None:
+    """U10-3: operation / job / YouTube video ID は主導線に出さず折り畳みへ格納する."""
+    operation = _operation(tmp_path, state="uploaded")
+    events: list[str] = []
+
+    @contextmanager
+    def _tracking_expander(*args, **kwargs):
+        events.append("expander_enter")
+        yield
+        events.append("expander_exit")
+
+    def _tracking_caption(text: str, *args: object, **kwargs: object) -> None:
+        events.append(f"caption:{text}")
+
+    def _tracking_write(text: str, *args: object, **kwargs: object) -> None:
+        events.append(f"write:{text}")
+
+    with (
+        patch.object(upload.st, "container", side_effect=_container),
+        patch.object(upload.st, "expander", side_effect=_tracking_expander) as expander,
+        patch.object(upload.st, "markdown"),
+        patch.object(upload.st, "caption", side_effect=_tracking_caption),
+        patch.object(upload.st, "write", side_effect=_tracking_write),
+    ):
+        upload.render_upload_operation(operation)
+
+    expander.assert_called_once_with(
+        "この投稿の内部 ID",
+        expanded=False,
+        key=f"upload_operation_ids_{operation.operation_id}",
+    )
+    enter_index = events.index("expander_enter")
+    exit_index = events.index("expander_exit")
+    id_event_indexes = [
+        index
+        for index, event in enumerate(events)
+        if event
+        == f"caption:operation {operation.operation_id} / job {operation.job_id}"
+        or event == f"write:YouTube video ID: {operation.video_id}"
+    ]
+    assert len(id_event_indexes) == 2
+    assert all(enter_index < index < exit_index for index in id_event_indexes)
+
+
 def test_needs_reconciliation_shows_manual_guidance_without_retry_button(tmp_path: Path) -> None:
     operation = _operation(tmp_path, state="needs_reconciliation")
     with (
@@ -1799,13 +1919,19 @@ def test_poll_classification_is_always_rendered_in_japanese(
     operation = base.model_copy(update={"poll_history": (observation,)})
     with (
         patch.object(upload.st, "container", side_effect=_container),
+        patch.object(upload.st, "expander", side_effect=_container),
         patch.object(upload.st, "markdown"),
         patch.object(upload.st, "caption") as caption,
         patch.object(upload.st, "write"),
     ):
         upload.render_upload_operation(operation)
-    assert label in caption.call_args_list[-1].args[0]
-    assert classification not in caption.call_args_list[-1].args[0]
+    poll_caption = next(
+        call.args[0]
+        for call in caption.call_args_list
+        if call.args[0].startswith("最終確認")
+    )
+    assert label in poll_caption
+    assert classification not in poll_caption
 
 
 def test_uploaded_operation_starts_publication_poll_from_explicit_cta(

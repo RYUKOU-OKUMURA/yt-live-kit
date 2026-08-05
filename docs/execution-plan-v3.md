@@ -2193,7 +2193,7 @@ data/{video_id}/ ...
 
 **目的:** U9 完了後に実データ（`hPeRSA9YVIM` / `clip_001`）で 3 ワークスペースを実機操作して発見した、FR-33 の「毎回選ばせない」「行き止まりゼロ」に反する導線上の欠陥を解消する。U9 が「見た目」の刷新であるのに対し、本フェーズは**情報構造と操作回数**の是正であり、テーマ・配色・形状には手を入れない。
 
-**フェーズ状態:** [ ] 未着手
+**フェーズ状態:** [x] 完了（U10-1 / U10-2 / U10-3 / U10-4 すべて完了）
 
 **前提・制約:** U9 の第 1 弾（テーマ適用）・AppTest 視覚回帰スモーク・サイドバー縦ステッパー（U9-2 / U9-3 / U9-6）が完了済みであることを前提とする。U9 の残り（U9-1 / U9-4 / U9-5 / U9-7〜U9-9 の視覚仕上げ、U9-10〜U9-12 の掃除）は本フェーズより後に回す。導線構造が変わると視覚仕上げの対象自体が変わるため、順序を逆にしない。現在の回帰基準は U9 完了時点の全件 `uv run pytest` である。
 
@@ -2220,22 +2220,32 @@ data/{video_id}/ ...
   - **他動画の判別:** `_render_related_video_summary_panel` に `current_video_id` を足して現在の動画を除外し、残りを `st.expander("他の動画の確認待ち（N 件）")` へ格納したうえで各項目を「元動画 {ID} のショート「{タイトル}」」で始めた。確定ボタンと dialog は据え置きで、`upload.py:906-908` の永続追跡の設計意図（再起動後・manifest 消失後も残す）を維持している
   - **順序保証:** 追跡描画を `render_upload_section` から新設 `render_post_upload_followup` へ切り出し、`render_upload_section` は projection を返すだけにした。追跡を予約投稿の後ろへ置くと manifest 都合の早期 return（manifest 無し・interrupted・未完了・成功 item 無し）で追跡ごと消えるためである。queue 読み出しは 1 回のまま共有し、queue 破損時に予約を止める fail-closed も維持した
   - **実機確認で発見した重複（2026-08-05）:** 並べ替えた結果、`video_detail` 側の `st.info("先にショートを作成してください。")` と `render_upload_section` の「まとめて生成したショートがありません。先にショートを生成してください。」が隣接して二重表示になった。予約対象が無い理由は manifest から `render_upload_section` が診断できるため前者を削除し、`video_detail` 側には manifest から導けない「生成済みだが予約対象に入っていない」の案内と、行き止まりを防ぐ「ショート生産ラインへ」の出口だけを残した
-- [ ] U10-3. 内部識別子を主導線から「詳細・再生成」相当の折り畳みへ移す。`short_cut.py:1021` と `shorts_line.py:169` の `st.code(json.dumps(payload, ...))` は `artifact_fingerprint` と `used_range_cue_digests`（SHA-256）を含む生 JSON をメイン導線にそのまま出している。`upload.py:178` の投稿 operation ID、`upload.py:238-239` の元動画 ID / Shorts video ID、`upload.py:281` の operation 表示も同様。素材候補ワークスペースでは `video_detail.py:895-913` の `_candidate_provenance_text` が "candidate provenance: coarse VTT（lineage 未確認）" という内部用語をそのまま表示している。人が読んで意味の分かる 1 行へ置き換え、識別子そのものは折り畳みへ格納する
-- [ ] U10-4. U10-1〜U10-3 の各変更を Playwright MCP で実機確認する。対象は実データの動画 1 本を素材候補 → ショート作成 → 公開・投稿と通す 1 周。ポートは 8501 を避けて 8502 等を使う（8501 は T1-1 の人手アノテーション UI が使用している可能性がある）
+- [x] U10-3. 内部識別子を主導線から「詳細・再生成」相当の折り畳みへ移す。`short_cut.py:1021` と `shorts_line.py:169` の `st.code(json.dumps(payload, ...))` は `artifact_fingerprint` と `used_range_cue_digests`（SHA-256）を含む生 JSON をメイン導線にそのまま出している。`upload.py:178` の投稿 operation ID、`upload.py:238-239` の元動画 ID / Shorts video ID、`upload.py:281` の operation 表示も同様。素材候補ワークスペースでは `video_detail.py:895-913` の `_candidate_provenance_text` が "candidate provenance: coarse VTT（lineage 未確認）" という内部用語をそのまま表示している。人が読んで意味の分かる 1 行へ置き換え、識別子そのものは折り畳みへ格納する
+  - **実装（2026-08-05）:** 主導線に残すのは「人が読んで意味の分かる 1 行」だけとし、識別子は削除せず折り畳みへ移した。追加した折り畳みは `字幕の照合データ`（`short_cut.py` / `shorts_line.py`）・`Studio で設定する ID と手順`・`この投稿の内部 ID`・`このショートの内部 ID`（`upload.py`）・`候補の抽出記録`（`video_detail.py`）の 5 種である。loop で複数描かれるものには `key` を付けた
+  - **`render_cutplan_provenance` は主導線に何も出さない:** 呼び出し元 `short_cut.py:_render_plan` が直後に `st.success("選択区間の高精度字幕を固定済みです。")` / 代替 caption で同じ事実を述べているため、状態表示を主導線に残すと二重表示になる。よってこの関数は折り畳みだけを描く。テロップ編集器の `_render_telop_provenance_header` は直後に同じ事実を述べる行が無いため、人が読める 1 行は主導線に残し生 JSON だけを折り畳んだ
+  - **確認 dialog（`upload.py:164-212`）は変更しない:** 警告文が「2つの正本 ID を確認して確定してください」と明示しており、ID 表示そのものが人による照合ステップである。加えてこの dialog はボタンを明示的に押したときだけ開くため、常時表示の主導線ではなく機能的に折り畳みと等価である。一方 `_render_related_video_status` の同じ 2 つの ID は dialog を開けば必ず見えるので主導線から畳んだ。Studio へのリンクは識別子ではなく出口のため主導線に残し、行き止まりを作らない
+  - **他動画パネルは既に折り畳みの内側:** `_render_related_video_summary_panel` は `st.expander("他の動画の確認待ち（N 件）")` の中で描かれるため要件を満たしており、expander を新たに足していない（ネストさせない）。内側にあった `設定対象の元動画 ID` は 2 行前の「元動画 {ID} のショート「…」」と同一 ID の重複だったため削除し、残りを `st.caption` へ降格した
+  - **素材候補の per-card 重複を解消:** `_candidate_provenance_text` は候補カードごとに同一文字列を `st.caption` していた。人が読める 1 行へ置き換えたうえで loop の外へ出して 1 回だけ描き、fingerprint 2 種は新設 `_render_candidate_provenance_details` の折り畳みへ移した（削除ではない）
+  - **実機確認で追加発見した露出（2026-08-05）:** 当初の露出リストに無かった 4 箇所を実機とコード走査で発見し、同じ方針で直した。`upload.py` の予約投稿カードが `clip_id` を裸で `st.caption` していた（→ `このショートの内部 ID` へ格納）、`short_cut.py` の `st.success` が "artifact" を含んでいた、`shorts_line.py` の生成条件 caption が "ハード判定通過 + fingerprint 一致" という内部語だった、最終確認の 3 分岐が "最終確認 banner: refined artifact lineage" のように UI 実装語と内部語を出していた。いずれも識別子ではなく用語のみの是正である
+  - **残す識別子:** `shorts_line.py` の lineage 失効時 `st.error`（`対象 clip: {clip_id}` を含む）と `upload.py:624` / `:647` のライン記録失敗時 `st.error`（`operation {id}` を含む）は診断に必要なため一字も変えていない
+- [x] U10-4. U10-1〜U10-3 の各変更を Playwright MCP で実機確認する。対象は実データの動画 1 本を素材候補 → ショート作成 → 公開・投稿と通す 1 周。ポートは 8501 を避けて 8502 等を使う（8501 は T1-1 の人手アノテーション UI が使用している可能性がある）
+  - **確認結果（2026-08-05、動画 `hPeRSA9YVIM`）:** 3 ワークスペースとも主導線から SHA-256 fingerprint / cue digest / operation ID / job ID / clip_id / 生 JSON / "provenance"・"lineage" が消え、折り畳みを開くと同じ値が残っていることを DOM で確認した。`字幕の照合データ` を開いて `artifact_fingerprint` と `used_range_cue_digests` の 3 要素が保持されていること、`他の動画の確認待ち（2 件）` が現在の動画を除外し `gZAoIbp4lBc` の 2 件だけを「元動画 {ID} のショート「…」」で並べることも確認した
+  - **テロップ編集器（工程 3）の確認方法:** 実データのラインは `reserved` で工程 3 を通り過ぎており、production data を書かずには到達できない。そこで `YTLK_DATA_DIR` で `data/` の複製（大容量メディア除外）を指す 2 つ目の Streamlit を 8503 で起動し、複製側でラインを `telop_review` に戻して確認した。確認の前後で production の `data/_schedule/queue.json` と `data/hPeRSA9YVIM/shorts/line/*.json` の mtime / サイズが不変であることを `stat -f "%m %z %N"` で実測している
+  - **未確認として残す 1 点:** 最終確認（工程 5）の 3 分岐の文言は、複製側で `final_review` へ戻すと生成 spec fingerprint の不一致でライン状態が復元されず、実機描画まで到達できなかった。折り畳みを追加した変更ではなく `st.error` / `st.warning` / `st.info` の文言差し替えのみであり、テストとコードレビューで担保している
 
 **Done 条件:**
 
-- [ ] 同一クリップを主導線で選ばせる回数が 1 回になっている。素材候補ワークスペースで選択済みの場合、ショート作成ワークスペースで選び直しを強制されない
-- [ ] 選択肢が 1 個しかない選択 widget が主導線に存在しない
-- [ ] 公開・投稿ワークスペースで、現在開いている動画の作業と他の動画の作業が表示上区別できる。同じ関連動画確認タスクが 2 箇所に重複表示されない。「上部パネルをご覧ください」のような自己言及の案内が残っていない
-- [ ] 主導線に SHA-256 fingerprint / cue digest / operation ID / 生 JSON / "provenance"・"lineage" などの内部用語が露出していない。これらは折り畳み内、または lineage 不一致時のエラー表示にのみ現れる
-- [ ] 関連動画の確認待ち追跡が、再起動後・最新 manifest から clip が消えた後も引き続き到達できる（`upload.py:906-908` の設計意図が維持されている）
-- [ ] `LineState` の生成条件・遷移判定・永続化と lineage 検証ロジックに差分が無い
-- [ ] U9 の「ワークフローの可読性」受け入れ条件（現在地の一目特定・次の一手が常に 1 つ・進めない理由が伝わる・矛盾しない・二重表示しない）が引き続き満たされている
-- [ ] `unsafe_allow_html` 0 件・`st.data_editor` 0 件・`st.segmented_control` の conditional rendering が維持されている
-- [ ] R2 §5 の安全境界（transaction 順序、確認 dialog、worker thread からの `st.*` 禁止、`st.tabs` への単純置換禁止）に変更が無い
-- [ ] **実機ブラウザ（Playwright MCP）で実データ 1 周を操作して確認済みである。** テストの全件通過のみをもって完了としない
-- [ ] 全件 `uv run pytest` が変更前の基準から回帰せずに通る
+- [x] 同一クリップを主導線で選ばせる回数が 1 回になっている。素材候補ワークスペースで選択済みの場合、ショート作成ワークスペースで選び直しを強制されない
+- [x] 選択肢が 1 個しかない選択 widget が主導線に存在しない
+- [x] 公開・投稿ワークスペースで、現在開いている動画の作業と他の動画の作業が表示上区別できる。同じ関連動画確認タスクが 2 箇所に重複表示されない。「上部パネルをご覧ください」のような自己言及の案内が残っていない
+- [x] 主導線に SHA-256 fingerprint / cue digest / operation ID / 生 JSON / "provenance"・"lineage" などの内部用語が露出していない。これらは折り畳み内、または lineage 不一致時のエラー表示にのみ現れる
+- [x] 関連動画の確認待ち追跡が、再起動後・最新 manifest から clip が消えた後も引き続き到達できる（`upload.py:906-908` の設計意図が維持されている）
+- [x] `LineState` の生成条件・遷移判定・永続化と lineage 検証ロジックに差分が無い
+- [x] U9 の「ワークフローの可読性」受け入れ条件（現在地の一目特定・次の一手が常に 1 つ・進めない理由が伝わる・矛盾しない・二重表示しない）が引き続き満たされている
+- [x] `unsafe_allow_html` 0 件・`st.data_editor` 0 件・`st.segmented_control` の conditional rendering が維持されている
+- [x] R2 §5 の安全境界（transaction 順序、確認 dialog、worker thread からの `st.*` 禁止、`st.tabs` への単純置換禁止）に変更が無い
+- [x] **実機ブラウザ（Playwright MCP）で実データ 1 周を操作して確認済みである。** テストの全件通過のみをもって完了としない
+- [x] 全件 `uv run pytest` が変更前の基準から回帰せずに通る
 
 **コミット境界:** U10-1（3 重選択の解消）を最初のコミットとする。U10-2（公開・投稿の時間軸分離と他動画混入の解消）を次のコミットとする。U10-3（内部識別子の格納）を最後のコミットとする。実機確認（U10-4）は各コミット前に行い、単独のコミットにはしない。
 

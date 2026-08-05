@@ -1008,17 +1008,20 @@ def artifact_provenance_payload(document: object) -> dict[str, object] | None:
 
 
 def render_cutplan_provenance(document: ShortCutDocument) -> None:
-    """工程 2 panel 固定位置の coarse / refined provenance を表示する."""
+    """工程 2 panel 固定位置の字幕照合データを折り畳みへ表示する."""
     ranges = "、".join(
         f"{candidate.id} {candidate.start} → {candidate.end}"
         for candidate in document.candidates
     ) or "なし"
     payload = artifact_provenance_payload(document)
-    if payload is None:
-        st.caption("字幕 provenance: coarse VTT fallback。対象 range: " + ranges)
-        return
-    st.caption("字幕 provenance: refined artifact。対象 range: " + ranges)
-    st.code(json.dumps(payload, ensure_ascii=False, indent=2))
+    with st.expander("字幕の照合データ", expanded=False):
+        if payload is None:
+            st.caption("この区間は自動字幕（通常精度）のまま扱っています。")
+            st.caption("対象区間: " + ranges)
+            return
+        st.caption("この区間は高精度字幕に対応づけて固定しています。")
+        st.caption("対象区間: " + ranges)
+        st.code(json.dumps(payload, ensure_ascii=False, indent=2))
 
 
 def _render_plan(
@@ -1135,7 +1138,7 @@ def _render_plan(
     busy = is_busy(settings)
     is_high_precision = document.artifact_ref is not None and transcript_notice is None
     if is_high_precision:
-        st.success("選択区間の高精度字幕 artifact を固定済みです。")
+        st.success("選択区間の高精度字幕を固定済みです。")
     else:
         st.caption(
             "親候補の探索・通常 rerun は既存 VTT のままです。"

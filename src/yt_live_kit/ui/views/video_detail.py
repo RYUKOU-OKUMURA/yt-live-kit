@@ -895,26 +895,45 @@ def _load_material_candidate_fingerprints(
     }
 
 
+def _candidate_lineage(video_id: str, settings: Settings) -> object | None:
+    """保存済み候補ファイルの lineage を安全に読み出す."""
+    try:
+        document = load_candidates_file(video_id, settings)
+    except (OSError, UnicodeError, TypeError, ValueError):
+        return None
+    return getattr(document, "lineage", None)
+
+
 def _candidate_provenance_text(
     video_id: str,
     source: str,
     settings: Settings,
 ) -> str:
-    """保存済み coarse candidate lineage を候補カード header 用に返す."""
+    """候補カード上部に出す、抽出元の 1 行説明を返す."""
     if source != "clips":
-        return "candidate provenance: coarse VTT（候補 fingerprint は保存されていません）"
-    try:
-        document = load_candidates_file(video_id, settings)
-    except (OSError, UnicodeError, TypeError, ValueError):
-        document = None
-    lineage = getattr(document, "lineage", None)
+        return "自動字幕から抽出した候補です。"
+    if _candidate_lineage(video_id, settings) is None:
+        return "自動字幕から抽出した候補です（抽出記録は未保存）。"
+    return "自動字幕から抽出した候補です（抽出記録を保存済み）。"
+
+
+def _render_candidate_provenance_details(
+    video_id: str,
+    source: str,
+    settings: Settings,
+) -> None:
+    """候補の抽出記録（fingerprint）を主導線から外して 1 回だけ表示する."""
+    if source != "clips":
+        return
+    lineage = _candidate_lineage(video_id, settings)
     if lineage is None:
-        return "candidate provenance: coarse VTT（lineage 未確認）"
-    return (
-        "candidate provenance: coarse VTT・"
-        f"candidate fingerprint {lineage.candidate_fingerprint}・"
-        f"VTT fingerprint {lineage.coarse_vtt_artifact_fingerprint}"
-    )
+        return
+    with st.expander("候補の抽出記録", expanded=False):
+        st.write(f"candidate fingerprint: {lineage.candidate_fingerprint}")
+        st.write(
+            "coarse VTT artifact fingerprint: "
+            f"{lineage.coarse_vtt_artifact_fingerprint}"
+        )
 
 
 def _render_materials_workspace(
@@ -975,10 +994,10 @@ def _render_materials_workspace(
         settings,
     )
 
+    st.caption(candidate_provenance)
     for candidate in candidates:
         with st.container(border=True):
             st.markdown(f"**{_safe_user_text(candidate.title)}**")
-            st.caption(candidate_provenance)
             st.caption(
                 f"{_safe_user_text(candidate.start)} → {_safe_user_text(candidate.end)}"
                 f"（{candidate.duration_sec} 秒）"
@@ -1007,6 +1026,7 @@ def _render_materials_workspace(
             args=(result.video_id, "shorts"),
         )
 
+    _render_candidate_provenance_details(result.video_id, source, settings)
     st.divider()
     st.markdown("#### 補助操作")
     render_highlights_section(result)

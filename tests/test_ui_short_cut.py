@@ -36,6 +36,7 @@ from yt_live_kit.ui.components.short_cut import (
     load_transcript_cues,
     load_transcript_cues_for_document,
     parse_cut_timestamp,
+    render_cutplan_provenance,
     resolve_transcript_bounds,
     resolve_parent_option_identity,
     render_short_cut_section,
@@ -680,6 +681,53 @@ def test_build_disabled_message_prefers_parse_errors() -> None:
 
     ok = validate_short_cut_selection(_document().candidates, parent=_clip())
     assert build_disabled_message(ok, []) is None
+
+
+def test_render_cutplan_provenance_hides_raw_json_without_artifact() -> None:
+    document = _document()
+    assert document.artifact_ref is None
+
+    with (
+        patch("yt_live_kit.ui.components.short_cut.st.expander") as expander,
+        patch("yt_live_kit.ui.components.short_cut.st.caption") as caption,
+        patch("yt_live_kit.ui.components.short_cut.st.code") as code,
+    ):
+        render_cutplan_provenance(document)
+
+    expander.assert_called_once_with("字幕の照合データ", expanded=False)
+    code.assert_not_called()
+    rendered = " ".join(str(call.args[0]) for call in caption.call_args_list)
+    assert "自動字幕（通常精度）" in rendered
+
+
+def test_render_cutplan_provenance_moves_raw_json_into_expander(
+    tmp_path: Path,
+) -> None:
+    settings = Settings(data_dir=tmp_path)
+    artifact = _high_precision_artifact()
+    store = TranscriptArtifactStore("video-1", settings)
+    store.save(artifact)
+    reference = store.artifact_ref(artifact)
+    document = _document().model_copy(
+        update={
+            "artifact_ref": reference,
+            "artifact_fingerprint": artifact.artifact_fingerprint,
+            "used_range_cue_digests": artifact.used_range_cue_digests,
+        }
+    )
+
+    with (
+        patch("yt_live_kit.ui.components.short_cut.st.expander") as expander,
+        patch("yt_live_kit.ui.components.short_cut.st.caption") as caption,
+        patch("yt_live_kit.ui.components.short_cut.st.code") as code,
+    ):
+        render_cutplan_provenance(document)
+
+    expander.assert_called_once_with("字幕の照合データ", expanded=False)
+    rendered = " ".join(str(call.args[0]) for call in caption.call_args_list)
+    assert "高精度字幕に対応づけて固定" in rendered
+    code.assert_called_once()
+    assert artifact.artifact_fingerprint in code.call_args.args[0]
 
 
 def test_refine_preview_does_not_start_without_explicit_submit(
