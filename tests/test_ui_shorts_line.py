@@ -46,6 +46,19 @@ from yt_live_kit.ui.views._local_settings import (
 )
 
 
+class _ExpanderStub:
+    """`st.expander` の戻り値スタブ（U10-1: 折り畳み open/closed の両経路を検証する）."""
+
+    def __init__(self, is_open: bool) -> None:
+        self.open = is_open
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args: object) -> bool:
+        return False
+
+
 def _reviewed_output_state(output_path: Path, settings: Settings):
     review = "b" * 64
     state = create_line_state("video-1", "clip-1", "a" * 64, review_fingerprint=review)
@@ -433,6 +446,10 @@ def test_mixed_handoff_preselects_order_and_does_not_force_long_cut(
         patch.object(shorts_line, "render_short_cut_section") as cut,
         patch.object(shorts_line.st, "session_state", session_state),
         patch.object(shorts_line.st, "subheader"),
+        patch.object(shorts_line.st, "markdown"),
+        patch.object(
+            shorts_line.st, "expander", return_value=_ExpanderStub(True)
+        ),
         patch.object(
             shorts_line.st,
             "multiselect",
@@ -465,6 +482,96 @@ def test_mixed_handoff_preselects_order_and_does_not_force_long_cut(
         ("highlights", "same"),
         ("clips", "same"),
     ]
+    cut.assert_not_called()
+
+
+def test_confirmed_target_reaches_main_line_without_opening_reselect(
+    tmp_path: Path,
+) -> None:
+    """U10-1: 引き継ぎ済みなら折り畳みを開かなくても主導線で確定表示・確定まで到達する."""
+    clip = ClipCandidate(
+        id="clip-1",
+        title="短い切り抜き",
+        start="0:00:00",
+        end="0:00:30",
+        duration_sec=30,
+        reason="理由",
+    )
+    session_state: dict[str, object] = {}
+    with (
+        patch.object(shorts_line, "resolve_active_line_read_only", return_value=None),
+        patch.object(shorts_line, "render_short_cut_section") as cut,
+        patch.object(shorts_line, "_start_line") as start_line,
+        patch.object(shorts_line.st, "session_state", session_state),
+        patch.object(shorts_line.st, "subheader"),
+        patch.object(shorts_line.st, "markdown") as markdown,
+        patch.object(
+            shorts_line.st, "expander", return_value=_ExpanderStub(False)
+        ) as expander,
+        patch.object(shorts_line.st, "multiselect") as multiselect,
+        patch.object(shorts_line.st, "radio") as radio,
+        patch.object(shorts_line.st, "caption"),
+        patch.object(shorts_line.st, "button", return_value=True),
+    ):
+        shorts_line.render_shorts_line(
+            video_id="video-1",
+            title="動画",
+            clip_candidates=(clip,),
+            highlight_candidates=(),
+            settings=Settings(data_dir=tmp_path),
+            preferred_candidate_keys=(("clips", "clip-1"),),
+        )
+
+    assert any(
+        "今回作る候補" in call.args[0] for call in markdown.call_args_list
+    )
+    expander.assert_called_once()
+    multiselect.assert_not_called()
+    radio.assert_not_called()
+    cut.assert_not_called()
+    start_line.assert_called_once()
+
+
+def test_empty_selection_still_shows_reselect_expander(tmp_path: Path) -> None:
+    """U10-1: 全解除しても折り畳み（選び直し導線）が消えない（行き止まりゼロ）."""
+    clip = ClipCandidate(
+        id="clip-1",
+        title="切り抜き",
+        start="0:00:00",
+        end="0:00:30",
+        duration_sec=30,
+        reason="理由",
+    )
+    selection_key = shorts_line.line_material_selection_key("video-1")
+    transfer_marker_key = shorts_line.line_material_transfer_marker_key("video-1")
+    session_state: dict[str, object] = {selection_key: [], transfer_marker_key: ()}
+    with (
+        patch.object(shorts_line, "resolve_active_line_read_only", return_value=None),
+        patch.object(shorts_line, "render_short_cut_section") as cut,
+        patch.object(shorts_line.st, "session_state", session_state),
+        patch.object(shorts_line.st, "subheader"),
+        patch.object(shorts_line.st, "markdown") as markdown,
+        patch.object(
+            shorts_line.st, "expander", return_value=_ExpanderStub(False)
+        ) as expander,
+        patch.object(shorts_line.st, "multiselect"),
+        patch.object(shorts_line.st, "radio"),
+        patch.object(shorts_line.st, "caption"),
+        patch.object(shorts_line.st, "info") as info,
+        patch.object(shorts_line.st, "button", return_value=False),
+    ):
+        shorts_line.render_shorts_line(
+            video_id="video-1",
+            title="動画",
+            clip_candidates=(clip,),
+            highlight_candidates=(),
+            settings=Settings(data_dir=tmp_path),
+        )
+
+    expander.assert_called_once()
+    markdown.assert_not_called()
+    info.assert_called_once()
+    assert "選び直す" in info.call_args.args[0]
     cut.assert_not_called()
 
 

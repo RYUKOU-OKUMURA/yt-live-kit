@@ -979,7 +979,16 @@ def test_refine_job_target_keeps_structured_timeout_error_report(
     assert S9_WHISPER_ERROR_PREFIX in str(raised.value)
 
 
-def test_render_section_reloads_saved_cutplan_after_job_rerun(tmp_path: Path) -> None:
+def test_embedded_section_skips_reselect_radio_and_resolves_preferred_option(
+    tmp_path: Path,
+) -> None:
+    """U10-1: embedded では親候補の再選択 radio を描かず、選択済み候補で確定する.
+
+    以前は preferred_candidate_ids で絞った 1 件だけを親候補として渡していたため
+    「刻む候補」が選択肢 1 個のラジオになっていた（3 重選択の一因）。embedded
+    経路では呼び出し元（shorts_line.py）がすでに確定表示しているため、ここでは
+    radio を描かず、standalone 経路の session_state key も汚さない。
+    """
     settings = Settings(data_dir=tmp_path)
     option = MagicMock()
     option.id = "clip_002"
@@ -1001,9 +1010,7 @@ def test_render_section_reloads_saved_cutplan_after_job_rerun(tmp_path: Path) ->
         patch("yt_live_kit.ui.components.short_cut.is_busy", return_value=False),
         patch("yt_live_kit.ui.components.short_cut.st.session_state", session_state),
         patch("yt_live_kit.ui.components.short_cut.st.caption"),
-        patch(
-            "yt_live_kit.ui.components.short_cut.st.radio", return_value=0
-        ) as radio,
+        patch("yt_live_kit.ui.components.short_cut.st.radio") as radio,
         patch("yt_live_kit.ui.components.short_cut.st.button", return_value=False),
     ):
         render_short_cut_section(
@@ -1013,6 +1020,60 @@ def test_render_section_reloads_saved_cutplan_after_job_rerun(tmp_path: Path) ->
             highlight_candidates=(),
             settings=settings,
             embedded=True,
+            preferred_candidate_ids=("clip_002",),
+        )
+
+    load.assert_called_once_with("video-1", "clip_002", settings)
+    render_plan.assert_called_once()
+    radio.assert_not_called()
+    assert "short_cut_parent_video-1" not in session_state
+
+
+def test_standalone_section_migrates_legacy_index_and_writes_session_state(
+    tmp_path: Path,
+) -> None:
+    """standalone（embedded=False）では R2 以前の配列 index 保存からの移行を維持する.
+
+    session_state に旧形式（整数 index）が残っていても、正しい identity へ
+    正規化して radio と session_state の両方に反映する。
+    """
+    settings = Settings(data_dir=tmp_path)
+    option = MagicMock()
+    option.id = "clip_002"
+    option.identity = "clip:clip_002"
+    option.label = "切り抜き候補"
+    option.candidate = _clip()
+    document = _document()
+    session_state: dict[str, object] = {"short_cut_parent_video-1": 0}
+    with (
+        patch(
+            "yt_live_kit.ui.components.short_cut.collect_parent_options",
+            return_value=[option],
+        ),
+        patch(
+            "yt_live_kit.ui.components.short_cut.load_cut_plan",
+            return_value=document,
+        ) as load,
+        patch("yt_live_kit.ui.components.short_cut._render_plan") as render_plan,
+        patch("yt_live_kit.ui.components.short_cut.is_busy", return_value=False),
+        patch("yt_live_kit.ui.components.short_cut.st.session_state", session_state),
+        patch("yt_live_kit.ui.components.short_cut.st.caption"),
+        patch(
+            "yt_live_kit.ui.components.short_cut.st.expander",
+            return_value=MagicMock(open=True),
+        ),
+        patch(
+            "yt_live_kit.ui.components.short_cut.st.radio", return_value="clip:clip_002"
+        ) as radio,
+        patch("yt_live_kit.ui.components.short_cut.st.button", return_value=False),
+    ):
+        render_short_cut_section(
+            video_id="video-1",
+            title="動画",
+            clip_candidates=(_clip(),),
+            highlight_candidates=(),
+            settings=settings,
+            embedded=False,
         )
 
     load.assert_called_once_with("video-1", "clip_002", settings)

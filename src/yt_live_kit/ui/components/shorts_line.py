@@ -1260,39 +1260,98 @@ def render_shorts_line(
         ):
             st.session_state.pop(selection_key, None)
             st.session_state[transfer_marker_key] = transfer_marker
-        selected_keys = st.multiselect(
-            "ショート作成対象（選択順）",
-            ordered_keys,
-            default=default_keys,
-            format_func=lambda value: _candidate_handoff_label(
-                candidate_by_key[value], value[0]
-            ),
-            key=selection_key,
-            persist_state="session",
+        # 素材候補ワークスペースの選択順を「作業キューの先頭 1 本を進める」表示へ
+        # 変換する。widget を描く前に実効選択を session_state から導出する
+        # （失効判定で pop 済みなら stored_selection は None になる）。
+        stored_selection = st.session_state.get(selection_key)
+        effective_selection = (
+            [value for value in stored_selection if value in candidate_by_key]
+            if isinstance(stored_selection, list)
+            else list(default_keys)
         )
-        if not selected_keys:
-            st.info("ショート作成対象を 1 件以上選択してください。")
-            return
-        st.caption(
-            "選択順: "
-            + " → ".join(
-                f"{index}. {_candidate_handoff_label(candidate_by_key[candidate_key], candidate_key[0])}"
-                for index, candidate_key in enumerate(selected_keys, start=1)
-            )
-        )
+
         target_key = line_material_target_key(video_id)
-        if st.session_state.get(target_key) not in selected_keys:
-            st.session_state[target_key] = selected_keys[0]
-        selected_key = st.radio(
-            "今回作る候補（1 本ずつ進めます）",
-            selected_keys,
-            format_func=lambda value: _candidate_handoff_label(
-                candidate_by_key[value], value[0]
-            ),
-            key=target_key,
-            persist_state="session",
+        if (
+            effective_selection
+            and st.session_state.get(target_key) not in effective_selection
+        ):
+            st.session_state[target_key] = effective_selection[0]
+        current_key = (
+            st.session_state.get(target_key) if effective_selection else None
         )
-        selected = candidate_by_key[selected_key]
+
+        if current_key is not None:
+            st.markdown(
+                "**今回作る候補:** "
+                f"{_candidate_handoff_label(candidate_by_key[current_key], current_key[0])}"
+            )
+            if len(effective_selection) >= 2:
+                remaining = [
+                    key for key in effective_selection if key != current_key
+                ]
+                st.caption(
+                    "この後: "
+                    + " / ".join(
+                        f"{index}. {_candidate_handoff_label(candidate_by_key[key], key[0])}"
+                        for index, key in enumerate(remaining, start=2)
+                    )
+                )
+
+        # 選び直しは主導線から折り畳みへ外す。全解除しても折り畳みは消えず、
+        # ここから選び直せる（行き止まりゼロ）。
+        expander = st.expander(
+            f"対象を選び直す（全 {len(ordered_keys)} 件）",
+            expanded=False,
+            key=f"line_material_reselect_{video_id}",
+            on_change="rerun",
+        )
+        if expander.open:
+            with expander:
+                selected_keys = st.multiselect(
+                    "作る候補（選択順）",
+                    ordered_keys,
+                    default=default_keys,
+                    format_func=lambda value: _candidate_handoff_label(
+                        candidate_by_key[value], value[0]
+                    ),
+                    key=selection_key,
+                    persist_state="session",
+                )
+                # 全解除時は radio と順序 caption を描かない。空の選択肢で描くと
+                # Streamlit 既定の英語文言（No options to select.）と、対象の無い
+                # 「選択順:」だけの行が残るため。
+                if selected_keys:
+                    if st.session_state.get(target_key) not in selected_keys:
+                        st.session_state[target_key] = selected_keys[0]
+                    current_key = st.radio(
+                        "先に作る候補",
+                        selected_keys,
+                        format_func=lambda value: _candidate_handoff_label(
+                            candidate_by_key[value], value[0]
+                        ),
+                        key=target_key,
+                        persist_state="session",
+                    )
+                    st.caption(
+                        "選択順: "
+                        + " → ".join(
+                            f"{index}. {_candidate_handoff_label(candidate_by_key[candidate_key], candidate_key[0])}"
+                            for index, candidate_key in enumerate(selected_keys, start=1)
+                        )
+                    )
+                else:
+                    current_key = None
+
+        # current_key は折り畳みが開いているとき radio の戻り値で更新される。
+        # 選択が空なら radio は None を返すため、対象未確定はここで一括して弾く。
+        if not effective_selection or current_key is None:
+            st.info(
+                "ショート作成対象を 1 件以上選択してください。"
+                "「対象を選び直す」から選べます。"
+            )
+            return
+
+        selected = candidate_by_key[current_key]
         if selected.duration_sec > 180:
             render_short_cut_section(
                 video_id=video_id,
@@ -1313,7 +1372,7 @@ def render_shorts_line(
                 ),
             )
             return
-        st.write(f"{_safe(selected.title)}（{selected.start} → {selected.end}）")
+        st.caption(f"{_safe(selected.start)} → {_safe(selected.end)}")
         if st.button("この区間を確定してテロップ確認へ", type="primary"):
             option = ParentOption(
                 "切り抜き" if isinstance(selected, ClipCandidate) else "ハイライト",

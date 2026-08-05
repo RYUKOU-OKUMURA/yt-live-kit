@@ -1222,29 +1222,42 @@ def render_short_cut_section(
             st.info(_NO_LONG_CANDIDATE_MESSAGE)
             return
 
-        selected_key = f"short_cut_parent_{video_id}"
-        selected_identity = resolve_parent_option_identity(
-            options,
-            st.session_state.get(selected_key),
-            preferred_candidate_ids=preferred_candidate_ids,
-        )
-        if st.session_state.get(selected_key) != selected_identity:
-            st.session_state[selected_key] = selected_identity
         options_by_identity = {option.identity: option for option in options}
 
-        selected_value = st.radio(
-            "刻む候補",
-            tuple(options_by_identity),
-            format_func=lambda identity: options_by_identity[identity].label,
-            key=selected_key,
-            persist_state="session",
-        )
-        selected_identity = resolve_parent_option_identity(
-            options,
-            selected_value,
-            preferred_candidate_ids=preferred_candidate_ids,
-        )
-        option = options_by_identity[selected_identity]
+        if embedded:
+            # embedded 経路では呼び出し元（shorts_line.py）が候補を
+            # 「今回作る候補」として既に確定表示している。ここで親候補の
+            # 再選択 widget を描かず、standalone 経路の session_state key
+            # （short_cut_parent_{video_id}）も汚さない。
+            selected_identity = resolve_parent_option_identity(
+                options,
+                None,
+                preferred_candidate_ids=preferred_candidate_ids,
+            )
+            option = options_by_identity[selected_identity]
+        else:
+            selected_key = f"short_cut_parent_{video_id}"
+            selected_identity = resolve_parent_option_identity(
+                options,
+                st.session_state.get(selected_key),
+                preferred_candidate_ids=preferred_candidate_ids,
+            )
+            if st.session_state.get(selected_key) != selected_identity:
+                st.session_state[selected_key] = selected_identity
+
+            selected_value = st.radio(
+                "刻む候補",
+                tuple(options_by_identity),
+                format_func=lambda identity: options_by_identity[identity].label,
+                key=selected_key,
+                persist_state="session",
+            )
+            selected_identity = resolve_parent_option_identity(
+                options,
+                selected_value,
+                preferred_candidate_ids=preferred_candidate_ids,
+            )
+            option = options_by_identity[selected_identity]
 
         document = load_cut_plan(video_id, option.id, settings)
         busy = is_busy(settings)
