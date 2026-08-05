@@ -120,6 +120,13 @@ def _render_unread_job_errors(detail_page) -> None:
             consume_unread_job_error_notifications()
             st.rerun(scope="app")
 
+
+def _render_sidebar_brand() -> None:
+    """Keep the product identity visible without repeating every page heading."""
+    st.markdown("### yt-live-kit")
+    st.caption(f"v{__version__}")
+
+
 app_settings = get_settings()
 
 
@@ -164,14 +171,12 @@ _record_interrupted_jobs(interrupted_job_ids, app_settings)
 _render_unread_job_errors(detail_page)
 render_pipeline_completion_notices(detail_page=detail_page)
 
-st.title("yt-live-kit")
-st.caption(f"v{__version__} — YouTube ライブアーカイブのタイムライン生成")
-
 ytdlp_warning = check_ytdlp_version_warning_cached(app_settings)
 if ytdlp_warning:
     st.warning(ytdlp_warning)
 
 with st.sidebar:
+    _render_sidebar_brand()
     render_status_bar(detail_page=detail_page)
     render_sidebar_line_context(get_selected_video_id(), app_settings)
 page.run()

@@ -252,7 +252,7 @@ def test_settings_page_is_included_in_navigation_list() -> None:
     assert "settings_page" in navigation_names
 
 
-def test_running_status_is_rendered_inside_sidebar() -> None:
+def test_brand_and_running_status_are_rendered_inside_sidebar() -> None:
     app_path = Path(__file__).parents[1] / "src/yt_live_kit/ui/app.py"
     tree = ast.parse(app_path.read_text(encoding="utf-8"))
     sidebar = next(
@@ -272,7 +272,11 @@ def test_running_status_is_rendered_inside_sidebar() -> None:
         and isinstance(node.value.func, ast.Name)
     ]
 
-    assert calls == ["render_status_bar", "render_sidebar_line_context"]
+    assert calls == [
+        "_render_sidebar_brand",
+        "render_status_bar",
+        "render_sidebar_line_context",
+    ]
     assert not any(
         isinstance(node, ast.Expr)
         and isinstance(node.value, ast.Call)
@@ -280,6 +284,16 @@ def test_running_status_is_rendered_inside_sidebar() -> None:
         and node.value.func.id == "render_status_bar"
         for node in tree.body
     )
+
+
+def test_global_brand_is_compact_and_not_repeated_in_main() -> None:
+    app_path = Path(__file__).parents[1] / "src/yt_live_kit/ui/app.py"
+    source = app_path.read_text(encoding="utf-8")
+
+    assert 'st.markdown("### yt-live-kit")' in source
+    assert 'st.caption(f"v{__version__}")' in source
+    assert 'st.title("yt-live-kit")' not in source
+    assert "YouTube ライブアーカイブのタイムライン生成" not in source
 
 
 def test_app_defines_navigation_before_rendering_unread_job_errors() -> None:

@@ -114,5 +114,5 @@ def test_video_detail_page_renders_empty_selection_without_exception() -> None:
     at = _run_page("video-detail")
 
     assert not list(at.exception)
-    assert "動画詳細" in [item.value for item in at.header]
+    assert ":material/movie: 動画詳細" in [item.value for item in at.header]
     assert "ライブラリから動画を選択してください。" in [item.value for item in at.info]

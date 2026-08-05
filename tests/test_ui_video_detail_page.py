@@ -137,6 +137,48 @@ def test_detail_summary_keeps_generated_and_reservable_counts_separate() -> None
     assert summary == video_detail.DetailSummary(5, 4, 1, True)
 
 
+def test_detail_shell_labels_use_material_icons_and_human_readable_values() -> None:
+    summary = video_detail.DetailSummary(5, 4, 1, True)
+
+    assert [
+        video_detail._format_workspace_label(workspace)
+        for workspace in video_detail._WORKSPACES
+    ] == [
+        ":material/video_library: 素材候補",
+        ":material/vertical_shades: ショート作成",
+        ":material/campaign: 公開・投稿",
+    ]
+    assert [tuple(metric) for metric in video_detail._state_summary_metrics(summary)] == [
+        (":material/video_library: 素材候補", "5 件", None),
+        (":material/vertical_shades: ショート", "生成 4 本", "予約可能 1 本"),
+        (":material/description: 概要欄", "反映済み", None),
+    ]
+    assert video_detail._format_video_heading("人が読む <動画タイトル>") == (
+        ":material/movie: 人が読む 〈動画タイトル〉"
+    )
+
+
+def test_state_summary_uses_bordered_native_metrics() -> None:
+    summary = video_detail.DetailSummary(5, 4, 1, False)
+    columns = [MagicMock(), MagicMock(), MagicMock()]
+
+    with patch.object(video_detail.st, "columns", return_value=columns) as st_columns:
+        video_detail._render_state_summary(summary)
+
+    st_columns.assert_called_once_with(3)
+    expected = video_detail._state_summary_metrics(summary)
+    for column, metric in zip(columns, expected, strict=True):
+        column.metric.assert_called_once_with(
+            metric.label,
+            metric.value,
+            delta=metric.detail,
+            delta_color="off",
+            delta_arrow="off",
+            border=True,
+            height="stretch",
+        )
+
+
 def test_count_reservable_shorts_requires_completed_manifest(tmp_path: Path) -> None:
     output = tmp_path / "short.mp4"
     output.write_bytes(b"video")
@@ -705,11 +747,13 @@ def test_render_detail_without_saved_result_shows_only_recovery_state(
         patch("yt_live_kit.ui.views.video_detail.is_busy", return_value=False),
         patch("yt_live_kit.ui.views.video_detail._render_recovery_state") as recovery,
         patch("yt_live_kit.ui.views.video_detail._render_materials_workspace") as materials,
-        patch("yt_live_kit.ui.views.video_detail.st.header"),
-        patch("yt_live_kit.ui.views.video_detail.st.caption"),
+        patch("yt_live_kit.ui.views.video_detail.st.header") as header,
+        patch("yt_live_kit.ui.views.video_detail.st.caption") as caption,
     ):
         video_detail.render_video_detail_page(run_page=run_page)
 
+    header.assert_called_once_with(":material/movie: テスト動画")
+    caption.assert_called_once_with("動画 ID: vid1234567")
     recovery.assert_called_once_with(video.video_id, settings, run_page=run_page)
     materials.assert_not_called()
 
@@ -757,7 +801,12 @@ def test_render_detail_draws_only_selected_workspace(tmp_path: Path) -> None:
         stack.enter_context(patch("yt_live_kit.ui.views.video_detail._render_state_summary"))
         stack.enter_context(patch("yt_live_kit.ui.views.video_detail.render_main_line_summary"))
         line = stack.enter_context(patch("yt_live_kit.ui.views.video_detail.render_shorts_line"))
-        stack.enter_context(patch("yt_live_kit.ui.views.video_detail.st.segmented_control", return_value="shorts"))
+        segmented = stack.enter_context(
+            patch(
+                "yt_live_kit.ui.views.video_detail.st.segmented_control",
+                return_value="shorts",
+            )
+        )
         materials = stack.enter_context(patch("yt_live_kit.ui.views.video_detail._render_materials_workspace"))
         shorts = stack.enter_context(
             patch("yt_live_kit.ui.views.video_detail.render_shorts_section")
@@ -785,6 +834,12 @@ def test_render_detail_draws_only_selected_workspace(tmp_path: Path) -> None:
     publish.assert_not_called()
     subheader.assert_not_called()
     details.assert_called_once_with(video, result, settings=settings, busy=False)
+    segmented.assert_called_once()
+    assert segmented.call_args.args[:2] == ("作業を選択", video_detail._WORKSPACES)
+    assert segmented.call_args.kwargs["required"] is True
+    assert segmented.call_args.kwargs["format_func"] is video_detail._format_workspace_label
+    assert segmented.call_args.kwargs["label_visibility"] == "collapsed"
+    assert segmented.call_args.kwargs["width"] == "stretch"
 
 
 def test_video_error_history_omits_empty_history() -> None:

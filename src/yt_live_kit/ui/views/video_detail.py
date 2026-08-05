@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal, Mapping
+from typing import TYPE_CHECKING, Literal, Mapping, NamedTuple
 
 import streamlit as st
 
@@ -105,9 +105,25 @@ _WORKSPACE_LABELS: dict[Workspace, str] = {
     "shorts": "ショート作成",
     "publish": "公開・投稿",
 }
+_WORKSPACE_ICONS: dict[Workspace, str] = {
+    "materials": ":material/video_library:",
+    "shorts": ":material/vertical_shades:",
+    "publish": ":material/campaign:",
+}
 _DESCRIPTION_UPDATED_IDS_KEY = "detail_description_updated_ids"
 _DESCRIPTION_SUCCESS_KEY = "detail_description_success"
 _MAX_DETAIL_JOB_ERROR_LOG_BYTES = 64 * 1024
+
+
+class _SummaryMetric(NamedTuple):
+    label: str
+    value: str
+    detail: str | None = None
+
+
+def _format_workspace_label(workspace: Workspace) -> str:
+    """Return the native Material-icon label for one workspace segment."""
+    return f"{_WORKSPACE_ICONS[workspace]} {_WORKSPACE_LABELS[workspace]}"
 
 
 def count_reservable_shorts(video_id: str, settings: Settings) -> int:
@@ -200,6 +216,11 @@ def _description_updated_ids() -> set[str]:
 def _safe_user_text(value: object) -> str:
     """ユーザー表示用テキストの半角山カッコを全角へ置換する."""
     return str(value).replace("<", "〈").replace(">", "〉")
+
+
+def _format_video_heading(title: object) -> str:
+    """Format a human-readable video title as the page's primary heading."""
+    return f":material/movie: {_safe_user_text(title)}"
 
 
 def _parse_s9_payload(value: object, prefix: str) -> dict[str, object] | None:
@@ -754,20 +775,41 @@ def _set_workspace(video_id: str, workspace: Workspace) -> None:
     st.session_state[detail_workspace_key(video_id)] = workspace
 
 
+def _state_summary_metrics(summary: DetailSummary) -> tuple[_SummaryMetric, ...]:
+    """Project the detail summary into the three read-only KPI cards."""
+    return (
+        _SummaryMetric(
+            ":material/video_library: 素材候補",
+            f"{summary.candidate_count} 件",
+        ),
+        _SummaryMetric(
+            ":material/vertical_shades: ショート",
+            f"生成 {summary.generated_short_count} 本",
+            f"予約可能 {summary.reservable_short_count} 本",
+        ),
+        _SummaryMetric(
+            ":material/description: 概要欄",
+            "反映済み" if summary.description_applied else "未反映",
+        ),
+    )
+
+
 def _render_state_summary(summary: DetailSummary) -> None:
     columns = st.columns(3)
-    with columns[0].container(border=True, height="stretch"):
-        st.markdown("**素材候補**")
-        st.write(f"{summary.candidate_count} 件")
-    with columns[1].container(border=True, height="stretch"):
-        st.markdown("**ショート**")
-        st.write(
-            f"生成 {summary.generated_short_count} 本・"
-            f"予約可能 {summary.reservable_short_count} 本"
+    for column, metric in zip(
+        columns,
+        _state_summary_metrics(summary),
+        strict=True,
+    ):
+        column.metric(
+            metric.label,
+            metric.value,
+            delta=metric.detail,
+            delta_color="off",
+            delta_arrow="off",
+            border=True,
+            height="stretch",
         )
-    with columns[2].container(border=True, height="stretch"):
-        st.markdown("**概要欄**")
-        st.write("反映済み" if summary.description_applied else "未反映")
 
 
 def _existing_artifacts(video_id: str, settings: Settings) -> tuple[str, ...]:
@@ -1113,7 +1155,7 @@ def render_video_detail_page(
     """選択中の動画について、保存済み成果物から詳細ページを再構築する."""
     video_id = get_selected_video_id()
     if video_id is None:
-        st.header("動画詳細")
+        st.header(_format_video_heading("動画詳細"))
         st.info("ライブラリから動画を選択してください。")
         return
 
@@ -1133,7 +1175,7 @@ def render_video_detail_page(
         )
         return
 
-    st.header(_safe_user_text(video.title))
+    st.header(_format_video_heading(video.title))
     st.caption(f"動画 ID: {_safe_user_text(video.video_id)}")
     description_success = st.session_state.pop(_DESCRIPTION_SUCCESS_KEY, None)
     if description_success:
@@ -1192,8 +1234,9 @@ def render_video_detail_page(
         _WORKSPACES,
         default=default_workspace,
         required=True,
-        format_func=lambda value: _WORKSPACE_LABELS[value],
+        format_func=_format_workspace_label,
         key=detail_workspace_key(video.video_id),
+        label_visibility="collapsed",
         width="stretch",
     )
     selected_workspace: Workspace = (
