@@ -1,0 +1,3866 @@
+{
+  "schema": "t1-1-human-audio-annotation-packet-v1",
+  "benchmark_id": "t1-1-timing-spike-20260804-corrected",
+  "manifest_fingerprint": "b4f33f33c6b7f23be0d28c13bdb0bdde946659a7a8f9909894e8b0d4807a11ec",
+  "status": "awaiting_human_audio_annotation",
+  "annotation_contract": {
+    "source": "human_audio_listening_line_onset_only",
+    "onset_definition": "lineの意味ある発話が音声で最初に聞こえた時刻。VTT境界、token境界、cue境界、既存telop時刻、推測値はgoldにしない。",
+    "do_not_copy": [
+      "draft_reference",
+      "VTT cue boundary",
+      "Whisper token boundary",
+      "existing telop time",
+      "manual text split boundary"
+    ],
+    "required_fields": [
+      "gold.line_onset_ms",
+      "gold.annotator_id",
+      "gold.annotated_at",
+      "gold.audio_listened"
+    ],
+    "completion": "各rowを実際に再生して playback receipt を残し、全行を入力するまで測定しない。"
+  },
+  "sources": {
+    "lb4_e1ff-cut_001": {
+      "source_content_bytes": 502876028,
+      "source_content_kind": "source_mp4",
+      "source_content_path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/LB4px1wRFnY/clips/source/LB4px1wRFnY.mp4",
+      "source_content_sha256": "5f8e8187fd3520da8ae6186f851995346eb8213123a456fdeb608ead00476aed",
+      "source_id": "lb4_e1ff-cut_001-audio"
+    },
+    "lb4_e1ff-cut_002": {
+      "source_content_bytes": 502876028,
+      "source_content_kind": "source_mp4",
+      "source_content_path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/LB4px1wRFnY/clips/source/LB4px1wRFnY.mp4",
+      "source_content_sha256": "5f8e8187fd3520da8ae6186f851995346eb8213123a456fdeb608ead00476aed",
+      "source_id": "lb4_e1ff-cut_002-audio"
+    },
+    "lb4_e1ff-cut_003": {
+      "source_content_bytes": 502876028,
+      "source_content_kind": "source_mp4",
+      "source_content_path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/LB4px1wRFnY/clips/source/LB4px1wRFnY.mp4",
+      "source_content_sha256": "5f8e8187fd3520da8ae6186f851995346eb8213123a456fdeb608ead00476aed",
+      "source_id": "lb4_e1ff-cut_003-audio"
+    },
+    "lb4_e1ff-cut_004": {
+      "source_content_bytes": 502876028,
+      "source_content_kind": "source_mp4",
+      "source_content_path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/LB4px1wRFnY/clips/source/LB4px1wRFnY.mp4",
+      "source_content_sha256": "5f8e8187fd3520da8ae6186f851995346eb8213123a456fdeb608ead00476aed",
+      "source_id": "lb4_e1ff-cut_004-audio"
+    },
+    "gza_415-cut_001": {
+      "source_content_bytes": 352078,
+      "source_content_kind": "wav_cache",
+      "source_content_path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/gZAoIbp4lBc/transcripts/audio_cache/187df21606517bdbe26b3284e9a32321db2801968f8d2b7e14fb5e705c2c272d.wav",
+      "source_content_sha256": "9030b591ffc52ac7ec2a7ac99edfb8ac8296291d123434fb482841338ce3cbb5",
+      "source_id": "gza_415-cut_001-audio"
+    },
+    "gza_415-cut_002": {
+      "source_content_bytes": 1216078,
+      "source_content_kind": "wav_cache",
+      "source_content_path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/gZAoIbp4lBc/transcripts/audio_cache/d71aab9b1ada89e14df231d16a07801ffcfb7af0c43324917429551e1dd6cd36.wav",
+      "source_content_sha256": "476eed4ae22f68ea9360fa684f1c3c905331674dcad4bcdef3cc333c6e826cf0",
+      "source_id": "gza_415-cut_002-audio"
+    },
+    "gza_415-cut_003": {
+      "source_content_bytes": 832078,
+      "source_content_kind": "wav_cache",
+      "source_content_path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/gZAoIbp4lBc/transcripts/audio_cache/6f611c911d48a73870921310f4fac13e02470622dd986f0db153253e1f89ebb0.wav",
+      "source_content_sha256": "c55c9ba56d500c62e587b483c30ed959a1ad048ec21dfb9b19f790657ac4616a",
+      "source_id": "gza_415-cut_003-audio"
+    },
+    "gza_f0-cut_001": {
+      "source_content_bytes": 800078,
+      "source_content_kind": "wav_cache",
+      "source_content_path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/gZAoIbp4lBc/transcripts/audio_cache/75500497c4ffc64ba0875e1165605a900e4cbaecba5a42fc90d05b8529792419.wav",
+      "source_content_sha256": "bdedaea372bc08229a74e3c0a8253a987a448a1d9b95b28edaaff0388f96cb06",
+      "source_id": "gza_f0-cut_001-audio"
+    },
+    "gza_f0-cut_002": {
+      "source_content_bytes": 896078,
+      "source_content_kind": "wav_cache",
+      "source_content_path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/gZAoIbp4lBc/transcripts/audio_cache/0505de4ab2ead7fbbe29d1e6fd184c2727dd2873e26dc0a0e973870f4195fb7a.wav",
+      "source_content_sha256": "fddfe8dc96d36c8cc2a5f9c5a03316c36bed8531c9258a3250db6ac532b726a5",
+      "source_id": "gza_f0-cut_002-audio"
+    },
+    "hpe_8ad-cut_001": {
+      "source_content_bytes": 608078,
+      "source_content_kind": "wav_cache",
+      "source_content_path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/hPeRSA9YVIM/transcripts/audio_cache/06aa1d961b292c19c9fb6bc7b13f8e6205e574f59556bdbec734ccd33e210e2b.wav",
+      "source_content_sha256": "1b2b5e464ff15172f5fb7b6633ca142b7266044db3730cecb15a0f2b0f2bd0a8",
+      "source_id": "hpe_8ad-cut_001-audio"
+    },
+    "hpe_8ad-cut_002": {
+      "source_content_bytes": 864078,
+      "source_content_kind": "wav_cache",
+      "source_content_path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/hPeRSA9YVIM/transcripts/audio_cache/9c87d5a8bdbacddf44b91c6ed156a19f264080b73f932bbdd6673c1160df2783.wav",
+      "source_content_sha256": "544c739f09738bb0deb1040b00d46795c97b2657c67f47543a1abf239438da75",
+      "source_id": "hpe_8ad-cut_002-audio"
+    },
+    "hpe_8ad-cut_003": {
+      "source_content_bytes": 864078,
+      "source_content_kind": "wav_cache",
+      "source_content_path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/hPeRSA9YVIM/transcripts/audio_cache/8fdf28aa8f82f33801d2af427653233ca124539833a2b9f1167bc1e9ba2ca876.wav",
+      "source_content_sha256": "9c0200aceed5860a93a9809c605a0c8c13e02143c0909841feddb64370f41306",
+      "source_id": "hpe_8ad-cut_003-audio"
+    },
+    "lb4_b5d-cut_001": {
+      "source_content_bytes": 502876028,
+      "source_content_kind": "source_mp4",
+      "source_content_path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/LB4px1wRFnY/clips/source/LB4px1wRFnY.mp4",
+      "source_content_sha256": "5f8e8187fd3520da8ae6186f851995346eb8213123a456fdeb608ead00476aed",
+      "source_id": "lb4_b5d-cut_001-audio"
+    },
+    "lb4_b5d-cut_002": {
+      "source_content_bytes": 502876028,
+      "source_content_kind": "source_mp4",
+      "source_content_path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/LB4px1wRFnY/clips/source/LB4px1wRFnY.mp4",
+      "source_content_sha256": "5f8e8187fd3520da8ae6186f851995346eb8213123a456fdeb608ead00476aed",
+      "source_id": "lb4_b5d-cut_002-audio"
+    },
+    "lb4_b5d-cut_003": {
+      "source_content_bytes": 502876028,
+      "source_content_kind": "source_mp4",
+      "source_content_path": "/Users/ryukouokumura/Desktop/boss-workspace/yt-live-kit/data/LB4px1wRFnY/clips/source/LB4px1wRFnY.mp4",
+      "source_content_sha256": "5f8e8187fd3520da8ae6186f851995346eb8213123a456fdeb608ead00476aed",
+      "source_id": "lb4_b5d-cut_003-audio"
+    }
+  },
+  "rows": [
+    {
+      "row_id": "t1-long-001",
+      "fixture_group": "long_single_cue",
+      "audio_source_id": "gza_415-cut_001-audio",
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 11000
+      },
+      "target_text": "この話が出るんですよね",
+      "gold": {
+        "line_onset_ms": 0,
+        "timebase": "source_audio_relative_ms",
+        "annotator_id": "ryukou",
+        "annotated_at": "2026-08-05T04:49:31.120205+00:00",
+        "audio_listened": true
+      },
+      "gold_provenance": "human_audio_listening_line_onset_only"
+    },
+    {
+      "row_id": "t1-long-002",
+      "fixture_group": "long_single_cue",
+      "audio_source_id": "gza_415-cut_001-audio",
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 11000
+      },
+      "target_text": "何に使えばいいか分からない",
+      "gold": {
+        "line_onset_ms": 4000,
+        "timebase": "source_audio_relative_ms",
+        "annotator_id": "ryukou",
+        "annotated_at": "2026-08-05T04:53:32.577989+00:00",
+        "audio_listened": true
+      },
+      "gold_provenance": "human_audio_listening_line_onset_only"
+    },
+    {
+      "row_id": "t1-long-003",
+      "fixture_group": "long_single_cue",
+      "audio_source_id": "gza_415-cut_001-audio",
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 11000
+      },
+      "target_text": "自分の仕事が分かってない",
+      "gold": {
+        "line_onset_ms": 8000,
+        "timebase": "source_audio_relative_ms",
+        "annotator_id": "ryukou",
+        "annotated_at": "2026-08-05T04:54:12.539843+00:00",
+        "audio_listened": true
+      },
+      "gold_provenance": "human_audio_listening_line_onset_only"
+    },
+    {
+      "row_id": "t1-long-004",
+      "fixture_group": "long_single_cue",
+      "audio_source_id": "gza_415-cut_002-audio",
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 38000
+      },
+      "target_text": "上から目線で申し訳ないけど",
+      "gold": {
+        "line_onset_ms": 10000,
+        "timebase": "source_audio_relative_ms",
+        "annotator_id": "ryukou",
+        "annotated_at": "2026-08-05T04:55:04.250364+00:00",
+        "audio_listened": true
+      },
+      "gold_provenance": "human_audio_listening_line_onset_only"
+    },
+    {
+      "row_id": "t1-long-005",
+      "fixture_group": "long_single_cue",
+      "audio_source_id": "gza_415-cut_002-audio",
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 38000
+      },
+      "target_text": "業務で何をやっているか",
+      "gold": {
+        "line_onset_ms": 12500,
+        "timebase": "source_audio_relative_ms",
+        "annotator_id": "ryukou",
+        "annotated_at": "2026-08-05T04:55:46.976410+00:00",
+        "audio_listened": true
+      },
+      "gold_provenance": "human_audio_listening_line_onset_only"
+    },
+    {
+      "row_id": "t1-long-006",
+      "fixture_group": "long_single_cue",
+      "audio_source_id": "gza_415-cut_002-audio",
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 38000
+      },
+      "target_text": "分からないから使えない",
+      "gold": {
+        "line_onset_ms": 14000,
+        "timebase": "source_audio_relative_ms",
+        "annotator_id": "ryukou",
+        "annotated_at": "2026-08-05T04:57:29.665433+00:00",
+        "audio_listened": true
+      },
+      "gold_provenance": "human_audio_listening_line_onset_only"
+    },
+    {
+      "row_id": "t1-long-007",
+      "fixture_group": "long_single_cue",
+      "audio_source_id": "gza_415-cut_003-audio",
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 26000
+      },
+      "target_text": "業務への解像度を上げましょう",
+      "gold": {
+        "line_onset_ms": 0,
+        "timebase": "source_audio_relative_ms",
+        "annotator_id": "ryukou",
+        "annotated_at": "2026-08-05T04:58:00.473235+00:00",
+        "audio_listened": true
+      },
+      "gold_provenance": "human_audio_listening_line_onset_only"
+    },
+    {
+      "row_id": "t1-long-008",
+      "fixture_group": "long_single_cue",
+      "audio_source_id": "gza_415-cut_003-audio",
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 26000
+      },
+      "target_text": "結局はそこなんですよね",
+      "gold": {
+        "line_onset_ms": 3000,
+        "timebase": "source_audio_relative_ms",
+        "annotator_id": "ryukou",
+        "annotated_at": "2026-08-05T04:58:56.198628+00:00",
+        "audio_listened": true
+      },
+      "gold_provenance": "human_audio_listening_line_onset_only"
+    },
+    {
+      "row_id": "t1-long-009",
+      "fixture_group": "long_single_cue",
+      "audio_source_id": "gza_415-cut_003-audio",
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 26000
+      },
+      "target_text": "ワークフローを細分化して",
+      "gold": {
+        "line_onset_ms": 8000,
+        "timebase": "source_audio_relative_ms",
+        "annotator_id": "ryukou",
+        "annotated_at": "2026-08-05T04:59:54.098245+00:00",
+        "audio_listened": true
+      },
+      "gold_provenance": "human_audio_listening_line_onset_only"
+    },
+    {
+      "row_id": "t1-long-010",
+      "fixture_group": "long_single_cue",
+      "audio_source_id": "gza_415-cut_003-audio",
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 26000
+      },
+      "target_text": "自分がやっていることへの",
+      "gold": {
+        "line_onset_ms": 12700,
+        "timebase": "source_audio_relative_ms",
+        "annotator_id": "ryukou",
+        "annotated_at": "2026-08-05T05:00:30.504175+00:00",
+        "audio_listened": true
+      },
+      "gold_provenance": "human_audio_listening_line_onset_only"
+    },
+    {
+      "row_id": "t1-long-011",
+      "fixture_group": "long_single_cue",
+      "audio_source_id": "gza_415-cut_003-audio",
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 26000
+      },
+      "target_text": "解像度を上げる話になる",
+      "gold": {
+        "line_onset_ms": 16000,
+        "timebase": "source_audio_relative_ms",
+        "annotator_id": "ryukou",
+        "annotated_at": "2026-08-05T05:01:06.796761+00:00",
+        "audio_listened": true
+      },
+      "gold_provenance": "human_audio_listening_line_onset_only"
+    },
+    {
+      "row_id": "t1-long-012",
+      "fixture_group": "long_single_cue",
+      "audio_source_id": "gza_415-cut_003-audio",
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 26000
+      },
+      "target_text": "結局は業務コンサルになる",
+      "gold": {
+        "line_onset_ms": 19000,
+        "timebase": "source_audio_relative_ms",
+        "annotator_id": "ryukou",
+        "annotated_at": "2026-08-05T11:14:47.136902+00:00",
+        "audio_listened": true
+      },
+      "gold_provenance": "human_audio_listening_line_onset_only"
+    },
+    {
+      "row_id": "t1-long-013",
+      "fixture_group": "long_single_cue",
+      "audio_source_id": "gza_f0-cut_002-audio",
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 28000
+      },
+      "target_text": "個人事業主だったら",
+      "gold": {
+        "line_onset_ms": 4000,
+        "timebase": "source_audio_relative_ms",
+        "annotator_id": "ryukou",
+        "annotated_at": "2026-08-05T11:17:00.471263+00:00",
+        "audio_listened": true
+      },
+      "gold_provenance": "human_audio_listening_line_onset_only"
+    },
+    {
+      "row_id": "t1-long-014",
+      "fixture_group": "long_single_cue",
+      "audio_source_id": "gza_f0-cut_002-audio",
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 28000
+      },
+      "target_text": "Facebookのチャット",
+      "gold": {
+        "line_onset_ms": 8000,
+        "timebase": "source_audio_relative_ms",
+        "annotator_id": "ryukou",
+        "annotated_at": "2026-08-05T11:18:12.002664+00:00",
+        "audio_listened": true
+      },
+      "gold_provenance": "human_audio_listening_line_onset_only"
+    },
+    {
+      "row_id": "t1-long-015",
+      "fixture_group": "long_single_cue",
+      "audio_source_id": "gza_f0-cut_002-audio",
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 28000
+      },
+      "target_text": "メッセンジャーがあります",
+      "gold": {
+        "line_onset_ms": 11000,
+        "timebase": "source_audio_relative_ms",
+        "annotator_id": "ryukou",
+        "annotated_at": "2026-08-05T11:19:23.014456+00:00",
+        "audio_listened": true
+      },
+      "gold_provenance": "human_audio_listening_line_onset_only"
+    },
+    {
+      "row_id": "t1-long-016",
+      "fixture_group": "long_single_cue",
+      "audio_source_id": "gza_f0-cut_002-audio",
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 28000
+      },
+      "target_text": "普通に請求書や資料を",
+      "gold": {
+        "line_onset_ms": 14000,
+        "timebase": "source_audio_relative_ms",
+        "annotator_id": "ryukou",
+        "annotated_at": "2026-08-05T11:19:53.460445+00:00",
+        "audio_listened": true
+      },
+      "gold_provenance": "human_audio_listening_line_onset_only"
+    },
+    {
+      "row_id": "t1-long-017",
+      "fixture_group": "long_single_cue",
+      "audio_source_id": "gza_f0-cut_002-audio",
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 28000
+      },
+      "target_text": "やり取りしているのに",
+      "gold": {
+        "line_onset_ms": 16500,
+        "timebase": "source_audio_relative_ms",
+        "annotator_id": "ryukou",
+        "annotated_at": "2026-08-05T11:20:34.748669+00:00",
+        "audio_listened": true
+      },
+      "gold_provenance": "human_audio_listening_line_onset_only"
+    },
+    {
+      "row_id": "t1-long-018",
+      "fixture_group": "long_single_cue",
+      "audio_source_id": "gza_f0-cut_002-audio",
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 28000
+      },
+      "target_text": "AIだと個人情報と言う",
+      "gold": {
+        "line_onset_ms": 20000,
+        "timebase": "source_audio_relative_ms",
+        "annotator_id": "ryukou",
+        "annotated_at": "2026-08-05T11:21:51.702848+00:00",
+        "audio_listened": true
+      },
+      "gold_provenance": "human_audio_listening_line_onset_only"
+    },
+    {
+      "row_id": "t1-long-019",
+      "fixture_group": "long_single_cue",
+      "audio_source_id": "hpe_8ad-cut_003-audio",
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 27000
+      },
+      "target_text": "アミカルで音声入力をテスト",
+      "gold": {
+        "line_onset_ms": 0,
+        "timebase": "source_audio_relative_ms",
+        "annotator_id": "ryukou",
+        "annotated_at": "2026-08-05T11:22:40.493003+00:00",
+        "audio_listened": true
+      },
+      "gold_provenance": "human_audio_listening_line_onset_only"
+    },
+    {
+      "row_id": "t1-long-020",
+      "fixture_group": "long_single_cue",
+      "audio_source_id": "hpe_8ad-cut_003-audio",
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 27000
+      },
+      "target_text": "ローカルで使えるアプリです",
+      "gold": {
+        "line_onset_ms": 3000,
+        "timebase": "source_audio_relative_ms",
+        "annotator_id": "ryukou",
+        "annotated_at": "2026-08-05T11:24:05.681202+00:00",
+        "audio_listened": true
+      },
+      "gold_provenance": "human_audio_listening_line_onset_only"
+    },
+    {
+      "row_id": "t1-multi-001",
+      "fixture_group": "multi_cross_cue",
+      "audio_source_id": "gza_415-cut_002-audio",
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 38000
+      },
+      "target_text": "何かが分かってないんです",
+      "gold": {
+        "line_onset_ms": 0,
+        "timebase": "source_audio_relative_ms",
+        "annotator_id": "ryukou",
+        "annotated_at": "2026-08-05T11:25:55.724994+00:00",
+        "audio_listened": true
+      },
+      "gold_provenance": "human_audio_listening_line_onset_only"
+    },
+    {
+      "row_id": "t1-multi-002",
+      "fixture_group": "multi_cross_cue",
+      "audio_source_id": "gza_415-cut_002-audio",
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 38000
+      },
+      "target_text": "AIを使わなきゃと思うほど",
+      "gold": {
+        "line_onset_ms": 19800,
+        "timebase": "source_audio_relative_ms",
+        "annotator_id": "ryukou",
+        "annotated_at": "2026-08-05T11:28:09.757352+00:00",
+        "audio_listened": true
+      },
+      "gold_provenance": "human_audio_listening_line_onset_only"
+    },
+    {
+      "row_id": "t1-multi-003",
+      "fixture_group": "multi_cross_cue",
+      "audio_source_id": "gza_415-cut_002-audio",
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 38000
+      },
+      "target_text": "余計に分からなくなってしまう",
+      "gold": {
+        "line_onset_ms": 24000,
+        "timebase": "source_audio_relative_ms",
+        "annotator_id": "ryukou",
+        "annotated_at": "2026-08-05T11:28:47.404592+00:00",
+        "audio_listened": true
+      },
+      "gold_provenance": "human_audio_listening_line_onset_only"
+    },
+    {
+      "row_id": "t1-multi-004",
+      "fixture_group": "multi_cross_cue",
+      "audio_source_id": "gza_415-cut_002-audio",
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 38000
+      },
+      "target_text": "使わなくていい部分を理解する",
+      "gold": {
+        "line_onset_ms": 27600,
+        "timebase": "source_audio_relative_ms",
+        "annotator_id": "ryukou",
+        "annotated_at": "2026-08-05T11:32:31.876948+00:00",
+        "audio_listened": true
+      },
+      "gold_provenance": "human_audio_listening_line_onset_only"
+    },
+    {
+      "row_id": "t1-multi-005",
+      "fixture_group": "multi_cross_cue",
+      "audio_source_id": "gza_415-cut_002-audio",
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 38000
+      },
+      "target_text": "使うべき部分が見えてくる",
+      "gold": {
+        "line_onset_ms": 31000,
+        "timebase": "source_audio_relative_ms",
+        "annotator_id": "ryukou",
+        "annotated_at": "2026-08-05T11:33:59.315724+00:00",
+        "audio_listened": true
+      },
+      "gold_provenance": "human_audio_listening_line_onset_only"
+    },
+    {
+      "row_id": "t1-multi-006",
+      "fixture_group": "multi_cross_cue",
+      "audio_source_id": "gza_f0-cut_001-audio",
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 25000
+      },
+      "target_text": "アスクルについて",
+      "gold": {
+        "line_onset_ms": 0,
+        "timebase": "source_audio_relative_ms",
+        "annotator_id": "ryukou",
+        "annotated_at": "2026-08-05T11:35:40.250009+00:00",
+        "audio_listened": true
+      },
+      "gold_provenance": "human_audio_listening_line_onset_only"
+    },
+    {
+      "row_id": "t1-multi-007",
+      "fixture_group": "multi_cross_cue",
+      "audio_source_id": "gza_f0-cut_001-audio",
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 25000
+      },
+      "target_text": "倉庫もサイバー攻撃を受けた",
+      "gold": {
+        "line_onset_ms": 1900,
+        "timebase": "source_audio_relative_ms",
+        "annotator_id": "ryukou",
+        "annotated_at": "2026-08-05T11:36:15.928798+00:00",
+        "audio_listened": true
+      },
+      "gold_provenance": "human_audio_listening_line_onset_only"
+    },
+    {
+      "row_id": "t1-multi-008",
+      "fixture_group": "multi_cross_cue",
+      "audio_source_id": "gza_f0-cut_001-audio",
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 25000
+      },
+      "target_text": "SaaSには気にせず",
+      "gold": {
+        "line_onset_ms": 8800,
+        "timebase": "source_audio_relative_ms",
+        "annotator_id": "ryukou",
+        "annotated_at": "2026-08-05T11:36:54.484259+00:00",
+        "audio_listened": true
+      },
+      "gold_provenance": "human_audio_listening_line_onset_only"
+    },
+    {
+      "row_id": "t1-multi-009",
+      "fixture_group": "multi_cross_cue",
+      "audio_source_id": "gza_f0-cut_001-audio",
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 25000
+      },
+      "target_text": "データを上げるのに",
+      "gold": {
+        "line_onset_ms": 10800,
+        "timebase": "source_audio_relative_ms",
+        "annotator_id": "ryukou",
+        "annotated_at": "2026-08-05T11:37:28.390402+00:00",
+        "audio_listened": true
+      },
+      "gold_provenance": "human_audio_listening_line_onset_only"
+    },
+    {
+      "row_id": "t1-multi-010",
+      "fixture_group": "multi_cross_cue",
+      "audio_source_id": "hpe_8ad-cut_001-audio",
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 19000
+      },
+      "target_text": "今、日本語で喋っています",
+      "gold": {
+        "line_onset_ms": 6000,
+        "timebase": "source_audio_relative_ms",
+        "annotator_id": "ryukou",
+        "annotated_at": "2026-08-05T11:38:46.527973+00:00",
+        "audio_listened": true
+      },
+      "gold_provenance": "human_audio_listening_line_onset_only"
+    },
+    {
+      "row_id": "t1-multi-011",
+      "fixture_group": "multi_cross_cue",
+      "audio_source_id": "hpe_8ad-cut_001-audio",
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 19000
+      },
+      "target_text": "日本語で文字起こしされる？",
+      "gold": {
+        "line_onset_ms": 8800,
+        "timebase": "source_audio_relative_ms",
+        "annotator_id": "ryukou",
+        "annotated_at": "2026-08-05T11:39:22.015492+00:00",
+        "audio_listened": true
+      },
+      "gold_provenance": "human_audio_listening_line_onset_only"
+    },
+    {
+      "row_id": "t1-multi-012",
+      "fixture_group": "multi_cross_cue",
+      "audio_source_id": "hpe_8ad-cut_001-audio",
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 19000
+      },
+      "target_text": "英語になるわ",
+      "gold": {
+        "line_onset_ms": 13900,
+        "timebase": "source_audio_relative_ms",
+        "annotator_id": "ryukou",
+        "annotated_at": "2026-08-05T11:39:54.615255+00:00",
+        "audio_listened": true
+      },
+      "gold_provenance": "human_audio_listening_line_onset_only"
+    },
+    {
+      "row_id": "t1-multi-013",
+      "fixture_group": "multi_cross_cue",
+      "audio_source_id": "hpe_8ad-cut_001-audio",
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 19000
+      },
+      "target_text": "設定がおかしいのかな？",
+      "gold": {
+        "line_onset_ms": 17000,
+        "timebase": "source_audio_relative_ms",
+        "annotator_id": "ryukou",
+        "annotated_at": "2026-08-05T11:40:36.051382+00:00",
+        "audio_listened": true
+      },
+      "gold_provenance": "human_audio_listening_line_onset_only"
+    },
+    {
+      "row_id": "t1-multi-014",
+      "fixture_group": "multi_cross_cue",
+      "audio_source_id": "hpe_8ad-cut_002-audio",
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 27000
+      },
+      "target_text": "言語設定ってどこでやるの？",
+      "gold": {
+        "line_onset_ms": 1400,
+        "timebase": "source_audio_relative_ms",
+        "annotator_id": "ryukou",
+        "annotated_at": "2026-08-05T11:41:08.502245+00:00",
+        "audio_listened": true
+      },
+      "gold_provenance": "human_audio_listening_line_onset_only"
+    },
+    {
+      "row_id": "t1-multi-015",
+      "fixture_group": "multi_cross_cue",
+      "audio_source_id": "hpe_8ad-cut_002-audio",
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 27000
+      },
+      "target_text": "あ、ここ？",
+      "gold": {
+        "line_onset_ms": 7000,
+        "timebase": "source_audio_relative_ms",
+        "annotator_id": "ryukou",
+        "annotated_at": "2026-08-05T11:41:46.757711+00:00",
+        "audio_listened": true
+      },
+      "gold_provenance": "human_audio_listening_line_onset_only"
+    },
+    {
+      "row_id": "t1-multi-016",
+      "fixture_group": "multi_cross_cue",
+      "audio_source_id": "hpe_8ad-cut_002-audio",
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 27000
+      },
+      "target_text": "オートになってるじゃん",
+      "gold": {
+        "line_onset_ms": 11000,
+        "timebase": "source_audio_relative_ms",
+        "annotator_id": "ryukou",
+        "annotated_at": "2026-08-05T11:42:18.110097+00:00",
+        "audio_listened": true
+      },
+      "gold_provenance": "human_audio_listening_line_onset_only"
+    },
+    {
+      "row_id": "t1-multi-017",
+      "fixture_group": "multi_cross_cue",
+      "audio_source_id": "hpe_8ad-cut_002-audio",
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 27000
+      },
+      "target_text": "失礼しました、Japanese",
+      "gold": {
+        "line_onset_ms": 16000,
+        "timebase": "source_audio_relative_ms",
+        "annotator_id": "ryukou",
+        "annotated_at": "2026-08-05T11:43:16.833889+00:00",
+        "audio_listened": true
+      },
+      "gold_provenance": "human_audio_listening_line_onset_only"
+    },
+    {
+      "row_id": "t1-multi-018",
+      "fixture_group": "multi_cross_cue",
+      "audio_source_id": "hpe_8ad-cut_002-audio",
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 27000
+      },
+      "target_text": "これでいいんじゃない？",
+      "gold": {
+        "line_onset_ms": 19000,
+        "timebase": "source_audio_relative_ms",
+        "annotator_id": "ryukou",
+        "annotated_at": "2026-08-05T11:43:47.688425+00:00",
+        "audio_listened": true
+      },
+      "gold_provenance": "human_audio_listening_line_onset_only"
+    },
+    {
+      "row_id": "t1-multi-019",
+      "fixture_group": "multi_cross_cue",
+      "audio_source_id": "hpe_8ad-cut_003-audio",
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 27000
+      },
+      "target_text": "早い、早い！",
+      "gold": {
+        "line_onset_ms": 17000,
+        "timebase": "source_audio_relative_ms",
+        "annotator_id": "ryukou",
+        "annotated_at": "2026-08-05T11:45:43.952890+00:00",
+        "audio_listened": true
+      },
+      "gold_provenance": "human_audio_listening_line_onset_only"
+    },
+    {
+      "row_id": "t1-multi-020",
+      "fixture_group": "multi_cross_cue",
+      "audio_source_id": "hpe_8ad-cut_003-audio",
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 27000
+      },
+      "target_text": "アミカル、いいじゃないですか",
+      "gold": {
+        "line_onset_ms": 22900,
+        "timebase": "source_audio_relative_ms",
+        "annotator_id": "ryukou",
+        "annotated_at": "2026-08-05T11:46:40.869007+00:00",
+        "audio_listened": true
+      },
+      "gold_provenance": "human_audio_listening_line_onset_only"
+    },
+    {
+      "row_id": "t1-multi-021",
+      "fixture_group": "multi_cross_cue",
+      "audio_source_id": "gza_f0-cut_001-audio",
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 25000
+      },
+      "target_text": "なぜAIに関しては",
+      "gold": {
+        "line_onset_ms": 11000,
+        "timebase": "source_audio_relative_ms",
+        "annotator_id": "ryukou",
+        "annotated_at": "2026-08-05T11:47:53.431772+00:00",
+        "audio_listened": true
+      },
+      "gold_provenance": "human_audio_listening_line_onset_only"
+    },
+    {
+      "row_id": "t1-multi-022",
+      "fixture_group": "multi_cross_cue",
+      "audio_source_id": "gza_f0-cut_001-audio",
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 25000
+      },
+      "target_text": "セキュリティと言うのか",
+      "gold": {
+        "line_onset_ms": 13000,
+        "timebase": "source_audio_relative_ms",
+        "annotator_id": "ryukou",
+        "annotated_at": "2026-08-05T11:48:26.163937+00:00",
+        "audio_listened": true
+      },
+      "gold_provenance": "human_audio_listening_line_onset_only"
+    },
+    {
+      "row_id": "t1-multi-023",
+      "fixture_group": "multi_cross_cue",
+      "audio_source_id": "hpe_8ad-cut_002-audio",
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 27000
+      },
+      "target_text": "これでいけるってことでしょ？",
+      "gold": {
+        "line_onset_ms": 20900,
+        "timebase": "source_audio_relative_ms",
+        "annotator_id": "ryukou",
+        "annotated_at": "2026-08-05T11:49:16.996312+00:00",
+        "audio_listened": true
+      },
+      "gold_provenance": "human_audio_listening_line_onset_only"
+    },
+    {
+      "row_id": "t1-multi-024",
+      "fixture_group": "multi_cross_cue",
+      "audio_source_id": "hpe_8ad-cut_003-audio",
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 27000
+      },
+      "target_text": "文字起こしの精度と速度は？",
+      "gold": {
+        "line_onset_ms": 8000,
+        "timebase": "source_audio_relative_ms",
+        "annotator_id": "ryukou",
+        "annotated_at": "2026-08-05T11:49:56.895331+00:00",
+        "audio_listened": true
+      },
+      "gold_provenance": "human_audio_listening_line_onset_only"
+    },
+    {
+      "row_id": "t1-fallback-001",
+      "fixture_group": "vtt_fallback_concat",
+      "audio_source_id": "lb4_e1ff-cut_001-audio",
+      "source_span": {
+        "kind": "concatenated_source_video_audio",
+        "coordinate_system": "absolute_video_ms",
+        "parts": [
+          {
+            "start_ms": 857000,
+            "end_ms": 875000,
+            "concat_offset_ms": 0
+          },
+          {
+            "start_ms": 996000,
+            "end_ms": 1012000,
+            "concat_offset_ms": 18000
+          }
+        ],
+        "duration_ms": 34000
+      },
+      "target_text": "スラッシュワークフローで",
+      "gold": {
+        "line_onset_ms": 2000,
+        "timebase": "source_audio_relative_ms",
+        "annotator_id": "ryukou",
+        "annotated_at": "2026-08-05T11:50:26.224967+00:00",
+        "audio_listened": true
+      },
+      "gold_provenance": "human_audio_listening_line_onset_only"
+    },
+    {
+      "row_id": "t1-fallback-002",
+      "fixture_group": "vtt_fallback_concat",
+      "audio_source_id": "lb4_e1ff-cut_001-audio",
+      "source_span": {
+        "kind": "concatenated_source_video_audio",
+        "coordinate_system": "absolute_video_ms",
+        "parts": [
+          {
+            "start_ms": 857000,
+            "end_ms": 875000,
+            "concat_offset_ms": 0
+          },
+          {
+            "start_ms": 996000,
+            "end_ms": 1012000,
+            "concat_offset_ms": 18000
+          }
+        ],
+        "duration_ms": 34000
+      },
+      "target_text": "進捗をリアルタイム確認",
+      "gold": {
+        "line_onset_ms": 3000,
+        "timebase": "source_audio_relative_ms",
+        "annotator_id": "ryukou",
+        "annotated_at": "2026-08-05T11:50:56.801124+00:00",
+        "audio_listened": true
+      },
+      "gold_provenance": "human_audio_listening_line_onset_only"
+    },
+    {
+      "row_id": "t1-fallback-003",
+      "fixture_group": "vtt_fallback_concat",
+      "audio_source_id": "lb4_e1ff-cut_001-audio",
+      "source_span": {
+        "kind": "concatenated_source_video_audio",
+        "coordinate_system": "absolute_video_ms",
+        "parts": [
+          {
+            "start_ms": 857000,
+            "end_ms": 875000,
+            "concat_offset_ms": 0
+          },
+          {
+            "start_ms": 996000,
+            "end_ms": 1012000,
+            "concat_offset_ms": 18000
+          }
+        ],
+        "duration_ms": 34000
+      },
+      "target_text": "ああ、こういう感じか",
+      "gold": {
+        "line_onset_ms": 11000,
+        "timebase": "source_audio_relative_ms",
+        "annotator_id": "ryukou",
+        "annotated_at": "2026-08-05T11:51:35.336800+00:00",
+        "audio_listened": true
+      },
+      "gold_provenance": "human_audio_listening_line_onset_only"
+    },
+    {
+      "row_id": "t1-fallback-004",
+      "fixture_group": "vtt_fallback_concat",
+      "audio_source_id": "lb4_e1ff-cut_002-audio",
+      "source_span": {
+        "kind": "concatenated_source_video_audio",
+        "coordinate_system": "absolute_video_ms",
+        "parts": [
+          {
+            "start_ms": 857000,
+            "end_ms": 875000,
+            "concat_offset_ms": 0
+          },
+          {
+            "start_ms": 996000,
+            "end_ms": 1012000,
+            "concat_offset_ms": 18000
+          }
+        ],
+        "duration_ms": 34000
+      },
+      "target_text": "まだ動いてるのかな？",
+      "gold": {
+        "line_onset_ms": 17900,
+        "timebase": "source_audio_relative_ms",
+        "annotator_id": "ryukou",
+        "annotated_at": "2026-08-05T11:52:24.686108+00:00",
+        "audio_listened": true
+      },
+      "gold_provenance": "human_audio_listening_line_onset_only"
+    },
+    {
+      "row_id": "t1-fallback-005",
+      "fixture_group": "vtt_fallback_concat",
+      "audio_source_id": "lb4_e1ff-cut_002-audio",
+      "source_span": {
+        "kind": "concatenated_source_video_audio",
+        "coordinate_system": "absolute_video_ms",
+        "parts": [
+          {
+            "start_ms": 857000,
+            "end_ms": 875000,
+            "concat_offset_ms": 0
+          },
+          {
+            "start_ms": 996000,
+            "end_ms": 1012000,
+            "concat_offset_ms": 18000
+          }
+        ],
+        "duration_ms": 34000
+      },
+      "target_text": "めっちゃ動いてるね",
+      "gold": {
+        "line_onset_ms": 22800,
+        "timebase": "source_audio_relative_ms",
+        "annotator_id": "ryukou",
+        "annotated_at": "2026-08-05T11:52:53.773697+00:00",
+        "audio_listened": true
+      },
+      "gold_provenance": "human_audio_listening_line_onset_only"
+    },
+    {
+      "row_id": "t1-fallback-006",
+      "fixture_group": "vtt_fallback_concat",
+      "audio_source_id": "lb4_e1ff-cut_002-audio",
+      "source_span": {
+        "kind": "concatenated_source_video_audio",
+        "coordinate_system": "absolute_video_ms",
+        "parts": [
+          {
+            "start_ms": 857000,
+            "end_ms": 875000,
+            "concat_offset_ms": 0
+          },
+          {
+            "start_ms": 996000,
+            "end_ms": 1012000,
+            "concat_offset_ms": 18000
+          }
+        ],
+        "duration_ms": 34000
+      },
+      "target_text": "めっちゃ色々やってる",
+      "gold": {
+        "line_onset_ms": 24500,
+        "timebase": "source_audio_relative_ms",
+        "annotator_id": "ryukou",
+        "annotated_at": "2026-08-05T11:53:21.828209+00:00",
+        "audio_listened": true
+      },
+      "gold_provenance": "human_audio_listening_line_onset_only"
+    },
+    {
+      "row_id": "t1-fallback-007",
+      "fixture_group": "vtt_fallback_concat",
+      "audio_source_id": "lb4_e1ff-cut_002-audio",
+      "source_span": {
+        "kind": "concatenated_source_video_audio",
+        "coordinate_system": "absolute_video_ms",
+        "parts": [
+          {
+            "start_ms": 857000,
+            "end_ms": 875000,
+            "concat_offset_ms": 0
+          },
+          {
+            "start_ms": 996000,
+            "end_ms": 1012000,
+            "concat_offset_ms": 18000
+          }
+        ],
+        "duration_ms": 34000
+      },
+      "target_text": "こんなに許可が必要なのか",
+      "gold": {
+        "line_onset_ms": 31000,
+        "timebase": "source_audio_relative_ms",
+        "annotator_id": "ryukou",
+        "annotated_at": "2026-08-05T11:54:14.874633+00:00",
+        "audio_listened": true
+      },
+      "gold_provenance": "human_audio_listening_line_onset_only"
+    },
+    {
+      "row_id": "t1-fallback-008",
+      "fixture_group": "vtt_fallback_concat",
+      "audio_source_id": "lb4_e1ff-cut_003-audio",
+      "source_span": {
+        "kind": "concatenated_source_video_audio",
+        "coordinate_system": "absolute_video_ms",
+        "parts": [
+          {
+            "start_ms": 996000,
+            "end_ms": 1012000,
+            "concat_offset_ms": 0
+          },
+          {
+            "start_ms": 1069000,
+            "end_ms": 1101000,
+            "concat_offset_ms": 16000
+          }
+        ],
+        "duration_ms": 48000
+      },
+      "target_text": "Opusを使う余裕がなくなる",
+      "gold": {
+        "line_onset_ms": null,
+        "timebase": "source_audio_relative_ms",
+        "annotator_id": null,
+        "annotated_at": null,
+        "audio_listened": false
+      },
+      "gold_provenance": "human_audio_listening_line_onset_only"
+    },
+    {
+      "row_id": "t1-fallback-009",
+      "fixture_group": "vtt_fallback_concat",
+      "audio_source_id": "lb4_e1ff-cut_003-audio",
+      "source_span": {
+        "kind": "concatenated_source_video_audio",
+        "coordinate_system": "absolute_video_ms",
+        "parts": [
+          {
+            "start_ms": 996000,
+            "end_ms": 1012000,
+            "concat_offset_ms": 0
+          },
+          {
+            "start_ms": 1069000,
+            "end_ms": 1101000,
+            "concat_offset_ms": 16000
+          }
+        ],
+        "duration_ms": 48000
+      },
+      "target_text": "挙動は見れたから止めるか",
+      "gold": {
+        "line_onset_ms": 18000,
+        "timebase": "source_audio_relative_ms",
+        "annotator_id": "ryukou",
+        "annotated_at": "2026-08-05T12:02:05.021315+00:00",
+        "audio_listened": true
+      },
+      "gold_provenance": "human_audio_listening_line_onset_only"
+    },
+    {
+      "row_id": "t1-fallback-010",
+      "fixture_group": "vtt_fallback_concat",
+      "audio_source_id": "lb4_e1ff-cut_003-audio",
+      "source_span": {
+        "kind": "concatenated_source_video_audio",
+        "coordinate_system": "absolute_video_ms",
+        "parts": [
+          {
+            "start_ms": 996000,
+            "end_ms": 1012000,
+            "concat_offset_ms": 0
+          },
+          {
+            "start_ms": 1069000,
+            "end_ms": 1101000,
+            "concat_offset_ms": 16000
+          }
+        ],
+        "duration_ms": 48000
+      },
+      "target_text": "ディープリサーチを一旦止めます",
+      "gold": {
+        "line_onset_ms": 28000,
+        "timebase": "source_audio_relative_ms",
+        "annotator_id": "ryukou",
+        "annotated_at": "2026-08-05T12:01:26.130742+00:00",
+        "audio_listened": true
+      },
+      "gold_provenance": "human_audio_listening_line_onset_only"
+    },
+    {
+      "row_id": "t1-fallback-011",
+      "fixture_group": "vtt_fallback_concat",
+      "audio_source_id": "lb4_e1ff-cut_003-audio",
+      "source_span": {
+        "kind": "concatenated_source_video_audio",
+        "coordinate_system": "absolute_video_ms",
+        "parts": [
+          {
+            "start_ms": 996000,
+            "end_ms": 1012000,
+            "concat_offset_ms": 0
+          },
+          {
+            "start_ms": 1069000,
+            "end_ms": 1101000,
+            "concat_offset_ms": 16000
+          }
+        ],
+        "duration_ms": 48000
+      },
+      "target_text": "この挙動が分かればいい",
+      "gold": {
+        "line_onset_ms": 36000,
+        "timebase": "source_audio_relative_ms",
+        "annotator_id": "ryukou",
+        "annotated_at": "2026-08-05T12:03:06.061853+00:00",
+        "audio_listened": true
+      },
+      "gold_provenance": "human_audio_listening_line_onset_only"
+    },
+    {
+      "row_id": "t1-fallback-012",
+      "fixture_group": "vtt_fallback_concat",
+      "audio_source_id": "lb4_e1ff-cut_004-audio",
+      "source_span": {
+        "kind": "concatenated_source_video_audio",
+        "coordinate_system": "absolute_video_ms",
+        "parts": [
+          {
+            "start_ms": 1069000,
+            "end_ms": 1101000,
+            "concat_offset_ms": 0
+          },
+          {
+            "start_ms": 1104000,
+            "end_ms": 1140000,
+            "concat_offset_ms": 32000
+          }
+        ],
+        "duration_ms": 68000
+      },
+      "target_text": "止まってないな、これ",
+      "gold": {
+        "line_onset_ms": 32000,
+        "timebase": "source_audio_relative_ms",
+        "annotator_id": "ryukou",
+        "annotated_at": "2026-08-05T12:04:49.571321+00:00",
+        "audio_listened": true
+      },
+      "gold_provenance": "human_audio_listening_line_onset_only"
+    },
+    {
+      "row_id": "t1-fallback-013",
+      "fixture_group": "vtt_fallback_concat",
+      "audio_source_id": "lb4_e1ff-cut_004-audio",
+      "source_span": {
+        "kind": "concatenated_source_video_audio",
+        "coordinate_system": "absolute_video_ms",
+        "parts": [
+          {
+            "start_ms": 1069000,
+            "end_ms": 1101000,
+            "concat_offset_ms": 0
+          },
+          {
+            "start_ms": 1104000,
+            "end_ms": 1140000,
+            "concat_offset_ms": 32000
+          }
+        ],
+        "duration_ms": 68000
+      },
+      "target_text": "やばい",
+      "gold": {
+        "line_onset_ms": 38000,
+        "timebase": "source_audio_relative_ms",
+        "annotator_id": "ryukou",
+        "annotated_at": "2026-08-05T12:09:43.187416+00:00",
+        "audio_listened": true
+      },
+      "gold_provenance": "human_audio_listening_line_onset_only"
+    },
+    {
+      "row_id": "t1-fallback-014",
+      "fixture_group": "vtt_fallback_concat",
+      "audio_source_id": "lb4_e1ff-cut_004-audio",
+      "source_span": {
+        "kind": "concatenated_source_video_audio",
+        "coordinate_system": "absolute_video_ms",
+        "parts": [
+          {
+            "start_ms": 1069000,
+            "end_ms": 1101000,
+            "concat_offset_ms": 0
+          },
+          {
+            "start_ms": 1104000,
+            "end_ms": 1140000,
+            "concat_offset_ms": 32000
+          }
+        ],
+        "duration_ms": 68000
+      },
+      "target_text": "止まってないね",
+      "gold": {
+        "line_onset_ms": 38900,
+        "timebase": "source_audio_relative_ms",
+        "annotator_id": "ryukou",
+        "annotated_at": "2026-08-05T12:10:16.185442+00:00",
+        "audio_listened": true
+      },
+      "gold_provenance": "human_audio_listening_line_onset_only"
+    },
+    {
+      "row_id": "t1-fallback-015",
+      "fixture_group": "vtt_fallback_concat",
+      "audio_source_id": "lb4_e1ff-cut_004-audio",
+      "source_span": {
+        "kind": "concatenated_source_video_audio",
+        "coordinate_system": "absolute_video_ms",
+        "parts": [
+          {
+            "start_ms": 1069000,
+            "end_ms": 1101000,
+            "concat_offset_ms": 0
+          },
+          {
+            "start_ms": 1104000,
+            "end_ms": 1140000,
+            "concat_offset_ms": 32000
+          }
+        ],
+        "duration_ms": 68000
+      },
+      "target_text": "あ、止まった",
+      "gold": {
+        "line_onset_ms": 61000,
+        "timebase": "source_audio_relative_ms",
+        "annotator_id": "ryukou",
+        "annotated_at": "2026-08-05T12:13:35.126993+00:00",
+        "audio_listened": true
+      },
+      "gold_provenance": "human_audio_listening_line_onset_only"
+    },
+    {
+      "row_id": "t1-fallback-016",
+      "fixture_group": "vtt_fallback_concat",
+      "audio_source_id": "lb4_e1ff-cut_004-audio",
+      "source_span": {
+        "kind": "concatenated_source_video_audio",
+        "coordinate_system": "absolute_video_ms",
+        "parts": [
+          {
+            "start_ms": 1069000,
+            "end_ms": 1101000,
+            "concat_offset_ms": 0
+          },
+          {
+            "start_ms": 1104000,
+            "end_ms": 1140000,
+            "concat_offset_ms": 32000
+          }
+        ],
+        "duration_ms": 68000
+      },
+      "target_text": "相当持ってかれた",
+      "gold": {
+        "line_onset_ms": 65000,
+        "timebase": "source_audio_relative_ms",
+        "annotator_id": "ryukou",
+        "annotated_at": "2026-08-05T12:14:32.707136+00:00",
+        "audio_listened": true
+      },
+      "gold_provenance": "human_audio_listening_line_onset_only"
+    },
+    {
+      "row_id": "t1-fallback-017",
+      "fixture_group": "vtt_fallback_concat",
+      "audio_source_id": "lb4_b5d-cut_001-audio",
+      "source_span": {
+        "kind": "concatenated_source_video_audio",
+        "coordinate_system": "absolute_video_ms",
+        "parts": [
+          {
+            "start_ms": 3700000,
+            "end_ms": 3721000,
+            "concat_offset_ms": 0
+          },
+          {
+            "start_ms": 4015000,
+            "end_ms": 4052000,
+            "concat_offset_ms": 21000
+          },
+          {
+            "start_ms": 4086000,
+            "end_ms": 4100000,
+            "concat_offset_ms": 58000
+          }
+        ],
+        "duration_ms": 72000
+      },
+      "target_text": "の人が使っちゃダメなやつっすね。",
+      "gold": {
+        "line_onset_ms": 0,
+        "timebase": "source_audio_relative_ms",
+        "annotator_id": "ryukou",
+        "annotated_at": "2026-08-05T12:15:05.970019+00:00",
+        "audio_listened": true
+      },
+      "gold_provenance": "human_audio_listening_line_onset_only"
+    },
+    {
+      "row_id": "t1-fallback-018",
+      "fixture_group": "vtt_fallback_concat",
+      "audio_source_id": "lb4_b5d-cut_002-audio",
+      "source_span": {
+        "kind": "concatenated_source_video_audio",
+        "coordinate_system": "absolute_video_ms",
+        "parts": [
+          {
+            "start_ms": 3700000,
+            "end_ms": 3721000,
+            "concat_offset_ms": 0
+          },
+          {
+            "start_ms": 4015000,
+            "end_ms": 4052000,
+            "concat_offset_ms": 21000
+          },
+          {
+            "start_ms": 4086000,
+            "end_ms": 4100000,
+            "concat_offset_ms": 58000
+          }
+        ],
+        "duration_ms": 72000
+      },
+      "target_text": "トクン効率自体は良くなってるらしいんす",
+      "gold": {
+        "line_onset_ms": 12000,
+        "timebase": "source_audio_relative_ms",
+        "annotator_id": "ryukou",
+        "annotated_at": "2026-08-05T12:16:11.671166+00:00",
+        "audio_listened": true
+      },
+      "gold_provenance": "human_audio_listening_line_onset_only"
+    },
+    {
+      "row_id": "t1-fallback-019",
+      "fixture_group": "vtt_fallback_concat",
+      "audio_source_id": "lb4_b5d-cut_003-audio",
+      "source_span": {
+        "kind": "concatenated_source_video_audio",
+        "coordinate_system": "absolute_video_ms",
+        "parts": [
+          {
+            "start_ms": 3700000,
+            "end_ms": 3721000,
+            "concat_offset_ms": 0
+          },
+          {
+            "start_ms": 4015000,
+            "end_ms": 4052000,
+            "concat_offset_ms": 21000
+          },
+          {
+            "start_ms": 4086000,
+            "end_ms": 4100000,
+            "concat_offset_ms": 58000
+          }
+        ],
+        "duration_ms": 72000
+      },
+      "target_text": "じゃあ同じ200ドルを払うとして",
+      "gold": {
+        "line_onset_ms": 34800,
+        "timebase": "source_audio_relative_ms",
+        "annotator_id": "ryukou",
+        "annotated_at": "2026-08-05T12:18:39.419979+00:00",
+        "audio_listened": true
+      },
+      "gold_provenance": "human_audio_listening_line_onset_only"
+    },
+    {
+      "row_id": "t1-fallback-020",
+      "fixture_group": "vtt_fallback_concat",
+      "audio_source_id": "lb4_b5d-cut_003-audio",
+      "source_span": {
+        "kind": "concatenated_source_video_audio",
+        "coordinate_system": "absolute_video_ms",
+        "parts": [
+          {
+            "start_ms": 3700000,
+            "end_ms": 3721000,
+            "concat_offset_ms": 0
+          },
+          {
+            "start_ms": 4015000,
+            "end_ms": 4052000,
+            "concat_offset_ms": 21000
+          },
+          {
+            "start_ms": 4086000,
+            "end_ms": 4100000,
+            "concat_offset_ms": 58000
+          }
+        ],
+        "duration_ms": 72000
+      },
+      "target_text": "今んところチャットGPT優勢なんだよな",
+      "gold": {
+        "line_onset_ms": 61000,
+        "timebase": "source_audio_relative_ms",
+        "annotator_id": "ryukou",
+        "annotated_at": "2026-08-05T12:20:23.596159+00:00",
+        "audio_listened": true
+      },
+      "gold_provenance": "human_audio_listening_line_onset_only"
+    }
+  ],
+  "playback_receipts": {
+    "t1-long-001": {
+      "manifest_fingerprint": "b4f33f33c6b7f23be0d28c13bdb0bdde946659a7a8f9909894e8b0d4807a11ec",
+      "row_id": "t1-long-001",
+      "audio_source_id": "gza_415-cut_001-audio",
+      "source_content_sha256": "9030b591ffc52ac7ec2a7ac99edfb8ac8296291d123434fb482841338ce3cbb5",
+      "target_text": "この話が出るんですよね",
+      "row_source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 11000
+      },
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 11000
+      },
+      "played_from_ms": 0,
+      "played_duration_ms": 11000,
+      "playback_wav_path": "/private/tmp/.yt-live-kit-t1-1-human-gold.json.playback/t1-long-001.3d0932285bc1131c187b4e99b89c72c09b2287cf2dc53779d4aab4d1761d365f.b5daf10680cd420a85334ced9f08f9f6.wav",
+      "playback_wav_sha256": "3d0932285bc1131c187b4e99b89c72c09b2287cf2dc53779d4aab4d1761d365f",
+      "playback_wav_bytes": 352044,
+      "playback_format": {
+        "channels": 1,
+        "sample_width": 2,
+        "sample_rate": 16000
+      },
+      "recorded_at": "2026-08-05T04:49:27.742373+00:00"
+    },
+    "t1-long-002": {
+      "manifest_fingerprint": "b4f33f33c6b7f23be0d28c13bdb0bdde946659a7a8f9909894e8b0d4807a11ec",
+      "row_id": "t1-long-002",
+      "audio_source_id": "gza_415-cut_001-audio",
+      "source_content_sha256": "9030b591ffc52ac7ec2a7ac99edfb8ac8296291d123434fb482841338ce3cbb5",
+      "target_text": "何に使えばいいか分からない",
+      "row_source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 11000
+      },
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 4000,
+        "end_ms": 11000
+      },
+      "played_from_ms": 4000,
+      "played_duration_ms": 7000,
+      "playback_wav_path": "/private/tmp/.yt-live-kit-t1-1-human-gold.json.playback/t1-long-002.9a1d40149be0ecab721e69258774041240b4db8df3f325c3ede35ec77ef7e31c.cb6821068f6a4085bb8b2e590428dede.wav",
+      "playback_wav_sha256": "9a1d40149be0ecab721e69258774041240b4db8df3f325c3ede35ec77ef7e31c",
+      "playback_wav_bytes": 224044,
+      "playback_format": {
+        "channels": 1,
+        "sample_width": 2,
+        "sample_rate": 16000
+      },
+      "recorded_at": "2026-08-05T04:53:08.400891+00:00"
+    },
+    "t1-long-003": {
+      "manifest_fingerprint": "b4f33f33c6b7f23be0d28c13bdb0bdde946659a7a8f9909894e8b0d4807a11ec",
+      "row_id": "t1-long-003",
+      "audio_source_id": "gza_415-cut_001-audio",
+      "source_content_sha256": "9030b591ffc52ac7ec2a7ac99edfb8ac8296291d123434fb482841338ce3cbb5",
+      "target_text": "自分の仕事が分かってない",
+      "row_source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 11000
+      },
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 11000
+      },
+      "played_from_ms": 0,
+      "played_duration_ms": 11000,
+      "playback_wav_path": "/private/tmp/.yt-live-kit-t1-1-human-gold.json.playback/t1-long-003.3d0932285bc1131c187b4e99b89c72c09b2287cf2dc53779d4aab4d1761d365f.4ae657eeaf6e4cd0bb896a3e990294ca.wav",
+      "playback_wav_sha256": "3d0932285bc1131c187b4e99b89c72c09b2287cf2dc53779d4aab4d1761d365f",
+      "playback_wav_bytes": 352044,
+      "playback_format": {
+        "channels": 1,
+        "sample_width": 2,
+        "sample_rate": 16000
+      },
+      "recorded_at": "2026-08-05T04:53:40.747920+00:00"
+    },
+    "t1-long-004": {
+      "manifest_fingerprint": "b4f33f33c6b7f23be0d28c13bdb0bdde946659a7a8f9909894e8b0d4807a11ec",
+      "row_id": "t1-long-004",
+      "audio_source_id": "gza_415-cut_002-audio",
+      "source_content_sha256": "476eed4ae22f68ea9360fa684f1c3c905331674dcad4bcdef3cc333c6e826cf0",
+      "target_text": "上から目線で申し訳ないけど",
+      "row_source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 38000
+      },
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 38000
+      },
+      "played_from_ms": 0,
+      "played_duration_ms": 38000,
+      "playback_wav_path": "/private/tmp/.yt-live-kit-t1-1-human-gold.json.playback/t1-long-004.a517ff846154416b9acb7a4d5a748d55849c3cc3cfdd07f64e908960d7939330.83c22bfe7e39482f8b447db594a20fc2.wav",
+      "playback_wav_sha256": "a517ff846154416b9acb7a4d5a748d55849c3cc3cfdd07f64e908960d7939330",
+      "playback_wav_bytes": 1216044,
+      "playback_format": {
+        "channels": 1,
+        "sample_width": 2,
+        "sample_rate": 16000
+      },
+      "recorded_at": "2026-08-05T04:54:20.821478+00:00"
+    },
+    "t1-long-005": {
+      "manifest_fingerprint": "b4f33f33c6b7f23be0d28c13bdb0bdde946659a7a8f9909894e8b0d4807a11ec",
+      "row_id": "t1-long-005",
+      "audio_source_id": "gza_415-cut_002-audio",
+      "source_content_sha256": "476eed4ae22f68ea9360fa684f1c3c905331674dcad4bcdef3cc333c6e826cf0",
+      "target_text": "業務で何をやっているか",
+      "row_source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 38000
+      },
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 38000
+      },
+      "played_from_ms": 0,
+      "played_duration_ms": 38000,
+      "playback_wav_path": "/private/tmp/.yt-live-kit-t1-1-human-gold.json.playback/t1-long-005.a517ff846154416b9acb7a4d5a748d55849c3cc3cfdd07f64e908960d7939330.04ce3a3c840d4f3e975a3ce2112e45f1.wav",
+      "playback_wav_sha256": "a517ff846154416b9acb7a4d5a748d55849c3cc3cfdd07f64e908960d7939330",
+      "playback_wav_bytes": 1216044,
+      "playback_format": {
+        "channels": 1,
+        "sample_width": 2,
+        "sample_rate": 16000
+      },
+      "recorded_at": "2026-08-05T04:55:12.582857+00:00"
+    },
+    "t1-long-006": {
+      "manifest_fingerprint": "b4f33f33c6b7f23be0d28c13bdb0bdde946659a7a8f9909894e8b0d4807a11ec",
+      "row_id": "t1-long-006",
+      "audio_source_id": "gza_415-cut_002-audio",
+      "source_content_sha256": "476eed4ae22f68ea9360fa684f1c3c905331674dcad4bcdef3cc333c6e826cf0",
+      "target_text": "分からないから使えない",
+      "row_source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 38000
+      },
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 38000
+      },
+      "played_from_ms": 0,
+      "played_duration_ms": 38000,
+      "playback_wav_path": "/private/tmp/.yt-live-kit-t1-1-human-gold.json.playback/t1-long-006.a517ff846154416b9acb7a4d5a748d55849c3cc3cfdd07f64e908960d7939330.a94f24c84f104c0e940edff25f29adcb.wav",
+      "playback_wav_sha256": "a517ff846154416b9acb7a4d5a748d55849c3cc3cfdd07f64e908960d7939330",
+      "playback_wav_bytes": 1216044,
+      "playback_format": {
+        "channels": 1,
+        "sample_width": 2,
+        "sample_rate": 16000
+      },
+      "recorded_at": "2026-08-05T04:55:55.233786+00:00"
+    },
+    "t1-long-007": {
+      "manifest_fingerprint": "b4f33f33c6b7f23be0d28c13bdb0bdde946659a7a8f9909894e8b0d4807a11ec",
+      "row_id": "t1-long-007",
+      "audio_source_id": "gza_415-cut_003-audio",
+      "source_content_sha256": "c55c9ba56d500c62e587b483c30ed959a1ad048ec21dfb9b19f790657ac4616a",
+      "target_text": "業務への解像度を上げましょう",
+      "row_source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 26000
+      },
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 26000
+      },
+      "played_from_ms": 0,
+      "played_duration_ms": 26000,
+      "playback_wav_path": "/private/tmp/.yt-live-kit-t1-1-human-gold.json.playback/t1-long-007.48c5dd5a786d823bc9693b80ec9a1c9eeaf06286f918ce64fc5f81a96db91daa.b5c0700c0bb648498314d42155cf7ff3.wav",
+      "playback_wav_sha256": "48c5dd5a786d823bc9693b80ec9a1c9eeaf06286f918ce64fc5f81a96db91daa",
+      "playback_wav_bytes": 832044,
+      "playback_format": {
+        "channels": 1,
+        "sample_width": 2,
+        "sample_rate": 16000
+      },
+      "recorded_at": "2026-08-05T04:57:37.855052+00:00"
+    },
+    "t1-long-008": {
+      "manifest_fingerprint": "b4f33f33c6b7f23be0d28c13bdb0bdde946659a7a8f9909894e8b0d4807a11ec",
+      "row_id": "t1-long-008",
+      "audio_source_id": "gza_415-cut_003-audio",
+      "source_content_sha256": "c55c9ba56d500c62e587b483c30ed959a1ad048ec21dfb9b19f790657ac4616a",
+      "target_text": "結局はそこなんですよね",
+      "row_source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 26000
+      },
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 26000
+      },
+      "played_from_ms": 0,
+      "played_duration_ms": 26000,
+      "playback_wav_path": "/private/tmp/.yt-live-kit-t1-1-human-gold.json.playback/t1-long-008.48c5dd5a786d823bc9693b80ec9a1c9eeaf06286f918ce64fc5f81a96db91daa.7b1b76f2311845c19f410d31ffaf0f44.wav",
+      "playback_wav_sha256": "48c5dd5a786d823bc9693b80ec9a1c9eeaf06286f918ce64fc5f81a96db91daa",
+      "playback_wav_bytes": 832044,
+      "playback_format": {
+        "channels": 1,
+        "sample_width": 2,
+        "sample_rate": 16000
+      },
+      "recorded_at": "2026-08-05T04:58:08.888815+00:00"
+    },
+    "t1-long-009": {
+      "manifest_fingerprint": "b4f33f33c6b7f23be0d28c13bdb0bdde946659a7a8f9909894e8b0d4807a11ec",
+      "row_id": "t1-long-009",
+      "audio_source_id": "gza_415-cut_003-audio",
+      "source_content_sha256": "c55c9ba56d500c62e587b483c30ed959a1ad048ec21dfb9b19f790657ac4616a",
+      "target_text": "ワークフローを細分化して",
+      "row_source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 26000
+      },
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 26000
+      },
+      "played_from_ms": 0,
+      "played_duration_ms": 26000,
+      "playback_wav_path": "/private/tmp/.yt-live-kit-t1-1-human-gold.json.playback/t1-long-009.48c5dd5a786d823bc9693b80ec9a1c9eeaf06286f918ce64fc5f81a96db91daa.e86d171675f54f61a8d13a830c0810dc.wav",
+      "playback_wav_sha256": "48c5dd5a786d823bc9693b80ec9a1c9eeaf06286f918ce64fc5f81a96db91daa",
+      "playback_wav_bytes": 832044,
+      "playback_format": {
+        "channels": 1,
+        "sample_width": 2,
+        "sample_rate": 16000
+      },
+      "recorded_at": "2026-08-05T04:59:04.579703+00:00"
+    },
+    "t1-long-010": {
+      "manifest_fingerprint": "b4f33f33c6b7f23be0d28c13bdb0bdde946659a7a8f9909894e8b0d4807a11ec",
+      "row_id": "t1-long-010",
+      "audio_source_id": "gza_415-cut_003-audio",
+      "source_content_sha256": "c55c9ba56d500c62e587b483c30ed959a1ad048ec21dfb9b19f790657ac4616a",
+      "target_text": "自分がやっていることへの",
+      "row_source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 26000
+      },
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 26000
+      },
+      "played_from_ms": 0,
+      "played_duration_ms": 26000,
+      "playback_wav_path": "/private/tmp/.yt-live-kit-t1-1-human-gold.json.playback/t1-long-010.48c5dd5a786d823bc9693b80ec9a1c9eeaf06286f918ce64fc5f81a96db91daa.d3756dfb6dca4c8e8e003094230455d8.wav",
+      "playback_wav_sha256": "48c5dd5a786d823bc9693b80ec9a1c9eeaf06286f918ce64fc5f81a96db91daa",
+      "playback_wav_bytes": 832044,
+      "playback_format": {
+        "channels": 1,
+        "sample_width": 2,
+        "sample_rate": 16000
+      },
+      "recorded_at": "2026-08-05T05:00:02.398883+00:00"
+    },
+    "t1-long-011": {
+      "manifest_fingerprint": "b4f33f33c6b7f23be0d28c13bdb0bdde946659a7a8f9909894e8b0d4807a11ec",
+      "row_id": "t1-long-011",
+      "audio_source_id": "gza_415-cut_003-audio",
+      "source_content_sha256": "c55c9ba56d500c62e587b483c30ed959a1ad048ec21dfb9b19f790657ac4616a",
+      "target_text": "解像度を上げる話になる",
+      "row_source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 26000
+      },
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 26000
+      },
+      "played_from_ms": 0,
+      "played_duration_ms": 26000,
+      "playback_wav_path": "/private/tmp/.yt-live-kit-t1-1-human-gold.json.playback/t1-long-011.48c5dd5a786d823bc9693b80ec9a1c9eeaf06286f918ce64fc5f81a96db91daa.eb7efc12f7af44ea87580cb55aa4d62b.wav",
+      "playback_wav_sha256": "48c5dd5a786d823bc9693b80ec9a1c9eeaf06286f918ce64fc5f81a96db91daa",
+      "playback_wav_bytes": 832044,
+      "playback_format": {
+        "channels": 1,
+        "sample_width": 2,
+        "sample_rate": 16000
+      },
+      "recorded_at": "2026-08-05T05:00:38.810027+00:00"
+    },
+    "t1-long-012": {
+      "manifest_fingerprint": "b4f33f33c6b7f23be0d28c13bdb0bdde946659a7a8f9909894e8b0d4807a11ec",
+      "row_id": "t1-long-012",
+      "audio_source_id": "gza_415-cut_003-audio",
+      "source_content_sha256": "c55c9ba56d500c62e587b483c30ed959a1ad048ec21dfb9b19f790657ac4616a",
+      "target_text": "結局は業務コンサルになる",
+      "row_source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 26000
+      },
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 26000
+      },
+      "played_from_ms": 0,
+      "played_duration_ms": 26000,
+      "playback_wav_path": "/private/tmp/.yt-live-kit-t1-1-human-gold.json.playback/t1-long-012.48c5dd5a786d823bc9693b80ec9a1c9eeaf06286f918ce64fc5f81a96db91daa.5fa095d4390d4e85bf36589d1511af60.wav",
+      "playback_wav_sha256": "48c5dd5a786d823bc9693b80ec9a1c9eeaf06286f918ce64fc5f81a96db91daa",
+      "playback_wav_bytes": 832044,
+      "playback_format": {
+        "channels": 1,
+        "sample_width": 2,
+        "sample_rate": 16000
+      },
+      "recorded_at": "2026-08-05T10:59:38.157482+00:00"
+    },
+    "t1-long-013": {
+      "manifest_fingerprint": "b4f33f33c6b7f23be0d28c13bdb0bdde946659a7a8f9909894e8b0d4807a11ec",
+      "row_id": "t1-long-013",
+      "audio_source_id": "gza_f0-cut_002-audio",
+      "source_content_sha256": "fddfe8dc96d36c8cc2a5f9c5a03316c36bed8531c9258a3250db6ac532b726a5",
+      "target_text": "個人事業主だったら",
+      "row_source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 28000
+      },
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 28000
+      },
+      "played_from_ms": 0,
+      "played_duration_ms": 28000,
+      "playback_wav_path": "/private/tmp/.yt-live-kit-t1-1-human-gold.json.playback/t1-long-013.33cebbdb24a6c6d9c6571beecc868715c718542179a85dacecc7c53e0c5fc02e.d079985fe693412c896e1bf037e264f7.wav",
+      "playback_wav_sha256": "33cebbdb24a6c6d9c6571beecc868715c718542179a85dacecc7c53e0c5fc02e",
+      "playback_wav_bytes": 896044,
+      "playback_format": {
+        "channels": 1,
+        "sample_width": 2,
+        "sample_rate": 16000
+      },
+      "recorded_at": "2026-08-05T11:14:54.521839+00:00"
+    },
+    "t1-long-014": {
+      "manifest_fingerprint": "b4f33f33c6b7f23be0d28c13bdb0bdde946659a7a8f9909894e8b0d4807a11ec",
+      "row_id": "t1-long-014",
+      "audio_source_id": "gza_f0-cut_002-audio",
+      "source_content_sha256": "fddfe8dc96d36c8cc2a5f9c5a03316c36bed8531c9258a3250db6ac532b726a5",
+      "target_text": "Facebookのチャット",
+      "row_source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 28000
+      },
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 28000
+      },
+      "played_from_ms": 0,
+      "played_duration_ms": 28000,
+      "playback_wav_path": "/private/tmp/.yt-live-kit-t1-1-human-gold.json.playback/t1-long-014.33cebbdb24a6c6d9c6571beecc868715c718542179a85dacecc7c53e0c5fc02e.6aa9a2a545af46198a132cbb37752433.wav",
+      "playback_wav_sha256": "33cebbdb24a6c6d9c6571beecc868715c718542179a85dacecc7c53e0c5fc02e",
+      "playback_wav_bytes": 896044,
+      "playback_format": {
+        "channels": 1,
+        "sample_width": 2,
+        "sample_rate": 16000
+      },
+      "recorded_at": "2026-08-05T11:17:07.874575+00:00"
+    },
+    "t1-long-015": {
+      "manifest_fingerprint": "b4f33f33c6b7f23be0d28c13bdb0bdde946659a7a8f9909894e8b0d4807a11ec",
+      "row_id": "t1-long-015",
+      "audio_source_id": "gza_f0-cut_002-audio",
+      "source_content_sha256": "fddfe8dc96d36c8cc2a5f9c5a03316c36bed8531c9258a3250db6ac532b726a5",
+      "target_text": "メッセンジャーがあります",
+      "row_source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 28000
+      },
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 28000
+      },
+      "played_from_ms": 0,
+      "played_duration_ms": 28000,
+      "playback_wav_path": "/private/tmp/.yt-live-kit-t1-1-human-gold.json.playback/t1-long-015.33cebbdb24a6c6d9c6571beecc868715c718542179a85dacecc7c53e0c5fc02e.d03f6d2d628e4283b82998d977c06590.wav",
+      "playback_wav_sha256": "33cebbdb24a6c6d9c6571beecc868715c718542179a85dacecc7c53e0c5fc02e",
+      "playback_wav_bytes": 896044,
+      "playback_format": {
+        "channels": 1,
+        "sample_width": 2,
+        "sample_rate": 16000
+      },
+      "recorded_at": "2026-08-05T11:18:19.277197+00:00"
+    },
+    "t1-long-016": {
+      "manifest_fingerprint": "b4f33f33c6b7f23be0d28c13bdb0bdde946659a7a8f9909894e8b0d4807a11ec",
+      "row_id": "t1-long-016",
+      "audio_source_id": "gza_f0-cut_002-audio",
+      "source_content_sha256": "fddfe8dc96d36c8cc2a5f9c5a03316c36bed8531c9258a3250db6ac532b726a5",
+      "target_text": "普通に請求書や資料を",
+      "row_source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 28000
+      },
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 28000
+      },
+      "played_from_ms": 0,
+      "played_duration_ms": 28000,
+      "playback_wav_path": "/private/tmp/.yt-live-kit-t1-1-human-gold.json.playback/t1-long-016.33cebbdb24a6c6d9c6571beecc868715c718542179a85dacecc7c53e0c5fc02e.ce81549c0a9c4f4e8f5756356d8f35b3.wav",
+      "playback_wav_sha256": "33cebbdb24a6c6d9c6571beecc868715c718542179a85dacecc7c53e0c5fc02e",
+      "playback_wav_bytes": 896044,
+      "playback_format": {
+        "channels": 1,
+        "sample_width": 2,
+        "sample_rate": 16000
+      },
+      "recorded_at": "2026-08-05T11:19:30.405806+00:00"
+    },
+    "t1-long-017": {
+      "manifest_fingerprint": "b4f33f33c6b7f23be0d28c13bdb0bdde946659a7a8f9909894e8b0d4807a11ec",
+      "row_id": "t1-long-017",
+      "audio_source_id": "gza_f0-cut_002-audio",
+      "source_content_sha256": "fddfe8dc96d36c8cc2a5f9c5a03316c36bed8531c9258a3250db6ac532b726a5",
+      "target_text": "やり取りしているのに",
+      "row_source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 28000
+      },
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 28000
+      },
+      "played_from_ms": 0,
+      "played_duration_ms": 28000,
+      "playback_wav_path": "/private/tmp/.yt-live-kit-t1-1-human-gold.json.playback/t1-long-017.33cebbdb24a6c6d9c6571beecc868715c718542179a85dacecc7c53e0c5fc02e.eb3af863caba414b82d24e822e32dd12.wav",
+      "playback_wav_sha256": "33cebbdb24a6c6d9c6571beecc868715c718542179a85dacecc7c53e0c5fc02e",
+      "playback_wav_bytes": 896044,
+      "playback_format": {
+        "channels": 1,
+        "sample_width": 2,
+        "sample_rate": 16000
+      },
+      "recorded_at": "2026-08-05T11:20:00.878897+00:00"
+    },
+    "t1-long-018": {
+      "manifest_fingerprint": "b4f33f33c6b7f23be0d28c13bdb0bdde946659a7a8f9909894e8b0d4807a11ec",
+      "row_id": "t1-long-018",
+      "audio_source_id": "gza_f0-cut_002-audio",
+      "source_content_sha256": "fddfe8dc96d36c8cc2a5f9c5a03316c36bed8531c9258a3250db6ac532b726a5",
+      "target_text": "AIだと個人情報と言う",
+      "row_source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 28000
+      },
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 28000
+      },
+      "played_from_ms": 0,
+      "played_duration_ms": 28000,
+      "playback_wav_path": "/private/tmp/.yt-live-kit-t1-1-human-gold.json.playback/t1-long-018.33cebbdb24a6c6d9c6571beecc868715c718542179a85dacecc7c53e0c5fc02e.1fb871366a1d443f97048e17258da0ba.wav",
+      "playback_wav_sha256": "33cebbdb24a6c6d9c6571beecc868715c718542179a85dacecc7c53e0c5fc02e",
+      "playback_wav_bytes": 896044,
+      "playback_format": {
+        "channels": 1,
+        "sample_width": 2,
+        "sample_rate": 16000
+      },
+      "recorded_at": "2026-08-05T11:20:42.154890+00:00"
+    },
+    "t1-long-019": {
+      "manifest_fingerprint": "b4f33f33c6b7f23be0d28c13bdb0bdde946659a7a8f9909894e8b0d4807a11ec",
+      "row_id": "t1-long-019",
+      "audio_source_id": "hpe_8ad-cut_003-audio",
+      "source_content_sha256": "9c0200aceed5860a93a9809c605a0c8c13e02143c0909841feddb64370f41306",
+      "target_text": "アミカルで音声入力をテスト",
+      "row_source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 27000
+      },
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 27000
+      },
+      "played_from_ms": 0,
+      "played_duration_ms": 27000,
+      "playback_wav_path": "/private/tmp/.yt-live-kit-t1-1-human-gold.json.playback/t1-long-019.40bf7e0c4c370912f524341ecf2629b49ffa9191ce8dd804f4d4b2338b0e1be8.d06c1a17c53b49dca50fd7dd8cd0bab1.wav",
+      "playback_wav_sha256": "40bf7e0c4c370912f524341ecf2629b49ffa9191ce8dd804f4d4b2338b0e1be8",
+      "playback_wav_bytes": 864044,
+      "playback_format": {
+        "channels": 1,
+        "sample_width": 2,
+        "sample_rate": 16000
+      },
+      "recorded_at": "2026-08-05T11:21:59.237997+00:00"
+    },
+    "t1-long-020": {
+      "manifest_fingerprint": "b4f33f33c6b7f23be0d28c13bdb0bdde946659a7a8f9909894e8b0d4807a11ec",
+      "row_id": "t1-long-020",
+      "audio_source_id": "hpe_8ad-cut_003-audio",
+      "source_content_sha256": "9c0200aceed5860a93a9809c605a0c8c13e02143c0909841feddb64370f41306",
+      "target_text": "ローカルで使えるアプリです",
+      "row_source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 27000
+      },
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 27000
+      },
+      "played_from_ms": 0,
+      "played_duration_ms": 27000,
+      "playback_wav_path": "/private/tmp/.yt-live-kit-t1-1-human-gold.json.playback/t1-long-020.40bf7e0c4c370912f524341ecf2629b49ffa9191ce8dd804f4d4b2338b0e1be8.4e14f465680141a69cab7d1d1acf1482.wav",
+      "playback_wav_sha256": "40bf7e0c4c370912f524341ecf2629b49ffa9191ce8dd804f4d4b2338b0e1be8",
+      "playback_wav_bytes": 864044,
+      "playback_format": {
+        "channels": 1,
+        "sample_width": 2,
+        "sample_rate": 16000
+      },
+      "recorded_at": "2026-08-05T11:22:48.043891+00:00"
+    },
+    "t1-multi-001": {
+      "manifest_fingerprint": "b4f33f33c6b7f23be0d28c13bdb0bdde946659a7a8f9909894e8b0d4807a11ec",
+      "row_id": "t1-multi-001",
+      "audio_source_id": "gza_415-cut_002-audio",
+      "source_content_sha256": "476eed4ae22f68ea9360fa684f1c3c905331674dcad4bcdef3cc333c6e826cf0",
+      "target_text": "何かが分かってないんです",
+      "row_source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 38000
+      },
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 38000
+      },
+      "played_from_ms": 0,
+      "played_duration_ms": 38000,
+      "playback_wav_path": "/private/tmp/.yt-live-kit-t1-1-human-gold.json.playback/t1-multi-001.a517ff846154416b9acb7a4d5a748d55849c3cc3cfdd07f64e908960d7939330.145dbe745cf34d70820bc0f53989fa67.wav",
+      "playback_wav_sha256": "a517ff846154416b9acb7a4d5a748d55849c3cc3cfdd07f64e908960d7939330",
+      "playback_wav_bytes": 1216044,
+      "playback_format": {
+        "channels": 1,
+        "sample_width": 2,
+        "sample_rate": 16000
+      },
+      "recorded_at": "2026-08-05T11:24:13.266842+00:00"
+    },
+    "t1-multi-002": {
+      "manifest_fingerprint": "b4f33f33c6b7f23be0d28c13bdb0bdde946659a7a8f9909894e8b0d4807a11ec",
+      "row_id": "t1-multi-002",
+      "audio_source_id": "gza_415-cut_002-audio",
+      "source_content_sha256": "476eed4ae22f68ea9360fa684f1c3c905331674dcad4bcdef3cc333c6e826cf0",
+      "target_text": "AIを使わなきゃと思うほど",
+      "row_source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 38000
+      },
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 38000
+      },
+      "played_from_ms": 0,
+      "played_duration_ms": 38000,
+      "playback_wav_path": "/private/tmp/.yt-live-kit-t1-1-human-gold.json.playback/t1-multi-002.a517ff846154416b9acb7a4d5a748d55849c3cc3cfdd07f64e908960d7939330.4a1fff4926ba484ab4f77db52619b26d.wav",
+      "playback_wav_sha256": "a517ff846154416b9acb7a4d5a748d55849c3cc3cfdd07f64e908960d7939330",
+      "playback_wav_bytes": 1216044,
+      "playback_format": {
+        "channels": 1,
+        "sample_width": 2,
+        "sample_rate": 16000
+      },
+      "recorded_at": "2026-08-05T11:26:03.265464+00:00"
+    },
+    "t1-multi-003": {
+      "manifest_fingerprint": "b4f33f33c6b7f23be0d28c13bdb0bdde946659a7a8f9909894e8b0d4807a11ec",
+      "row_id": "t1-multi-003",
+      "audio_source_id": "gza_415-cut_002-audio",
+      "source_content_sha256": "476eed4ae22f68ea9360fa684f1c3c905331674dcad4bcdef3cc333c6e826cf0",
+      "target_text": "余計に分からなくなってしまう",
+      "row_source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 38000
+      },
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 38000
+      },
+      "played_from_ms": 0,
+      "played_duration_ms": 38000,
+      "playback_wav_path": "/private/tmp/.yt-live-kit-t1-1-human-gold.json.playback/t1-multi-003.a517ff846154416b9acb7a4d5a748d55849c3cc3cfdd07f64e908960d7939330.1e3fe25176734cc98503e0f08775d5b1.wav",
+      "playback_wav_sha256": "a517ff846154416b9acb7a4d5a748d55849c3cc3cfdd07f64e908960d7939330",
+      "playback_wav_bytes": 1216044,
+      "playback_format": {
+        "channels": 1,
+        "sample_width": 2,
+        "sample_rate": 16000
+      },
+      "recorded_at": "2026-08-05T11:28:17.357175+00:00"
+    },
+    "t1-multi-004": {
+      "manifest_fingerprint": "b4f33f33c6b7f23be0d28c13bdb0bdde946659a7a8f9909894e8b0d4807a11ec",
+      "row_id": "t1-multi-004",
+      "audio_source_id": "gza_415-cut_002-audio",
+      "source_content_sha256": "476eed4ae22f68ea9360fa684f1c3c905331674dcad4bcdef3cc333c6e826cf0",
+      "target_text": "使わなくていい部分を理解する",
+      "row_source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 38000
+      },
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 38000
+      },
+      "played_from_ms": 0,
+      "played_duration_ms": 38000,
+      "playback_wav_path": "/private/tmp/.yt-live-kit-t1-1-human-gold.json.playback/t1-multi-004.a517ff846154416b9acb7a4d5a748d55849c3cc3cfdd07f64e908960d7939330.436677dfe944468e808f359ddf35e637.wav",
+      "playback_wav_sha256": "a517ff846154416b9acb7a4d5a748d55849c3cc3cfdd07f64e908960d7939330",
+      "playback_wav_bytes": 1216044,
+      "playback_format": {
+        "channels": 1,
+        "sample_width": 2,
+        "sample_rate": 16000
+      },
+      "recorded_at": "2026-08-05T11:28:54.935510+00:00"
+    },
+    "t1-multi-005": {
+      "manifest_fingerprint": "b4f33f33c6b7f23be0d28c13bdb0bdde946659a7a8f9909894e8b0d4807a11ec",
+      "row_id": "t1-multi-005",
+      "audio_source_id": "gza_415-cut_002-audio",
+      "source_content_sha256": "476eed4ae22f68ea9360fa684f1c3c905331674dcad4bcdef3cc333c6e826cf0",
+      "target_text": "使うべき部分が見えてくる",
+      "row_source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 38000
+      },
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 38000
+      },
+      "played_from_ms": 0,
+      "played_duration_ms": 38000,
+      "playback_wav_path": "/private/tmp/.yt-live-kit-t1-1-human-gold.json.playback/t1-multi-005.a517ff846154416b9acb7a4d5a748d55849c3cc3cfdd07f64e908960d7939330.753b82c781454e148ec229e3b3ad6adc.wav",
+      "playback_wav_sha256": "a517ff846154416b9acb7a4d5a748d55849c3cc3cfdd07f64e908960d7939330",
+      "playback_wav_bytes": 1216044,
+      "playback_format": {
+        "channels": 1,
+        "sample_width": 2,
+        "sample_rate": 16000
+      },
+      "recorded_at": "2026-08-05T11:32:39.270203+00:00"
+    },
+    "t1-multi-006": {
+      "manifest_fingerprint": "b4f33f33c6b7f23be0d28c13bdb0bdde946659a7a8f9909894e8b0d4807a11ec",
+      "row_id": "t1-multi-006",
+      "audio_source_id": "gza_f0-cut_001-audio",
+      "source_content_sha256": "bdedaea372bc08229a74e3c0a8253a987a448a1d9b95b28edaaff0388f96cb06",
+      "target_text": "アスクルについて",
+      "row_source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 25000
+      },
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 25000
+      },
+      "played_from_ms": 0,
+      "played_duration_ms": 25000,
+      "playback_wav_path": "/private/tmp/.yt-live-kit-t1-1-human-gold.json.playback/t1-multi-006.87e5a991c49fc7889c10c40fd83f256b79ece07c62615177a39e00e07c74ff09.d5e9dea724284aaab2f4322d99a9f645.wav",
+      "playback_wav_sha256": "87e5a991c49fc7889c10c40fd83f256b79ece07c62615177a39e00e07c74ff09",
+      "playback_wav_bytes": 800044,
+      "playback_format": {
+        "channels": 1,
+        "sample_width": 2,
+        "sample_rate": 16000
+      },
+      "recorded_at": "2026-08-05T11:34:06.851747+00:00"
+    },
+    "t1-multi-007": {
+      "manifest_fingerprint": "b4f33f33c6b7f23be0d28c13bdb0bdde946659a7a8f9909894e8b0d4807a11ec",
+      "row_id": "t1-multi-007",
+      "audio_source_id": "gza_f0-cut_001-audio",
+      "source_content_sha256": "bdedaea372bc08229a74e3c0a8253a987a448a1d9b95b28edaaff0388f96cb06",
+      "target_text": "倉庫もサイバー攻撃を受けた",
+      "row_source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 25000
+      },
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 25000
+      },
+      "played_from_ms": 0,
+      "played_duration_ms": 25000,
+      "playback_wav_path": "/private/tmp/.yt-live-kit-t1-1-human-gold.json.playback/t1-multi-007.87e5a991c49fc7889c10c40fd83f256b79ece07c62615177a39e00e07c74ff09.3b0fe909b7e14bd4840858f5005eee94.wav",
+      "playback_wav_sha256": "87e5a991c49fc7889c10c40fd83f256b79ece07c62615177a39e00e07c74ff09",
+      "playback_wav_bytes": 800044,
+      "playback_format": {
+        "channels": 1,
+        "sample_width": 2,
+        "sample_rate": 16000
+      },
+      "recorded_at": "2026-08-05T11:35:47.868287+00:00"
+    },
+    "t1-multi-008": {
+      "manifest_fingerprint": "b4f33f33c6b7f23be0d28c13bdb0bdde946659a7a8f9909894e8b0d4807a11ec",
+      "row_id": "t1-multi-008",
+      "audio_source_id": "gza_f0-cut_001-audio",
+      "source_content_sha256": "bdedaea372bc08229a74e3c0a8253a987a448a1d9b95b28edaaff0388f96cb06",
+      "target_text": "SaaSには気にせず",
+      "row_source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 25000
+      },
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 25000
+      },
+      "played_from_ms": 0,
+      "played_duration_ms": 25000,
+      "playback_wav_path": "/private/tmp/.yt-live-kit-t1-1-human-gold.json.playback/t1-multi-008.87e5a991c49fc7889c10c40fd83f256b79ece07c62615177a39e00e07c74ff09.f9bb0de0289e42e49b558bd80a248be1.wav",
+      "playback_wav_sha256": "87e5a991c49fc7889c10c40fd83f256b79ece07c62615177a39e00e07c74ff09",
+      "playback_wav_bytes": 800044,
+      "playback_format": {
+        "channels": 1,
+        "sample_width": 2,
+        "sample_rate": 16000
+      },
+      "recorded_at": "2026-08-05T11:36:23.674080+00:00"
+    },
+    "t1-multi-009": {
+      "manifest_fingerprint": "b4f33f33c6b7f23be0d28c13bdb0bdde946659a7a8f9909894e8b0d4807a11ec",
+      "row_id": "t1-multi-009",
+      "audio_source_id": "gza_f0-cut_001-audio",
+      "source_content_sha256": "bdedaea372bc08229a74e3c0a8253a987a448a1d9b95b28edaaff0388f96cb06",
+      "target_text": "データを上げるのに",
+      "row_source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 25000
+      },
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 25000
+      },
+      "played_from_ms": 0,
+      "played_duration_ms": 25000,
+      "playback_wav_path": "/private/tmp/.yt-live-kit-t1-1-human-gold.json.playback/t1-multi-009.87e5a991c49fc7889c10c40fd83f256b79ece07c62615177a39e00e07c74ff09.890873e9490e47d79547e3569f63a23d.wav",
+      "playback_wav_sha256": "87e5a991c49fc7889c10c40fd83f256b79ece07c62615177a39e00e07c74ff09",
+      "playback_wav_bytes": 800044,
+      "playback_format": {
+        "channels": 1,
+        "sample_width": 2,
+        "sample_rate": 16000
+      },
+      "recorded_at": "2026-08-05T11:37:02.090544+00:00"
+    },
+    "t1-multi-010": {
+      "manifest_fingerprint": "b4f33f33c6b7f23be0d28c13bdb0bdde946659a7a8f9909894e8b0d4807a11ec",
+      "row_id": "t1-multi-010",
+      "audio_source_id": "hpe_8ad-cut_001-audio",
+      "source_content_sha256": "1b2b5e464ff15172f5fb7b6633ca142b7266044db3730cecb15a0f2b0f2bd0a8",
+      "target_text": "今、日本語で喋っています",
+      "row_source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 19000
+      },
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 19000
+      },
+      "played_from_ms": 0,
+      "played_duration_ms": 19000,
+      "playback_wav_path": "/private/tmp/.yt-live-kit-t1-1-human-gold.json.playback/t1-multi-010.88ed7d0a06b49f94ade4cabead92b2024778189ab113f91fdde0da27cdb22652.527457e378054db2a9f3b8bcbcff5d50.wav",
+      "playback_wav_sha256": "88ed7d0a06b49f94ade4cabead92b2024778189ab113f91fdde0da27cdb22652",
+      "playback_wav_bytes": 608044,
+      "playback_format": {
+        "channels": 1,
+        "sample_width": 2,
+        "sample_rate": 16000
+      },
+      "recorded_at": "2026-08-05T11:37:35.963057+00:00"
+    },
+    "t1-multi-011": {
+      "manifest_fingerprint": "b4f33f33c6b7f23be0d28c13bdb0bdde946659a7a8f9909894e8b0d4807a11ec",
+      "row_id": "t1-multi-011",
+      "audio_source_id": "hpe_8ad-cut_001-audio",
+      "source_content_sha256": "1b2b5e464ff15172f5fb7b6633ca142b7266044db3730cecb15a0f2b0f2bd0a8",
+      "target_text": "日本語で文字起こしされる？",
+      "row_source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 19000
+      },
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 19000
+      },
+      "played_from_ms": 0,
+      "played_duration_ms": 19000,
+      "playback_wav_path": "/private/tmp/.yt-live-kit-t1-1-human-gold.json.playback/t1-multi-011.88ed7d0a06b49f94ade4cabead92b2024778189ab113f91fdde0da27cdb22652.f5f1ee8f87bb4557b85533d4f6e846e4.wav",
+      "playback_wav_sha256": "88ed7d0a06b49f94ade4cabead92b2024778189ab113f91fdde0da27cdb22652",
+      "playback_wav_bytes": 608044,
+      "playback_format": {
+        "channels": 1,
+        "sample_width": 2,
+        "sample_rate": 16000
+      },
+      "recorded_at": "2026-08-05T11:38:54.081719+00:00"
+    },
+    "t1-multi-012": {
+      "manifest_fingerprint": "b4f33f33c6b7f23be0d28c13bdb0bdde946659a7a8f9909894e8b0d4807a11ec",
+      "row_id": "t1-multi-012",
+      "audio_source_id": "hpe_8ad-cut_001-audio",
+      "source_content_sha256": "1b2b5e464ff15172f5fb7b6633ca142b7266044db3730cecb15a0f2b0f2bd0a8",
+      "target_text": "英語になるわ",
+      "row_source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 19000
+      },
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 19000
+      },
+      "played_from_ms": 0,
+      "played_duration_ms": 19000,
+      "playback_wav_path": "/private/tmp/.yt-live-kit-t1-1-human-gold.json.playback/t1-multi-012.88ed7d0a06b49f94ade4cabead92b2024778189ab113f91fdde0da27cdb22652.c7caa6bcdd3144e98ec209e02830b573.wav",
+      "playback_wav_sha256": "88ed7d0a06b49f94ade4cabead92b2024778189ab113f91fdde0da27cdb22652",
+      "playback_wav_bytes": 608044,
+      "playback_format": {
+        "channels": 1,
+        "sample_width": 2,
+        "sample_rate": 16000
+      },
+      "recorded_at": "2026-08-05T11:39:29.607062+00:00"
+    },
+    "t1-multi-013": {
+      "manifest_fingerprint": "b4f33f33c6b7f23be0d28c13bdb0bdde946659a7a8f9909894e8b0d4807a11ec",
+      "row_id": "t1-multi-013",
+      "audio_source_id": "hpe_8ad-cut_001-audio",
+      "source_content_sha256": "1b2b5e464ff15172f5fb7b6633ca142b7266044db3730cecb15a0f2b0f2bd0a8",
+      "target_text": "設定がおかしいのかな？",
+      "row_source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 19000
+      },
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 19000
+      },
+      "played_from_ms": 0,
+      "played_duration_ms": 19000,
+      "playback_wav_path": "/private/tmp/.yt-live-kit-t1-1-human-gold.json.playback/t1-multi-013.88ed7d0a06b49f94ade4cabead92b2024778189ab113f91fdde0da27cdb22652.b8f3ed82d92b4828bbaa58a0d275d507.wav",
+      "playback_wav_sha256": "88ed7d0a06b49f94ade4cabead92b2024778189ab113f91fdde0da27cdb22652",
+      "playback_wav_bytes": 608044,
+      "playback_format": {
+        "channels": 1,
+        "sample_width": 2,
+        "sample_rate": 16000
+      },
+      "recorded_at": "2026-08-05T11:40:02.487300+00:00"
+    },
+    "t1-multi-014": {
+      "manifest_fingerprint": "b4f33f33c6b7f23be0d28c13bdb0bdde946659a7a8f9909894e8b0d4807a11ec",
+      "row_id": "t1-multi-014",
+      "audio_source_id": "hpe_8ad-cut_002-audio",
+      "source_content_sha256": "544c739f09738bb0deb1040b00d46795c97b2657c67f47543a1abf239438da75",
+      "target_text": "言語設定ってどこでやるの？",
+      "row_source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 27000
+      },
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 27000
+      },
+      "played_from_ms": 0,
+      "played_duration_ms": 27000,
+      "playback_wav_path": "/private/tmp/.yt-live-kit-t1-1-human-gold.json.playback/t1-multi-014.aa38728592dbae861b6db1dd078e13c7d09f35a53c84016069bac5c218058db3.b01c21db533a4d759810a4d20f3f9ac8.wav",
+      "playback_wav_sha256": "aa38728592dbae861b6db1dd078e13c7d09f35a53c84016069bac5c218058db3",
+      "playback_wav_bytes": 864044,
+      "playback_format": {
+        "channels": 1,
+        "sample_width": 2,
+        "sample_rate": 16000
+      },
+      "recorded_at": "2026-08-05T11:40:43.759680+00:00"
+    },
+    "t1-multi-015": {
+      "manifest_fingerprint": "b4f33f33c6b7f23be0d28c13bdb0bdde946659a7a8f9909894e8b0d4807a11ec",
+      "row_id": "t1-multi-015",
+      "audio_source_id": "hpe_8ad-cut_002-audio",
+      "source_content_sha256": "544c739f09738bb0deb1040b00d46795c97b2657c67f47543a1abf239438da75",
+      "target_text": "あ、ここ？",
+      "row_source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 27000
+      },
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 27000
+      },
+      "played_from_ms": 0,
+      "played_duration_ms": 27000,
+      "playback_wav_path": "/private/tmp/.yt-live-kit-t1-1-human-gold.json.playback/t1-multi-015.aa38728592dbae861b6db1dd078e13c7d09f35a53c84016069bac5c218058db3.e999921c2e614196983769840ecb5f19.wav",
+      "playback_wav_sha256": "aa38728592dbae861b6db1dd078e13c7d09f35a53c84016069bac5c218058db3",
+      "playback_wav_bytes": 864044,
+      "playback_format": {
+        "channels": 1,
+        "sample_width": 2,
+        "sample_rate": 16000
+      },
+      "recorded_at": "2026-08-05T11:41:16.307753+00:00"
+    },
+    "t1-multi-016": {
+      "manifest_fingerprint": "b4f33f33c6b7f23be0d28c13bdb0bdde946659a7a8f9909894e8b0d4807a11ec",
+      "row_id": "t1-multi-016",
+      "audio_source_id": "hpe_8ad-cut_002-audio",
+      "source_content_sha256": "544c739f09738bb0deb1040b00d46795c97b2657c67f47543a1abf239438da75",
+      "target_text": "オートになってるじゃん",
+      "row_source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 27000
+      },
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 27000
+      },
+      "played_from_ms": 0,
+      "played_duration_ms": 27000,
+      "playback_wav_path": "/private/tmp/.yt-live-kit-t1-1-human-gold.json.playback/t1-multi-016.aa38728592dbae861b6db1dd078e13c7d09f35a53c84016069bac5c218058db3.a9516555b2274cdf9d758df19d2c8da9.wav",
+      "playback_wav_sha256": "aa38728592dbae861b6db1dd078e13c7d09f35a53c84016069bac5c218058db3",
+      "playback_wav_bytes": 864044,
+      "playback_format": {
+        "channels": 1,
+        "sample_width": 2,
+        "sample_rate": 16000
+      },
+      "recorded_at": "2026-08-05T11:41:54.334736+00:00"
+    },
+    "t1-multi-017": {
+      "manifest_fingerprint": "b4f33f33c6b7f23be0d28c13bdb0bdde946659a7a8f9909894e8b0d4807a11ec",
+      "row_id": "t1-multi-017",
+      "audio_source_id": "hpe_8ad-cut_002-audio",
+      "source_content_sha256": "544c739f09738bb0deb1040b00d46795c97b2657c67f47543a1abf239438da75",
+      "target_text": "失礼しました、Japanese",
+      "row_source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 27000
+      },
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 27000
+      },
+      "played_from_ms": 0,
+      "played_duration_ms": 27000,
+      "playback_wav_path": "/private/tmp/.yt-live-kit-t1-1-human-gold.json.playback/t1-multi-017.aa38728592dbae861b6db1dd078e13c7d09f35a53c84016069bac5c218058db3.0e4f2a6cec55456e88a5b789c14b1042.wav",
+      "playback_wav_sha256": "aa38728592dbae861b6db1dd078e13c7d09f35a53c84016069bac5c218058db3",
+      "playback_wav_bytes": 864044,
+      "playback_format": {
+        "channels": 1,
+        "sample_width": 2,
+        "sample_rate": 16000
+      },
+      "recorded_at": "2026-08-05T11:42:25.789918+00:00"
+    },
+    "t1-multi-018": {
+      "manifest_fingerprint": "b4f33f33c6b7f23be0d28c13bdb0bdde946659a7a8f9909894e8b0d4807a11ec",
+      "row_id": "t1-multi-018",
+      "audio_source_id": "hpe_8ad-cut_002-audio",
+      "source_content_sha256": "544c739f09738bb0deb1040b00d46795c97b2657c67f47543a1abf239438da75",
+      "target_text": "これでいいんじゃない？",
+      "row_source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 27000
+      },
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 27000
+      },
+      "played_from_ms": 0,
+      "played_duration_ms": 27000,
+      "playback_wav_path": "/private/tmp/.yt-live-kit-t1-1-human-gold.json.playback/t1-multi-018.aa38728592dbae861b6db1dd078e13c7d09f35a53c84016069bac5c218058db3.7a4030ab93f8433e845a0509862f65e3.wav",
+      "playback_wav_sha256": "aa38728592dbae861b6db1dd078e13c7d09f35a53c84016069bac5c218058db3",
+      "playback_wav_bytes": 864044,
+      "playback_format": {
+        "channels": 1,
+        "sample_width": 2,
+        "sample_rate": 16000
+      },
+      "recorded_at": "2026-08-05T11:43:24.561293+00:00"
+    },
+    "t1-multi-019": {
+      "manifest_fingerprint": "b4f33f33c6b7f23be0d28c13bdb0bdde946659a7a8f9909894e8b0d4807a11ec",
+      "row_id": "t1-multi-019",
+      "audio_source_id": "hpe_8ad-cut_003-audio",
+      "source_content_sha256": "9c0200aceed5860a93a9809c605a0c8c13e02143c0909841feddb64370f41306",
+      "target_text": "早い、早い！",
+      "row_source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 27000
+      },
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 27000
+      },
+      "played_from_ms": 0,
+      "played_duration_ms": 27000,
+      "playback_wav_path": "/private/tmp/.yt-live-kit-t1-1-human-gold.json.playback/t1-multi-019.40bf7e0c4c370912f524341ecf2629b49ffa9191ce8dd804f4d4b2338b0e1be8.c5d62cf0f60d4f7b87c1ad036e628941.wav",
+      "playback_wav_sha256": "40bf7e0c4c370912f524341ecf2629b49ffa9191ce8dd804f4d4b2338b0e1be8",
+      "playback_wav_bytes": 864044,
+      "playback_format": {
+        "channels": 1,
+        "sample_width": 2,
+        "sample_rate": 16000
+      },
+      "recorded_at": "2026-08-05T11:43:55.436734+00:00"
+    },
+    "t1-multi-020": {
+      "manifest_fingerprint": "b4f33f33c6b7f23be0d28c13bdb0bdde946659a7a8f9909894e8b0d4807a11ec",
+      "row_id": "t1-multi-020",
+      "audio_source_id": "hpe_8ad-cut_003-audio",
+      "source_content_sha256": "9c0200aceed5860a93a9809c605a0c8c13e02143c0909841feddb64370f41306",
+      "target_text": "アミカル、いいじゃないですか",
+      "row_source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 27000
+      },
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 27000
+      },
+      "played_from_ms": 0,
+      "played_duration_ms": 27000,
+      "playback_wav_path": "/private/tmp/.yt-live-kit-t1-1-human-gold.json.playback/t1-multi-020.40bf7e0c4c370912f524341ecf2629b49ffa9191ce8dd804f4d4b2338b0e1be8.6a41aa545d8741f39c9f48ac4e4d98cf.wav",
+      "playback_wav_sha256": "40bf7e0c4c370912f524341ecf2629b49ffa9191ce8dd804f4d4b2338b0e1be8",
+      "playback_wav_bytes": 864044,
+      "playback_format": {
+        "channels": 1,
+        "sample_width": 2,
+        "sample_rate": 16000
+      },
+      "recorded_at": "2026-08-05T11:45:51.495287+00:00"
+    },
+    "t1-multi-021": {
+      "manifest_fingerprint": "b4f33f33c6b7f23be0d28c13bdb0bdde946659a7a8f9909894e8b0d4807a11ec",
+      "row_id": "t1-multi-021",
+      "audio_source_id": "gza_f0-cut_001-audio",
+      "source_content_sha256": "bdedaea372bc08229a74e3c0a8253a987a448a1d9b95b28edaaff0388f96cb06",
+      "target_text": "なぜAIに関しては",
+      "row_source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 25000
+      },
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 25000
+      },
+      "played_from_ms": 0,
+      "played_duration_ms": 25000,
+      "playback_wav_path": "/private/tmp/.yt-live-kit-t1-1-human-gold.json.playback/t1-multi-021.87e5a991c49fc7889c10c40fd83f256b79ece07c62615177a39e00e07c74ff09.309d82214a1f47cab2d38b09375fda30.wav",
+      "playback_wav_sha256": "87e5a991c49fc7889c10c40fd83f256b79ece07c62615177a39e00e07c74ff09",
+      "playback_wav_bytes": 800044,
+      "playback_format": {
+        "channels": 1,
+        "sample_width": 2,
+        "sample_rate": 16000
+      },
+      "recorded_at": "2026-08-05T11:46:48.402606+00:00"
+    },
+    "t1-multi-022": {
+      "manifest_fingerprint": "b4f33f33c6b7f23be0d28c13bdb0bdde946659a7a8f9909894e8b0d4807a11ec",
+      "row_id": "t1-multi-022",
+      "audio_source_id": "gza_f0-cut_001-audio",
+      "source_content_sha256": "bdedaea372bc08229a74e3c0a8253a987a448a1d9b95b28edaaff0388f96cb06",
+      "target_text": "セキュリティと言うのか",
+      "row_source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 25000
+      },
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 25000
+      },
+      "played_from_ms": 0,
+      "played_duration_ms": 25000,
+      "playback_wav_path": "/private/tmp/.yt-live-kit-t1-1-human-gold.json.playback/t1-multi-022.87e5a991c49fc7889c10c40fd83f256b79ece07c62615177a39e00e07c74ff09.2874acee25e04405b48a55c8507f483e.wav",
+      "playback_wav_sha256": "87e5a991c49fc7889c10c40fd83f256b79ece07c62615177a39e00e07c74ff09",
+      "playback_wav_bytes": 800044,
+      "playback_format": {
+        "channels": 1,
+        "sample_width": 2,
+        "sample_rate": 16000
+      },
+      "recorded_at": "2026-08-05T11:48:00.938052+00:00"
+    },
+    "t1-multi-023": {
+      "manifest_fingerprint": "b4f33f33c6b7f23be0d28c13bdb0bdde946659a7a8f9909894e8b0d4807a11ec",
+      "row_id": "t1-multi-023",
+      "audio_source_id": "hpe_8ad-cut_002-audio",
+      "source_content_sha256": "544c739f09738bb0deb1040b00d46795c97b2657c67f47543a1abf239438da75",
+      "target_text": "これでいけるってことでしょ？",
+      "row_source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 27000
+      },
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 27000
+      },
+      "played_from_ms": 0,
+      "played_duration_ms": 27000,
+      "playback_wav_path": "/private/tmp/.yt-live-kit-t1-1-human-gold.json.playback/t1-multi-023.aa38728592dbae861b6db1dd078e13c7d09f35a53c84016069bac5c218058db3.fccef3aa465c4591ae6462cd52c574b0.wav",
+      "playback_wav_sha256": "aa38728592dbae861b6db1dd078e13c7d09f35a53c84016069bac5c218058db3",
+      "playback_wav_bytes": 864044,
+      "playback_format": {
+        "channels": 1,
+        "sample_width": 2,
+        "sample_rate": 16000
+      },
+      "recorded_at": "2026-08-05T11:48:33.719196+00:00"
+    },
+    "t1-multi-024": {
+      "manifest_fingerprint": "b4f33f33c6b7f23be0d28c13bdb0bdde946659a7a8f9909894e8b0d4807a11ec",
+      "row_id": "t1-multi-024",
+      "audio_source_id": "hpe_8ad-cut_003-audio",
+      "source_content_sha256": "9c0200aceed5860a93a9809c605a0c8c13e02143c0909841feddb64370f41306",
+      "target_text": "文字起こしの精度と速度は？",
+      "row_source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 27000
+      },
+      "source_span": {
+        "kind": "single_source_audio",
+        "start_ms": 0,
+        "end_ms": 27000
+      },
+      "played_from_ms": 0,
+      "played_duration_ms": 27000,
+      "playback_wav_path": "/private/tmp/.yt-live-kit-t1-1-human-gold.json.playback/t1-multi-024.40bf7e0c4c370912f524341ecf2629b49ffa9191ce8dd804f4d4b2338b0e1be8.165791596293481aad4c2b118956973d.wav",
+      "playback_wav_sha256": "40bf7e0c4c370912f524341ecf2629b49ffa9191ce8dd804f4d4b2338b0e1be8",
+      "playback_wav_bytes": 864044,
+      "playback_format": {
+        "channels": 1,
+        "sample_width": 2,
+        "sample_rate": 16000
+      },
+      "recorded_at": "2026-08-05T11:49:24.523653+00:00"
+    },
+    "t1-fallback-001": {
+      "manifest_fingerprint": "b4f33f33c6b7f23be0d28c13bdb0bdde946659a7a8f9909894e8b0d4807a11ec",
+      "row_id": "t1-fallback-001",
+      "audio_source_id": "lb4_e1ff-cut_001-audio",
+      "source_content_sha256": "5f8e8187fd3520da8ae6186f851995346eb8213123a456fdeb608ead00476aed",
+      "target_text": "スラッシュワークフローで",
+      "row_source_span": {
+        "kind": "concatenated_source_video_audio",
+        "coordinate_system": "absolute_video_ms",
+        "parts": [
+          {
+            "start_ms": 857000,
+            "end_ms": 875000,
+            "concat_offset_ms": 0
+          },
+          {
+            "start_ms": 996000,
+            "end_ms": 1012000,
+            "concat_offset_ms": 18000
+          }
+        ],
+        "duration_ms": 34000
+      },
+      "source_span": {
+        "kind": "concatenated_source_video_audio",
+        "parts": [
+          {
+            "start_ms": 857000,
+            "end_ms": 875000,
+            "concat_offset_ms": 0
+          },
+          {
+            "start_ms": 996000,
+            "end_ms": 1012000,
+            "concat_offset_ms": 18000
+          }
+        ],
+        "duration_ms": 34000,
+        "coordinate_system": "absolute_video_ms"
+      },
+      "played_from_ms": 0,
+      "played_duration_ms": 34000,
+      "playback_wav_path": "/private/tmp/.yt-live-kit-t1-1-human-gold.json.playback/t1-fallback-001.22716e0031a9908021f02d7b6ebb2ef6d1658581a109419529ce1a221da3d22d.cf123be581cf453bbcb62637d21331a2.wav",
+      "playback_wav_sha256": "22716e0031a9908021f02d7b6ebb2ef6d1658581a109419529ce1a221da3d22d",
+      "playback_wav_bytes": 1088044,
+      "playback_format": {
+        "channels": 1,
+        "sample_width": 2,
+        "sample_rate": 16000
+      },
+      "recorded_at": "2026-08-05T11:50:05.293161+00:00"
+    },
+    "t1-fallback-002": {
+      "manifest_fingerprint": "b4f33f33c6b7f23be0d28c13bdb0bdde946659a7a8f9909894e8b0d4807a11ec",
+      "row_id": "t1-fallback-002",
+      "audio_source_id": "lb4_e1ff-cut_001-audio",
+      "source_content_sha256": "5f8e8187fd3520da8ae6186f851995346eb8213123a456fdeb608ead00476aed",
+      "target_text": "進捗をリアルタイム確認",
+      "row_source_span": {
+        "kind": "concatenated_source_video_audio",
+        "coordinate_system": "absolute_video_ms",
+        "parts": [
+          {
+            "start_ms": 857000,
+            "end_ms": 875000,
+            "concat_offset_ms": 0
+          },
+          {
+            "start_ms": 996000,
+            "end_ms": 1012000,
+            "concat_offset_ms": 18000
+          }
+        ],
+        "duration_ms": 34000
+      },
+      "source_span": {
+        "kind": "concatenated_source_video_audio",
+        "parts": [
+          {
+            "start_ms": 857000,
+            "end_ms": 875000,
+            "concat_offset_ms": 0
+          },
+          {
+            "start_ms": 996000,
+            "end_ms": 1012000,
+            "concat_offset_ms": 18000
+          }
+        ],
+        "duration_ms": 34000,
+        "coordinate_system": "absolute_video_ms"
+      },
+      "played_from_ms": 0,
+      "played_duration_ms": 34000,
+      "playback_wav_path": "/private/tmp/.yt-live-kit-t1-1-human-gold.json.playback/t1-fallback-002.22716e0031a9908021f02d7b6ebb2ef6d1658581a109419529ce1a221da3d22d.5d1acf33701d4d4384a7dab79234f784.wav",
+      "playback_wav_sha256": "22716e0031a9908021f02d7b6ebb2ef6d1658581a109419529ce1a221da3d22d",
+      "playback_wav_bytes": 1088044,
+      "playback_format": {
+        "channels": 1,
+        "sample_width": 2,
+        "sample_rate": 16000
+      },
+      "recorded_at": "2026-08-05T11:50:34.779672+00:00"
+    },
+    "t1-fallback-003": {
+      "manifest_fingerprint": "b4f33f33c6b7f23be0d28c13bdb0bdde946659a7a8f9909894e8b0d4807a11ec",
+      "row_id": "t1-fallback-003",
+      "audio_source_id": "lb4_e1ff-cut_001-audio",
+      "source_content_sha256": "5f8e8187fd3520da8ae6186f851995346eb8213123a456fdeb608ead00476aed",
+      "target_text": "ああ、こういう感じか",
+      "row_source_span": {
+        "kind": "concatenated_source_video_audio",
+        "coordinate_system": "absolute_video_ms",
+        "parts": [
+          {
+            "start_ms": 857000,
+            "end_ms": 875000,
+            "concat_offset_ms": 0
+          },
+          {
+            "start_ms": 996000,
+            "end_ms": 1012000,
+            "concat_offset_ms": 18000
+          }
+        ],
+        "duration_ms": 34000
+      },
+      "source_span": {
+        "kind": "concatenated_source_video_audio",
+        "parts": [
+          {
+            "start_ms": 857000,
+            "end_ms": 875000,
+            "concat_offset_ms": 0
+          },
+          {
+            "start_ms": 996000,
+            "end_ms": 1012000,
+            "concat_offset_ms": 18000
+          }
+        ],
+        "duration_ms": 34000,
+        "coordinate_system": "absolute_video_ms"
+      },
+      "played_from_ms": 0,
+      "played_duration_ms": 34000,
+      "playback_wav_path": "/private/tmp/.yt-live-kit-t1-1-human-gold.json.playback/t1-fallback-003.22716e0031a9908021f02d7b6ebb2ef6d1658581a109419529ce1a221da3d22d.efc6a0705e3041a1b6ba9ca348a32099.wav",
+      "playback_wav_sha256": "22716e0031a9908021f02d7b6ebb2ef6d1658581a109419529ce1a221da3d22d",
+      "playback_wav_bytes": 1088044,
+      "playback_format": {
+        "channels": 1,
+        "sample_width": 2,
+        "sample_rate": 16000
+      },
+      "recorded_at": "2026-08-05T11:51:05.374532+00:00"
+    },
+    "t1-fallback-004": {
+      "manifest_fingerprint": "b4f33f33c6b7f23be0d28c13bdb0bdde946659a7a8f9909894e8b0d4807a11ec",
+      "row_id": "t1-fallback-004",
+      "audio_source_id": "lb4_e1ff-cut_002-audio",
+      "source_content_sha256": "5f8e8187fd3520da8ae6186f851995346eb8213123a456fdeb608ead00476aed",
+      "target_text": "まだ動いてるのかな？",
+      "row_source_span": {
+        "kind": "concatenated_source_video_audio",
+        "coordinate_system": "absolute_video_ms",
+        "parts": [
+          {
+            "start_ms": 857000,
+            "end_ms": 875000,
+            "concat_offset_ms": 0
+          },
+          {
+            "start_ms": 996000,
+            "end_ms": 1012000,
+            "concat_offset_ms": 18000
+          }
+        ],
+        "duration_ms": 34000
+      },
+      "source_span": {
+        "kind": "concatenated_source_video_audio",
+        "parts": [
+          {
+            "start_ms": 857000,
+            "end_ms": 875000,
+            "concat_offset_ms": 0
+          },
+          {
+            "start_ms": 996000,
+            "end_ms": 1012000,
+            "concat_offset_ms": 18000
+          }
+        ],
+        "duration_ms": 34000,
+        "coordinate_system": "absolute_video_ms"
+      },
+      "played_from_ms": 0,
+      "played_duration_ms": 34000,
+      "playback_wav_path": "/private/tmp/.yt-live-kit-t1-1-human-gold.json.playback/t1-fallback-004.22716e0031a9908021f02d7b6ebb2ef6d1658581a109419529ce1a221da3d22d.0f8eb5f1134c42fdb9dc5bbf38976544.wav",
+      "playback_wav_sha256": "22716e0031a9908021f02d7b6ebb2ef6d1658581a109419529ce1a221da3d22d",
+      "playback_wav_bytes": 1088044,
+      "playback_format": {
+        "channels": 1,
+        "sample_width": 2,
+        "sample_rate": 16000
+      },
+      "recorded_at": "2026-08-05T11:51:43.838398+00:00"
+    },
+    "t1-fallback-005": {
+      "manifest_fingerprint": "b4f33f33c6b7f23be0d28c13bdb0bdde946659a7a8f9909894e8b0d4807a11ec",
+      "row_id": "t1-fallback-005",
+      "audio_source_id": "lb4_e1ff-cut_002-audio",
+      "source_content_sha256": "5f8e8187fd3520da8ae6186f851995346eb8213123a456fdeb608ead00476aed",
+      "target_text": "めっちゃ動いてるね",
+      "row_source_span": {
+        "kind": "concatenated_source_video_audio",
+        "coordinate_system": "absolute_video_ms",
+        "parts": [
+          {
+            "start_ms": 857000,
+            "end_ms": 875000,
+            "concat_offset_ms": 0
+          },
+          {
+            "start_ms": 996000,
+            "end_ms": 1012000,
+            "concat_offset_ms": 18000
+          }
+        ],
+        "duration_ms": 34000
+      },
+      "source_span": {
+        "kind": "concatenated_source_video_audio",
+        "parts": [
+          {
+            "start_ms": 857000,
+            "end_ms": 875000,
+            "concat_offset_ms": 0
+          },
+          {
+            "start_ms": 996000,
+            "end_ms": 1012000,
+            "concat_offset_ms": 18000
+          }
+        ],
+        "duration_ms": 34000,
+        "coordinate_system": "absolute_video_ms"
+      },
+      "played_from_ms": 0,
+      "played_duration_ms": 34000,
+      "playback_wav_path": "/private/tmp/.yt-live-kit-t1-1-human-gold.json.playback/t1-fallback-005.22716e0031a9908021f02d7b6ebb2ef6d1658581a109419529ce1a221da3d22d.2cd1a2dbbf96492cab6c3a8fa93116b7.wav",
+      "playback_wav_sha256": "22716e0031a9908021f02d7b6ebb2ef6d1658581a109419529ce1a221da3d22d",
+      "playback_wav_bytes": 1088044,
+      "playback_format": {
+        "channels": 1,
+        "sample_width": 2,
+        "sample_rate": 16000
+      },
+      "recorded_at": "2026-08-05T11:52:33.033354+00:00"
+    },
+    "t1-fallback-006": {
+      "manifest_fingerprint": "b4f33f33c6b7f23be0d28c13bdb0bdde946659a7a8f9909894e8b0d4807a11ec",
+      "row_id": "t1-fallback-006",
+      "audio_source_id": "lb4_e1ff-cut_002-audio",
+      "source_content_sha256": "5f8e8187fd3520da8ae6186f851995346eb8213123a456fdeb608ead00476aed",
+      "target_text": "めっちゃ色々やってる",
+      "row_source_span": {
+        "kind": "concatenated_source_video_audio",
+        "coordinate_system": "absolute_video_ms",
+        "parts": [
+          {
+            "start_ms": 857000,
+            "end_ms": 875000,
+            "concat_offset_ms": 0
+          },
+          {
+            "start_ms": 996000,
+            "end_ms": 1012000,
+            "concat_offset_ms": 18000
+          }
+        ],
+        "duration_ms": 34000
+      },
+      "source_span": {
+        "kind": "concatenated_source_video_audio",
+        "parts": [
+          {
+            "start_ms": 857000,
+            "end_ms": 875000,
+            "concat_offset_ms": 0
+          },
+          {
+            "start_ms": 996000,
+            "end_ms": 1012000,
+            "concat_offset_ms": 18000
+          }
+        ],
+        "duration_ms": 34000,
+        "coordinate_system": "absolute_video_ms"
+      },
+      "played_from_ms": 0,
+      "played_duration_ms": 34000,
+      "playback_wav_path": "/private/tmp/.yt-live-kit-t1-1-human-gold.json.playback/t1-fallback-006.22716e0031a9908021f02d7b6ebb2ef6d1658581a109419529ce1a221da3d22d.32f5dcb927f6429fa8c3b217412a44e3.wav",
+      "playback_wav_sha256": "22716e0031a9908021f02d7b6ebb2ef6d1658581a109419529ce1a221da3d22d",
+      "playback_wav_bytes": 1088044,
+      "playback_format": {
+        "channels": 1,
+        "sample_width": 2,
+        "sample_rate": 16000
+      },
+      "recorded_at": "2026-08-05T11:53:02.138854+00:00"
+    },
+    "t1-fallback-007": {
+      "manifest_fingerprint": "b4f33f33c6b7f23be0d28c13bdb0bdde946659a7a8f9909894e8b0d4807a11ec",
+      "row_id": "t1-fallback-007",
+      "audio_source_id": "lb4_e1ff-cut_002-audio",
+      "source_content_sha256": "5f8e8187fd3520da8ae6186f851995346eb8213123a456fdeb608ead00476aed",
+      "target_text": "こんなに許可が必要なのか",
+      "row_source_span": {
+        "kind": "concatenated_source_video_audio",
+        "coordinate_system": "absolute_video_ms",
+        "parts": [
+          {
+            "start_ms": 857000,
+            "end_ms": 875000,
+            "concat_offset_ms": 0
+          },
+          {
+            "start_ms": 996000,
+            "end_ms": 1012000,
+            "concat_offset_ms": 18000
+          }
+        ],
+        "duration_ms": 34000
+      },
+      "source_span": {
+        "kind": "concatenated_source_video_audio",
+        "parts": [
+          {
+            "start_ms": 857000,
+            "end_ms": 875000,
+            "concat_offset_ms": 0
+          },
+          {
+            "start_ms": 996000,
+            "end_ms": 1012000,
+            "concat_offset_ms": 18000
+          }
+        ],
+        "duration_ms": 34000,
+        "coordinate_system": "absolute_video_ms"
+      },
+      "played_from_ms": 0,
+      "played_duration_ms": 34000,
+      "playback_wav_path": "/private/tmp/.yt-live-kit-t1-1-human-gold.json.playback/t1-fallback-007.22716e0031a9908021f02d7b6ebb2ef6d1658581a109419529ce1a221da3d22d.42c5f81f23074e2aa076dcfcb89e1c6e.wav",
+      "playback_wav_sha256": "22716e0031a9908021f02d7b6ebb2ef6d1658581a109419529ce1a221da3d22d",
+      "playback_wav_bytes": 1088044,
+      "playback_format": {
+        "channels": 1,
+        "sample_width": 2,
+        "sample_rate": 16000
+      },
+      "recorded_at": "2026-08-05T11:53:30.222767+00:00"
+    },
+    "t1-fallback-009": {
+      "manifest_fingerprint": "b4f33f33c6b7f23be0d28c13bdb0bdde946659a7a8f9909894e8b0d4807a11ec",
+      "row_id": "t1-fallback-009",
+      "audio_source_id": "lb4_e1ff-cut_003-audio",
+      "source_content_sha256": "5f8e8187fd3520da8ae6186f851995346eb8213123a456fdeb608ead00476aed",
+      "target_text": "挙動は見れたから止めるか",
+      "row_source_span": {
+        "kind": "concatenated_source_video_audio",
+        "coordinate_system": "absolute_video_ms",
+        "parts": [
+          {
+            "start_ms": 996000,
+            "end_ms": 1012000,
+            "concat_offset_ms": 0
+          },
+          {
+            "start_ms": 1069000,
+            "end_ms": 1101000,
+            "concat_offset_ms": 16000
+          }
+        ],
+        "duration_ms": 48000
+      },
+      "source_span": {
+        "kind": "concatenated_source_video_audio",
+        "parts": [
+          {
+            "start_ms": 996000,
+            "end_ms": 1012000,
+            "concat_offset_ms": 0
+          },
+          {
+            "start_ms": 1069000,
+            "end_ms": 1101000,
+            "concat_offset_ms": 16000
+          }
+        ],
+        "duration_ms": 48000,
+        "coordinate_system": "absolute_video_ms"
+      },
+      "played_from_ms": 0,
+      "played_duration_ms": 48000,
+      "playback_wav_path": "/private/tmp/.yt-live-kit-t1-1-human-gold.json.playback/t1-fallback-009.a36a14d5731e172866fbbcbedc34110f6e533e836ff39340d77d705a9b38f21b.b62dd8588dd745fd8debe1553c7a6d60.wav",
+      "playback_wav_sha256": "a36a14d5731e172866fbbcbedc34110f6e533e836ff39340d77d705a9b38f21b",
+      "playback_wav_bytes": 1536044,
+      "playback_format": {
+        "channels": 1,
+        "sample_width": 2,
+        "sample_rate": 16000
+      },
+      "recorded_at": "2026-08-05T11:58:54.262377+00:00"
+    },
+    "t1-fallback-010": {
+      "manifest_fingerprint": "b4f33f33c6b7f23be0d28c13bdb0bdde946659a7a8f9909894e8b0d4807a11ec",
+      "row_id": "t1-fallback-010",
+      "audio_source_id": "lb4_e1ff-cut_003-audio",
+      "source_content_sha256": "5f8e8187fd3520da8ae6186f851995346eb8213123a456fdeb608ead00476aed",
+      "target_text": "ディープリサーチを一旦止めます",
+      "row_source_span": {
+        "kind": "concatenated_source_video_audio",
+        "coordinate_system": "absolute_video_ms",
+        "parts": [
+          {
+            "start_ms": 996000,
+            "end_ms": 1012000,
+            "concat_offset_ms": 0
+          },
+          {
+            "start_ms": 1069000,
+            "end_ms": 1101000,
+            "concat_offset_ms": 16000
+          }
+        ],
+        "duration_ms": 48000
+      },
+      "source_span": {
+        "kind": "concatenated_source_video_audio",
+        "parts": [
+          {
+            "start_ms": 996000,
+            "end_ms": 1012000,
+            "concat_offset_ms": 0
+          },
+          {
+            "start_ms": 1069000,
+            "end_ms": 1101000,
+            "concat_offset_ms": 16000
+          }
+        ],
+        "duration_ms": 48000,
+        "coordinate_system": "absolute_video_ms"
+      },
+      "played_from_ms": 0,
+      "played_duration_ms": 48000,
+      "playback_wav_path": "/private/tmp/.yt-live-kit-t1-1-human-gold.json.playback/t1-fallback-010.a36a14d5731e172866fbbcbedc34110f6e533e836ff39340d77d705a9b38f21b.66f74deef4034293a0749972f861cfb4.wav",
+      "playback_wav_sha256": "a36a14d5731e172866fbbcbedc34110f6e533e836ff39340d77d705a9b38f21b",
+      "playback_wav_bytes": 1536044,
+      "playback_format": {
+        "channels": 1,
+        "sample_width": 2,
+        "sample_rate": 16000
+      },
+      "recorded_at": "2026-08-05T12:00:45.385923+00:00"
+    },
+    "t1-fallback-011": {
+      "manifest_fingerprint": "b4f33f33c6b7f23be0d28c13bdb0bdde946659a7a8f9909894e8b0d4807a11ec",
+      "row_id": "t1-fallback-011",
+      "audio_source_id": "lb4_e1ff-cut_003-audio",
+      "source_content_sha256": "5f8e8187fd3520da8ae6186f851995346eb8213123a456fdeb608ead00476aed",
+      "target_text": "この挙動が分かればいい",
+      "row_source_span": {
+        "kind": "concatenated_source_video_audio",
+        "coordinate_system": "absolute_video_ms",
+        "parts": [
+          {
+            "start_ms": 996000,
+            "end_ms": 1012000,
+            "concat_offset_ms": 0
+          },
+          {
+            "start_ms": 1069000,
+            "end_ms": 1101000,
+            "concat_offset_ms": 16000
+          }
+        ],
+        "duration_ms": 48000
+      },
+      "source_span": {
+        "kind": "concatenated_source_video_audio",
+        "parts": [
+          {
+            "start_ms": 996000,
+            "end_ms": 1012000,
+            "concat_offset_ms": 0
+          },
+          {
+            "start_ms": 1069000,
+            "end_ms": 1101000,
+            "concat_offset_ms": 16000
+          }
+        ],
+        "duration_ms": 48000,
+        "coordinate_system": "absolute_video_ms"
+      },
+      "played_from_ms": 0,
+      "played_duration_ms": 48000,
+      "playback_wav_path": "/private/tmp/.yt-live-kit-t1-1-human-gold.json.playback/t1-fallback-011.a36a14d5731e172866fbbcbedc34110f6e533e836ff39340d77d705a9b38f21b.6d6ea7d826cc41e89e068c5d4d88575a.wav",
+      "playback_wav_sha256": "a36a14d5731e172866fbbcbedc34110f6e533e836ff39340d77d705a9b38f21b",
+      "playback_wav_bytes": 1536044,
+      "playback_format": {
+        "channels": 1,
+        "sample_width": 2,
+        "sample_rate": 16000
+      },
+      "recorded_at": "2026-08-05T12:02:36.496192+00:00"
+    },
+    "t1-fallback-012": {
+      "manifest_fingerprint": "b4f33f33c6b7f23be0d28c13bdb0bdde946659a7a8f9909894e8b0d4807a11ec",
+      "row_id": "t1-fallback-012",
+      "audio_source_id": "lb4_e1ff-cut_004-audio",
+      "source_content_sha256": "5f8e8187fd3520da8ae6186f851995346eb8213123a456fdeb608ead00476aed",
+      "target_text": "止まってないな、これ",
+      "row_source_span": {
+        "kind": "concatenated_source_video_audio",
+        "coordinate_system": "absolute_video_ms",
+        "parts": [
+          {
+            "start_ms": 1069000,
+            "end_ms": 1101000,
+            "concat_offset_ms": 0
+          },
+          {
+            "start_ms": 1104000,
+            "end_ms": 1140000,
+            "concat_offset_ms": 32000
+          }
+        ],
+        "duration_ms": 68000
+      },
+      "source_span": {
+        "kind": "concatenated_source_video_audio",
+        "parts": [
+          {
+            "start_ms": 1069000,
+            "end_ms": 1101000,
+            "concat_offset_ms": 0
+          },
+          {
+            "start_ms": 1104000,
+            "end_ms": 1140000,
+            "concat_offset_ms": 32000
+          }
+        ],
+        "duration_ms": 68000,
+        "coordinate_system": "absolute_video_ms"
+      },
+      "played_from_ms": 0,
+      "played_duration_ms": 68000,
+      "playback_wav_path": "/private/tmp/.yt-live-kit-t1-1-human-gold.json.playback/t1-fallback-012.81548dca9ddcf61d8debeff865787bfc9522aa3d078e90c79011d22fa7e38ee0.c2ba5cf5ef7c4edba0a48e2c08ade924.wav",
+      "playback_wav_sha256": "81548dca9ddcf61d8debeff865787bfc9522aa3d078e90c79011d22fa7e38ee0",
+      "playback_wav_bytes": 2176044,
+      "playback_format": {
+        "channels": 1,
+        "sample_width": 2,
+        "sample_rate": 16000
+      },
+      "recorded_at": "2026-08-05T12:03:43.847112+00:00"
+    },
+    "t1-fallback-013": {
+      "manifest_fingerprint": "b4f33f33c6b7f23be0d28c13bdb0bdde946659a7a8f9909894e8b0d4807a11ec",
+      "row_id": "t1-fallback-013",
+      "audio_source_id": "lb4_e1ff-cut_004-audio",
+      "source_content_sha256": "5f8e8187fd3520da8ae6186f851995346eb8213123a456fdeb608ead00476aed",
+      "target_text": "やばい",
+      "row_source_span": {
+        "kind": "concatenated_source_video_audio",
+        "coordinate_system": "absolute_video_ms",
+        "parts": [
+          {
+            "start_ms": 1069000,
+            "end_ms": 1101000,
+            "concat_offset_ms": 0
+          },
+          {
+            "start_ms": 1104000,
+            "end_ms": 1140000,
+            "concat_offset_ms": 32000
+          }
+        ],
+        "duration_ms": 68000
+      },
+      "source_span": {
+        "kind": "concatenated_source_video_audio",
+        "parts": [
+          {
+            "start_ms": 1069000,
+            "end_ms": 1101000,
+            "concat_offset_ms": 0
+          },
+          {
+            "start_ms": 1104000,
+            "end_ms": 1140000,
+            "concat_offset_ms": 32000
+          }
+        ],
+        "duration_ms": 68000,
+        "coordinate_system": "absolute_video_ms"
+      },
+      "played_from_ms": 0,
+      "played_duration_ms": 68000,
+      "playback_wav_path": "/private/tmp/.yt-live-kit-t1-1-human-gold.json.playback/t1-fallback-013.81548dca9ddcf61d8debeff865787bfc9522aa3d078e90c79011d22fa7e38ee0.e4d8d2e38efc4ad6bac60d557a14542d.wav",
+      "playback_wav_sha256": "81548dca9ddcf61d8debeff865787bfc9522aa3d078e90c79011d22fa7e38ee0",
+      "playback_wav_bytes": 2176044,
+      "playback_format": {
+        "channels": 1,
+        "sample_width": 2,
+        "sample_rate": 16000
+      },
+      "recorded_at": "2026-08-05T12:09:08.664967+00:00"
+    },
+    "t1-fallback-014": {
+      "manifest_fingerprint": "b4f33f33c6b7f23be0d28c13bdb0bdde946659a7a8f9909894e8b0d4807a11ec",
+      "row_id": "t1-fallback-014",
+      "audio_source_id": "lb4_e1ff-cut_004-audio",
+      "source_content_sha256": "5f8e8187fd3520da8ae6186f851995346eb8213123a456fdeb608ead00476aed",
+      "target_text": "止まってないね",
+      "row_source_span": {
+        "kind": "concatenated_source_video_audio",
+        "coordinate_system": "absolute_video_ms",
+        "parts": [
+          {
+            "start_ms": 1069000,
+            "end_ms": 1101000,
+            "concat_offset_ms": 0
+          },
+          {
+            "start_ms": 1104000,
+            "end_ms": 1140000,
+            "concat_offset_ms": 32000
+          }
+        ],
+        "duration_ms": 68000
+      },
+      "source_span": {
+        "kind": "concatenated_source_video_audio",
+        "parts": [
+          {
+            "start_ms": 1069000,
+            "end_ms": 1101000,
+            "concat_offset_ms": 0
+          },
+          {
+            "start_ms": 1104000,
+            "end_ms": 1140000,
+            "concat_offset_ms": 32000
+          }
+        ],
+        "duration_ms": 68000,
+        "coordinate_system": "absolute_video_ms"
+      },
+      "played_from_ms": 0,
+      "played_duration_ms": 68000,
+      "playback_wav_path": "/private/tmp/.yt-live-kit-t1-1-human-gold.json.playback/t1-fallback-014.81548dca9ddcf61d8debeff865787bfc9522aa3d078e90c79011d22fa7e38ee0.939411eab1b24649b9cb451836742f3b.wav",
+      "playback_wav_sha256": "81548dca9ddcf61d8debeff865787bfc9522aa3d078e90c79011d22fa7e38ee0",
+      "playback_wav_bytes": 2176044,
+      "playback_format": {
+        "channels": 1,
+        "sample_width": 2,
+        "sample_rate": 16000
+      },
+      "recorded_at": "2026-08-05T12:09:52.002943+00:00"
+    },
+    "t1-fallback-015": {
+      "manifest_fingerprint": "b4f33f33c6b7f23be0d28c13bdb0bdde946659a7a8f9909894e8b0d4807a11ec",
+      "row_id": "t1-fallback-015",
+      "audio_source_id": "lb4_e1ff-cut_004-audio",
+      "source_content_sha256": "5f8e8187fd3520da8ae6186f851995346eb8213123a456fdeb608ead00476aed",
+      "target_text": "あ、止まった",
+      "row_source_span": {
+        "kind": "concatenated_source_video_audio",
+        "coordinate_system": "absolute_video_ms",
+        "parts": [
+          {
+            "start_ms": 1069000,
+            "end_ms": 1101000,
+            "concat_offset_ms": 0
+          },
+          {
+            "start_ms": 1104000,
+            "end_ms": 1140000,
+            "concat_offset_ms": 32000
+          }
+        ],
+        "duration_ms": 68000
+      },
+      "source_span": {
+        "kind": "concatenated_source_video_audio",
+        "parts": [
+          {
+            "start_ms": 1132000,
+            "end_ms": 1137000,
+            "concat_offset_ms": 0
+          }
+        ],
+        "duration_ms": 5000,
+        "coordinate_system": "absolute_video_ms"
+      },
+      "played_from_ms": 60000,
+      "played_duration_ms": 5000,
+      "playback_wav_path": "/private/tmp/.yt-live-kit-t1-1-human-gold.json.playback/t1-fallback-015.487e22525270e097927b71f7e966702e2702d5e7fcc40daa99ab7a04ba343141.bace9488e79c4823a45279be864b650f.wav",
+      "playback_wav_sha256": "487e22525270e097927b71f7e966702e2702d5e7fcc40daa99ab7a04ba343141",
+      "playback_wav_bytes": 160044,
+      "playback_format": {
+        "channels": 1,
+        "sample_width": 2,
+        "sample_rate": 16000
+      },
+      "recorded_at": "2026-08-05T12:12:59.891679+00:00"
+    },
+    "t1-fallback-016": {
+      "manifest_fingerprint": "b4f33f33c6b7f23be0d28c13bdb0bdde946659a7a8f9909894e8b0d4807a11ec",
+      "row_id": "t1-fallback-016",
+      "audio_source_id": "lb4_e1ff-cut_004-audio",
+      "source_content_sha256": "5f8e8187fd3520da8ae6186f851995346eb8213123a456fdeb608ead00476aed",
+      "target_text": "相当持ってかれた",
+      "row_source_span": {
+        "kind": "concatenated_source_video_audio",
+        "coordinate_system": "absolute_video_ms",
+        "parts": [
+          {
+            "start_ms": 1069000,
+            "end_ms": 1101000,
+            "concat_offset_ms": 0
+          },
+          {
+            "start_ms": 1104000,
+            "end_ms": 1140000,
+            "concat_offset_ms": 32000
+          }
+        ],
+        "duration_ms": 68000
+      },
+      "source_span": {
+        "kind": "concatenated_source_video_audio",
+        "parts": [
+          {
+            "start_ms": 1069000,
+            "end_ms": 1101000,
+            "concat_offset_ms": 0
+          },
+          {
+            "start_ms": 1104000,
+            "end_ms": 1140000,
+            "concat_offset_ms": 32000
+          }
+        ],
+        "duration_ms": 68000,
+        "coordinate_system": "absolute_video_ms"
+      },
+      "played_from_ms": 0,
+      "played_duration_ms": 68000,
+      "playback_wav_path": "/private/tmp/.yt-live-kit-t1-1-human-gold.json.playback/t1-fallback-016.81548dca9ddcf61d8debeff865787bfc9522aa3d078e90c79011d22fa7e38ee0.5d8ef779a2ee4d38978921437680f924.wav",
+      "playback_wav_sha256": "81548dca9ddcf61d8debeff865787bfc9522aa3d078e90c79011d22fa7e38ee0",
+      "playback_wav_bytes": 2176044,
+      "playback_format": {
+        "channels": 1,
+        "sample_width": 2,
+        "sample_rate": 16000
+      },
+      "recorded_at": "2026-08-05T12:13:43.858303+00:00"
+    },
+    "t1-fallback-017": {
+      "manifest_fingerprint": "b4f33f33c6b7f23be0d28c13bdb0bdde946659a7a8f9909894e8b0d4807a11ec",
+      "row_id": "t1-fallback-017",
+      "audio_source_id": "lb4_b5d-cut_001-audio",
+      "source_content_sha256": "5f8e8187fd3520da8ae6186f851995346eb8213123a456fdeb608ead00476aed",
+      "target_text": "の人が使っちゃダメなやつっすね。",
+      "row_source_span": {
+        "kind": "concatenated_source_video_audio",
+        "coordinate_system": "absolute_video_ms",
+        "parts": [
+          {
+            "start_ms": 3700000,
+            "end_ms": 3721000,
+            "concat_offset_ms": 0
+          },
+          {
+            "start_ms": 4015000,
+            "end_ms": 4052000,
+            "concat_offset_ms": 21000
+          },
+          {
+            "start_ms": 4086000,
+            "end_ms": 4100000,
+            "concat_offset_ms": 58000
+          }
+        ],
+        "duration_ms": 72000
+      },
+      "source_span": {
+        "kind": "concatenated_source_video_audio",
+        "parts": [
+          {
+            "start_ms": 3700000,
+            "end_ms": 3721000,
+            "concat_offset_ms": 0
+          },
+          {
+            "start_ms": 4015000,
+            "end_ms": 4052000,
+            "concat_offset_ms": 21000
+          },
+          {
+            "start_ms": 4086000,
+            "end_ms": 4100000,
+            "concat_offset_ms": 58000
+          }
+        ],
+        "duration_ms": 72000,
+        "coordinate_system": "absolute_video_ms"
+      },
+      "played_from_ms": 0,
+      "played_duration_ms": 72000,
+      "playback_wav_path": "/private/tmp/.yt-live-kit-t1-1-human-gold.json.playback/t1-fallback-017.b0b53b016acf5fdf85700a740706be7e671a3d41ed3516ca6d465c5aeaff8869.63e20dbb70394c858be8e7b10261a64f.wav",
+      "playback_wav_sha256": "b0b53b016acf5fdf85700a740706be7e671a3d41ed3516ca6d465c5aeaff8869",
+      "playback_wav_bytes": 2304044,
+      "playback_format": {
+        "channels": 1,
+        "sample_width": 2,
+        "sample_rate": 16000
+      },
+      "recorded_at": "2026-08-05T12:14:41.740881+00:00"
+    },
+    "t1-fallback-018": {
+      "manifest_fingerprint": "b4f33f33c6b7f23be0d28c13bdb0bdde946659a7a8f9909894e8b0d4807a11ec",
+      "row_id": "t1-fallback-018",
+      "audio_source_id": "lb4_b5d-cut_002-audio",
+      "source_content_sha256": "5f8e8187fd3520da8ae6186f851995346eb8213123a456fdeb608ead00476aed",
+      "target_text": "トクン効率自体は良くなってるらしいんす",
+      "row_source_span": {
+        "kind": "concatenated_source_video_audio",
+        "coordinate_system": "absolute_video_ms",
+        "parts": [
+          {
+            "start_ms": 3700000,
+            "end_ms": 3721000,
+            "concat_offset_ms": 0
+          },
+          {
+            "start_ms": 4015000,
+            "end_ms": 4052000,
+            "concat_offset_ms": 21000
+          },
+          {
+            "start_ms": 4086000,
+            "end_ms": 4100000,
+            "concat_offset_ms": 58000
+          }
+        ],
+        "duration_ms": 72000
+      },
+      "source_span": {
+        "kind": "concatenated_source_video_audio",
+        "parts": [
+          {
+            "start_ms": 3700000,
+            "end_ms": 3721000,
+            "concat_offset_ms": 0
+          },
+          {
+            "start_ms": 4015000,
+            "end_ms": 4052000,
+            "concat_offset_ms": 21000
+          },
+          {
+            "start_ms": 4086000,
+            "end_ms": 4100000,
+            "concat_offset_ms": 58000
+          }
+        ],
+        "duration_ms": 72000,
+        "coordinate_system": "absolute_video_ms"
+      },
+      "played_from_ms": 0,
+      "played_duration_ms": 72000,
+      "playback_wav_path": "/private/tmp/.yt-live-kit-t1-1-human-gold.json.playback/t1-fallback-018.b0b53b016acf5fdf85700a740706be7e671a3d41ed3516ca6d465c5aeaff8869.b337a6f945a448838e8951b5b4580d0e.wav",
+      "playback_wav_sha256": "b0b53b016acf5fdf85700a740706be7e671a3d41ed3516ca6d465c5aeaff8869",
+      "playback_wav_bytes": 2304044,
+      "playback_format": {
+        "channels": 1,
+        "sample_width": 2,
+        "sample_rate": 16000
+      },
+      "recorded_at": "2026-08-05T12:15:14.996276+00:00"
+    },
+    "t1-fallback-019": {
+      "manifest_fingerprint": "b4f33f33c6b7f23be0d28c13bdb0bdde946659a7a8f9909894e8b0d4807a11ec",
+      "row_id": "t1-fallback-019",
+      "audio_source_id": "lb4_b5d-cut_003-audio",
+      "source_content_sha256": "5f8e8187fd3520da8ae6186f851995346eb8213123a456fdeb608ead00476aed",
+      "target_text": "じゃあ同じ200ドルを払うとして",
+      "row_source_span": {
+        "kind": "concatenated_source_video_audio",
+        "coordinate_system": "absolute_video_ms",
+        "parts": [
+          {
+            "start_ms": 3700000,
+            "end_ms": 3721000,
+            "concat_offset_ms": 0
+          },
+          {
+            "start_ms": 4015000,
+            "end_ms": 4052000,
+            "concat_offset_ms": 21000
+          },
+          {
+            "start_ms": 4086000,
+            "end_ms": 4100000,
+            "concat_offset_ms": 58000
+          }
+        ],
+        "duration_ms": 72000
+      },
+      "source_span": {
+        "kind": "concatenated_source_video_audio",
+        "parts": [
+          {
+            "start_ms": 3700000,
+            "end_ms": 3721000,
+            "concat_offset_ms": 0
+          },
+          {
+            "start_ms": 4015000,
+            "end_ms": 4052000,
+            "concat_offset_ms": 21000
+          },
+          {
+            "start_ms": 4086000,
+            "end_ms": 4100000,
+            "concat_offset_ms": 58000
+          }
+        ],
+        "duration_ms": 72000,
+        "coordinate_system": "absolute_video_ms"
+      },
+      "played_from_ms": 0,
+      "played_duration_ms": 72000,
+      "playback_wav_path": "/private/tmp/.yt-live-kit-t1-1-human-gold.json.playback/t1-fallback-019.b0b53b016acf5fdf85700a740706be7e671a3d41ed3516ca6d465c5aeaff8869.0d2af12a7a6e4e2db18c6b8bfc37553f.wav",
+      "playback_wav_sha256": "b0b53b016acf5fdf85700a740706be7e671a3d41ed3516ca6d465c5aeaff8869",
+      "playback_wav_bytes": 2304044,
+      "playback_format": {
+        "channels": 1,
+        "sample_width": 2,
+        "sample_rate": 16000
+      },
+      "recorded_at": "2026-08-05T12:16:20.810407+00:00"
+    },
+    "t1-fallback-020": {
+      "manifest_fingerprint": "b4f33f33c6b7f23be0d28c13bdb0bdde946659a7a8f9909894e8b0d4807a11ec",
+      "row_id": "t1-fallback-020",
+      "audio_source_id": "lb4_b5d-cut_003-audio",
+      "source_content_sha256": "5f8e8187fd3520da8ae6186f851995346eb8213123a456fdeb608ead00476aed",
+      "target_text": "今んところチャットGPT優勢なんだよな",
+      "row_source_span": {
+        "kind": "concatenated_source_video_audio",
+        "coordinate_system": "absolute_video_ms",
+        "parts": [
+          {
+            "start_ms": 3700000,
+            "end_ms": 3721000,
+            "concat_offset_ms": 0
+          },
+          {
+            "start_ms": 4015000,
+            "end_ms": 4052000,
+            "concat_offset_ms": 21000
+          },
+          {
+            "start_ms": 4086000,
+            "end_ms": 4100000,
+            "concat_offset_ms": 58000
+          }
+        ],
+        "duration_ms": 72000
+      },
+      "source_span": {
+        "kind": "concatenated_source_video_audio",
+        "parts": [
+          {
+            "start_ms": 3700000,
+            "end_ms": 3721000,
+            "concat_offset_ms": 0
+          },
+          {
+            "start_ms": 4015000,
+            "end_ms": 4052000,
+            "concat_offset_ms": 21000
+          },
+          {
+            "start_ms": 4086000,
+            "end_ms": 4100000,
+            "concat_offset_ms": 58000
+          }
+        ],
+        "duration_ms": 72000,
+        "coordinate_system": "absolute_video_ms"
+      },
+      "played_from_ms": 0,
+      "played_duration_ms": 72000,
+      "playback_wav_path": "/private/tmp/.yt-live-kit-t1-1-human-gold.json.playback/t1-fallback-020.b0b53b016acf5fdf85700a740706be7e671a3d41ed3516ca6d465c5aeaff8869.1ee4101e1f6d40b6bce4bd17e69ccc84.wav",
+      "playback_wav_sha256": "b0b53b016acf5fdf85700a740706be7e671a3d41ed3516ca6d465c5aeaff8869",
+      "playback_wav_bytes": 2304044,
+      "playback_format": {
+        "channels": 1,
+        "sample_width": 2,
+        "sample_rate": 16000
+      },
+      "recorded_at": "2026-08-05T12:18:48.615745+00:00"
+    }
+  }
+}

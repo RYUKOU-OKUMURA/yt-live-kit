@@ -49,8 +49,8 @@
 | S9-5 | UI 設定・進捗・エラー・失効表示 | [x] 完了 |
 | T1-PLAN | テロップ行時刻同期計画（docs-only） | [x] 完了 |
 | T1 | テロップ行時刻同期・明示確認 | [~] 進行中 |
-| T1-1 | production 非変更 timing spike・評価 manifest | [ ] 未着手 |
-| T1-2 | timing 保存契約・extractor | [ ] 未着手 |
+| T1-1 | production 非変更 timing spike・評価 manifest | [x] 完了（2026-08-05 測定済み、**No-Go / fallback-only**。T1-2 は着手条件未成立） |
+| T1-2 | timing 保存契約・extractor | [ ] 未着手（T1-1 No-Go のため着手しない。fallback-only 記録） |
 | T1-3 | pure aligner・telop・fingerprint 統合 | [ ] 未着手 |
 | T1-4 | Streamlit UI 時刻確認 gate | [ ] 未着手 |
 | T1-5 | 同期 component acceptance | [ ] 未着手 |
@@ -1719,7 +1719,7 @@ data/{video_id}/ ...
 ### T1: テロップ行時刻同期・明示確認（v3.2 追加）
 
 **目的:** S9-6 を受け入れ専用の未完了状態で保持したまま、Codex が作成したテロップ draft の行時刻を、既存の production 境界を変えずに評価・保存・補正・表示する独立した実装列を追加する。低信頼行は元時刻を維持して警告し、誤字・固有名詞の全文確認とは別に、要確認行の時刻確認を明示的に記録する。
-**フェーズ状態:** [~] 進行中。T1-PLAN は [x] 完了、次の未着手タスクは T1-1。T1-5 の同期受け入れ後に S9-6 の正式受け入れを一度だけ行う。
+**フェーズ状態:** [~] 進行中。T1-PLAN と T1-1 は [x] 完了。T1-1 の判定は **No-Go（fallback-only）** であり、T1-2〜T1-5 は着手条件を満たさない。fallback-only の記録を保持したまま、S9-6 の受け入れ方針（T1 なしでの正式受け入れ、または gold 精度改善後の T1-1 再測定を別承認で行うか）はユーザー判断待ち。
 **対応要件 / AC:** FR-22、FR-25、FR-33、FR-35、FR-36、FR-39、AC-23、AC-35、AC-37、AC-40。
 **依存:** `S9-5 → T1-PLAN → T1-1 → T1-2 → T1-3 → T1-4 → T1-5 → S9-6`。既存 S9-6 の ID・目的・受け入れ専用性は変更しない。
 
@@ -1764,20 +1764,22 @@ data/{video_id}/ ...
 
 #### T1-1: production 非変更 timing spike と評価 manifest 固定
 
-**タスク状態:** [ ] 未着手。T1-PLAN 完了後の次の着手タスク。
+**タスク状態:** [x] 完了（2026-08-05、判定 **No-Go / fallback-only**）。canonical predecessor は `d94a8c5`（corrected v3.5、候補測定0）、manifest-only freeze は `d152230`、fingerprint は `b4f33f33c6b7f23be0d28c13bdb0bdde946659a7a8f9909894e8b0d4807a11ec`。human gold は 63/64 行（`t1-fallback-008` は対象発話を bound audio 内で確認できず、manifest `human_containment_audit.human_check` に従い onset 未入力の fail-closed 記録）。bounded whisper-cli は 8 invocation 以内で 2 回実行（canonical は peak memory 付き 8/8、hash 全一致）、証跡は `docs/benchmarks/t1-1-timing-inputs.json`。候補測定は current / segment_snap / token_alignment の 3 方式を同一 fixture・同一 policy で比較し、`docs/benchmarks/t1-1-report.md` / `t1-1-report.json` に固定した。token_alignment は pooled median 370 ms / p90 1640 ms / max 2310 ms、multi coverage 0.79 で、pooled・long・multi の全群 gate FAIL。事後緩和なしで **No-Go** とし、T1-2 以降は着手しない（fallback-only）。gold 63 行のうち 45 行が 1000 ms 単位入力である測定限界は報告書に明記した。gold packet は `docs/benchmarks/t1-1-human-gold-packet.json` に保存。fallback 非回帰は自動移動 0 / silent move 0（分母 20 = gold 評価 19 + fail-closed 1）。production hash unchanged を validator で確認済み。
 **目的:** token timing alignment を production に導入する前に、固定 fixture と人音声 gold で現行・短 cue 候補・token timing alignment 候補を比較し、採用可否の根拠を production 非変更で得る。現行 artifact が raw token timing を保持しない場合は、固定した選択 span だけを隔離 temp へ bounded に whisper-cli 再実行し、raw full JSON と token timing 候補を benchmark input として取得する。
 **前提:** S9-1 の固定評価・S9-5 完了・T1-PLAN 完了。測定開始前に manifest、gold、coverage 分母、gate、実行環境を immutable に固定する。
+
+**T1-1 candidate freeze 記録（2026-08-04、manifest-only `d152230`）:** saved telop 59 unique tupleから artifact-backed 44行を long 20 / normal multi 20 / multi low-confidence holdout 4へ一意割当し、legacy LB4の15 saved lineを14 exact target＋1原文の2 manual subtarget（net 16）へ置換した。b5d既存VTT/ASS dialogue 4件をLB4 genuine VTT fallback 16件へ追加し、long / multi / fallback は20 / 24 / 20、合計64行、audio contextは15 span、bounded timing inputは8 span、max invocationは8・実績0に固定した。fallback内のLB4 16 targetは実在する非連続cut pair full context、b5d 4 targetはcutplan003の非連続3-part full contextを使う。b5d ASS event、production VTT delta、ASS concat→absolute mapping、VTT ±5ms / cut clamp、canonical clip ID、ffmpeg log inputを別々に機械検証する。manual subtargetは兄弟a/bを同時出力しない独立scenarioで、元行保存時刻はbaseline reference（goldではない）に限定した。artifact JSONはcue-only、raw token timingは未生成のまま pending。source MP4／configured ffmpeg-full 8.1.2のhashをbindし、既存LB4 1秒 smokeとcut1末尾2秒＋gap後cut2先頭3秒の2-part concat smoke（80000 frames、160044 bytes、output未commit）を再検証した。`24c777d`、corrected v2、`9e66122`、v3.6 working candidateはreview-rejected predecessorとしてmanifestのsupersedesに残し、候補測定は0回である。production before/after固定root、15-file live hash、manifest-bound 15 source／4 telop／3 artifact／b5d 4 evidence fileの再hash契約もvalidatorで固定する。
 **変更ファイル範囲:** `benchmarks/t1/` の専用 harness / fixture / manifest、`docs/benchmarks/` の T1-1 manifest・結果・再現記録、必要な benchmark 用 tests のみ。隔離 temp は repository 外または明示した一時 `data_dir` とし、`src/`、既存 `tests/`、既存 `data/`、production artifact / cache / output / hash、既存 S9-1 証跡は変更しない。
 
 **作業:**
 
-- [ ] T1-1-1. 長い単一 cue、multi / cross-cue、VTT fallback + 連結を各 20 行以上、全体 60 行以上含む評価 manifest を測定前に固定し、fixture fingerprint と変更禁止の記録を残す。manifest に有限の整数 `max_selected_spans` と `max_whisper_invocations` を各実行で明記し、実績が上限を超えないことを検証する
-- [ ] T1-1-2. gold は人が音声を聞いて付けた line onset だけとし、推測 token end、字幕 end、既存自動境界を gold に昇格しない
-- [ ] T1-1-3. 現行 artifact が raw token timing を持たない場合、manifest の `max_selected_spans` と `max_whisper_invocations` の範囲内で固定した選択 span を隔離 temp へ bounded に whisper-cli 再実行し、runtime / model / settings fingerprint、再現 command、raw full JSON の hash を記録する。production data / artifact / cache / output / hash は変更せず、全編処理・47 本 backfill は行わない
-- [ ] T1-1-4. 現行、短 cue 候補、token timing alignment 候補を同じ fixture・同じ policy で A/B 比較し、CER、固有名詞、cue 欠落 / 重複、wall time、peak memory も同じ証跡へ記録する
-- [ ] T1-1-5. coverage 分母を固定 manifest 内の検証済み token timing を持ち alignment 対象になり得る全 telop 行とし、VTT fallback と timing 無し legacy は coverage 外の非回帰群として分離する。VTT fallback + 連結群は現行出力同等、誤った自動移動 0 を別に判定する
-- [ ] T1-1-6. provisional Go gate を pooled と、alignment 対象の長い単一 cue 群・multi / cross-cue 群の各群で個別に満たす。各群と pooled の coverage 80％以上、absolute onset median 250 ms 以下、p90 500 ms 以下、max 1000 ms 以下、signed median bias の絶対値 200 ms 以下、誤った line / cross-cue 移動 0 を測定前に記録する。結果後の基準緩和は禁止し、変更は別承認と理由記録を要する
-- [ ] T1-1-7. low-confidence は全件 flag、元時刻維持、黙った移動 0 を確認し、owning cue / range clamp、時系列、非重複、最低表示 500 ms を満たせない場合は fallback にする。長い単一 cue 群・multi / cross-cue 群の signed bias と VTT fallback + 連結群の非回帰結果を別集計する
+- [x] T1-1-1. 長い単一 cue、multi / cross-cue、VTT fallback + 連結を各 20 行以上、全体 60 行以上含む評価 manifest を測定前に固定し、fixture fingerprint と変更禁止の記録を残す。manifest に有限の整数 `max_selected_spans` と `max_whisper_invocations` を各実行で明記し、実績が上限を超えないことを検証する（64行、fingerprint `b4f33f33c6b7f23be0d28c13bdb0bdde946659a7a8f9909894e8b0d4807a11ec`、manifest-only freeze `d152230`）
+- [x] T1-1-2. gold は人が音声を聞いて付けた line onset だけとし、推測 token end、字幕 end、既存自動境界を gold に昇格しない（波形付きローカル review UI で 63/64 行を人手入力。`t1-fallback-008` は fail-closed。gold packet: `docs/benchmarks/t1-1-human-gold-packet.json`）
+- [x] T1-1-3. 現行 artifact が raw token timing を持たない場合、manifest の `max_selected_spans` と `max_whisper_invocations` の範囲内で固定した選択 span を隔離 temp へ bounded に whisper-cli 再実行し、runtime / model / settings fingerprint、再現 command、raw full JSON の hash を記録する。production data / artifact / cache / output / hash は変更せず、全編処理・47 本 backfill は行わない（8/8 invocation、hash 全一致、証跡 `docs/benchmarks/t1-1-timing-inputs.json`）
+- [x] T1-1-4. 現行、短 cue 候補、token timing alignment 候補を同じ fixture・同じ policy で A/B 比較し、CER、固有名詞、cue 欠落 / 重複、wall time、peak memory も同じ証跡へ記録する（`docs/benchmarks/t1-1-report.json`）
+- [x] T1-1-5. coverage 分母を固定 manifest 内の検証済み token timing を持ち alignment 対象になり得る全 telop 行とし、VTT fallback と timing 無し legacy は coverage 外の非回帰群として分離する。VTT fallback + 連結群は現行出力同等、誤った自動移動 0 を別に判定する（分母 44 行。fallback 20 行は自動移動 0 / silent move 0）
+- [x] T1-1-6. provisional Go gate を pooled と、alignment 対象の長い単一 cue 群・multi / cross-cue 群の各群で個別に満たす。各群と pooled の coverage 80％以上、absolute onset median 250 ms 以下、p90 500 ms 以下、max 1000 ms 以下、signed median bias の絶対値 200 ms 以下、誤った line / cross-cue 移動 0 を測定前に記録する。結果後の基準緩和は禁止し、変更は別承認と理由記録を要する（判定実施: 全群 FAIL → **No-Go**。緩和なし）
+- [x] T1-1-7. low-confidence は全件 flag、元時刻維持、黙った移動 0 を確認し、owning cue / range clamp、時系列、非重複、最低表示 500 ms を満たせない場合は fallback にする。長い単一 cue 群・multi / cross-cue 群の signed bias と VTT fallback + 連結群の非回帰結果を別集計する（silent move 0。ambiguous holdout 4 件中 low-confidence 判定は 1 件のみで、期待との乖離を報告書に記録）
 
 **テスト / 検証:** 固定 manifest の再現実行、固定選択 span の隔離 bounded whisper-cli 実行、runtime / model fingerprint と再現 command の検証、候補別 metric 再計算、群別 / pooled gate、gold / glossary / cue 欠落重複監査、VTT fallback + 連結の現行出力同等性、failure / fallback、wall / peak memory、production hash unchanged、`git diff --check`。production 経路への追加 Whisper、実 upload、外部 API は使わない。
 
@@ -2624,8 +2626,9 @@ S9 初版で実装するのは、既存 YouTube `video_id` の良好な VTT を�
 13. ~~**P6-PLAN を S9-1 の人手 gold 監査と並行して docs-only で閉じる。**~~ 完了。独立レビュー済み plan commit から分離 worktree を作成した
 14. ~~**P6-1 / P6-2 / P6-3 を分離 worktree で並行実装し、個別レビュー後に main へ統合する。**~~ 完了。P6-1 を S9-4 より先に統合・依存元へ報告し、P6-4 → P6-5 まで独立レビュー後に閉じた
 15. ~~**R2 を完了する。**~~ 完了。手動 E2E 済みの現行挙動を基準に、UI 大幅刷新前の page / session / durable state / upload gate を整理し、監査文書・characterization test・独立レビューで固定した
-16. ~~**T1-PLAN を docs-only で完了する。**~~ 完了。FR-39 / AC-40、T1-1〜T1-5 の独立境界、S9-6 最終受け入れ順、R2 安全境界を 4 docs に反映した。**次は T1-1 の production 非変更 spike と評価 manifest 固定。**
-17. **U9（UI 視覚刷新）を第 1 弾から進める。** R2 で境界整理が完了し、残るのは視覚レイヤーのみ。`.streamlit/config.toml` のネイティブテーマ適用（案 A+）を最初のコミットとし、AppTest 視覚回帰スモークを挟んでから shell 刷新へ進む。限定 CSS 注入（案 B）の要否は A+ 適用後の残差実測で判断する。テロップ編集器の刷新は T1-4 へ合流させ、U9 には含めない。
+16. ~~**T1-PLAN を docs-only で完了する。**~~ 完了。FR-39 / AC-40、T1-1〜T1-5 の独立境界、S9-6 最終受け入れ順、R2 安全境界を 4 docs に反映した
+17. ~~**U9（UI 視覚刷新）を第 1 弾から進める。**~~ 完了。`.streamlit/config.toml` のネイティブテーマ適用（案 A+）、AppTest 視覚回帰スモーク、shell 刷新まで閉じた。テロップ編集器の刷新は T1-4 へ合流させ、U9 には含めていない
+18. ~~**T1-1（production 非変更 timing spike と評価 manifest 固定）を完了する。**~~ 完了。判定は **No-Go / fallback-only** で、T1-2〜T1-5 は着手条件を満たさない。**次は S9-6（A/B 受け入れ・回帰・フェーズ判定）** を、T1 を fallback-only 記録のまま formal phase acceptance として一度だけ行う。最終 short preview の人確認を含む
 
 ---
 
@@ -2633,6 +2636,7 @@ S9 初版で実装するのは、既存 YouTube `video_id` の良好な VTT を�
 
 | 日付 | 内容 |
 |------|------|
+| 2026-08-05 | **T1-1 を完了（No-Go / fallback-only）。** 波形付きローカル review UI で human gold 63/64 行を入力し、`t1-fallback-008` は対象発話不在の fail-closed 記録とした。bounded whisper-cli を 8 invocation 以内で実行（hash 全一致、peak memory 付き証跡）、current / segment_snap / token_alignment の 3 候補を同一 fixture・同一 policy で A/B 測定した。token_alignment は pooled median 370 ms / p90 1640 ms で全群 gate FAIL、事後緩和なしで No-Go とし、T1-2 以降は着手しない。gold 45/63 行の 1000 ms 単位入力という測定限界と、gold 精度改善後の再測定には別承認が必要である旨を報告書に記録した。証跡: `docs/benchmarks/t1-1-report.md` / `t1-1-report.json` / `t1-1-timing-inputs.json` / `t1-1-human-gold-packet.json` |
 | 2026-08-05 | **U9（UI 視覚刷新）を計画。** R2 完了により残るのは視覚レイヤーのみと確認し、実行計画に未定義だったフェーズを追加した。Streamlit 1.60 のネイティブテーマ 23 オプションを使い切る案 A+ を第 1 弾、限定 CSS 注入の案 B を A+ 適用後の残差実測まで保留、カスタムコンポーネントの案 C は不採用と決めた。AppTest による視覚回帰スモークを第 2 弾の前提として追加し、テロップ編集器の刷新は T1-4 へ合流させて U9 に含めない。R2 §5 の安全境界を全項目継承し、`st.tabs` への単純置換禁止を不変条件として明記した。調査根拠は `docs/ui-visual-refresh-plan-2026-08-05.md` に分離した。 |
 | 2026-08-04 | **T1-PLAN 親レビュー指摘を反映。** T1-1 に固定選択 span の隔離 bounded whisper-cli benchmark を許可し、pooled / 長い単一 cue / multi-cross-cue の群別 gate、VTT fallback + 連結の非回帰、再現 fingerprint を追加した。T1-5 を同期 component acceptance、S9-6 を formal phase acceptance と明記し、隔離 preview、production 不変、T1-5 evidence の条件付き再利用、AC-40 を S9-6 formal PASS 時だけ完了する規約、T1-1〜T1-5 の進捗行、標準 ADR path を反映した。 |
 | 2026-08-04 | **T1-PLAN を docs-only で完了。** S9-6 を受け入れ専用の未完了状態で保持し、S9-5 → T1-PLAN → T1-1 → T1-2 → T1-3 → T1-4 → T1-5 → S9-6 の依存を追加した。固定 manifest と人音声 gold による production 非変更 spike、timing payload 保存 ADR、pure aligner、独立 timing confirmation、R2 の UI 安全境界、AC-40 の同期受け入れを計画し、次の未着手を T1-1 とした。 |
