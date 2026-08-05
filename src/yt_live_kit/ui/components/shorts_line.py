@@ -91,13 +91,14 @@ from yt_live_kit.ui.session_keys import (
     shorts_line_context_key,
 )
 from yt_live_kit.ui.view_models.shorts_line import (
-    NEXT_ACTIONS as _NEXT_ACTIONS,
-    STAGES as _STAGES,
-    STAGE_LABELS as _STAGE_LABELS,
     CandidateKey,
+    LineStepperItem,
     SidebarLineProjection,
+    StepStatus,
     choose_preview_mode,
     is_human_review_current,
+    line_next_action_text,
+    line_stepper_items,
     ordered_candidate_keys,
     project_review_state,
     sidebar_projection_from_target,
@@ -930,18 +931,27 @@ def _find_output(
     return item.output_path, spec
 
 
-def render_stage_bar(stage: LineStage) -> None:
-    """現在工程と通過済みゲートを 1 本の縮約表示で描画する."""
-    current = stage_number(stage)
-    with st.container(horizontal=True, horizontal_alignment="distribute"):
-        for index, value in enumerate(_STAGES, start=1):
-            if index < current or stage == LineStage.RESERVED:
-                marker = "完了"
-            elif index == current:
-                marker = "進行中"
-            else:
-                marker = "待機中"
-            st.badge(f"{index}. {_STAGE_LABELS[value]}・{marker}")
+_STEP_ICONS: dict[StepStatus, str] = {
+    "done": "✅",
+    "current": "◉",
+    "locked": "🔒",
+}
+# 接続線「│」を記号（全角相当の幅を持つアイコン）の中心へ寄せるための余白。
+# unsafe_allow_html は使わず、素の文字だけで揃える。
+_CONNECTOR = " │"
+
+
+def _render_line_stepper(items: Sequence[LineStepperItem]) -> None:
+    """6 工程の縦ステッパーを、素の Streamlit ウィジェットと文字だけで描画する."""
+    last_index = len(items)
+    for item in items:
+        icon = _STEP_ICONS[item.status]
+        line = f"{icon}　{item.index}　{item.label}"
+        if item.status == "current":
+            line += "　← 今"
+        st.markdown(line)
+        if item.index < last_index:
+            st.caption(_CONNECTOR)
 
 
 def render_compact_line_status(
@@ -950,20 +960,29 @@ def render_compact_line_status(
     *,
     title: str | None = None,
 ) -> None:
-    """左パネルと狭幅代替で共有する表示専用の縮約状態."""
+    """サイドバーの縦ステッパーと日次カウンタを描画する表示専用関数.
+
+    ``state`` だけを工程判定の唯一の入力にすることで、メイン領域の
+    縮約表示（``render_main_line_summary``）と同じ ``LineState`` から
+    導出し、状態表示の矛盾（サイドバーとメインで異なる工程を示す）を防ぐ。
+    """
+    current_stage = state.current_stage if state is not None else None
     st.markdown("**作成中のショート**")
     if state is None:
-        st.caption("作成中のラインはありません。")
+        st.caption("まだ開始していません")
     else:
         st.caption(f"対象ショート: {_safe(title or state.clip_id)}")
-        st.write(
-            f"工程 {stage_number(state.current_stage)}／6 "
-            f"{_STAGE_LABELS[state.current_stage]}"
-        )
-        st.caption(f"次: {_NEXT_ACTIONS[state.current_stage]}")
+
+    _render_line_stepper(line_stepper_items(current_stage))
+
+    st.markdown("── 次にやること ──")
+    st.write(line_next_action_text(current_stage))
+
     if daily is not None:
-        st.write(f"本日のライン完了 {daily.completed_count}／{daily.target_count}")
-        st.caption(f"要対応 {daily.needs_attention_count} 件")
+        st.caption(
+            f"本日 {daily.completed_count}／{daily.target_count}　・　"
+            f"要対応 {daily.needs_attention_count} 件"
+        )
 
 
 def load_daily_line_summary(settings: Settings) -> DailyLineSummary | None:
@@ -1207,7 +1226,9 @@ def render_shorts_line(
             _save_context(video_id, context)
 
     if state is None:
-        render_stage_bar(LineStage.MATERIAL_SELECTION)
+        # 6 工程の進行表示はサイドバー（render_compact_line_status）へ一本化した。
+        # ここで工程バーを描かないことで、ライン未開始時にメイン領域が
+        # 「1.素材選定・進行中」のような矛盾した状態を示さないようにする。
         st.subheader("素材を選び、区間を決める")
         candidate_by_key: dict[CandidateKey, ClipCandidate | HighlightSegment] = {
             **{("clips", candidate.id): candidate for candidate in clip_candidates},
@@ -1307,7 +1328,7 @@ def render_shorts_line(
             )
         return
 
-    render_stage_bar(state.current_stage)
+    # 6 工程の進行表示はサイドバー（render_compact_line_status）へ一本化した。
     if context is None:
         st.error(
             "区間 snapshot を安全に復元できませんでした。"

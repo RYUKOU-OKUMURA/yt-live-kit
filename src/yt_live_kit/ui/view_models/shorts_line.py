@@ -71,6 +71,69 @@ def stage_number(stage: LineStage) -> int:
     return STAGES.index(stage) + 1
 
 
+StepStatus = Literal["done", "current", "locked"]
+
+
+@dataclass(frozen=True)
+class LineStepperItem:
+    """サイドバー縦ステッパーの 1 工程分の表示状態."""
+
+    index: int
+    stage: LineStage
+    label: str
+    status: StepStatus
+
+
+def line_stepper_items(current_stage: LineStage | None) -> tuple[LineStepperItem, ...]:
+    """6 工程の状態を導出する純粋関数（サイドバーとメインの表示矛盾を防ぐ唯一の判定源）。
+
+    ``current_stage`` が ``None`` の場合、``LineState`` はまだ作られていないが
+    「これから素材を選ぶ」という現在地は決まっているため、工程 1（素材選定）を
+    ``current`` とし、工程 2〜6 は一本道でまだ進めない ``locked`` として返す。
+    これは表示の導出だけであり、``LineState`` の生成条件（区間確定まで
+    ``LineState`` を作らない永続化の意味）は変えない。
+    ``LineStage.RESERVED`` は既存 ``render_stage_bar`` の分岐と同様に全工程を
+    ``done`` として扱う。
+    """
+    if current_stage is None:
+        return tuple(
+            LineStepperItem(
+                index=index,
+                stage=stage,
+                label=STAGE_LABELS[stage],
+                status="current" if index == 1 else "locked",
+            )
+            for index, stage in enumerate(STAGES, start=1)
+        )
+    current = stage_number(current_stage)
+    reserved = current_stage == LineStage.RESERVED
+    items: list[LineStepperItem] = []
+    for index, stage in enumerate(STAGES, start=1):
+        status: StepStatus
+        if index < current or reserved:
+            status = "done"
+        elif index == current:
+            status = "current"
+        else:
+            status = "locked"
+        items.append(
+            LineStepperItem(index=index, stage=stage, label=STAGE_LABELS[stage], status=status)
+        )
+    return tuple(items)
+
+
+def line_next_action_text(current_stage: LineStage | None) -> str:
+    """サイドバー「次にやること」の文言を導出する。
+
+    サイドバーは全ページで描画されるため、「〇〇タブで」のような特定画面を
+    前提にした表現は使わない。ライン未開始（``current_stage is None``）でも
+    行き止まりを作らず、最初の一歩を案内する。
+    """
+    if current_stage is None:
+        return "素材を選び、区間を決める"
+    return NEXT_ACTIONS[current_stage]
+
+
 def choose_preview_mode(
     *,
     output_available: bool,

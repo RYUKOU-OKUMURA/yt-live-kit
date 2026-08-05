@@ -131,22 +131,30 @@ def test_choose_preview_mode_has_four_explicit_states(
     ) == expected
 
 
-def test_stage_bar_renders_six_stages_and_current_marker() -> None:
-    @contextmanager
-    def container(*_args: object, **_kwargs: object):
-        yield
-
+def test_sidebar_stepper_replaces_horizontal_badge_bar() -> None:
+    """U9-6: 横並び st.badge 表示は廃止し、サイドバーの縦ステッパーへ一本化する."""
+    state = create_line_state("video-1", "clip-1", "a" * 64).model_copy(
+        update={"current_stage": LineStage.TELOP_REVIEW}
+    )
     with (
-        patch("yt_live_kit.ui.components.shorts_line.st.container", side_effect=container),
-        patch("yt_live_kit.ui.components.shorts_line.st.badge") as badge,
+        patch.object(shorts_line.st, "markdown") as markdown,
+        patch.object(shorts_line.st, "caption") as caption,
+        patch.object(shorts_line.st, "write"),
+        patch.object(shorts_line.st, "badge") as badge,
     ):
-        shorts_line.render_stage_bar(LineStage.TELOP_REVIEW)
+        shorts_line.render_compact_line_status(state, None)
 
-    assert badge.call_count == 6
-    labels = [call.args[0] for call in badge.call_args_list]
-    assert labels[0].endswith("完了")
-    assert "3. テロップ確認・進行中" in labels
-    assert labels[-1].endswith("待機中")
+    badge.assert_not_called()
+    markdowns = [call.args[0] for call in markdown.call_args_list]
+    assert any("✅　1　素材選定" in value for value in markdowns)
+    assert any("✅　2　区間決定" in value for value in markdowns)
+    assert any("◉　3　テロップ確認" in value and "← 今" in value for value in markdowns)
+    assert any("🔒　4　生成" in value for value in markdowns)
+    assert any("🔒　5　最終確認" in value for value in markdowns)
+    assert any("🔒　6　予約" in value for value in markdowns)
+    captions = [call.args[0] for call in caption.call_args_list]
+    # 接続線は記号側へ寄せるための空白を持つ（U9-6 追加修正）。
+    assert captions.count(" │") == 5
 
 
 def test_human_confirmation_does_not_return_after_edit_and_revert() -> None:
@@ -422,7 +430,6 @@ def test_mixed_handoff_preselects_order_and_does_not_force_long_cut(
     session_state: dict[str, object] = {}
     with (
         patch.object(shorts_line, "resolve_active_line_read_only", return_value=None),
-        patch.object(shorts_line, "render_stage_bar"),
         patch.object(shorts_line, "render_short_cut_section") as cut,
         patch.object(shorts_line.st, "session_state", session_state),
         patch.object(shorts_line.st, "subheader"),
@@ -643,9 +650,25 @@ def test_sidebar_is_display_only_and_shows_daily_progress(tmp_path: Path) -> Non
     ):
         shorts_line.render_sidebar_line_context("video-1", settings)
 
-    markdown.assert_called_once_with("**作成中のショート**")
-    assert any("作成中のラインはありません" in call.args[0] for call in caption.call_args_list)
-    assert any("本日のライン完了 1／3" in call.args[0] for call in write.call_args_list)
+    markdowns = [call.args[0] for call in markdown.call_args_list]
+    captions = [call.args[0] for call in caption.call_args_list]
+    writes = [call.args[0] for call in write.call_args_list]
+    assert markdowns[0] == "**作成中のショート**"
+    # ライン未開始でも行き止まりにせず、最初の一歩を示す（U9-6）。
+    assert "まだ開始していません" in captions
+    # LineState は未作成でも、工程 1（素材選定）は現在地として current 表示する。
+    assert any("◉　1　素材選定" in value and "← 今" in value for value in markdowns)
+    assert any("🔒　2　区間決定" in value for value in markdowns)
+    assert any("🔒　3　テロップ確認" in value for value in markdowns)
+    assert any("🔒　4　生成" in value for value in markdowns)
+    assert any("🔒　5　最終確認" in value for value in markdowns)
+    assert any("🔒　6　予約" in value for value in markdowns)
+    assert not any("✅" in value or "○" in value for value in markdowns)
+    assert writes == [shorts_line.line_next_action_text(None)]
+    # サイドバーは全ページで描画されるため、特定画面（タブ名）を前提にしない。
+    assert writes == ["素材を選び、区間を決める"]
+    assert "タブ" not in writes[0]
+    assert "本日 1／3　・　要対応 2 件" in captions
     button.assert_not_called()
     assert session_state == {"unrelated": "keep"}
 
@@ -667,7 +690,6 @@ def test_main_line_double_render_keeps_legacy_line_pointer_and_session_unchanged
     with (
         patch.object(shorts_line.st, "session_state", session_state),
         patch.object(shorts_line, "resolve_active_line") as mutating_resolver,
-        patch.object(shorts_line, "render_stage_bar"),
         patch.object(shorts_line, "_render_line_recovery_actions"),
         patch.object(shorts_line.st, "error"),
     ):
@@ -690,7 +712,7 @@ def test_sidebar_labels_target_stage_next_and_attention() -> None:
     state = create_line_state("video-1", "clip-1", "a" * 64)
     daily = DailyLineSummary(completed_count=1, needs_attention_count=2)
     with (
-        patch.object(shorts_line.st, "markdown"),
+        patch.object(shorts_line.st, "markdown") as markdown,
         patch.object(shorts_line.st, "caption") as caption,
         patch.object(shorts_line.st, "write") as write,
     ):
@@ -700,18 +722,13 @@ def test_sidebar_labels_target_stage_next_and_attention() -> None:
             title="重要ポイント",
         )
 
+    markdowns = [call.args[0] for call in markdown.call_args_list]
     captions = [call.args[0] for call in caption.call_args_list]
     writes = [call.args[0] for call in write.call_args_list]
     assert "対象ショート: 重要ポイント" in captions
-    assert any(value.startswith("次: ") for value in captions)
-    assert "要対応 2 件" in captions
-    assert any(
-        value.startswith(
-            f"工程 {shorts_line.stage_number(state.current_stage)}／6"
-        )
-        for value in writes
-    )
-    assert "本日のライン完了 1／3" in writes
+    assert any("← 今" in value for value in markdowns)
+    assert "本日 1／3　・　要対応 2 件" in captions
+    assert writes == [shorts_line.line_next_action_text(state.current_stage)]
 
 
 def test_sidebar_generation_preview_has_no_duplicate_location_guidance(
