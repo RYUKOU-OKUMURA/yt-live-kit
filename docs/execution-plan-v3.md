@@ -2138,7 +2138,9 @@ data/{video_id}/ ...
 
 **目的:** `docs/references/u6-short-production-line-v3.2.png` の視覚階層へ、R2 で整理した表示・session state・永続 state の境界を壊さずに近づける。第 1 弾は Streamlit ネイティブテーマ（案 A+）のみを `.streamlit/config.toml` で適用し Python コードを 0 行に保つ。第 2 弾はサイドバー・ヘッダ・KPI カード・ワークスペース切替・6 工程ステッパーの shell 刷新を行う。テロップ編集器の刷新（第 3 弾）は本フェーズに含めず、T1（テロップ行時刻同期）の `T1-4` に合流させる。
 
-**フェーズ状態:** [ ] 未着手
+**フェーズ状態:** [ ] 進行中（U9-2 / U9-3 / U9-6 完了）
+
+**残りの着手順（2026-08-05 決定）:** U9-1 / U9-4 / U9-5 / U9-7〜U9-9 の視覚仕上げと U9-10〜U9-12 の掃除は、`U10`（ワークフロー導線の整理）の完了後に再開する。ユーザーの受け入れ基準が「ワークフローとして何をやればいいかが分かりやすくなること」であり、導線構造が変わると視覚仕上げの対象自体が変わるためである。
 
 **前提・制約:** R2（`docs/ui-refactor-review-2026-08-04.md`）が 2026-08-04 に完了し、旧結果混入・session snapshot 復元・draft revision・親候補 index 依存・予約可能件数不一致の P1 / P2 は解消済みであることを前提とする。U6 は完了・M15 達成済みで、現在の回帰基準は `1694 tests collected` である。導入版 Streamlit は 1.60.0、`pyproject.toml` の宣言は `streamlit>=1.59.0`。第 2 弾で限定 CSS 注入（案 B）の要否を判断するのは、第 1 弾（A+）適用後に残差を実測してからとする。第 3 弾（テロップ編集器の刷新）は独立フェーズとせず、`docs/execution-plan-v3.md:1836` / `:1849` の指示どおり T1 contract 確定後の `T1-4` へ合流させ、本フェーズでは新規タスク ID を振らない。
 
@@ -2184,6 +2186,51 @@ data/{video_id}/ ...
 - [ ] 全件 `uv run pytest` が変更前の基準から回帰せずに通る
 
 **コミット境界:** テーマ適用（第 1 弾、`.streamlit/config.toml` のみ）を最初のコミットとする。AppTest 視覚回帰スモークの追加を次のコミットとする。shell 刷新（第 2 弾）を独立コミットとする。デッドコード（`_render_clips` の削除）と `shorts_queue.py` の index 依存 key 修正の掃除は最後のコミットに分ける。`ui/pages/` の `__pycache__` は git 管理外でコミット差分が発生しないため、この掃除コミットの対象に含めない。テロップ編集器の刷新（第 3 弾）は `T1-4` に合流するため、本フェーズのコミットには含めない。
+
+---
+
+### U10: ワークフロー導線の整理（3 ワークスペースの操作回数・時間軸・表示語彙）
+
+**目的:** U9 完了後に実データ（`hPeRSA9YVIM` / `clip_001`）で 3 ワークスペースを実機操作して発見した、FR-33 の「毎回選ばせない」「行き止まりゼロ」に反する導線上の欠陥を解消する。U9 が「見た目」の刷新であるのに対し、本フェーズは**情報構造と操作回数**の是正であり、テーマ・配色・形状には手を入れない。
+
+**フェーズ状態:** [ ] 未着手
+
+**前提・制約:** U9 の第 1 弾（テーマ適用）・AppTest 視覚回帰スモーク・サイドバー縦ステッパー（U9-2 / U9-3 / U9-6）が完了済みであることを前提とする。U9 の残り（U9-1 / U9-4 / U9-5 / U9-7〜U9-9 の視覚仕上げ、U9-10〜U9-12 の掃除）は本フェーズより後に回す。導線構造が変わると視覚仕上げの対象自体が変わるため、順序を逆にしない。現在の回帰基準は U9 完了時点の全件 `uv run pytest` である。
+
+**発見の根拠:** 2026-08-05 に Playwright MCP で実機操作して確認した。判断ログは `docs/dev-journal/2026-08-05-ui-visual-refresh-and-workflow-legibility.md` にある。AppTest は DOM / CSS を持たず、文言の文脈依存・状態表示の矛盾・同一対象の重複選択といった構造問題を検出できないため、本フェーズの受け入れは**実機ブラウザ操作を必須**とする。テストの全件通過をもって完了と判断しない。
+
+**変更ファイル範囲:** `src/yt_live_kit/ui/components/shorts_line.py`、`src/yt_live_kit/ui/components/short_cut.py`、`src/yt_live_kit/ui/components/upload.py`、`src/yt_live_kit/ui/views/video_detail.py`、および必要に応じて `src/yt_live_kit/ui/session_keys.py` / `src/yt_live_kit/ui/view_models/`。対応する既存テストは `tests/test_ui_shorts_line.py`、`tests/test_ui_short_cut.py`、`tests/test_ui_upload.py`、`tests/test_ui_video_detail_page.py`、`tests/test_ui_visual_smoke.py`。`services/`、`models/`、`docs/requirements-v3.md`、production `data/`、`benchmarks/t1/`（T1-1 の担当範囲）は read-only とする。
+
+**追加の不変条件:** U9 の「追加の不変条件」を全項目継承する。加えて本フェーズ固有に以下を守る。
+
+- `unsafe_allow_html` 0 件・`st.data_editor` 0 件の方針を崩さない
+- `st.segmented_control` による 3 ワークスペースの conditional rendering を維持し、`st.tabs` へ置換しない
+- 選択導線の統合は**表示層の統合に限る**。`LineState` の生成条件・遷移判定・永続化の意味と、`artifact_ref` / `artifact_fingerprint` / `used_range_cue_digests` の lineage 検証ロジックを変更しない
+- 内部識別子を「表示しない」のではなく「主導線から折り畳みへ移す」。lineage 不一致時のエラー表示に含まれる識別子は診断に必要なため残す
+- 関連動画の確認待ち追跡は再起動後・manifest 消失後も残す設計意図（`upload.py:906-908` のコメント）を壊さない。現在の動画に無関係な項目を消すのではなく、**どの動画の作業かが表示から判別できる**ようにする
+
+**作業:**
+
+- [ ] U10-1. ショート作成ワークスペースの 3 重選択を解消する。同一クリップが `shorts_line.py:1263` の `st.multiselect`「ショート作成対象（選択順）」→ `shorts_line.py:1286` の `st.radio`「今回作る候補（1 本ずつ進めます）」→ `short_cut.py:1235` の `st.radio`「刻む候補」と、名前の違う 3 つの UI で 3 回選ばされている。とくに `shorts_line.py:1297` の `render_short_cut_section(embedded=True)` は選択済みの 1 件だけを渡しているため、「刻む候補」は**選択肢 1 個のラジオ**になっている。embedded 経路では親候補の再選択 UI を描かず、選択済み候補を確定表示に変える。素材候補ワークスペースからの引き継ぎ（`video_detail.py:998-1005`）で既に対象が決まっている場合に、ショート作成ワークスペースで選び直しを強制しない
+- [ ] U10-2. 公開・投稿ワークスペースの時間軸を分離する。`video_detail.py:1012-1063` は「元動画の概要欄」（ラインと無関係）・「ショートの予約投稿」（工程 6）・関連動画の Studio 確認（投稿後フォローアップ）を 1 画面に同居させている。加えて `upload.py:908` の `_render_related_video_summary_panel(settings)` は `video_id` を受け取らない全投稿横断パネルであるため、別動画（実機確認では `gZAoIbp4lBc`）の確認待ちが現在の動画の画面に混入する。さらに `upload.py:215-253` の `_render_related_video_status` が同じ確認タスクを重複表示し、片方が「確認待ち一覧は上部パネルをご覧ください」と自己言及している。工程順に沿った区分と、どの動画の作業かの明示、重複パネルの一本化を行う
+- [ ] U10-3. 内部識別子を主導線から「詳細・再生成」相当の折り畳みへ移す。`short_cut.py:1021` と `shorts_line.py:169` の `st.code(json.dumps(payload, ...))` は `artifact_fingerprint` と `used_range_cue_digests`（SHA-256）を含む生 JSON をメイン導線にそのまま出している。`upload.py:178` の投稿 operation ID、`upload.py:238-239` の元動画 ID / Shorts video ID、`upload.py:281` の operation 表示も同様。素材候補ワークスペースでは `video_detail.py:895-913` の `_candidate_provenance_text` が "candidate provenance: coarse VTT（lineage 未確認）" という内部用語をそのまま表示している。人が読んで意味の分かる 1 行へ置き換え、識別子そのものは折り畳みへ格納する
+- [ ] U10-4. U10-1〜U10-3 の各変更を Playwright MCP で実機確認する。対象は実データの動画 1 本を素材候補 → ショート作成 → 公開・投稿と通す 1 周。ポートは 8501 を避けて 8502 等を使う（8501 は T1-1 の人手アノテーション UI が使用している可能性がある）
+
+**Done 条件:**
+
+- [ ] 同一クリップを主導線で選ばせる回数が 1 回になっている。素材候補ワークスペースで選択済みの場合、ショート作成ワークスペースで選び直しを強制されない
+- [ ] 選択肢が 1 個しかない選択 widget が主導線に存在しない
+- [ ] 公開・投稿ワークスペースで、現在開いている動画の作業と他の動画の作業が表示上区別できる。同じ関連動画確認タスクが 2 箇所に重複表示されない。「上部パネルをご覧ください」のような自己言及の案内が残っていない
+- [ ] 主導線に SHA-256 fingerprint / cue digest / operation ID / 生 JSON / "provenance"・"lineage" などの内部用語が露出していない。これらは折り畳み内、または lineage 不一致時のエラー表示にのみ現れる
+- [ ] 関連動画の確認待ち追跡が、再起動後・最新 manifest から clip が消えた後も引き続き到達できる（`upload.py:906-908` の設計意図が維持されている）
+- [ ] `LineState` の生成条件・遷移判定・永続化と lineage 検証ロジックに差分が無い
+- [ ] U9 の「ワークフローの可読性」受け入れ条件（現在地の一目特定・次の一手が常に 1 つ・進めない理由が伝わる・矛盾しない・二重表示しない）が引き続き満たされている
+- [ ] `unsafe_allow_html` 0 件・`st.data_editor` 0 件・`st.segmented_control` の conditional rendering が維持されている
+- [ ] R2 §5 の安全境界（transaction 順序、確認 dialog、worker thread からの `st.*` 禁止、`st.tabs` への単純置換禁止）に変更が無い
+- [ ] **実機ブラウザ（Playwright MCP）で実データ 1 周を操作して確認済みである。** テストの全件通過のみをもって完了としない
+- [ ] 全件 `uv run pytest` が変更前の基準から回帰せずに通る
+
+**コミット境界:** U10-1（3 重選択の解消）を最初のコミットとする。U10-2（公開・投稿の時間軸分離と他動画混入の解消）を次のコミットとする。U10-3（内部識別子の格納）を最後のコミットとする。実機確認（U10-4）は各コミット前に行い、単独のコミットにはしない。
 
 ---
 
