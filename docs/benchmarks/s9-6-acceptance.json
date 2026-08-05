@@ -322,18 +322,104 @@
   "pending": [
     "case2/3 opening trim後preview",
     "case4 internal gap removal後preview",
-    "final shortに致命的無発話なし確認",
-    "exact gold/glossary/cue anchor監査、またはS9-6で採用可能な明示的waiver"
+    "final shortに致命的無発話なし確認"
   ],
   "decision": {
     "verdict": "no_go",
     "reason": [
-      "single report は comparator不足かつ gold_audit_status=provisional のため no_go",
-      "canonical evidence の gold は unverified_provisional で、operational transcript reference に限定される",
       "case2/3/4 の編集後 preview と final short の致命的無発話確認が未完了",
       "transcripts が概ね許容可能でも、それだけでは Go に不十分",
-      "Whisper timestamp による境界の自動確定は false"
+      "Whisper timestamp による境界の自動確定は false",
+      "gold は unverified_provisional のままで、用途は operational transcript reference に限定される（2026-08-06 の明示 waiver により、この項目自体は S9-6 の operational 判定を阻害しない）",
+      "T1-1 が No-Go / fallback-only のため AC-40 は Go の場合でも未完了のまま残す"
     ],
     "self_approval": false
+  },
+  "ac40": false,
+  "gold_audit_waiver": {
+    "granted": true,
+    "granted_by": "user",
+    "granted_date": "2026-08-06",
+    "scope": "fixture_exact_gold_glossary_cue_anchor",
+    "basis": "S9-1 protocol が gate を benchmark_quality_gate と effective_operational_gate の2 namespace へ分離済みで、fixture exact gold は前者の品質認定にのみ必要、後者の operational Go には不要と機械検証されている",
+    "validators": [
+      "validate_fixture_benchmark_quality_gate_v1",
+      "validate_effective_operational_gate_v1"
+    ],
+    "does_not_claim": [
+      "s9-1-cases.json の gold_audit_status を audited へ変更すること",
+      "文字・句読点 exactness の承認",
+      "glossary の個別 exact approval",
+      "cue anchor の正確なミリ秒承認"
+    ],
+    "benchmark_quality_gate_status": "unmet_and_remains_unmet",
+    "effective_operational_gate_status": "not_blocked_by_this_item",
+    "note": "waiver は exact gold 未承認という事実を維持したまま、S9-6 の operational 判定から当該条件を外す明示記録である"
+  },
+  "t1_disposition": {
+    "t1_1_verdict": "no_go",
+    "t1_1_mode": "fallback_only",
+    "t1_2_to_t1_5_started": false,
+    "t1_5_component_acceptance_available": false,
+    "s9_6_proceeds_without_t1_5_evidence": true,
+    "ac40_updatable": false,
+    "reason": "T1-1 の group 別 gate が全群 FAIL のため T1-2 以降は着手条件を満たさず、T1-5 の immutable evidence は生成されない。S9-6 は T1 を fallback-only 記録のまま formal phase acceptance を行い、AC-40 は未完了のまま残す"
+  },
+  "post_merge_reverification": {
+    "date": "2026-08-06",
+    "merge_commit": "f9aa2b7",
+    "merged_branch": "codex/t1-1-timing-spike",
+    "full_pytest": "1828 passed, 2 skipped",
+    "focused_s9_selection": "253 passed, 1577 deselected",
+    "git_diff_check": "clean",
+    "production_hash_unchanged": {
+      "s9-1-production-hash-after.json": "15/15 files unchanged",
+      "t1-1-production-hash-after.json": "15/15 files unchanged"
+    },
+    "src_changed_by_merge": false,
+    "note": "T1-1 統合は benchmarks / docs / tests のみで src を変更しない。S9 の production 経路は非回帰"
+  },
+  "benchmark_audio_cache_status": {
+    "checked_date": "2026-08-06",
+    "path": "/Users/ryukouokumura/Library/Caches/yt-live-kit/s9-benchmark",
+    "exists": false,
+    "consequence": "音声 fixture の再生成なしには byte 単位の benchmark 再実行ができない",
+    "mitigation": "再現要件は 2026-08-04 の run id q5-cold-s9-6-repro と canonical fixture / q5 run manifest fingerprint、および command_argv_by_case の記録で満たす",
+    "recorded_evidence_still_valid": true
+  },
+  "preview_material_availability": {
+    "checked_date": "2026-08-06",
+    "cases": [
+      {
+        "case_id": "lb4-clip002-short-proper-nouns",
+        "video_id": "LB4px1wRFnY",
+        "preview_required": false,
+        "source_av_mp4_present": true,
+        "transcript_artifact_present": true
+      },
+      {
+        "case_id": "hpe-audio-variation",
+        "video_id": "hPeRSA9YVIM",
+        "preview_required": true,
+        "source_av_mp4_present": false,
+        "local_source_note": "clips/source/hPeRSA9YVIM.f299.mp4 は video-only で HF4 契約により source として採用不可",
+        "transcript_artifact_present": true
+      },
+      {
+        "case_id": "cgal-proper-nouns",
+        "video_id": "CGalA8SISPE",
+        "preview_required": true,
+        "source_av_mp4_present": false,
+        "transcript_artifact_present": false
+      },
+      {
+        "case_id": "mkw-long-local-asr",
+        "video_id": "mKwn-93gg90",
+        "preview_required": true,
+        "source_av_mp4_present": false,
+        "transcript_artifact_present": false
+      }
+    ],
+    "blocking": "case2/3/4 の編集後 preview には音声付き source の再取得が必要で、case3/4 は選択区間の Whisper artifact 生成も必要"
   }
 }
