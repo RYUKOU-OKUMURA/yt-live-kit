@@ -63,4 +63,4 @@
 - **U9 最終判断:** 限定 CSS は不採用とし、`unsafe_allow_html` 0 件を維持する。U9-9 は U9-6 の native 縦ステッパーへ吸収済みとして完了扱いにする。
 - ヘッダ・KPI・ワークスペース切替は native Material icon、`st.metric`、`st.segmented_control` で仕上げる。完全な下線タブ表現に届かない点は、安全な条件描画を守るための意図的な残差とする。
 - テロップ表と赤い波下線は U9 へ追加せず、時刻同期契約と合わせて T1-4 で扱う。
-- 全件テストによる既知の production data mtime 副作用は元の値へ復元し、production data が実質不変であることを確認した。U9 は `1742 passed / 2 skipped` で完了とする。
+- 全件テストによる既知の production data mtime 副作用は元の値へ復元し、production data が実質不変であることを確認した。レビューで見つかった重複 candidate ID の widget key 衝突も既存 service gate により描画前に fail closed とし、U9 は `1743 passed / 2 skipped` で完了とする。
