@@ -496,10 +496,10 @@ def _render_snapshot_form(
     with st.form(f"{prefix}_form"):
         st.markdown("**生成する候補を選択**")
         selected: list[ClipCandidate | HighlightSegment] = []
-        for index, candidate in enumerate(candidates):
+        for candidate in candidates:
             if st.checkbox(
                 _candidate_label(candidate),
-                key=f"{prefix}_{source}_{index}",
+                key=f"{prefix}_{source}_{candidate.id}",
             ):
                 selected.append(candidate)
         mode = st.segmented_control(

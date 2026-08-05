@@ -653,40 +653,6 @@ def _render_chapters(
     )
 
 
-def _render_clips(
-    video: ProcessedVideo,
-    result: PipelineResult,
-    *,
-    busy: bool,
-    settings: Settings,
-    has_highlights: bool,
-) -> None:
-    st.subheader("3. 切り抜き候補")
-    if result.clips_error:
-        st.warning(
-            "切り抜き候補の生成に失敗しましたが、他の成果物は利用できます。\n\n"
-            f"{result.clips_error}"
-        )
-    if result.clips_candidates:
-        for candidate in result.clips_candidates:
-            with st.container(border=True):
-                st.markdown(f"**{candidate.title}**")
-                st.caption(
-                    f"{candidate.start} → {candidate.end}（{candidate.duration_sec} 秒）"
-                )
-                st.write(candidate.reason)
-    elif not result.clips_error:
-        st.info("切り抜き候補はまだ生成されていません。")
-
-    _render_regenerate_control(
-        video,
-        target="clips",
-        complete=video.has_clips or bool(result.clips_candidates) or has_highlights,
-        busy=busy,
-        settings=settings,
-    )
-
-
 def _transfer_key(video_id: str, source: str) -> str:
     return candidate_transfer_key(video_id, source)
 

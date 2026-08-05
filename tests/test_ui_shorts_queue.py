@@ -28,6 +28,7 @@ from yt_live_kit.ui.components.shorts_queue import (
     _confirm_queue_overwrite_dialog,
     _render_current_result,
     _render_result,
+    _render_snapshot_form,
     _render_target_editor,
     _state_key,
     _start_queue_job,
@@ -151,6 +152,52 @@ def _queue_result(
         failure_count=sum(item.status == "failed" for item in items),
         manifest_path=tmp_path / "manifest.json",
     )
+
+
+def test_snapshot_selection_keys_follow_source_and_candidate_id_after_reorder():
+    first = _clip()
+    second = first.model_copy(update={"id": "clip_002", "title": "候補 2"})
+    with (
+        patch(
+            "yt_live_kit.ui.components.shorts_queue.st.form",
+            return_value=nullcontext(),
+        ),
+        patch("yt_live_kit.ui.components.shorts_queue.st.markdown"),
+        patch(
+            "yt_live_kit.ui.components.shorts_queue.st.checkbox",
+            return_value=False,
+        ) as checkbox,
+        patch("yt_live_kit.ui.components.shorts_queue.st.segmented_control"),
+        patch("yt_live_kit.ui.components.shorts_queue.st.selectbox"),
+        patch(
+            "yt_live_kit.ui.components.shorts_queue.st.form_submit_button",
+            return_value=False,
+        ),
+    ):
+        _render_snapshot_form(
+            video_id="video-a",
+            source="clips",
+            candidates=(first, second),
+        )
+        _render_snapshot_form(
+            video_id="video-a",
+            source="clips",
+            candidates=(second, first),
+        )
+
+    prefix = _state_key("video-a", "selection")
+    assert [call.kwargs["key"] for call in checkbox.call_args_list] == [
+        f"{prefix}_clips_{first.id}",
+        f"{prefix}_clips_{second.id}",
+        f"{prefix}_clips_{second.id}",
+        f"{prefix}_clips_{first.id}",
+    ]
+    assert [call.args[0] for call in checkbox.call_args_list] == [
+        "0:00:00 → 0:00:10 / 10 秒 / 候補",
+        "0:00:00 → 0:00:10 / 10 秒 / 候補 2",
+        "0:00:00 → 0:00:10 / 10 秒 / 候補 2",
+        "0:00:00 → 0:00:10 / 10 秒 / 候補",
+    ]
 
 
 def test_start_queue_stores_job_id_by_video_and_updates_global_status():
