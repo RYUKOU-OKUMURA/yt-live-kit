@@ -2151,8 +2151,9 @@ data/{video_id}/ ...
 **作業:**
 
 - [ ] U9-1. `.streamlit/config.toml` に `[theme]` セクションを追加し、23 オプションのうちリファレンス画像に合わせる配色・文字・形状・チャート項目を設定する。Python コードは変更しない
-- [ ] U9-2. `[theme] base = "dark"` でダークを既定に固定し、`[theme.sidebar]` でサイドバーを本体と別配色にする。`[theme.light]` / `[theme.dark]` は `[theme]` を拡張する mode 別上書きであり定義すると mode 追従が前提になるため、ダーク前提のリファレンスに合わせる本フェーズでは定義しない
-- [ ] U9-3. 新規 `tests/test_ui_visual_smoke.py` を追加し、`streamlit.testing` / `AppTest` でライブラリ・詳細・設定ページを起動し、例外なく描画できることを検証する。第 2 弾着手前の安全網として先に導入する
+- [x] U9-2. `[theme] base = "dark"` でダークを既定に固定し、`[theme.sidebar]` でサイドバーを本体と別配色にする。`[theme.light]` / `[theme.dark]` は `[theme]` を拡張する mode 別上書きであり定義すると mode 追従が前提になるため、ダーク前提のリファレンスに合わせる本フェーズでは定義しない
+- [x] U9-3. 新規 `tests/test_ui_visual_smoke.py` を追加し、`streamlit.testing` / `AppTest` でライブラリ・詳細・設定ページを起動し、例外なく描画できることを検証する。第 2 弾着手前の安全網として先に導入する
+  - **既知の負債（2026-08-05）:** `st.Page(callable, url_path=...)` に `AppTest.switch_page` は使えず（ファイルパス専用）、`query_params` でもページが切り替わらないことを実測で確認した。`StreamlitPage._script_hash` と同じ `calc_hash(url_path)` を private 属性 `AppTest._page_hash` へ設定している。Streamlit 1.60.0 の内部実装依存だが、契約が壊れた場合は既定ページへ落ちてページ固有のアサーションが失敗するため、黙って通過することはない
 - [ ] U9-4. A+ 適用後の実装とリファレンス画像の残差を実測し、差分一覧を更新する。丸数字ステッパー + 接続線 + 鍵アイコン、赤い波下線、KPI カード内の左アイコン配置など「形」の差分を確認する
 - [ ] U9-5. U9-4 の残差実測を踏まえ、限定 CSS 注入（案 B）の要否を判断する。ステッパーを `st.badge` のまま妥協する選択肢を含めて判断を記録する
 - [x] U9-6. サイドバーに「作成中のショート」カード・進捗バー・日次カウンタを追加する。`shorts_line.py:947-966` の `st.write` / `st.caption` 実装を置き換える
