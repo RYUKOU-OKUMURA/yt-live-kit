@@ -1,2 +1,26 @@
 [server]
 address = "127.0.0.1"
+
+# U9-1 / U9-2: ショート生産ライン UI の視覚リファレンス
+# docs/references/u6-short-production-line-v3.2.png から実測した配色を適用する。
+# base = "dark" でダークを既定に固定する。[theme.light] / [theme.dark] は
+# [theme] を拡張する mode 別上書きであり、定義すると mode 追従が前提になるため、
+# ダーク前提のリファレンスに合わせる本フェーズでは定義しない。
+[theme]
+base = "dark"
+primaryColor = "#41BAEB"
+backgroundColor = "#0B1218"
+secondaryBackgroundColor = "#121B21"
+textColor = "#FFFFFF"
+linkColor = "#41BAEB"
+borderColor = "#282D32"
+baseRadius = "0.5rem"
+buttonRadius = "0.5rem"
+showWidgetBorder = true
+showSidebarBorder = true
+
+# サイドバーは本体よりわずかに暗く、縦の区切り線で分ける。
+[theme.sidebar]
+backgroundColor = "#0C1419"
+secondaryBackgroundColor = "#121B21"
+borderColor = "#282D32"
