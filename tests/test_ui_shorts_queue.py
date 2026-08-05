@@ -33,6 +33,7 @@ from yt_live_kit.ui.components.shorts_queue import (
     _state_key,
     _start_queue_job,
     _validate_overwrite_confirmation,
+    render_shorts_queue,
     start_or_confirm_line_generation,
 )
 
@@ -198,6 +199,35 @@ def test_snapshot_selection_keys_follow_source_and_candidate_id_after_reorder():
         "0:00:00 → 0:00:10 / 10 秒 / 候補 2",
         "0:00:00 → 0:00:10 / 10 秒 / 候補",
     ]
+
+
+def test_duplicate_candidate_ids_fail_closed_before_checkbox_rendering():
+    first = _clip()
+    duplicate = first.model_copy(update={"title": "重複候補"})
+    state: dict[str, object] = {}
+    with (
+        patch("yt_live_kit.ui.components.shorts_queue.st.session_state", state),
+        patch("yt_live_kit.ui.components.shorts_queue.st.divider"),
+        patch("yt_live_kit.ui.components.shorts_queue.st.markdown"),
+        patch(
+            "yt_live_kit.ui.components.shorts_queue.st.segmented_control",
+            return_value="clips",
+        ),
+        patch("yt_live_kit.ui.components.shorts_queue.st.checkbox") as checkbox,
+        patch("yt_live_kit.ui.components.shorts_queue.st.error") as error,
+    ):
+        render_shorts_queue(
+            video_id="video-a",
+            title="動画 A",
+            clip_candidates=(first, duplicate),
+            highlight_candidates=(),
+            settings=MagicMock(),
+        )
+
+    checkbox.assert_not_called()
+    error.assert_called_once()
+    assert "選択済み候補 ID が重複しています" in error.call_args.args[0]
+    assert _state_key("video-a", "snapshot") not in state
 
 
 def test_start_queue_stores_job_id_by_video_and_updates_global_status():

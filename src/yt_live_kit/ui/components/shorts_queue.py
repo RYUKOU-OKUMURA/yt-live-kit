@@ -925,6 +925,14 @@ def render_shorts_queue(
 
     snapshot = _snapshot(video_id)
     if snapshot is None:
+        try:
+            candidates = select_queue_candidates_by_id(
+                candidates,
+                tuple(candidate.id for candidate in candidates),
+            )
+        except ShortsQueueError as exc:
+            st.error(_safe_text(exc))
+            return
         _render_snapshot_form(
             video_id=video_id,
             source=source,
