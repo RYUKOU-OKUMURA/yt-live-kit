@@ -65,12 +65,14 @@ def test_acceptance_decision_is_fail_closed() -> None:
     assert decision["verdict"] == "no_go"
     assert decision["self_approval"] is False
     assert decision["reason"] == [
-        "single report は comparator不足かつ gold_audit_status=provisional のため no_go",
-        "canonical evidence の gold は unverified_provisional で、operational transcript reference に限定される",
-        "case2/3/4 の編集後 preview と final short の致命的無発話確認が未完了",
-        "transcripts が概ね許容可能でも、それだけでは Go に不十分",
+        "人 preview で選択区間音声の開始ずれ（−6.06〜−9.94 秒）に由来するテロップ時刻の不整合が実機で確認された。S9 中核成果物の欠陥であり非回帰ではない",
+        "final short の致命的無発話確認は未完了",
+        "hpe-audio-variation の編集後 preview は未実施",
         "Whisper timestamp による境界の自動確定は false",
+        "gold は unverified_provisional のままだが、2026-08-06 の明示 waiver により当該項目は operational 判定を阻害しない",
+        "T1-1 が No-Go / fallback-only のため AC-40 は未完了のまま残す",
     ]
+    assert evidence["ac40"] is False
 
 
 def test_fingerprints_are_complete_distinct_and_linked_to_s9_1() -> None:
@@ -230,8 +232,16 @@ def test_pending_and_case_outcomes_keep_human_gates_explicit() -> None:
         "case2/3 opening trim後preview",
         "case4 internal gap removal後preview",
         "final shortに致命的無発話なし確認",
-        "exact gold/glossary/cue anchor監査、またはS9-6で採用可能な明示的waiver",
     ]
+    # gold 監査は pending から外れているが、それは 2026-08-06 のユーザー承認
+    # waiver が明示記録されているからである。未承認のまま消えていないことを
+    # ここで固定する。exact gold 未承認という事実自体は維持される。
+    waiver = evidence["gold_audit_waiver"]
+    assert waiver["granted"] is True
+    assert waiver["granted_by"] == "user"
+    assert waiver["granted_date"] == "2026-08-06"
+    assert waiver["benchmark_quality_gate_status"] == "unmet_and_remains_unmet"
+    assert evidence["canonical_evidence"]["gold_audit_status"] == "unverified_provisional"
 
     assert tuple(item["case_id"] for item in evidence["case_outcomes"]) == CASE_IDS
     assert tuple(

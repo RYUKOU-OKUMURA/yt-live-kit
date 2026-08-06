@@ -1147,6 +1147,8 @@ def _source_metadata_for_artifact(
             {
                 "range": span.range.to_dict(),
                 "audio_input_fingerprint": span.audio_input_fingerprint,
+                "audio_route": span.audio_route,
+                "alignment": span.alignment,
                 "sample_rate": span.sample_rate,
                 "channel": span.channel,
                 "codec": span.codec,

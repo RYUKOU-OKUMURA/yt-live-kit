@@ -1380,3 +1380,288 @@ def test_prepare_audio_span_does_not_fallback_to_video_format(monkeypatch, tmp_p
     monkeypatch.setattr("yt_live_kit.services.ytdlp._run_ytdlp", no_audio_format)
     with pytest.raises(AudioSpanError, match="audio-only"):
         prepare_audio_span("IJvd6k6ZmUo", (1_000, 2_000), settings)
+
+
+def _fake_source_toolchain(
+    tmp_path: Path,
+    *,
+    misalign_reference_ms: int = 0,
+    duration_ms: int = 3_600_000,
+    stream_types: tuple[str, ...] = ("video", "audio"),
+) -> tuple[Path, Path]:
+    """accurate seek 切り出しと正規化の両方を扱う fake FFmpeg / ffprobe を作る.
+
+    切り出しは絶対 sample 位置だけで決まる決定的な波形を返すため、anchor が
+    違っても内容が一致する。``misalign_reference_ms`` を与えると別 anchor 側
+    だけがずれ、開始位置検証の失敗経路を再現できる。
+    """
+
+    bin_dir = tmp_path / "source tools"
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    ffmpeg = bin_dir / "ffmpeg"
+    ffmpeg.write_text(
+        f'''#!{sys.executable}
+import re
+import sys
+import wave
+from pathlib import Path
+
+args = sys.argv[1:]
+if "-version" in args:
+    raise SystemExit(0)
+output_path = Path(args[-1])
+audio_filter = args[args.index("-af") + 1]
+cut = re.search(r"atrim=start_sample=(\\d+):end_sample=(\\d+)", audio_filter)
+if cut is None:
+    prefix = "aresample=16000,atrim=end_sample="
+    if not audio_filter.startswith(prefix):
+        raise AssertionError(audio_filter)
+    requested_frames = int(audio_filter[len(prefix):])
+    input_path = Path(args[args.index("-i") + 1])
+    with wave.open(str(input_path), "rb") as source:
+        source_frames = source.getnframes()
+        source_bytes = source.readframes(source_frames)
+    payload = bytearray()
+    for index in range(requested_frames):
+        start = min(index, source_frames - 1) * 2
+        payload.extend(source_bytes[start:start + 2] or b"\\x00\\x00")
+else:
+    start_sample = int(cut.group(1))
+    end_sample = int(cut.group(2))
+    seconds, _, milliseconds = args[args.index("-ss") + 1].partition(".")
+    seek_ms = int(seconds) * 1000 + int(milliseconds or 0)
+    shift_ms = {misalign_reference_ms} if start_sample else 0
+    base = (seek_ms + shift_ms) * 16 + start_sample
+    payload = bytearray()
+    for index in range(end_sample - start_sample):
+        value = ((base + index) * 7919) % 20001 - 10000
+        payload.extend(int(value).to_bytes(2, "little", signed=True))
+with wave.open(str(output_path), "wb") as output:
+    output.setnchannels(1)
+    output.setsampwidth(2)
+    output.setframerate(16000)
+    output.writeframes(bytes(payload))
+''',
+        encoding="utf-8",
+    )
+    ffmpeg.chmod(0o755)
+
+    streams = ",".join(f'{{"codec_type":"{item}"}}' for item in stream_types)
+    ffprobe = bin_dir / "ffprobe"
+    ffprobe.write_text(
+        "#!/bin/sh\n"
+        f'printf \'{{"streams":[{streams}],'
+        f'"format":{{"duration":"{duration_ms / 1000:.3f}"}}}}\\n\'\n',
+        encoding="utf-8",
+    )
+    ffprobe.chmod(0o755)
+    return ffmpeg, ffprobe
+
+
+def _write_local_source(data_dir: Path, video_id: str) -> Path:
+    source_dir = data_dir / video_id / "clips" / "source"
+    source_dir.mkdir(parents=True, exist_ok=True)
+    source_path = source_dir / f"{video_id}.mp4"
+    source_path.write_bytes(b"fake source container")
+    return source_path
+
+
+def test_prepare_audio_span_prefers_local_source_with_accurate_seek(
+    monkeypatch,
+    tmp_path,
+):
+    data_dir = tmp_path / "data"
+    ffmpeg_path, _ = _fake_source_toolchain(tmp_path)
+    settings = Settings(
+        data_dir=data_dir,
+        ytdlp_path="yt-dlp-test",
+        ffmpeg_path=str(ffmpeg_path),
+    )
+    source_path = _write_local_source(data_dir, "IJvd6k6ZmUo")
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("ローカル source があるとき yt-dlp は呼ばない")
+
+    monkeypatch.setattr("yt_live_kit.services.ytdlp._run_ytdlp", fail_if_called)
+    real_subprocess_run = subprocess.run
+    cut_commands: list[list[str]] = []
+
+    def spy_subprocess_run(*args, **kwargs):
+        command = args[0]
+        if isinstance(command, list) and "-accurate_seek" in command:
+            cut_commands.append(list(command))
+        return real_subprocess_run(*args, **kwargs)
+
+    monkeypatch.setattr("yt_live_kit.services.ytdlp.subprocess.run", spy_subprocess_run)
+
+    result = prepare_audio_span("IJvd6k6ZmUo", (1_179_000, 1_195_000), settings)
+
+    assert result.cache_hit is False
+    assert result.audio_route == "local_source_accurate_seek"
+    assert result.alignment["verified"] is True
+    assert result.alignment["method"] == "cross_anchor_pcm_match"
+    assert result.alignment["reference_seek_ms"] == 1_174_000
+    with wave.open(io.BytesIO(result.audio_bytes), "rb") as normalized:
+        assert normalized.getnframes() == 16_000 * 16
+        assert normalized.getframerate() == 16_000
+
+    assert len(cut_commands) == 2
+    primary, reference = cut_commands
+    assert primary[primary.index("-ss") + 1] == "1179.000"
+    assert primary[primary.index("-i") + 1] == str(source_path)
+    assert primary[primary.index("-af") + 1] == (
+        "aresample=16000,atrim=start_sample=0:end_sample=256000,asetpts=N/SR/TB"
+    )
+    assert reference[reference.index("-ss") + 1] == "1174.000"
+    assert reference[reference.index("-af") + 1] == (
+        "aresample=16000,atrim=start_sample=80000:end_sample=336000,asetpts=N/SR/TB"
+    )
+
+    metadata = json.loads(result.path.with_suffix(".json").read_text(encoding="utf-8"))
+    assert metadata["audio_route"] == "local_source_accurate_seek"
+    assert metadata["alignment"]["verified"] is True
+
+    second = prepare_audio_span("IJvd6k6ZmUo", (1_179_000, 1_195_000), settings)
+    assert second.cache_hit is True
+    assert second.audio_route == "local_source_accurate_seek"
+
+
+def test_prepare_audio_span_uses_zero_anchor_reference_near_stream_start(tmp_path):
+    data_dir = tmp_path / "data"
+    ffmpeg_path, _ = _fake_source_toolchain(tmp_path)
+    settings = Settings(
+        data_dir=data_dir,
+        ytdlp_path="yt-dlp-test",
+        ffmpeg_path=str(ffmpeg_path),
+    )
+    _write_local_source(data_dir, "IJvd6k6ZmUo")
+
+    result = prepare_audio_span("IJvd6k6ZmUo", (1_000, 3_000), settings)
+
+    assert result.audio_route == "local_source_accurate_seek"
+    assert result.alignment["reference_seek_ms"] == 0
+    assert result.alignment["reference_skip_frames"] == 16_000
+
+
+def test_prepare_audio_span_start_offset_mismatch_is_fail_closed(tmp_path):
+    data_dir = tmp_path / "data"
+    ffmpeg_path, _ = _fake_source_toolchain(tmp_path, misalign_reference_ms=9_000)
+    settings = Settings(
+        data_dir=data_dir,
+        ytdlp_path="yt-dlp-test",
+        ffmpeg_path=str(ffmpeg_path),
+    )
+    _write_local_source(data_dir, "IJvd6k6ZmUo")
+
+    with pytest.raises(AudioSpanError, match="開始位置"):
+        prepare_audio_span("IJvd6k6ZmUo", (1_179_000, 1_195_000), settings)
+
+    cache_dir = data_dir / "IJvd6k6ZmUo" / "transcripts" / "audio_cache"
+    assert not list(cache_dir.glob("*.wav"))
+
+
+def test_prepare_audio_span_falls_back_to_ytdlp_with_forced_keyframes(
+    monkeypatch,
+    tmp_path,
+):
+    settings = Settings(
+        data_dir=tmp_path,
+        ytdlp_path="yt-dlp-test",
+        ffmpeg_path=str(_fake_ffmpeg(tmp_path / "configured ffmpeg")),
+    )
+    monkeypatch.setattr(
+        "yt_live_kit.services.ytdlp.shutil.which",
+        lambda value: "/usr/bin/yt-dlp" if value == "yt-dlp-test" else value,
+    )
+    calls = _patch_audio_download(monkeypatch, _wav_bytes(duration_ms=2_000))
+
+    result = prepare_audio_span("IJvd6k6ZmUo", (1_000, 2_000), settings)
+
+    assert len(calls) == 1
+    command = calls[0]
+    assert "--force-keyframes-at-cuts" in command
+    assert command.index("--force-keyframes-at-cuts") == (
+        command.index("--download-sections") + 2
+    )
+    assert result.audio_route == "ytdlp_download_sections_force_keyframes"
+    assert result.alignment["verified"] is False
+    metadata = json.loads(result.path.with_suffix(".json").read_text(encoding="utf-8"))
+    assert metadata["audio_route"] == "ytdlp_download_sections_force_keyframes"
+
+
+def test_prepare_audio_span_ignores_local_source_without_audio_stream(
+    monkeypatch,
+    tmp_path,
+):
+    data_dir = tmp_path / "data"
+    ffmpeg_path, _ = _fake_source_toolchain(tmp_path, stream_types=("video",))
+    settings = Settings(
+        data_dir=data_dir,
+        ytdlp_path="yt-dlp-test",
+        ffmpeg_path=str(ffmpeg_path),
+    )
+    _write_local_source(data_dir, "IJvd6k6ZmUo")
+    monkeypatch.setattr(
+        "yt_live_kit.services.ytdlp.shutil.which",
+        lambda value: "/usr/bin/yt-dlp" if value == "yt-dlp-test" else value,
+    )
+    calls = _patch_audio_download(monkeypatch, _wav_bytes(duration_ms=2_000))
+
+    result = prepare_audio_span("IJvd6k6ZmUo", (1_000, 2_000), settings)
+
+    assert len(calls) == 1
+    assert result.audio_route == "ytdlp_download_sections_force_keyframes"
+
+
+def test_prepare_audio_span_ignores_local_source_shorter_than_range(
+    monkeypatch,
+    tmp_path,
+):
+    data_dir = tmp_path / "data"
+    ffmpeg_path, _ = _fake_source_toolchain(tmp_path, duration_ms=1_500)
+    settings = Settings(
+        data_dir=data_dir,
+        ytdlp_path="yt-dlp-test",
+        ffmpeg_path=str(ffmpeg_path),
+    )
+    _write_local_source(data_dir, "IJvd6k6ZmUo")
+    monkeypatch.setattr(
+        "yt_live_kit.services.ytdlp.shutil.which",
+        lambda value: "/usr/bin/yt-dlp" if value == "yt-dlp-test" else value,
+    )
+    calls = _patch_audio_download(monkeypatch, _wav_bytes(duration_ms=2_000))
+
+    result = prepare_audio_span("IJvd6k6ZmUo", (1_000, 2_000), settings)
+
+    assert len(calls) == 1
+    assert result.audio_route == "ytdlp_download_sections_force_keyframes"
+
+
+def test_prepare_audio_span_regenerates_fallback_cache_when_source_appears(
+    monkeypatch,
+    tmp_path,
+):
+    data_dir = tmp_path / "data"
+    ffmpeg_path, _ = _fake_source_toolchain(tmp_path)
+    settings = Settings(
+        data_dir=data_dir,
+        ytdlp_path="yt-dlp-test",
+        ffmpeg_path=str(ffmpeg_path),
+    )
+    monkeypatch.setattr(
+        "yt_live_kit.services.ytdlp.shutil.which",
+        lambda value: "/usr/bin/yt-dlp" if value == "yt-dlp-test" else value,
+    )
+    calls = _patch_audio_download(monkeypatch, _wav_bytes(duration_ms=2_000))
+
+    first = prepare_audio_span("IJvd6k6ZmUo", (1_000, 2_000), settings)
+    assert first.audio_route == "ytdlp_download_sections_force_keyframes"
+
+    _write_local_source(data_dir, "IJvd6k6ZmUo")
+    second = prepare_audio_span("IJvd6k6ZmUo", (1_000, 2_000), settings)
+
+    assert second.cache_hit is False
+    assert second.audio_route == "local_source_accurate_seek"
+    assert second.alignment["verified"] is True
+    assert second.audio_bytes != first.audio_bytes
+    assert len(calls) == 1

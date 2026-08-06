@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import array
 import json
 import hashlib
 import io
@@ -14,7 +15,7 @@ import sys
 import tempfile
 import uuid
 import wave
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
@@ -91,7 +92,7 @@ class AudioSpanError(YtdlpError):
     """選択区間の音声 span を安全に準備できないエラー."""
 
 
-_AUDIO_CACHE_SCHEMA = "s9-3-audio-cache-v1"
+_AUDIO_CACHE_SCHEMA = "s9-3-audio-cache-v2"
 _AUDIO_CACHE_DIR = "audio_cache"
 _AUDIO_FORMAT_SETTINGS: dict[str, Any] = {
     "container": "wav",
@@ -99,11 +100,25 @@ _AUDIO_FORMAT_SETTINGS: dict[str, Any] = {
     "channel": 1,
     "codec": "pcm_s16le",
     "selector": "bestaudio",
-    "seek": "yt-dlp-download-sections",
+    "seek": "local-source-accurate-seek-preferred",
     "cue_inclusion_rule": "half_open_overlap",
 }
 _AUDIO_FFMPEG_CHECK_TIMEOUT = 30
 _VIDEO_CONTAINER_SUFFIX_ORDER = {".mp4": 0, ".mkv": 1, ".webm": 2}
+
+# S9-6 の実機欠陥（選択区間音声が要求範囲より 6〜10 秒早く始まる）への対処。
+# yt-dlp の ``--download-sections`` は keyframe 手前から出力し得るため、音声付き
+# ローカル source があるときは ffmpeg の accurate seek で切り出す方を優先する。
+_AUDIO_SOURCE_DIR_PARTS = ("clips", "source")
+_AUDIO_ROUTE_LOCAL_SOURCE = "local_source_accurate_seek"
+_AUDIO_ROUTE_YTDLP_SECTIONS = "ytdlp_download_sections_force_keyframes"
+_AUDIO_ROUTES = frozenset({_AUDIO_ROUTE_LOCAL_SOURCE, _AUDIO_ROUTE_YTDLP_SECTIONS})
+# 開始位置検証は、同じ絶対区間を別 anchor から切り出して PCM を照合する。
+# 実測（ffmpeg-full 8.1.2、mp4/AAC）では decoder priming 差だけが残り、
+# RMS 差は 0.06 LSB 程度、数秒ずれた場合は 3 桁大きくなる。
+_AUDIO_ALIGNMENT_LEAD_MS = 5_000
+_AUDIO_ALIGNMENT_ABSOLUTE_TOLERANCE = 64.0
+_AUDIO_ALIGNMENT_RELATIVE_TOLERANCE = 0.02
 
 
 @dataclass(frozen=True)
@@ -179,6 +194,8 @@ class AudioSpanResult:
     ffmpeg_settings: dict[str, Any]
     cache_hit: bool
     request_fingerprint: str
+    audio_route: str = _AUDIO_ROUTE_YTDLP_SECTIONS
+    alignment: dict[str, Any] = field(default_factory=dict)
 
     @property
     def source_ref(self) -> str:
@@ -311,6 +328,12 @@ def _format_audio_seek_ms(value: int) -> str:
     minutes, remainder = divmod(remainder, 60_000)
     seconds, milliseconds = divmod(remainder, 1_000)
     return f"{hours:02d}:{minutes:02d}:{seconds:02d}.{milliseconds:03d}"
+
+
+def _format_audio_seek_seconds(value: int) -> str:
+    """ffmpeg の ``-ss`` へ渡す秒表記を丸め誤差なしで作る."""
+
+    return f"{value // 1000}.{value % 1000:03d}"
 
 
 def _audio_cache_paths(
@@ -553,6 +576,369 @@ def _normalize_audio_span(
         raise AudioSpanError("音声 WAV を安全に正規化できません。") from exc
 
 
+def _local_audio_source_candidates(video_id: str, settings: Settings) -> list[Path]:
+    """選択区間を切り出せるローカル source container を決定的な順序で返す.
+
+    音声付き source が既にあるなら、network も keyframe 依存も無い accurate
+    seek で切り出せる。存在しない場合は空リストを返し、呼び出し側が既存の
+    yt-dlp 経路へ落ちる。symlink 等の安全に扱えない実体は例外にする。
+    """
+
+    try:
+        source_dir = confined_video_path(
+            settings.data_dir,
+            video_id,
+            *_AUDIO_SOURCE_DIR_PARTS,
+            label="元動画 source 保存先",
+        )
+    except PathConfinementError as exc:
+        raise AudioSpanError(str(exc)) from exc
+
+    directory_stat = _lstat_without_symlink(source_dir, "元動画 source 保存先")
+    if directory_stat is None or not stat.S_ISDIR(directory_stat.st_mode):
+        return []
+    try:
+        entries = list(source_dir.iterdir())
+    except OSError as exc:
+        raise AudioSpanError("元動画 source 保存先を確認できません。") from exc
+
+    candidates: list[Path] = []
+    for entry in entries:
+        entry_stat = _lstat_without_symlink(entry, "元動画 source")
+        if entry_stat is None or not stat.S_ISREG(entry_stat.st_mode):
+            continue
+        if entry.suffix.lower() not in _VIDEO_CONTAINER_SUFFIX_ORDER:
+            continue
+        if not entry.name.startswith(f"{video_id}."):
+            continue
+        candidates.append(_validate_confined_path(entry, settings, "元動画 source"))
+
+    def candidate_key(path: Path) -> tuple[int, int, str]:
+        return (
+            0 if path.stem == video_id else 1,
+            _VIDEO_CONTAINER_SUFFIX_ORDER[path.suffix.lower()],
+            path.name,
+        )
+
+    return sorted(candidates, key=candidate_key)
+
+
+def _optional_audio_ffprobe(ffmpeg_path: Path) -> Path | None:
+    """設定済み FFmpeg と同居する ffprobe を返す。無ければ None を返す."""
+
+    candidate = ffmpeg_path.with_name("ffprobe")
+    try:
+        resolved = candidate.resolve(strict=True)
+        stat_result = resolved.stat()
+    except (OSError, RuntimeError, TypeError, ValueError):
+        return None
+    if resolved.parent != ffmpeg_path.parent:
+        return None
+    if not stat.S_ISREG(stat_result.st_mode) or not os.access(resolved, os.X_OK):
+        return None
+    return resolved
+
+
+def _probe_local_audio_source_duration_ms(
+    path: Path,
+    *,
+    ffprobe_path: Path,
+    settings: Settings,
+) -> int | None:
+    """音声 stream を持つ source の尺を返す。使えない候補は None を返す."""
+
+    command = [
+        str(ffprobe_path),
+        "-v",
+        "error",
+        "-show_entries",
+        "format=duration:stream=codec_type",
+        "-of",
+        "json",
+        str(path),
+    ]
+    try:
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=min(settings.ffmpeg_timeout, _AUDIO_FFMPEG_CHECK_TIMEOUT),
+            shell=False,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    if result.returncode != 0:
+        return None
+    try:
+        document = json.loads(result.stdout)
+        streams = document["streams"]
+        duration = document["format"]["duration"]
+        if not isinstance(streams, list):
+            raise TypeError("invalid ffprobe streams")
+        has_audio = any(
+            isinstance(item, Mapping) and item.get("codec_type") == "audio"
+            for item in streams
+        )
+        duration_ms = int(float(duration) * 1000)
+    except (json.JSONDecodeError, KeyError, TypeError, ValueError):
+        return None
+    if not has_audio or duration_ms <= 0:
+        return None
+    return duration_ms
+
+
+def _select_local_audio_source(
+    video_id: str,
+    item: AudioSpanRange,
+    *,
+    ffmpeg_path: Path,
+    settings: Settings,
+) -> Path | None:
+    """要求区間を丸ごと含む音声付き source を選ぶ。無ければ None を返す."""
+
+    candidates = _local_audio_source_candidates(video_id, settings)
+    if not candidates:
+        return None
+    ffprobe_path = _optional_audio_ffprobe(ffmpeg_path)
+    if ffprobe_path is None:
+        return None
+    for candidate in candidates:
+        duration_ms = _probe_local_audio_source_duration_ms(
+            candidate,
+            ffprobe_path=ffprobe_path,
+            settings=settings,
+        )
+        if duration_ms is None or duration_ms < item.requested_end_ms:
+            continue
+        return candidate
+    return None
+
+
+def _audio_source_cut_argv(
+    source_path: Path,
+    output_path: Path,
+    *,
+    ffmpeg_path: Path,
+    seek_ms: int,
+    skip_frames: int,
+    requested_frames: int,
+) -> list[str]:
+    """accurate seek でローカル source から選択区間を切り出す argv を作る."""
+
+    return [
+        str(ffmpeg_path),
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-nostdin",
+        "-y",
+        "-ss",
+        _format_audio_seek_seconds(seek_ms),
+        "-accurate_seek",
+        "-i",
+        str(source_path),
+        "-map",
+        "0:a:0",
+        "-af",
+        (
+            f"aresample={_AUDIO_FORMAT_SETTINGS['sample_rate']},"
+            f"atrim=start_sample={skip_frames}:"
+            f"end_sample={skip_frames + requested_frames},"
+            "asetpts=N/SR/TB"
+        ),
+        "-vn",
+        "-ar",
+        str(_AUDIO_FORMAT_SETTINGS["sample_rate"]),
+        "-ac",
+        str(_AUDIO_FORMAT_SETTINGS["channel"]),
+        "-c:a",
+        str(_AUDIO_FORMAT_SETTINGS["codec"]),
+        "-f",
+        str(_AUDIO_FORMAT_SETTINGS["container"]),
+        str(output_path),
+    ]
+
+
+def _cut_audio_span_from_source(
+    source_path: Path,
+    output_path: Path,
+    *,
+    ffmpeg_path: Path,
+    settings: Settings,
+    seek_ms: int,
+    skip_frames: int,
+    requested_frames: int,
+    label: str,
+) -> tuple[bytes, str]:
+    """source から 1 本切り出し、形式と frame 数を fail closed に確認する."""
+
+    _validate_confined_path(output_path, settings, label)
+    if _lstat_without_symlink(output_path, label) is not None:
+        raise AudioSpanError(f"{label}の一時保存先が既に存在します。")
+
+    argv = _audio_source_cut_argv(
+        source_path,
+        output_path,
+        ffmpeg_path=ffmpeg_path,
+        seek_ms=seek_ms,
+        skip_frames=skip_frames,
+        requested_frames=requested_frames,
+    )
+    try:
+        result = subprocess.run(
+            argv,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=settings.ffmpeg_timeout,
+            shell=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise AudioSpanError(f"{label}の切り出しがタイムアウトしました。") from exc
+    except OSError as exc:
+        raise AudioSpanError(f"{label}の切り出しを実行できません。") from exc
+    if result.returncode != 0:
+        detail = _sanitize_diagnostic(result.stderr or result.stdout)
+        raise AudioSpanError(
+            f"{label}の切り出しに失敗しました（終了コード: {result.returncode}）。"
+            + (f"（詳細: {detail}）" if detail else "")
+        )
+
+    output_identity = _lstat_without_symlink(output_path, label)
+    if output_identity is None or not stat.S_ISREG(output_identity.st_mode):
+        raise AudioSpanError(f"{label}の出力がありません。")
+    content, digest = _audio_file_fingerprint(output_path)
+    _assert_audio_file_identity(output_path, output_identity, label=label)
+    details = _inspect_wav_details(content)
+    if (
+        details is None
+        or details[:3] != _EXPECTED_WAV_FORMAT
+        or details[3] != requested_frames
+    ):
+        raise AudioSpanError(
+            f"{label}の形式が不正、または要求 frame 数が一致しません。"
+        )
+    return content, digest
+
+
+def _audio_span_samples(content: bytes, label: str) -> array.array:
+    """検証用に 16 bit PCM の sample 列を取り出す."""
+
+    try:
+        with wave.open(io.BytesIO(content), "rb") as reader:
+            frames = reader.readframes(reader.getnframes())
+    except (wave.Error, EOFError, OSError, ValueError) as exc:
+        raise AudioSpanError(f"{label}の PCM を読み取れません。") from exc
+    samples = array.array("h")
+    try:
+        samples.frombytes(frames)
+    except ValueError as exc:
+        raise AudioSpanError(f"{label}の PCM 長が不正です。") from exc
+    if sys.byteorder != "little":
+        samples.byteswap()
+    return samples
+
+
+def _audio_alignment_metrics(
+    primary: array.array,
+    reference: array.array,
+) -> tuple[float, float]:
+    """本体と別 anchor 参照の RMS 差、参照側の RMS を返す."""
+
+    if len(primary) != len(reference):
+        raise AudioSpanError("開始位置検証用音声の長さが一致しません。")
+    if not primary:
+        raise AudioSpanError("開始位置検証用音声が空です。")
+    difference_square = 0
+    reference_square = 0
+    for left, right in zip(primary, reference):
+        delta = left - right
+        difference_square += delta * delta
+        reference_square += right * right
+    count = len(primary)
+    return (difference_square / count) ** 0.5, (reference_square / count) ** 0.5
+
+
+def _prepare_audio_span_from_local_source(
+    source_path: Path,
+    temporary_dir: Path,
+    item: AudioSpanRange,
+    *,
+    ffmpeg_path: Path,
+    settings: Settings,
+) -> tuple[bytes, str, dict[str, Any]]:
+    """ローカル source から選択区間を切り出し、開始位置の整合まで確認する.
+
+    長さ検証だけでは「長さは正しいのに内容が数秒ずれる」状態を検出できない。
+    そこで同じ絶対区間を別 anchor から切り出し、PCM が一致することを
+    fail closed に確認する。anchor が違っても一致するなら、seek 位置は
+    keyframe ではなく要求した絶対時刻に従っている。
+    """
+
+    requested_frames = _requested_audio_frames(item)
+    sample_rate = int(_AUDIO_FORMAT_SETTINGS["sample_rate"])
+    source_identity = _lstat_without_symlink(source_path, "元動画 source")
+    if source_identity is None or not stat.S_ISREG(source_identity.st_mode):
+        raise AudioSpanError("元動画 source を確認できません。")
+
+    content, digest = _cut_audio_span_from_source(
+        source_path,
+        temporary_dir / ".source-span.wav",
+        ffmpeg_path=ffmpeg_path,
+        settings=settings,
+        seek_ms=item.requested_start_ms,
+        skip_frames=0,
+        requested_frames=requested_frames,
+        label="選択区間の切り出し音声",
+    )
+    _assert_audio_file_identity(source_path, source_identity, label="元動画 source")
+
+    if item.requested_start_ms >= _AUDIO_ALIGNMENT_LEAD_MS:
+        reference_seek_ms = item.requested_start_ms - _AUDIO_ALIGNMENT_LEAD_MS
+    else:
+        # 先行 lead を取れない場合は seek 自体が起きない 0 を anchor にする。
+        reference_seek_ms = 0
+    skip_frames = (item.requested_start_ms - reference_seek_ms) * sample_rate // 1000
+    reference_content, _ = _cut_audio_span_from_source(
+        source_path,
+        temporary_dir / ".source-span-alignment.wav",
+        ffmpeg_path=ffmpeg_path,
+        settings=settings,
+        seek_ms=reference_seek_ms,
+        skip_frames=skip_frames,
+        requested_frames=requested_frames,
+        label="開始位置検証用音声",
+    )
+    _assert_audio_file_identity(source_path, source_identity, label="元動画 source")
+
+    rms_difference, rms_reference = _audio_alignment_metrics(
+        _audio_span_samples(content, "選択区間の切り出し音声"),
+        _audio_span_samples(reference_content, "開始位置検証用音声"),
+    )
+    tolerance = max(
+        _AUDIO_ALIGNMENT_ABSOLUTE_TOLERANCE,
+        _AUDIO_ALIGNMENT_RELATIVE_TOLERANCE * rms_reference,
+    )
+    if rms_difference > tolerance:
+        raise AudioSpanError(
+            "選択区間の音声が要求した開始位置と一致しません。"
+            f"（別 anchor {reference_seek_ms} ms との RMS 差 {rms_difference:.1f}、"
+            f"許容 {tolerance:.1f}）"
+            "元動画 source を確認して再取得してください。"
+        )
+    alignment = {
+        "method": "cross_anchor_pcm_match",
+        "verified": True,
+        "reference_seek_ms": reference_seek_ms,
+        "reference_skip_frames": skip_frames,
+        "rms_difference": round(rms_difference, 6),
+        "rms_reference": round(rms_reference, 6),
+        "tolerance": round(tolerance, 6),
+    }
+    return content, digest, alignment
+
+
 def _quarantine_audio_cache_file(path: Path, settings: Settings) -> None:
     """壊れた cache を同一ディレクトリへ隔離し、再生成を可能にする."""
 
@@ -618,12 +1004,16 @@ def _audio_cache_metadata(
     request_fingerprint: str,
     content: bytes,
     source_metadata: Mapping[str, Any],
+    audio_route: str,
+    alignment: Mapping[str, Any],
 ) -> dict[str, Any]:
     return {
         "schema": _AUDIO_CACHE_SCHEMA,
         "video_id": video_id,
         "range": item.to_dict(),
         "request_fingerprint": request_fingerprint,
+        "audio_route": audio_route,
+        "alignment": dict(alignment),
         "audio": {
             "bytes": len(content),
             "sha256": hashlib.sha256(content).hexdigest(),
@@ -661,11 +1051,30 @@ def _read_audio_cache(
             "video_id",
             "range",
             "request_fingerprint",
+            "audio_route",
+            "alignment",
             "audio",
             "source_metadata",
             "ffmpeg",
         }
         if not isinstance(metadata, dict) or set(metadata) != expected_keys:
+            return None
+        audio_route = metadata["audio_route"]
+        alignment = metadata["alignment"]
+        if audio_route not in _AUDIO_ROUTES:
+            return None
+        if (
+            not isinstance(alignment, dict)
+            or not isinstance(alignment.get("method"), str)
+            or not isinstance(alignment.get("verified"), bool)
+        ):
+            return None
+        if audio_route != _AUDIO_ROUTE_LOCAL_SOURCE and _local_audio_source_candidates(
+            video_id,
+            settings,
+        ):
+            # 開始位置を検証できない経路で作った cache は、accurate seek で
+            # 作り直せる source が現れた時点で再生成する。
             return None
         if (
             metadata["schema"] != _AUDIO_CACHE_SCHEMA
@@ -715,8 +1124,10 @@ def _read_audio_cache(
             ffmpeg_settings=dict(_AUDIO_FORMAT_SETTINGS),
             cache_hit=True,
             request_fingerprint=request_fingerprint,
+            audio_route=audio_route,
+            alignment=dict(alignment),
         )
-    except (AudioSpanError, OSError, UnicodeError, TypeError, ValueError, json.JSONDecodeError):
+    except (YtdlpError, OSError, UnicodeError, TypeError, ValueError, json.JSONDecodeError):
         # cache 破損は cache miss として安全に再取得する。壊れた bytes を
         # Whisper へ渡したり、既存 artifact を高精度として返したりしない。
         return None
@@ -955,6 +1366,9 @@ def _audio_download_argv(
         str(_AUDIO_FORMAT_SETTINGS["selector"]),
         "--download-sections",
         section,
+        # keyframe 手前からの出力を防ぐ。ローカル source が無い経路では
+        # 開始位置を照合できないため、切り出し側で精度を確保する。
+        "--force-keyframes-at-cuts",
         "--extract-audio",
         "--ffmpeg-location",
         str(ffmpeg_path),
@@ -1074,7 +1488,15 @@ def prepare_audio_span(
     resolved_ffmpeg = _resolve_audio_ffmpeg(settings.ffmpeg_path)
     _check_audio_ffmpeg(resolved_ffmpeg, settings)
 
-    if shutil.which(settings.ytdlp_path) is None:
+    # 音声付きローカル source があれば accurate seek で切り出す。無い場合だけ
+    # yt-dlp の部分取得へ落とす。yt-dlp の有無はその経路でだけ要求する。
+    local_source = _select_local_audio_source(
+        video_id,
+        item,
+        ffmpeg_path=resolved_ffmpeg,
+        settings=settings,
+    )
+    if local_source is None and shutil.which(settings.ytdlp_path) is None:
         raise AudioSpanError(
             f"yt-dlp が見つかりません（パス: {settings.ytdlp_path}）。"
             "音声だけを取得するため、yt-dlp を導入して再試行してください。"
@@ -1091,44 +1513,63 @@ def prepare_audio_span(
         temporary_identity = _lstat_without_symlink(temporary_dir, "音声一時保存先")
         if temporary_identity is None:
             raise AudioSpanError("音声一時保存先を確認できません。")
-        directory_descriptor = os.open(
-            temporary_dir,
-            os.O_RDONLY
-            | getattr(os, "O_DIRECTORY", 0)
-            | getattr(os, "O_NOFOLLOW", 0),
-        )
-        result = _run_ytdlp(
-            _audio_download_argv(
-                video_id,
+        if local_source is not None:
+            audio_route = _AUDIO_ROUTE_LOCAL_SOURCE
+            content, digest, alignment = _prepare_audio_span_from_local_source(
+                local_source,
+                temporary_dir,
                 item,
                 ffmpeg_path=resolved_ffmpeg,
-            ),
-            settings,
-            timeout=settings.ytdlp_timeout,
-            pass_fds=(directory_descriptor,),
-            cwd_fd=directory_descriptor,
-        )
-        _assert_directory_identity(
-            temporary_dir,
-            temporary_identity,
-            label="音声一時保存先",
-        )
-        if result.returncode != 0:
-            detail = _sanitize_diagnostic(result.stderr or result.stdout)
-            raise AudioSpanError(
-                "選択区間の audio-only format（bestaudio）を取得できませんでした。"
-                "動画全体や video format へ fallback せず、既存 YouTube VTT を明示的に使用してください。"
-                + (f"（詳細: {detail}）" if detail else "")
+                settings=settings,
             )
-        input_path = _find_audio_output(temporary_dir, settings)
-        normalized_path = temporary_dir / ".normalized-audio.wav"
-        content, digest = _normalize_audio_span(
-            input_path,
-            normalized_path,
-            item,
-            ffmpeg_path=resolved_ffmpeg,
-            settings=settings,
-        )
+        else:
+            audio_route = _AUDIO_ROUTE_YTDLP_SECTIONS
+            alignment = {
+                "method": "none",
+                "verified": False,
+                "reason": (
+                    "音声付きローカル source が無いため、開始位置を照合できない"
+                    "yt-dlp 経路で取得した。"
+                ),
+            }
+            directory_descriptor = os.open(
+                temporary_dir,
+                os.O_RDONLY
+                | getattr(os, "O_DIRECTORY", 0)
+                | getattr(os, "O_NOFOLLOW", 0),
+            )
+            result = _run_ytdlp(
+                _audio_download_argv(
+                    video_id,
+                    item,
+                    ffmpeg_path=resolved_ffmpeg,
+                ),
+                settings,
+                timeout=settings.ytdlp_timeout,
+                pass_fds=(directory_descriptor,),
+                cwd_fd=directory_descriptor,
+            )
+            _assert_directory_identity(
+                temporary_dir,
+                temporary_identity,
+                label="音声一時保存先",
+            )
+            if result.returncode != 0:
+                detail = _sanitize_diagnostic(result.stderr or result.stdout)
+                raise AudioSpanError(
+                    "選択区間の audio-only format（bestaudio）を取得できませんでした。"
+                    "動画全体や video format へ fallback せず、既存 YouTube VTT を明示的に使用してください。"
+                    + (f"（詳細: {detail}）" if detail else "")
+                )
+            input_path = _find_audio_output(temporary_dir, settings)
+            normalized_path = temporary_dir / ".normalized-audio.wav"
+            content, digest = _normalize_audio_span(
+                input_path,
+                normalized_path,
+                item,
+                ffmpeg_path=resolved_ffmpeg,
+                settings=settings,
+            )
         _assert_directory_identity(
             temporary_dir,
             temporary_identity,
@@ -1140,6 +1581,8 @@ def prepare_audio_span(
             request_fingerprint=request_fingerprint,
             content=content,
             source_metadata=merged_source_metadata,
+            audio_route=audio_route,
+            alignment=alignment,
         )
         _atomic_write_audio_cache(audio_path, content, settings)
         write_text_atomically(
@@ -1159,6 +1602,8 @@ def prepare_audio_span(
             ffmpeg_settings=dict(_AUDIO_FORMAT_SETTINGS),
             cache_hit=False,
             request_fingerprint=request_fingerprint,
+            audio_route=audio_route,
+            alignment=dict(alignment),
         )
     except AudioSpanError:
         raise
