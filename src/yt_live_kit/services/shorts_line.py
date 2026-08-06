@@ -30,8 +30,9 @@ from yt_live_kit.config import Settings
 from yt_live_kit.models.telop import TelopScriptDocument
 from yt_live_kit.models.transcript import TranscriptArtifactRef
 from yt_live_kit.models.upload import UploadOperation, UploadState
+from yt_live_kit.services._fsutil import write_text_atomically
 from yt_live_kit.services.schedule import SchedulePolicy
-from yt_live_kit.services.transcript_artifact import TranscriptArtifactError, TranscriptArtifactStore
+from yt_live_kit.services.transcript_artifact import stored_artifact_lineage_is_current
 from yt_live_kit.services._paths import (
     PathConfinementError,
     confined_video_path,
@@ -40,7 +41,8 @@ from yt_live_kit.services._paths import (
 )
 
 _SCHEMA_VERSION = 2
-_WRITE_LOCK = threading.RLock()
+_VIDEO_WRITE_LOCKS: dict[str, threading.RLock] = {}
+_VIDEO_WRITE_LOCKS_GUARD = threading.Lock()
 _COMPLETED_UPLOAD_STATES = frozenset({"reserved", "uploading", "uploaded"})
 _ATTENTION_UPLOAD_STATES = frozenset({"failed", "needs_reconciliation"})
 
@@ -934,10 +936,9 @@ def record_upload_operation(
     operation_id: str,
     output_path: Path | None = None,
     *,
-    settings: Settings | None = None,
     now: datetime | None = None,
 ) -> LineState:
-    """工程 6 直前に再検証し、差分時は未確認状態を返して保存する。"""
+    """工程 6 直前に再検証し、差分時は未確認状態を返す。永続化は呼び出し側が行う。"""
     _ensure_not_reserved(state)
     if (
         state.output_fingerprint is None
@@ -949,8 +950,6 @@ def record_upload_operation(
         raise LineStateError("投稿 operation ID が正しくありません。")
     if output_path is None or state.review_fingerprint is None:
         raise LineStateError("予約直前に完成動画を再確認できませんでした。")
-    if settings is not None:
-        output_path = _confined_output_path(output_path, settings)
     timestamp = _state_timestamp(state, now, "予約更新日時")
     try:
         checked = reconcile_output(state, output_path, now=timestamp)
@@ -966,18 +965,13 @@ def record_upload_operation(
         checked.output_fingerprint != state.output_fingerprint
         or checked.preview_confirmed_fingerprint != checked.output_fingerprint
     ):
-        if settings is not None:
-            save_line_state(checked, settings, expected_state=state)
         return checked
-    completed = _replace_state(
+    return _replace_state(
         state,
         upload_operation_id=operation_id,
         current_stage=LineStage.RESERVED,
         updated_at=timestamp,
     )
-    if settings is not None:
-        save_line_state(completed, settings, expected_state=state)
-    return completed
 
 
 def line_state_path(video_id: str, clip_id: str, settings: Settings) -> Path:
@@ -1012,24 +1006,13 @@ def _active_line_path(video_id: str, settings: Settings) -> Path:
 
 
 def _atomic_write(path: Path, payload: dict[str, object]) -> None:
-    temporary = path.parent / f".{path.name}.{uuid.uuid4().hex}.tmp"
+    text = json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with temporary.open("w", encoding="utf-8") as handle:
-            json.dump(payload, handle, ensure_ascii=False, indent=2)
-            handle.write("\n")
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temporary, path)
+        write_text_atomically(path, text)
     except OSError as exc:
         raise LineStateError(
             "ショート生産ラインの状態を安全に保存できませんでした。"
         ) from exc
-    finally:
-        try:
-            temporary.unlink(missing_ok=True)
-        except OSError:
-            pass
 
 
 def _file_snapshot(path: Path) -> bytes | None:
@@ -1072,26 +1055,44 @@ def _restore_file_snapshot(path: Path, snapshot: bytes | None) -> None:
             pass
 
 
+def _video_write_lock(video_id: str) -> threading.RLock:
+    """同一動画の line 書き込みをスレッド間で直列化する。"""
+    safe_video_id = _safe_identifier(video_id, "動画 ID")
+    with _VIDEO_WRITE_LOCKS_GUARD:
+        lock = _VIDEO_WRITE_LOCKS.get(safe_video_id)
+        if lock is None:
+            lock = threading.RLock()
+            _VIDEO_WRITE_LOCKS[safe_video_id] = lock
+        return lock
+
+
 @contextmanager
-def _line_lock(video_id: str, settings: Settings) -> Iterator[None]:
-    """同一動画の状態確認と atomic replace をプロセス間で直列化する。"""
+def _file_flock(video_id: str, settings: Settings) -> Iterator[None]:
+    """同一動画の line JSON 読み書きをプロセス間で直列化する。"""
     directory = _active_line_path(video_id, settings).parent
     lock_path = directory / ".line.lock"
-    with _WRITE_LOCK:
-        try:
-            directory.mkdir(parents=True, exist_ok=True)
-            with lock_path.open("a+b") as lock_file:
-                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
-                try:
-                    yield
-                finally:
-                    fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
-        except LineStateError:
-            raise
-        except OSError as exc:
-            raise LineStateError(
-                "ショート生産ラインの保存ロックを取得できませんでした。"
-            ) from exc
+    try:
+        directory.mkdir(parents=True, exist_ok=True)
+        with lock_path.open("a+b") as lock_file:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+    except LineStateError:
+        raise
+    except OSError as exc:
+        raise LineStateError(
+            "ショート生産ラインの保存ロックを取得できませんでした。"
+        ) from exc
+
+
+@contextmanager
+def _line_lock(video_id: str, settings: Settings) -> Iterator[None]:
+    """同一動画の状態確認と atomic replace をスレッド・プロセス間で直列化する。"""
+    with _video_write_lock(video_id):
+        with _file_flock(video_id, settings):
+            yield
 
 
 def _read_line_state(path: Path, video_id: str, clip_id: str) -> LineState | None:
@@ -1118,19 +1119,12 @@ def _artifact_lineage_is_current(
     """保存済み immutable artifact が高精度 lineage と一致するか確認する."""
     if state.artifact_ref is None or state.artifact_fingerprint is None:
         return state.artifact_ref is None
-    try:
-        store = TranscriptArtifactStore(state.video_id, settings)
-        artifact = store.load_artifact(state.artifact_fingerprint)
-        actual_ref = store.artifact_ref(artifact)
-    except (TranscriptArtifactError, OSError, ValueError):
-        return False
-    return (
-        actual_ref == state.artifact_ref
-        and artifact.video_id == state.video_id
-        and artifact.artifact_fingerprint == state.artifact_fingerprint
-        and tuple(artifact.used_range_cue_digests)
-        == tuple(state.used_range_cue_digests)
-        and artifact.is_high_precision
+    return stored_artifact_lineage_is_current(
+        video_id=state.video_id,
+        artifact_ref=state.artifact_ref,
+        artifact_fingerprint=state.artifact_fingerprint,
+        used_range_cue_digests=state.used_range_cue_digests,
+        settings=settings,
     )
 
 
@@ -1422,61 +1416,76 @@ def run_line_reservation_transaction(
     settings: Settings,
     start_upload: Callable[[], UploadOperation],
 ) -> UploadOperation:
-    """exact line の検証から外部投稿開始・operation 記録までを同一 lock で囲む。"""
+    """exact line の検証から外部投稿開始・operation 記録までを同一動画 lock で囲む。"""
     video_id = _safe_identifier(video_id, "動画 ID")
     clip_id = _safe_identifier(clip_id, "clip ID")
     output_path = _confined_output_path(output_path, settings)
     if not callable(start_upload):
         raise LineStateError("投稿開始 callback が正しくありません。")
-    with _line_lock(video_id, settings):
-        state = _load_line_state_locked(video_id, clip_id, settings)
-        if state is None:
+    with _video_write_lock(video_id):
+        with _file_flock(video_id, settings):
+            state = _load_line_state_locked(video_id, clip_id, settings)
+            if state is None:
+                baseline: LineState | None = None
+            else:
+                if state.generation_spec_fingerprint is None:
+                    raise LineStateError("生成 spec の証跡がないため予約投稿できません。")
+                checked = reconcile_output(state, output_path)
+                if checked != state:
+                    _atomic_write(
+                        line_state_path(video_id, clip_id, settings),
+                        checked.model_dump(mode="json"),
+                    )
+                if (
+                    checked.output_fingerprint is None
+                    or checked.preview_confirmed_fingerprint != checked.output_fingerprint
+                ):
+                    raise LineStateError(
+                        "完成動画が最終確認時から変わりました。もう一度プレビューしてください。"
+                    )
+                baseline = checked
+
+        if baseline is None:
             return start_upload()
-        if state.generation_spec_fingerprint is None:
-            raise LineStateError("生成 spec の証跡がないため予約投稿できません。")
-        checked = reconcile_output(state, output_path)
-        if checked != state:
-            _atomic_write(
-                line_state_path(video_id, clip_id, settings),
-                checked.model_dump(mode="json"),
-            )
-        if (
-            checked.output_fingerprint is None
-            or checked.preview_confirmed_fingerprint != checked.output_fingerprint
-        ):
-            raise LineStateError(
-                "完成動画が最終確認時から変わりました。もう一度プレビューしてください。"
-            )
+
         operation = start_upload()
         if not isinstance(operation, UploadOperation):
             raise LineStateError("開始済み投稿 operation を確認できませんでした。")
-        try:
+
+        with _file_flock(video_id, settings):
+            current = _load_line_state_locked(video_id, clip_id, settings)
+            if current is None or current != baseline:
+                raise LineReservationStartedError(
+                    "投稿開始後にライン状態が別の操作で更新されたため、予約完了を記録できませんでした。",
+                    operation,
+                )
+            try:
+                if (
+                    operation.source_video_id != video_id
+                    or operation.clip_id != clip_id
+                    or operation.video_path.resolve() != Path(output_path).resolve()
+                ):
+                    raise LineStateError("開始済み投稿 operation がライン対象と一致しません。")
+                completed = record_upload_operation(
+                    current,
+                    operation.operation_id,
+                    output_path,
+                )
+                _atomic_write(
+                    line_state_path(video_id, clip_id, settings),
+                    completed.model_dump(mode="json"),
+                )
+            except LineStateError as exc:
+                raise LineReservationStartedError(str(exc), operation) from exc
             if (
-                operation.source_video_id != video_id
-                or operation.clip_id != clip_id
-                or operation.video_path.resolve() != Path(output_path).resolve()
+                completed.current_stage != LineStage.RESERVED
+                or completed.upload_operation_id != operation.operation_id
             ):
-                raise LineStateError("開始済み投稿 operation がライン対象と一致しません。")
-            completed = record_upload_operation(
-                checked,
-                operation.operation_id,
-                output_path,
-            )
-            _atomic_write(
-                line_state_path(video_id, clip_id, settings),
-                completed.model_dump(mode="json"),
-            )
-        except LineStateError as exc:
-            raise LineReservationStartedError(str(exc), operation) from exc
-        if (
-            completed.current_stage != LineStage.RESERVED
-            or completed.upload_operation_id != operation.operation_id
-        ):
-            raise LineReservationStartedError(
-                "投稿開始後に完成動画が変わったため、ラインへ予約完了を記録できませんでした。",
-                operation,
-            )
-        return operation
+                raise LineReservationStartedError(
+                    "投稿開始後に完成動画が変わったため、ラインへ予約完了を記録できませんでした。",
+                    operation,
+                )
+            return operation
 
 
 def _valid_line_states(video_id: str, settings: Settings) -> tuple[LineState, ...]:

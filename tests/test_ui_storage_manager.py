@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from contextlib import nullcontext
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -38,6 +39,38 @@ def _video(
         other_bytes=5,
         total_bytes=source + intermediate + 35,
     )
+
+
+def _write_meta(
+    video_dir: Path,
+    video_id: str,
+    *,
+    fetched_at: datetime,
+) -> None:
+    meta = {
+        "id": video_id,
+        "title": f"処理済み {video_id}",
+        "url": f"https://www.youtube.com/watch?v={video_id}",
+        "duration": 3600,
+        "ytdlp_version": "2026.7.4",
+        "fetched_at": fetched_at.isoformat(),
+        "subtitle_lang": "ja",
+    }
+    video_dir.mkdir(parents=True, exist_ok=True)
+    (video_dir / "meta.json").write_text(json.dumps(meta), encoding="utf-8")
+
+
+def _build_deletable_video(
+    settings: Settings,
+    video_id: str,
+    *,
+    fetched_at: datetime,
+) -> None:
+    video_dir = settings.data_dir / video_id
+    _write_meta(video_dir, video_id, fetched_at=fetched_at)
+    source = video_dir / "clips" / "source" / "video.mp4"
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_bytes(b"source")
 
 
 def _processed(video_id: str, fetched_at: datetime | None) -> ProcessedVideo:
@@ -292,6 +325,7 @@ def test_bulk_confirm_uses_exact_snapshot_ids_without_rescan() -> None:
         patch.object(storage_manager.st, "session_state", session_state),
         patch.object(storage_manager.st, "rerun"),
         patch.object(storage_manager, "is_busy", return_value=False),
+        patch.object(storage_manager, "is_source_older_than", return_value=True),
         patch.object(storage_manager, "purge_source", side_effect=[100, 200]) as purge,
         patch.object(storage_manager, "summarize", return_value=StorageSummary(0, [])),
         patch.object(storage_manager, "list_processed_videos") as rescan,
@@ -303,6 +337,50 @@ def test_bulk_confirm_uses_exact_snapshot_ids_without_rescan() -> None:
     assert storage_manager._SNAPSHOT_KEY not in session_state
     assert isinstance(
         session_state[storage_manager._SUMMARY_KEY], StorageSummary
+    )
+
+
+def test_bulk_confirm_skips_refetched_target_after_preview(tmp_path: Path) -> None:
+    """プレビュー後に再取得された動画は削除しない."""
+    settings = _settings(tmp_path)
+    now = datetime(2026, 8, 1, 12, tzinfo=timezone.utc)
+    old_fetched = now - timedelta(days=40)
+    recent_fetched = now - timedelta(days=1)
+    video_id = "refetched-vid"
+
+    _build_deletable_video(settings, video_id, fetched_at=old_fetched)
+    processed = [_processed(video_id, old_fetched)]
+    summary = StorageSummary(
+        total_bytes=100,
+        videos=[_video(video_id, source=6)],
+    )
+    snapshot = storage_manager.build_bulk_purge_snapshot(
+        processed, summary, 30, now=now
+    )
+    assert [target.video_id for target in snapshot.targets] == [video_id]
+
+    _write_meta(settings.data_dir / video_id, video_id, fetched_at=recent_fetched)
+
+    session_state: dict[str, object] = {
+        storage_manager._SNAPSHOT_KEY: snapshot,
+    }
+    with (
+        patch.object(storage_manager.st, "button", return_value=True),
+        patch.object(storage_manager.st, "warning"),
+        patch.object(storage_manager.st, "info"),
+        patch.object(storage_manager.st, "session_state", session_state),
+        patch.object(storage_manager.st, "rerun"),
+        patch.object(storage_manager, "is_busy", return_value=False),
+        patch.object(storage_manager, "summarize", return_value=StorageSummary(0, [])),
+    ):
+        storage_manager._confirm_bulk_purge_dialog.__wrapped__(snapshot, settings)
+
+    source_dir = settings.data_dir / video_id / "clips" / "source"
+    assert source_dir.exists()
+    messages = session_state[storage_manager._FLASH_KEY]
+    assert any(
+        "再取得済み" in message and video_id in message
+        for _level, message in messages
     )
 
 
@@ -327,6 +405,7 @@ def test_bulk_partial_failure_keeps_only_failed_snapshot_and_refreshes_summary()
         patch.object(storage_manager.st, "session_state", session_state),
         patch.object(storage_manager.st, "rerun") as rerun,
         patch.object(storage_manager, "is_busy", return_value=False),
+        patch.object(storage_manager, "is_source_older_than", return_value=True),
         patch.object(
             storage_manager,
             "purge_source",
@@ -374,6 +453,7 @@ def test_bulk_success_then_summary_failure_discards_stale_summary() -> None:
         patch.object(storage_manager.st, "session_state", session_state),
         patch.object(storage_manager.st, "rerun"),
         patch.object(storage_manager, "is_busy", return_value=False),
+        patch.object(storage_manager, "is_source_older_than", return_value=True),
         patch.object(storage_manager, "purge_source", return_value=100),
         patch.object(
             storage_manager,
@@ -409,6 +489,7 @@ def test_bulk_dialog_shows_storage_error_in_japanese() -> None:
         patch.object(storage_manager.st, "session_state", session_state),
         patch.object(storage_manager.st, "rerun"),
         patch.object(storage_manager, "is_busy", return_value=False),
+        patch.object(storage_manager, "is_source_older_than", return_value=True),
         patch.object(
             storage_manager, "purge_source", side_effect=StorageError("削除不能")
         ),
@@ -546,8 +627,10 @@ def test_bulk_dialog_retains_artifacts_for_every_snapshot_id(tmp_path: Path) -> 
     settings = _settings(tmp_path)
     targets: list[storage_manager.PurgeTarget] = []
     retained: list[Path] = []
+    old_fetched = datetime(2020, 1, 1, tzinfo=timezone.utc)
     for video_id in ("bulk-1", "bulk-2"):
         video_dir = settings.data_dir / video_id
+        _write_meta(video_dir, video_id, fetched_at=old_fetched)
         source = video_dir / "clips/source/source.mp4"
         source.parent.mkdir(parents=True, exist_ok=True)
         source.write_bytes(b"source")

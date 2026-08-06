@@ -10,15 +10,18 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # S9-1 の decision.adopted_model.settings_contract に固定した値。runtime 側でも
 # 実体 fingerprint と capability を再検証するため、設定値だけで高精度結果を
 # 信頼しない。
-WHISPER_BINARY_PATH = "/opt/homebrew/bin/whisper-cli"
+# デフォルトの実体パスはマシン固有にしない。バイナリは PATH 上の whisper-cli、
+# モデルは data 配下の相対パスを既定とし、初回は環境変数
+# YTLK_WHISPER_BINARY_PATH / YTLK_WHISPER_MODEL_PATH または配置で指定する。
+# version / SHA256 / model_name 等の pin は下記 immutable contract のみが保持する。
+WHISPER_BINARY_PATH = "whisper-cli"
 WHISPER_BINARY_VERSION = "1.9.1"
 WHISPER_BINARY_SHA256 = (
     "1fbabb51a45906bd36684695de9025eab63618a6eedc26971c47fa5affc5fe49"
 )
 WHISPER_MODEL_NAME = "ggml-large-v3-turbo-q5_0"
 WHISPER_MODEL_PATH = (
-    "/Users/ryukouokumura/Library/Caches/whisper.cpp/models/"
-    "ggml-large-v3-turbo-q5_0.bin"
+    "./data/_config/whisper/models/ggml-large-v3-turbo-q5_0.bin"
 )
 WHISPER_MODEL_SHA256 = (
     "394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2"
@@ -137,12 +140,18 @@ class Settings(BaseSettings):
     whisper_binary_path: str = Field(
         default=WHISPER_BINARY_PATH,
         min_length=1,
-        description="whisper.cpp whisper-cli の実行ファイルパス",
+        description=(
+            "whisper.cpp whisper-cli の実行ファイルパス（既定は PATH 上の whisper-cli。"
+            "未配置時は YTLK_WHISPER_BINARY_PATH で上書き）"
+        ),
     )
     whisper_model_path: str = Field(
         default=WHISPER_MODEL_PATH,
         min_length=1,
-        description="採用 whisper.cpp model file パス",
+        description=(
+            "採用 whisper.cpp model file パス（既定は data/_config 配下の相対パス。"
+            "未配置時は YTLK_WHISPER_MODEL_PATH で上書き）"
+        ),
     )
 
     @field_validator("whisper_binary_path", "whisper_model_path", mode="after")

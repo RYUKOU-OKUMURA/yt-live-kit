@@ -15,6 +15,7 @@ from yt_live_kit.services.storage import (
     StorageSummary,
     VideoStorage,
     format_bytes,
+    is_source_older_than,
     purge_source,
     summarize,
 )
@@ -219,7 +220,11 @@ def _confirm_bulk_purge_dialog(
 
     successes: list[tuple[PurgeTarget, int]] = []
     failures: list[tuple[PurgeTarget, Exception]] = []
+    skipped: list[PurgeTarget] = []
     for target in snapshot.targets:
+        if not is_source_older_than(target.video_id, snapshot.days, settings):
+            skipped.append(target)
+            continue
         try:
             deleted = purge_source(target.video_id, settings)
         except (OSError, StorageError) as exc:
@@ -243,6 +248,14 @@ def _confirm_bulk_purge_dialog(
             (
                 "success",
                 f"{len(successes)} 件から {format_bytes(deleted_total)} 削除しました。",
+            )
+        )
+    if skipped:
+        skipped_ids = "、".join(target.video_id for target in skipped)
+        messages.append(
+            (
+                "warning",
+                f"{len(skipped)} 件は再取得済みのため削除しませんでした: {skipped_ids}。",
             )
         )
     if failures:

@@ -195,6 +195,41 @@ def purge_source(video_id: str, settings: Settings | None = None) -> int:
     return _purge_deletable_dirs(video_dir, data_dir)
 
 
+def _normalize_fetched_at(fetched_at: datetime) -> datetime:
+    if fetched_at.tzinfo is None:
+        return fetched_at.replace(tzinfo=timezone.utc)
+    return fetched_at.astimezone(timezone.utc)
+
+
+def source_fetched_at(video_id: str, settings: Settings | None = None) -> datetime | None:
+    """meta.json を再読込し、取得日時を返す."""
+    settings = settings or get_settings()
+    meta_path = _video_dir(video_id, settings) / "meta.json"
+    if not meta_path.is_file():
+        return None
+    try:
+        meta = VideoMeta.model_validate_json(meta_path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    return _normalize_fetched_at(meta.fetched_at)
+
+
+def is_source_older_than(
+    video_id: str,
+    days: int,
+    settings: Settings | None = None,
+    *,
+    now: datetime | None = None,
+) -> bool:
+    """meta.json を再読込し、指定日数より古い取得日時か判定する."""
+    fetched_at = source_fetched_at(video_id, settings)
+    if fetched_at is None:
+        return False
+    current = now or datetime.now(timezone.utc)
+    cutoff = current - timedelta(days=days)
+    return fetched_at < cutoff
+
+
 def purge_sources_older_than(
     days: int,
     settings: Settings | None = None,
@@ -219,12 +254,7 @@ def purge_sources_older_than(
         except Exception:
             continue
 
-        fetched_at = meta.fetched_at
-        if fetched_at.tzinfo is None:
-            fetched_at = fetched_at.replace(tzinfo=timezone.utc)
-        else:
-            fetched_at = fetched_at.astimezone(timezone.utc)
-
+        fetched_at = _normalize_fetched_at(meta.fetched_at)
         if fetched_at >= cutoff:
             continue
 

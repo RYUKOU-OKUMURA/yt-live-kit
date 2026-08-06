@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 import pytest
 
-from yt_live_kit.services._fsutil import advisory_lock, write_text_atomically
+from yt_live_kit.services._fsutil import advisory_lock, write_bytes_atomically, write_text_atomically
 
 
 def test_write_text_atomically_writes_content(tmp_path: Path):
@@ -46,7 +46,25 @@ def test_write_text_atomically_applies_explicit_mode_and_fsyncs(
         write_text_atomically(target, "{}", mode=0o600)
 
     assert target.stat().st_mode & 0o777 == 0o600
-    fsync.assert_called_once()
+    assert fsync.call_count == 2
+
+
+def test_write_text_atomically_fsyncs_parent_directory(tmp_path: Path) -> None:
+    target = tmp_path / "nested" / "payload.json"
+    with patch("yt_live_kit.services._fsutil.fsync_directory") as fsync_directory:
+        write_text_atomically(target, '{"ok": true}')
+    fsync_directory.assert_called_once_with(target.parent)
+
+
+def test_write_bytes_atomically_writes_content_and_fsyncs_directory(
+    tmp_path: Path,
+) -> None:
+    target = tmp_path / "binary.bin"
+    with patch("yt_live_kit.services._fsutil.fsync_directory") as fsync_directory:
+        write_bytes_atomically(target, b"\x00\x01", mode=0o600)
+    assert target.read_bytes() == b"\x00\x01"
+    assert target.stat().st_mode & 0o777 == 0o600
+    fsync_directory.assert_called_once_with(target.parent)
 
 
 def test_advisory_lock_uses_lock_file_in_parent_directory(tmp_path: Path) -> None:

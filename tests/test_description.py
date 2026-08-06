@@ -14,22 +14,15 @@ from yt_live_kit.services.description import (
     DescriptionError,
     SHORTS_DESCRIPTION_CTA,
     ShortsDescriptionRequirements,
-    build_description,
     build_shorts_description,
     build_shorts_description_for_upload,
     ensure_shorts_description_template,
     get_shorts_template_path,
-    get_template_path,
     save_shorts_template,
-    save_template,
     validate_shorts_description,
 )
 
 
-def _write_chapters(tmp_path, video_id: str, text: str) -> None:
-    chapters_dir = tmp_path / video_id / "chapters"
-    chapters_dir.mkdir(parents=True, exist_ok=True)
-    (chapters_dir / "chapters.md").write_text(text, encoding="utf-8")
 
 
 def _write_meta(tmp_path, video_id: str, *, title: str = "元のライブ配信") -> None:
@@ -53,52 +46,11 @@ def _write_meta(tmp_path, video_id: str, *, title: str = "元のライブ配信"
     )
 
 
-def test_build_description_with_template(tmp_path):
-    video_id = "desc001"
-    settings = Settings(data_dir=tmp_path)
-    _write_chapters(tmp_path, video_id, "0:00 開始\n5:00 本編\n")
-
-    save_template("【配信概要】\n\n{{timeline}}\n\n#タグ", settings=settings)
-
-    result = build_description(video_id, settings=settings)
-
-    assert result.startswith("【配信概要】")
-    assert "0:00 開始" in result
-    assert "5:00 本編" in result
-    assert "#タグ" in result
-    assert "{{timeline}}" not in result
-
-
-def test_build_description_without_template(tmp_path):
-    video_id = "desc002"
-    settings = Settings(data_dir=tmp_path)
-    chapters_text = "0:00 開始\n5:00 本編\n10:00 終了\n"
-    _write_chapters(tmp_path, video_id, chapters_text)
-
-    result = build_description(video_id, settings=settings)
-
-    assert result == chapters_text.strip()
-
-
-def test_build_description_missing_chapters_raises(tmp_path):
-    settings = Settings(data_dir=tmp_path)
-
-    with pytest.raises(DescriptionError, match="チャプターが見つかりません"):
-        build_description("missing001", settings=settings)
-
-
-def test_get_template_path(tmp_path):
-    settings = Settings(data_dir=tmp_path)
-    path = get_template_path(settings)
-    assert path == tmp_path / "_config" / "description_template.txt"
-
-
-def test_get_shorts_template_path_is_separate_from_long_form(tmp_path):
+def test_get_shorts_template_path(tmp_path):
     settings = Settings(data_dir=tmp_path)
     assert get_shorts_template_path(settings) == (
         tmp_path / "_config" / "shorts_description_template.txt"
     )
-    assert get_shorts_template_path(settings) != get_template_path(settings)
 
 
 def test_build_shorts_description_without_template_returns_input(tmp_path):
@@ -225,15 +177,6 @@ def test_build_shorts_description_rejects_over_byte_limit(tmp_path):
 
     with pytest.raises(DescriptionError, match="5000 bytes を超えます"):
         build_shorts_description("本文", video_id="short007", settings=settings)
-
-
-def test_shorts_template_does_not_affect_long_form_description(tmp_path):
-    video_id = "short008"
-    settings = Settings(data_dir=tmp_path)
-    _write_chapters(tmp_path, video_id, "0:00 開始\n5:00 本編\n")
-    save_shorts_template("ショート専用\n{{description}}", settings=settings)
-
-    assert build_description(video_id, settings=settings) == "0:00 開始\n5:00 本編"
 
 
 def _valid_quality_template(extra: str = "") -> str:

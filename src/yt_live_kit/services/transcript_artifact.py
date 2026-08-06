@@ -23,7 +23,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from yt_live_kit.config import Settings
+from yt_live_kit.config import WHISPER_ADOPTED_CONTRACT, Settings
 from yt_live_kit.models.transcript import (
     ArtifactStatus,
     ResolverUse,
@@ -1833,112 +1833,101 @@ def save_transcript_artifact(
 store_transcript_artifact = save_transcript_artifact
 
 
-def load_transcript_artifact(
-    video_id: str,
-    artifact_fingerprint_value: str,
-    settings: Settings | Path,
+def reference_artifact_for_current_capability(
+    stored: TranscriptArtifact,
+    *,
+    model: Mapping[str, Any] | None = None,
+    runtime: Mapping[str, Any] | None = None,
+    settings: Mapping[str, Any] | None = None,
 ) -> TranscriptArtifact:
-    return TranscriptArtifactStore(video_id, settings).load_artifact(
-        artifact_fingerprint_value
+    """保存済み artifact を、現在の adopted contract 相当 provenance に差し替えた参照を返す。"""
+
+    if not isinstance(stored, TranscriptArtifact):
+        raise TranscriptArtifactError("失効判定には TranscriptArtifact が必要です。")
+    contract = WHISPER_ADOPTED_CONTRACT
+    updated_model = dict(stored.model)
+    if model is not None:
+        updated_model.update(dict(model))
+    else:
+        updated_model["name"] = contract.model_name
+        updated_model["sha256"] = contract.model_sha256
+        updated_model["fingerprint"] = contract.model_sha256
+    updated_runtime = dict(stored.runtime)
+    if runtime is not None:
+        updated_runtime.update(dict(runtime))
+    else:
+        updated_runtime["binary_sha256"] = contract.binary_sha256
+        updated_runtime["version"] = contract.binary_version
+    if settings is not None:
+        updated_settings = dict(settings)
+    else:
+        updated_settings = {
+            "language": contract.language,
+            "initial_prompt": contract.initial_prompt,
+            "output_schema": contract.output_schema,
+            "padding_ms": contract.padding_ms,
+            "vad": contract.vad,
+            "decode": contract.decode,
+        }
+    return stored.model_copy(
+        update={
+            "model": updated_model,
+            "runtime": updated_runtime,
+            "settings": updated_settings,
+        }
     )
 
 
-def rebuild_transcript_index(video_id: str, settings: Settings | Path) -> tuple[str, ...]:
-    return TranscriptArtifactStore(video_id, settings).rebuild_index()
-
-
-def resolve_transcript(
-    video_id: str,
-    settings: Settings | Path,
-    purpose: TranscriptResolverUse | str,
+def should_invalidate_against_current_capability(
+    stored: TranscriptArtifact,
     *,
-    ranges: Iterable[TranscriptRange | Mapping[str, Any] | Sequence[Any]] | None = None,
-    expected_settings: Mapping[str, Any] | None = None,
-    **kwargs: Any,
-) -> TranscriptResolution:
-    """用途別 resolver の公開関数。"""
-
-    if expected_settings is not None:
-        if "settings" in kwargs:
-            raise TranscriptResolutionError(
-                "selected_range の expected settings が重複指定されています。"
-            )
-        kwargs["settings"] = expected_settings
-
-    return TranscriptResolver(video_id, settings).resolve(
-        purpose,
-        ranges=ranges,
-        **kwargs,
-    )
-
-
-def resolve_coarse_search(
-    video_id: str,
-    settings: Settings | Path,
-    **kwargs: Any,
-) -> TranscriptResolution:
-    return resolve_transcript(video_id, settings, ResolverUse.COARSE_SEARCH, **kwargs)
-
-
-def resolve_selected_range(
-    video_id: str,
-    settings: Settings | Path,
-    ranges: Iterable[TranscriptRange | Mapping[str, Any] | Sequence[Any]],
-    *,
-    expected_cache_identity_value: str | None = None,
-    expected_settings: Mapping[str, Any] | None = None,
-    **kwargs: Any,
-) -> TranscriptResolution:
-    return resolve_transcript(
-        video_id,
-        settings,
-        ResolverUse.SELECTED_RANGE,
-        ranges=ranges,
-        expected_cache_identity_value=expected_cache_identity_value,
-        expected_settings=expected_settings,
-        **kwargs,
-    )
-
-
-def resolve_artifact(
-    video_id: str,
-    settings: Settings | Path,
-    purpose: TranscriptResolverUse | str,
-    *,
-    ranges: Iterable[TranscriptRange | Mapping[str, Any] | Sequence[Any]] | None = None,
-    **kwargs: Any,
-) -> TranscriptArtifact | None:
-    """artifact だけが必要な S9-3 / S9-4 向け convenience API。"""
-
-    return resolve_transcript(
-        video_id,
-        settings,
-        purpose,
-        ranges=ranges,
-        **kwargs,
-    ).artifact
-
-
-def used_range_invalidated(
-    previous_cues: Iterable[TranscriptCue | Mapping[str, Any]],
-    current_cues: Iterable[TranscriptCue | Mapping[str, Any]],
-    ranges: Iterable[TranscriptRange | Mapping[str, Any] | Sequence[Any]],
-    *,
-    padding: int | Mapping[str, Any] | None = None,
-    inclusion_rule: str | None = None,
+    model: Mapping[str, Any] | None = None,
+    runtime: Mapping[str, Any] | None = None,
+    settings: Mapping[str, Any] | None = None,
 ) -> bool:
-    """使用範囲内の cue だけを比較する downstream 失効判定。"""
+    """保存済み artifact が現在の capability / adopted contract と一致しなければ True。"""
 
-    return used_range_cue_digest(
-        previous_cues,
-        ranges,
-        padding=padding,
-        inclusion_rule=inclusion_rule,
-    ) != used_range_cue_digest(
-        current_cues,
-        ranges,
-        padding=padding,
-        inclusion_rule=inclusion_rule,
+    reference = reference_artifact_for_current_capability(
+        stored,
+        model=model,
+        runtime=runtime,
+        settings=settings,
+    )
+    return should_invalidate_used_range(stored, reference)
+
+
+def stored_artifact_lineage_is_current(
+    *,
+    video_id: str,
+    artifact_ref: TranscriptArtifactRef,
+    artifact_fingerprint: str,
+    used_range_cue_digests: Sequence[str],
+    settings: Settings,
+    model: Mapping[str, Any] | None = None,
+    runtime: Mapping[str, Any] | None = None,
+    capability_settings: Mapping[str, Any] | None = None,
+) -> bool:
+    """immutable artifact ref と保存実体・adopted contract が一致するか判定する。"""
+
+    try:
+        store = TranscriptArtifactStore(video_id, settings)
+        artifact = store.load_artifact(artifact_fingerprint)
+        actual_ref = store.artifact_ref(artifact)
+    except (TranscriptArtifactError, OSError, ValueError):
+        return False
+    if (
+        actual_ref != artifact_ref
+        or artifact.video_id != video_id
+        or artifact.artifact_fingerprint != artifact_fingerprint
+        or tuple(artifact.used_range_cue_digests) != tuple(used_range_cue_digests)
+        or not artifact.is_high_precision
+    ):
+        return False
+    return not should_invalidate_against_current_capability(
+        artifact,
+        model=model,
+        runtime=runtime,
+        settings=capability_settings,
     )
 
 

@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import tempfile
 import uuid
 from contextlib import contextmanager
 from collections.abc import Callable, Mapping, Sequence
@@ -21,6 +20,7 @@ from yt_live_kit.models.clips import ClipCandidate
 from yt_live_kit.models.highlights import HighlightSegment
 from yt_live_kit.models.telop import TelopScriptDocument
 from yt_live_kit.models.transcript import TranscriptArtifactRef
+from yt_live_kit.services._fsutil import write_text_atomically
 from yt_live_kit.services.ffmpeg import FfmpegError, probe_media_streams
 from yt_live_kit.services.shorts import (
     MAX_DURATION_SEC,
@@ -41,7 +41,11 @@ from yt_live_kit.services.telop import (
     normalize_segment_bounds,
     validate_telop_script,
 )
-from yt_live_kit.services.transcript_artifact import TranscriptArtifactError, TranscriptArtifactStore
+from yt_live_kit.services.transcript_artifact import (
+    TranscriptArtifactError,
+    TranscriptArtifactStore,
+    stored_artifact_lineage_is_current,
+)
 
 QueueSource = Literal["clips", "highlights"]
 QueueMode = Literal["individual", "concat"]
@@ -995,7 +999,6 @@ def _validate_spec_artifact_lineage(
     try:
         store = TranscriptArtifactStore(video_id, settings)
         artifact = store.load_artifact(spec.artifact_fingerprint)
-        actual_ref = store.artifact_ref(artifact)
     except (TranscriptArtifactError, OSError, ValueError) as exc:
         raise ShortsQueueError(
             "queue spec の字幕 artifact を確認できません。古い結果は再利用せず、明示的に再確認してください。"
@@ -1010,10 +1013,12 @@ def _validate_spec_artifact_lineage(
             "queue spec の字幕 artifact は高精度成功結果ではありません。"
             "既存 VTT fallback を明示的に選ぶか、処理を停止してください。"
         )
-    if (
-        actual_ref != spec.artifact_ref
-        or artifact.artifact_fingerprint != spec.artifact_fingerprint
-        or tuple(artifact.used_range_cue_digests) != tuple(spec.used_range_cue_digests)
+    if not stored_artifact_lineage_is_current(
+        video_id=video_id,
+        artifact_ref=spec.artifact_ref,
+        artifact_fingerprint=spec.artifact_fingerprint,
+        used_range_cue_digests=spec.used_range_cue_digests,
+        settings=settings,
     ):
         raise ShortsQueueError("queue spec の artifact lineage が保存済み artifact と一致しません。")
 
@@ -1123,37 +1128,11 @@ def _manifest_lock(path: Path) -> Iterator[None]:
 def _write_manifest_unlocked(result: ShortsQueueResult, settings: Settings) -> None:
     _validate_result_paths(result, settings)
     path = result.manifest_path
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary_path: Path | None = None
+    text = json.dumps(result.to_dict(), ensure_ascii=False, indent=2) + "\n"
     try:
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            dir=path.parent,
-            prefix=f".{path.name}.{uuid.uuid4().hex}.",
-            suffix=".tmp",
-            delete=False,
-        ) as temporary:
-            temporary_path = Path(temporary.name)
-            json.dump(result.to_dict(), temporary, ensure_ascii=False, indent=2)
-            temporary.write("\n")
-            temporary.flush()
-            os.fsync(temporary.fileno())
-        os.replace(temporary_path, path)
-        try:
-            directory_fd = os.open(path.parent, os.O_RDONLY)
-        except OSError:
-            directory_fd = None
-        if directory_fd is not None:
-            try:
-                os.fsync(directory_fd)
-            finally:
-                os.close(directory_fd)
+        write_text_atomically(path, text)
     except OSError as exc:
         raise ShortsQueueError("ショート量産結果を保存できませんでした。") from exc
-    finally:
-        if temporary_path is not None and temporary_path.exists():
-            temporary_path.unlink(missing_ok=True)
 
 
 def _write_manifest(result: ShortsQueueResult, settings: Settings) -> None:

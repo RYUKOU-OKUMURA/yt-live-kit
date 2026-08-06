@@ -11,7 +11,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from yt_live_kit.config import Settings
+from yt_live_kit.config import Settings, WHISPER_ADOPTED_CONTRACT
 from yt_live_kit.models.clips import ClipCandidate
 from yt_live_kit.models.highlights import HighlightSegment
 from yt_live_kit.models.telop import TelopScriptDocument
@@ -23,6 +23,7 @@ from yt_live_kit.services.shorts_line import (
     confirm_preview,
     confirm_review,
     create_line_state,
+    line_state_path,
     load_line_state,
     make_review_fingerprint,
     record_output,
@@ -597,6 +598,144 @@ def test_recovery_actions_offer_retry_and_confirmed_abandon(tmp_path: Path) -> N
         "保存状態を再読み込み",
         "ラインを終了して素材選定へ戻る",
     ]
+
+
+def test_scan_broken_line_entries_detects_corrupt_json(tmp_path: Path) -> None:
+    settings = Settings(data_dir=tmp_path)
+    state = create_line_state("video-1", "clip-1", "a" * 64)
+    path = save_line_state(state, settings)
+    path.write_text("{broken", encoding="utf-8")
+    entries = shorts_line._scan_broken_line_entries("video-1", settings)
+    assert len(entries) == 1
+    assert entries[0].clip_id == "clip-1"
+    assert "壊れている" in entries[0].message
+
+
+def test_scan_broken_line_entries_does_not_mutate_legacy_state(tmp_path: Path) -> None:
+    settings = Settings(data_dir=tmp_path)
+    state = create_line_state("video-1", "clip-1", "a" * 64)
+    legacy = state.model_copy(update={"schema_version": 1})
+    path = save_line_state(legacy, settings)
+    before = path.read_bytes()
+    entries = shorts_line._scan_broken_line_entries("video-1", settings)
+    assert entries == ()
+    assert path.read_bytes() == before
+
+
+def test_render_shorts_line_offers_recovery_for_corrupt_line_state(
+    tmp_path: Path,
+) -> None:
+    settings = Settings(data_dir=tmp_path)
+    state = create_line_state("video-1", "clip-1", "a" * 64)
+    path = save_line_state(state, settings)
+    save_active_line("video-1", "clip-1", settings)
+    path.write_text("{broken", encoding="utf-8")
+
+    with patch.object(
+        shorts_line,
+        "_render_line_state_failure_recovery",
+    ) as recovery:
+        shorts_line.render_shorts_line(
+            video_id="video-1",
+            title="動画",
+            clip_candidates=(),
+            highlight_candidates=(),
+            settings=settings,
+        )
+
+    recovery.assert_called_once()
+    assert recovery.call_args.args[2] == "ショート生産ラインの状態が壊れているため安全に復元できません。"
+
+
+def test_render_main_line_summary_offers_recovery_for_corrupt_line_state(
+    tmp_path: Path,
+) -> None:
+    settings = Settings(data_dir=tmp_path)
+    state = create_line_state("video-1", "clip-1", "a" * 64)
+    path = save_line_state(state, settings)
+    save_active_line("video-1", "clip-1", settings)
+    path.write_text("{broken", encoding="utf-8")
+
+    with patch.object(
+        shorts_line,
+        "_render_line_state_failure_recovery",
+    ) as recovery:
+        shorts_line.render_main_line_summary("video-1", settings)
+
+    recovery.assert_called_once()
+
+
+def test_evacuate_broken_line_file_archives_and_clears_pointer(tmp_path: Path) -> None:
+    settings = Settings(data_dir=tmp_path)
+    state = create_line_state("video-1", "clip-1", "a" * 64)
+    path = save_line_state(state, settings)
+    save_active_line("video-1", "clip-1", settings)
+    path.write_text("{broken", encoding="utf-8")
+    active_path = path.parent / "active_line.json"
+
+    archive = shorts_line._evacuate_broken_line_file("video-1", "clip-1", settings)
+
+    assert not path.exists()
+    assert archive.is_file()
+    assert not active_path.exists()
+
+
+def test_execute_line_state_recovery_reparses_identity_mismatch_state(
+    tmp_path: Path,
+) -> None:
+    settings = Settings(data_dir=tmp_path)
+    target, document, _spec = _lineage_fixture()
+    candidate = ClipCandidate(
+        id="clip-source",
+        title="短い候補",
+        start="0:00:00",
+        end="0:00:20",
+        duration_sec=20,
+        reason="理由",
+    )
+    queue_fingerprint = make_shorts_queue_fingerprint(
+        video_id="video-1",
+        source="clips",
+        mode="concat",
+        original_candidates=(candidate,),
+        segments=target.segments,
+        layout="blur",
+        preset="default",
+        hook_preset="hook",
+    )
+    material = shorts_line._material_context_payload(
+        source="clips",
+        original_candidate=candidate,
+        target=target,
+        defaults=ShortsLineDefaults(),
+    )
+    mismatched = create_line_state(
+        "video-1",
+        "clip-wrong",
+        queue_fingerprint,
+        material_context=material,
+    )
+    wrong_path = line_state_path("video-1", "clip-1", settings)
+    wrong_path.parent.mkdir(parents=True, exist_ok=True)
+    wrong_path.write_text(mismatched.model_dump_json(indent=2), encoding="utf-8")
+    evidence = shorts_line._gather_line_recovery_evidence(
+        "video-1",
+        "clip-1",
+        settings,
+        broken_path=wrong_path,
+    )
+    assert evidence is not None
+    error = shorts_line._execute_line_state_recovery(
+        "video-1",
+        "clip-1",
+        settings,
+        evidence,
+    )
+    assert error is None
+    restored = load_line_state("video-1", "clip-1", settings)
+    assert restored is not None
+    assert restored.clip_id == "clip-1"
+    assert restored.queue_fingerprint == queue_fingerprint
 
 
 def test_legacy_abandon_first_click_materializes_before_archive(tmp_path: Path) -> None:
@@ -1801,6 +1940,64 @@ def test_s9_artifact_lineage_mismatch_keeps_clip_scope_and_fails_closed() -> Non
 
     assert current is False
     assert "使用区間の証跡" in reason
+    assert "対象 clip: cut-1" in reason
+    assert "ライン全体は失効していません" in reason
+
+
+def test_s9_artifact_lineage_invalidates_when_whisper_contract_changes(
+    tmp_path: Path,
+) -> None:
+    from yt_live_kit.models.transcript import TranscriptCue, TranscriptRange
+    from yt_live_kit.services.transcript_artifact import (
+        TranscriptArtifactStore,
+        build_transcript_artifact,
+    )
+
+    settings = Settings(data_dir=tmp_path)
+    contract = WHISPER_ADOPTED_CONTRACT
+    artifact = build_transcript_artifact(
+        video_id="video-1",
+        source_kind="whisper_cpp",
+        source_ref="transcripts/audio/range.wav",
+        language="ja",
+        ranges=[TranscriptRange(start_ms=10_000, end_ms=20_000)],
+        cues=[TranscriptCue(start_ms=11_000, end_ms=12_000, text="artifact cue")],
+        audio_bytes=b"ui-lineage-audio",
+        model={
+            "name": contract.model_name,
+            "sha256": "0" * 64,
+            "fingerprint": "0" * 64,
+        },
+        runtime={
+            "version": contract.binary_version,
+            "binary_sha256": contract.binary_sha256,
+        },
+        settings={
+            "language": contract.language,
+            "initial_prompt": contract.initial_prompt,
+            "output_schema": contract.output_schema,
+            "padding_ms": contract.padding_ms,
+            "vad": contract.vad,
+            "decode": contract.decode,
+        },
+        source_metadata={"audio_spans": [{"audio_route": "local_source_accurate_seek"}]},
+    )
+    store = TranscriptArtifactStore("video-1", settings)
+    store.save(artifact)
+    reference = store.artifact_ref(artifact)
+    state = create_line_state(
+        "video-1",
+        "cut-1",
+        "a" * 64,
+        artifact_ref=reference,
+        artifact_fingerprint=artifact.artifact_fingerprint,
+        used_range_cue_digests=artifact.used_range_cue_digests,
+    )
+
+    current, reason = shorts_line._inspect_artifact_lineage(state, settings)
+
+    assert current is False
+    assert "証跡が一致しない" in reason
     assert "対象 clip: cut-1" in reason
     assert "ライン全体は失効していません" in reason
 

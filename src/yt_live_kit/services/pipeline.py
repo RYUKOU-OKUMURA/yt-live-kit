@@ -10,6 +10,7 @@ from pathlib import Path
 from yt_live_kit.config import Settings, get_settings
 from yt_live_kit.models.clips import ClipCandidate, ClipCandidatesDocument
 from yt_live_kit.models.meta import VideoMeta
+from yt_live_kit.services._paths import PathConfinementError, confined_video_path
 from yt_live_kit.services.ai_prompt import (
     AiPromptError,
     ChapterValidationError,
@@ -92,7 +93,10 @@ def _notify(
 
 
 def _video_dir(video_id: str, settings: Settings) -> Path:
-    return settings.data_dir / video_id
+    try:
+        return confined_video_path(settings.data_dir, video_id)
+    except PathConfinementError as exc:
+        raise PipelineError(str(exc)) from exc
 
 
 def _fetch_artifacts_exist(video_dir: Path) -> bool:
@@ -121,7 +125,7 @@ def _chapters_path(video_dir: Path) -> Path:
     return video_dir / "chapters" / "chapters.md"
 
 
-def _backup_file(path: Path) -> None:
+def backup_file(path: Path) -> None:
     """既存成果物を .bak として退避する."""
     if path.is_file():
         shutil.copy2(path, Path(f"{path}.bak"))
@@ -352,7 +356,7 @@ def regenerate(
     if target == "chapters":
         try:
             _notify(on_progress, STAGE_CHAPTERS)
-            _backup_file(_chapters_path(video_dir))
+            backup_file(_chapters_path(video_dir))
             chapter_result = generate_chapters(video_id, settings)
         except CodexNotFoundError as exc:
             raise PipelineError(str(exc)) from exc
@@ -369,7 +373,7 @@ def regenerate(
         clips_error_path = _clips_error_path(video_dir)
         try:
             _notify(on_progress, STAGE_CLIPS_SUGGEST)
-            _backup_file(video_dir / "clips" / "candidates.json")
+            backup_file(video_dir / "clips" / "candidates.json")
             clips_result = suggest_clips(video_id, settings)
             clips_candidates = clips_result.candidates
             clips_candidates_path = clips_result.candidates_path
@@ -380,7 +384,7 @@ def regenerate(
     elif target == "highlights":
         highlights_error_path = _highlights_error_path(video_dir)
         try:
-            _backup_file(video_dir / "highlights" / "segments.json")
+            backup_file(video_dir / "highlights" / "segments.json")
             suggest_highlights(video_id, settings, on_progress=on_progress)
             _clear_softfail_error(highlights_error_path)
         except (
@@ -474,7 +478,7 @@ def load_result_from_disk(
 ) -> PipelineResult | None:
     """data/{video_id}/ から保存済み成果物を読み込む."""
     settings = settings or get_settings()
-    video_dir = settings.data_dir / video_id
+    video_dir = _video_dir(video_id, settings)
     meta_path = video_dir / "meta.json"
     full_path = video_dir / "transcript" / "full.txt"
 

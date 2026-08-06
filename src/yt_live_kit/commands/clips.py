@@ -4,7 +4,7 @@ from pathlib import Path
 
 import typer
 
-from yt_live_kit.config import get_settings
+from yt_live_kit.config import Settings, get_settings
 from yt_live_kit.services.clips import (
     ClipValidationError,
     ClipsError,
@@ -13,12 +13,17 @@ from yt_live_kit.services.clips import (
 )
 from yt_live_kit.services.ai_prompt import CodexNotFoundError
 from yt_live_kit.services.ffmpeg import FfmpegError, cut_clip
+from yt_live_kit.services.pipeline import backup_file
 
 clips_app = typer.Typer(
     name="clips",
     help="切り抜き候補の提案と動画切り出し",
     no_args_is_help=True,
 )
+
+
+def _candidates_path(video_id: str, settings: Settings) -> Path:
+    return settings.data_dir / video_id / "clips" / "candidates.json"
 
 
 @clips_app.command("suggest")
@@ -40,10 +45,14 @@ def clips_suggest_cmd(
 
     try:
         if from_file is not None:
+            backup_file(_candidates_path(video_id, settings))
             candidates_path, doc = save_candidates_from_file(video_id, from_file, settings)
             typer.echo(f"候補保存完了: {candidates_path}")
             typer.echo(f"候補数: {len(doc.candidates)}")
             return
+
+        if not prompt_only:
+            backup_file(_candidates_path(video_id, settings))
 
         result = suggest_clips(video_id, settings, prompt_only=prompt_only)
         typer.echo(f"プロンプト: {result.prompt_path}")

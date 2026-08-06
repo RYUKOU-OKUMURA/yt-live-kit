@@ -5,8 +5,10 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from pydantic import ValidationError
 
 from yt_live_kit.config import Settings
+from yt_live_kit.models.highlights import HighlightSegment, HighlightsDocument
 from yt_live_kit.services.highlights import (
     CODEX_INSTALL_HINT,
     HighlightValidationError,
@@ -73,6 +75,37 @@ def test_validate_highlights_ok():
     result = validate_highlights(_sample_highlights_data())
     assert result.ok
     assert not result.errors
+
+
+def test_highlight_models_reject_unknown_fields():
+    segment_payload = _segment(1)
+    assert HighlightSegment.model_validate(segment_payload)
+    with pytest.raises(ValidationError):
+        HighlightSegment.model_validate({**segment_payload, "unknown": True})
+
+    doc_payload = {"candidates": [segment_payload, _segment(2, start="00:05:00", end="00:07:00")]}
+    assert HighlightsDocument.model_validate(doc_payload)
+    with pytest.raises(ValidationError):
+        HighlightsDocument.model_validate({**doc_payload, "unknown": True})
+    with pytest.raises(ValidationError):
+        HighlightsDocument.model_validate(
+            {"candidates": [{**segment_payload, "unknown": True}, doc_payload["candidates"][1]]}
+        )
+
+
+def test_validate_highlights_rejects_unknown_fields():
+    data = _sample_highlights_data(2)
+    result = validate_highlights({**data, "unknown": True})
+    assert not result.ok
+    assert any("JSON 形式が想定と異なります" in err for err in result.errors)
+
+    tampered = {
+        **data,
+        "candidates": [{**data["candidates"][0], "unknown": True}, data["candidates"][1]],
+    }
+    result = validate_highlights(tampered)
+    assert not result.ok
+    assert any("JSON 形式が想定と異なります" in err for err in result.errors)
 
 
 def test_validate_highlights_too_few():

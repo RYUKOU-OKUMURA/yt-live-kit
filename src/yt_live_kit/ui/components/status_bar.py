@@ -25,7 +25,6 @@ from yt_live_kit.services.upload_queue import UploadQueueError, load_operation
 from yt_live_kit.ui.components.short_cut import S9_WHISPER_ERROR_PREFIX
 from yt_live_kit.ui.state import (
     clear_active_job_id,
-    clear_cut_result,
     clear_result,
     dismiss_pipeline_completion,
     format_job_error_summary_for_display,
@@ -38,7 +37,6 @@ from yt_live_kit.ui.state import (
     record_job_error,
     set_active_job_id,
     set_batch_summary,
-    set_cut_result,
     set_last_job_id,
     set_selected_video_id,
 )
@@ -53,13 +51,12 @@ _KIND_LABELS: dict[str, str] = {
     "short_cut": "ショート区間提案",
     "upload": "予約投稿",
     "upload_publication": "公開状態確認",
-    "cut_clip": "切り出し",
 }
 
 _PIPELINE_KINDS = frozenset({"single", "regenerate", "highlights", "shorts"})
 _UPLOAD_KINDS = frozenset({"upload", "upload_publication"})
 _KNOWN_NON_PIPELINE_KINDS = frozenset(
-    {"batch", "shorts_queue", "short_cut", "upload", "upload_publication", "cut_clip"}
+    {"batch", "shorts_queue", "short_cut", "upload", "upload_publication"}
 )
 
 _ERROR_SUMMARY_MAX_CHARS = 180
@@ -75,7 +72,6 @@ _RETRY_HINTS: dict[str, str] = {
     "short_cut": "対象動画の素材を確認して再実行してください。",
     "upload": "投稿履歴を確認し、必要なら明示的に再試行してください。",
     "upload_publication": "投稿状態を確認し、必要なら明示的に再試行してください。",
-    "cut_clip": "対象動画を開いて切り出しを再実行してください。",
 }
 
 # セッションをまたいで完了ジョブを復元する時間窓（分）。
@@ -412,7 +408,6 @@ def _handle_finished_job(job: JobState) -> None:
                     # 旧 page shell の全文表示用 state は互換 API として残すが、
                     # 新しい完了処理では保持しない。
                     clear_result()
-                    clear_cut_result()
                 else:
                     _record_job_error(
                         job,
@@ -517,38 +512,6 @@ def _handle_finished_job(job: JobState) -> None:
         elif job.kind == "short_cut":
             # 保存済み cutplan は画面 rerun 後に short_cut 部品が再読込する。
             pass
-        elif job.kind == "cut_clip":
-            if not job.result_ref:
-                _record_job_error(
-                    job,
-                    cause="切り出し成果物の参照先がありません。",
-                    detail_source="ジョブ状態",
-                    detail="result_ref が空です。",
-                )
-            else:
-                from yt_live_kit.services.clips import cut_result_from_ref
-
-                cut_result_error_recorded = False
-                try:
-                    cut_result = cut_result_from_ref(job.result_ref)
-                except Exception as exc:
-                    _record_job_error(
-                        job,
-                        cause="切り出し結果を読み込めません。",
-                        detail_source="切り出し成果物参照",
-                        detail=exc,
-                    )
-                    cut_result_error_recorded = True
-                    cut_result = None
-                if cut_result is not None:
-                    set_cut_result(cut_result)
-                elif not cut_result_error_recorded:
-                    _record_job_error(
-                        job,
-                        cause="切り出し結果を読み込めません。",
-                        detail_source="切り出し成果物参照",
-                        detail="result_ref の形式または内容が正しくありません。",
-                    )
         elif job.kind not in _KNOWN_NON_PIPELINE_KINDS:
             _record_job_error(
                 job,

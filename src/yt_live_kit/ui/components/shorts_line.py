@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Sequence
+import os
+import uuid
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
 import streamlit as st
+from pydantic import ValidationError
 
 from yt_live_kit.config import Settings
 from yt_live_kit.models.clips import ClipCandidate
@@ -18,6 +22,11 @@ from yt_live_kit.models.upload import UploadOperation
 from yt_live_kit.services.ai_prompt import AiPromptError
 from yt_live_kit.services.jobs import get_active_job
 from yt_live_kit.services.schedule import ScheduleError, load_schedule_policy
+from yt_live_kit.services._paths import (
+    PathConfinementError,
+    confined_video_path,
+    validate_confined_candidate,
+)
 from yt_live_kit.services.shorts_line import (
     DailyLineSummary,
     LineStage,
@@ -28,13 +37,16 @@ from yt_live_kit.services.shorts_line import (
     confirm_review,
     create_line_state,
     evaluate_telop_gate,
+    line_state_path,
+    load_line_state,
+    make_generation_spec_fingerprint,
+    make_output_fingerprint,
+    materialize_line_state_projection,
+    persist_line_start,
+    recover_line_state,
     record_output,
     record_upload_operation,
     reconcile_output,
-    load_line_state,
-    make_generation_spec_fingerprint,
-    materialize_line_state_projection,
-    persist_line_start,
     resolve_active_line_read_only,
     resolve_active_line,
     save_active_line,
@@ -61,7 +73,11 @@ from yt_live_kit.services.telop import (
     save_confirmed_telop_script,
     validate_telop_script,
 )
-from yt_live_kit.services.transcript_artifact import TranscriptArtifactError, TranscriptArtifactStore
+from yt_live_kit.services.transcript_artifact import (
+    TranscriptArtifactError,
+    TranscriptArtifactStore,
+    stored_artifact_lineage_is_current,
+)
 from yt_live_kit.services.short_cut import load_cut_plan
 from yt_live_kit.services.subtitle_burn import TELOP_PRESETS
 from yt_live_kit.services.upload_queue import UploadQueueError, list_operations
@@ -113,6 +129,32 @@ from yt_live_kit.ui.views._local_settings import (
 
 PreviewMode = Literal["source", "generating", "output", "source_missing"]
 
+_COMPLETED_UPLOAD_STATES = frozenset({"reserved", "uploading", "uploaded"})
+
+
+@dataclass(frozen=True)
+class _BrokenLineEntry:
+    """読み込めない永続ライン状態の 1 件."""
+
+    clip_id: str
+    message: str
+    path: Path
+
+
+@dataclass(frozen=True)
+class _LineRecoveryEvidence:
+    """recover_line_state へ渡す機械的証跡の束."""
+
+    queue_fingerprint: str
+    review_fingerprint: str | None = None
+    material_context: Mapping[str, object] | None = None
+    artifact_ref: object | None = None
+    artifact_fingerprint: str | None = None
+    used_range_cue_digests: tuple[str, ...] = ()
+    generation_spec: Mapping[str, object] | None = None
+    output_fingerprint: str | None = None
+    upload_operation: UploadOperation | None = None
+
 
 def _safe(value: object) -> str:
     return str(value).replace("<", "〈").replace(">", "〉")
@@ -132,24 +174,12 @@ def _inspect_artifact_lineage(
             f"対象 clip: {state.clip_id}。台本確認と最終確認だけを失効しました。"
             "次 gate: 工程 3 の台本を再確認してください。",
         )
-    try:
-        store = TranscriptArtifactStore(state.video_id, settings)
-        artifact = store.load_artifact(state.artifact_fingerprint)
-        actual_ref = store.artifact_ref(artifact)
-    except (TranscriptArtifactError, OSError, ValueError):
-        return (
-            False,
-            "保存済み高精度字幕 artifact を確認できないため失効しました。"
-            f"対象 clip: {state.clip_id}。使用区間外の候補や動画全体は削除していません。"
-            "次 gate: 工程 3 の台本を再確認してください。",
-        )
-    if (
-        actual_ref != state.artifact_ref
-        or artifact.video_id != state.video_id
-        or artifact.artifact_fingerprint != state.artifact_fingerprint
-        or tuple(artifact.used_range_cue_digests)
-        != tuple(state.used_range_cue_digests)
-        or not artifact.is_high_precision
+    if not stored_artifact_lineage_is_current(
+        video_id=state.video_id,
+        artifact_ref=state.artifact_ref,
+        artifact_fingerprint=state.artifact_fingerprint,
+        used_range_cue_digests=state.used_range_cue_digests,
+        settings=settings,
     ):
         return (
             False,
@@ -449,6 +479,462 @@ def _generate_line_telop(
     except (AiPromptError, LineStateError, TelopError) as exc:
         context["telop_error"] = str(exc)
         _save_context(video_id, context)
+
+
+def _line_state_directory(video_id: str, settings: Settings) -> Path:
+    """動画の永続ライン directory を返す."""
+    return line_state_path(video_id, "probe", settings).parent
+
+
+def _parse_line_state_file(path: Path) -> LineState | None:
+    """identity 検証をせず JSON だけ parse する（破損検出後の証跡抽出用）."""
+    if not path.is_file():
+        return None
+    try:
+        return LineState.model_validate_json(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, ValidationError):
+        return None
+
+
+def _scan_broken_line_entries(
+    video_id: str,
+    settings: Settings,
+) -> tuple[_BrokenLineEntry, ...]:
+    """永続ファイルを読み取り専用で検査し、load_line_state が拒否するものを列挙する."""
+    directory = _line_state_directory(video_id, settings)
+    if not directory.is_dir():
+        return ()
+    entries: list[_BrokenLineEntry] = []
+    for path in sorted(directory.glob("line_*.json")):
+        clip_id = path.stem.removeprefix("line_")
+        try:
+            if not path.is_file():
+                continue
+            state = LineState.model_validate_json(path.read_text(encoding="utf-8"))
+            if state.video_id != video_id or state.clip_id != clip_id:
+                raise LineStateError(
+                    "ショート生産ラインの対象が保存先と一致しないため復元できません。"
+                )
+        except LineStateError as exc:
+            entries.append(
+                _BrokenLineEntry(
+                    clip_id=clip_id,
+                    message=str(exc),
+                    path=path,
+                )
+            )
+        except (OSError, UnicodeError, ValidationError):
+            entries.append(
+                _BrokenLineEntry(
+                    clip_id=clip_id,
+                    message=(
+                        "ショート生産ラインの状態が壊れているため安全に復元できません。"
+                    ),
+                    path=path,
+                )
+            )
+    return tuple(entries)
+
+
+def _primary_broken_entry(
+    entries: Sequence[_BrokenLineEntry],
+    video_id: str,
+    settings: Settings,
+) -> _BrokenLineEntry | None:
+    """active pointer が指す破損ファイルを優先して選ぶ."""
+    if not entries:
+        return None
+    active_path = _line_state_directory(video_id, settings) / "active_line.json"
+    if active_path.is_file():
+        try:
+            raw = json.loads(active_path.read_text(encoding="utf-8"))
+            clip_id = raw.get("clip_id") if isinstance(raw, dict) else None
+            if isinstance(clip_id, str):
+                for entry in entries:
+                    if entry.clip_id == clip_id:
+                        return entry
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            pass
+    return entries[0]
+
+
+def _resolve_line_state_for_ui(
+    video_id: str,
+    settings: Settings,
+) -> tuple[LineState | None, str | None, tuple[_BrokenLineEntry, ...]]:
+    """描画用にライン状態を解決し、破損検出結果も返す."""
+    broken = _scan_broken_line_entries(video_id, settings)
+    load_error: str | None = None
+    try:
+        state = resolve_active_line_read_only(video_id, settings)
+    except LineStateError as exc:
+        state = None
+        load_error = str(exc)
+    if state is None and broken and load_error is None:
+        primary = _primary_broken_entry(broken, video_id, settings)
+        if primary is not None:
+            load_error = primary.message
+    return state, load_error, broken
+
+
+def _queue_fingerprint_from_material_json(
+    video_id: str,
+    clip_id: str,
+    material_json: str,
+) -> tuple[str, dict[str, object]] | None:
+    """material context から queue fingerprint を再計算する."""
+    try:
+        raw = json.loads(material_json)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(raw, dict) or set(raw) != {
+        "source",
+        "original_kind",
+        "original_candidate",
+        "target",
+        "defaults",
+    }:
+        return None
+    source = raw["source"]
+    kind = raw["original_kind"]
+    if source not in {"clips", "highlights"}:
+        return None
+    if kind == "clip" and source == "clips":
+        original: ClipCandidate | HighlightSegment = ClipCandidate.model_validate(
+            raw["original_candidate"]
+        )
+    elif kind == "highlight" and source == "highlights":
+        original = HighlightSegment.model_validate(raw["original_candidate"])
+    else:
+        return None
+    target_raw = raw["target"]
+    defaults_raw = raw["defaults"]
+    if not isinstance(target_raw, dict) or set(target_raw) != {
+        "target_id",
+        "segments",
+        "output_name",
+    }:
+        return None
+    if not isinstance(defaults_raw, dict) or set(defaults_raw) != {
+        "layout",
+        "preset",
+        "hook_preset",
+    }:
+        return None
+    segments_raw = target_raw["segments"]
+    if not isinstance(segments_raw, list):
+        return None
+    segments = tuple(ShortsQueueSegmentSpec.from_dict(value) for value in segments_raw)
+    target = ShortsQueueTarget(
+        str(target_raw["target_id"]),
+        segments,
+        str(target_raw["output_name"]),
+    )
+    if target.target_id != clip_id:
+        return None
+    defaults = ShortsLineDefaults(
+        str(defaults_raw["layout"]),
+        str(defaults_raw["preset"]),
+        str(defaults_raw["hook_preset"]),
+    )
+    if (
+        defaults.layout not in {"blur", "crop"}
+        or defaults.preset not in TELOP_PRESETS
+        or defaults.hook_preset not in TELOP_PRESETS
+    ):
+        return None
+    queue_fingerprint = make_shorts_queue_fingerprint(
+        video_id=video_id,
+        source=source,
+        mode="concat",
+        original_candidates=(original,),
+        segments=segments,
+        layout=defaults.layout,
+        preset=defaults.preset,
+        hook_preset=defaults.hook_preset,
+    )
+    return queue_fingerprint, raw
+
+
+def _upload_operation_for_clip(
+    video_id: str,
+    clip_id: str,
+    settings: Settings,
+) -> UploadOperation | None:
+    """完了済み投稿 operation を clip 単位で探す."""
+    try:
+        operations = list_operations(settings)
+    except UploadQueueError:
+        return None
+    candidates = [
+        operation
+        for operation in operations
+        if operation.source_video_id == video_id
+        and operation.clip_id == clip_id
+        and operation.state in _COMPLETED_UPLOAD_STATES
+    ]
+    if not candidates:
+        return None
+    candidates.sort(key=lambda operation: operation.updated_at, reverse=True)
+    return candidates[0]
+
+
+def _gather_line_recovery_evidence(
+    video_id: str,
+    clip_id: str,
+    settings: Settings,
+    *,
+    broken_path: Path | None = None,
+) -> _LineRecoveryEvidence | None:
+    """機械的証跡だけから recover_line_state 用の入力を組み立てる."""
+    path = broken_path or line_state_path(video_id, clip_id, settings)
+    parsed = _parse_line_state_file(path)
+
+    queue_fingerprint = parsed.queue_fingerprint if parsed is not None else None
+    review_fingerprint = parsed.review_fingerprint if parsed is not None else None
+    material_context: dict[str, object] | None = None
+    artifact_ref = parsed.artifact_ref if parsed is not None else None
+    artifact_fingerprint = parsed.artifact_fingerprint if parsed is not None else None
+    used_range_cue_digests = (
+        tuple(parsed.used_range_cue_digests) if parsed is not None else ()
+    )
+    generation_spec: dict[str, object] | None = None
+    if parsed is not None and parsed.generation_spec_json is not None:
+        try:
+            loaded = json.loads(parsed.generation_spec_json)
+            if isinstance(loaded, dict):
+                generation_spec = loaded
+        except json.JSONDecodeError:
+            generation_spec = None
+    output_fingerprint = parsed.output_fingerprint if parsed is not None else None
+
+    if parsed is not None and parsed.material_context_json is not None:
+        material_pair = _queue_fingerprint_from_material_json(
+            video_id,
+            clip_id,
+            parsed.material_context_json,
+        )
+        if material_pair is not None:
+            queue_fingerprint, material_context = material_pair
+
+    spec: ShortsQueueClipSpec | None = None
+    try:
+        result = load_latest_shorts_queue_result(video_id, settings)
+    except ShortsQueueError:
+        result = None
+    if result is not None:
+        spec = next(
+            (value for value in result.clip_specs if value.target_id == clip_id),
+            None,
+        )
+    if spec is not None and queue_fingerprint is not None:
+        document = spec.telop_document
+        review_fingerprint = make_review_fingerprint(
+            video_id,
+            clip_id,
+            queue_fingerprint,
+            document,
+        )
+        generation_spec = {
+            "target_id": spec.target_id,
+            "layout": spec.layout,
+            "preset": spec.preset,
+            "hook_preset": spec.hook_preset,
+            "telop_document": spec.telop_document_json,
+        }
+        if artifact_ref is None and spec.artifact_ref is not None:
+            artifact_ref = spec.artifact_ref
+            artifact_fingerprint = spec.artifact_fingerprint
+            used_range_cue_digests = tuple(spec.used_range_cue_digests)
+        item = next(
+            (
+                value
+                for value in result.items
+                if value.target_id == clip_id and value.status == "succeeded"
+            ),
+            None,
+        )
+        if (
+            item is not None
+            and item.output_path is not None
+            and item.output_path.is_file()
+            and review_fingerprint is not None
+        ):
+            try:
+                output_fingerprint = make_output_fingerprint(
+                    video_id,
+                    clip_id,
+                    review_fingerprint,
+                    item.output_path,
+                )
+            except LineStateError:
+                output_fingerprint = parsed.output_fingerprint if parsed else None
+
+    if queue_fingerprint is None:
+        return None
+
+    upload_operation = _upload_operation_for_clip(video_id, clip_id, settings)
+    return _LineRecoveryEvidence(
+        queue_fingerprint=queue_fingerprint,
+        review_fingerprint=review_fingerprint,
+        material_context=material_context,
+        artifact_ref=artifact_ref,
+        artifact_fingerprint=artifact_fingerprint,
+        used_range_cue_digests=used_range_cue_digests,
+        generation_spec=generation_spec,
+        output_fingerprint=output_fingerprint,
+        upload_operation=upload_operation,
+    )
+
+
+def _evacuate_broken_line_file(
+    video_id: str,
+    clip_id: str,
+    settings: Settings,
+) -> Path:
+    """parse 不能な永続ライン JSON を退避し、active pointer を外す."""
+    path = line_state_path(video_id, clip_id, settings)
+    if not path.is_file():
+        raise LineStateError("退避するライン状態が見つかりません。")
+    try:
+        archive = confined_video_path(
+            settings.data_dir,
+            video_id,
+            "shorts",
+            "line",
+            f"abandoned_{clip_id}_{uuid.uuid4().hex}.json",
+            label="ショート生産ライン保存先",
+        )
+    except PathConfinementError as exc:
+        raise LineStateError(str(exc)) from exc
+    try:
+        os.replace(path, archive)
+        active_path = _line_state_directory(video_id, settings) / "active_line.json"
+        if active_path.is_file():
+            try:
+                raw = json.loads(active_path.read_text(encoding="utf-8"))
+                pointer_clip = raw.get("clip_id") if isinstance(raw, dict) else None
+                if pointer_clip == clip_id:
+                    active_path.unlink(missing_ok=True)
+            except (OSError, UnicodeError, json.JSONDecodeError):
+                pass
+    except OSError as exc:
+        raise LineStateError(
+            "破損したライン状態を安全に退避できませんでした。"
+        ) from exc
+    return archive
+
+
+def _execute_line_state_recovery(
+    video_id: str,
+    clip_id: str,
+    settings: Settings,
+    evidence: _LineRecoveryEvidence,
+) -> str | None:
+    """破損ファイルを退避してから recover_line_state を永続化する."""
+    try:
+        _evacuate_broken_line_file(video_id, clip_id, settings)
+        recovered = recover_line_state(
+            video_id,
+            clip_id,
+            evidence.queue_fingerprint,
+            review_fingerprint=evidence.review_fingerprint,
+            material_context=evidence.material_context,
+            artifact_ref=evidence.artifact_ref,
+            artifact_fingerprint=evidence.artifact_fingerprint,
+            used_range_cue_digests=evidence.used_range_cue_digests,
+            generation_spec=evidence.generation_spec,
+            output_fingerprint=evidence.output_fingerprint,
+            upload_operation=evidence.upload_operation,
+        )
+        save_line_state(recovered, settings)
+        save_active_line(video_id, clip_id, settings)
+    except (LineStateError, ShortsQueueError, UploadQueueError) as exc:
+        return str(exc)
+    return None
+
+
+@st.dialog("破損したライン状態を退避する")
+def _confirm_evacuate_broken_line_dialog(
+    video_id: str,
+    clip_id: str,
+    message: str,
+    settings: Settings,
+) -> None:
+    """parse 不能な永続状態だけを退避し、素材選定へ戻す."""
+    st.warning(_safe(message))
+    st.write(
+        "破損したライン状態ファイルだけを退避します。"
+        "生成済み動画・テロップ台本・マニフェストは削除しません。"
+    )
+    confirmed = st.checkbox(
+        "破損したライン状態を退避して素材選定へ戻ることを確認した",
+        value=False,
+        key=f"line_evacuate_confirm_{video_id}_{clip_id}",
+    )
+    if st.button(
+        "破損状態を退避して素材選定へ戻る",
+        type="primary",
+        disabled=not confirmed,
+        key=f"line_evacuate_execute_{video_id}_{clip_id}",
+    ):
+        try:
+            _evacuate_broken_line_file(video_id, clip_id, settings)
+        except LineStateError as exc:
+            st.error(_safe(exc))
+            return
+        st.session_state.pop(_context_key(video_id), None)
+        clear_line_confirmed_spec(video_id, clip_id)
+        clear_line_snapshot(video_id)
+        st.success("破損したライン状態を退避しました。素材を選び直せます。")
+        st.rerun()
+
+
+def _render_line_state_failure_recovery(
+    video_id: str,
+    settings: Settings,
+    message: str,
+    entry: _BrokenLineEntry,
+) -> None:
+    """LineStateError と破損検出を同じ復旧導線へ統一する."""
+    st.error(_safe(message))
+    st.warning(
+        "ライン状態を安全に読み込めませんでした。"
+        "機械的証跡から再構成するか、破損した状態を退避して素材選定へ戻れます。"
+    )
+    evidence = _gather_line_recovery_evidence(
+        video_id,
+        entry.clip_id,
+        settings,
+        broken_path=entry.path,
+    )
+    with st.container(horizontal=True):
+        if evidence is not None and st.button(
+            "機械的証跡から再構成",
+            key=f"line_recover_{video_id}_{entry.clip_id}",
+        ):
+            error = _execute_line_state_recovery(
+                video_id,
+                entry.clip_id,
+                settings,
+                evidence,
+            )
+            if error is not None:
+                st.error(_safe(error))
+            else:
+                st.session_state.pop(_context_key(video_id), None)
+                st.success("ライン状態を再構成しました。作業を続けられます。")
+                st.rerun()
+        if st.button(
+            "破損状態を退避して素材選定へ戻る",
+            key=f"line_evacuate_open_{video_id}_{entry.clip_id}",
+        ):
+            _confirm_evacuate_broken_line_dialog(
+                video_id,
+                entry.clip_id,
+                message,
+                settings,
+            )
 
 
 @st.dialog("ショート生産ラインを素材選定へ戻す")
@@ -1073,10 +1559,19 @@ def render_sidebar_line_context(video_id: str | None, settings: Settings) -> Non
 
 def render_main_line_summary(video_id: str, settings: Settings) -> None:
     """サイドバー折り畳み時にも残る表示専用の工程要約."""
-    try:
-        state = resolve_active_line_read_only(video_id, settings)
-    except LineStateError:
-        state = None
+    state, load_error, broken = _resolve_line_state_for_ui(video_id, settings)
+    primary_broken = _primary_broken_entry(broken, video_id, settings)
+    if load_error is not None:
+        if primary_broken is not None:
+            _render_line_state_failure_recovery(
+                video_id,
+                settings,
+                load_error,
+                primary_broken,
+            )
+        else:
+            st.error(_safe(load_error))
+        return
     if state is None:
         return
     active_job = get_active_job(settings)
@@ -1106,12 +1601,20 @@ def record_line_upload(
     state = load_line_state(video_id, clip_id, settings)
     if state is None:
         return
+    try:
+        confined_output = validate_confined_candidate(
+            settings.data_dir,
+            output_path,
+            label="ショート出力保存先",
+        )
+    except PathConfinementError as exc:
+        raise LineStateError(str(exc)) from exc
     updated = record_upload_operation(
         state,
         operation_id,
-        output_path,
-        settings=settings,
+        confined_output,
     )
+    save_line_state(updated, settings, expected_state=state)
     if updated.current_stage != LineStage.RESERVED:
         raise LineStateError(
             "完成動画が最終確認時から変わりました。もう一度プレビューしてください。"
@@ -1201,10 +1704,18 @@ def render_shorts_line(
     preferred_candidate_keys: Sequence[CandidateKey] = (),
 ) -> None:
     """1 本の区間確定から予約導線までを工程として描画する."""
-    try:
-        state = resolve_active_line_read_only(video_id, settings)
-    except LineStateError as exc:
-        st.error(_safe(exc))
+    state, load_error, broken = _resolve_line_state_for_ui(video_id, settings)
+    primary_broken = _primary_broken_entry(broken, video_id, settings)
+    if load_error is not None:
+        if primary_broken is not None:
+            _render_line_state_failure_recovery(
+                video_id,
+                settings,
+                load_error,
+                primary_broken,
+            )
+        else:
+            st.error(_safe(load_error))
         return
     context = _context(video_id)
     if state is not None and context is None:

@@ -633,7 +633,6 @@ def test_handle_finished_job_loads_result_on_done() -> None:
         patch("yt_live_kit.ui.components.status_bar.load_result_from_disk", return_value=mock_result) as load_result,
         patch("yt_live_kit.ui.components.status_bar.record_pipeline_completion") as record_completion,
         patch("yt_live_kit.ui.components.status_bar.clear_result") as clear_result,
-        patch("yt_live_kit.ui.components.status_bar.clear_cut_result") as clear_cut,
         patch("yt_live_kit.ui.components.status_bar.clear_active_job_id") as clear_active,
         patch("yt_live_kit.ui.components.status_bar.st.rerun") as rerun,
     ):
@@ -648,7 +647,6 @@ def test_handle_finished_job_loads_result_on_done() -> None:
         status_bar._job_finished_at(job),
     )
     clear_result.assert_called_once()
-    clear_cut.assert_called_once()
     clear_active.assert_called_once()
     mark_handled.assert_called_once_with("done123")
     rerun.assert_called_once_with(scope="app")
@@ -674,7 +672,6 @@ def test_finished_pipeline_notification_does_not_change_selected_video_and_handl
             return_value=result,
         ) as load_result,
         patch("yt_live_kit.ui.components.status_bar.clear_result"),
-        patch("yt_live_kit.ui.components.status_bar.clear_cut_result"),
         patch("yt_live_kit.ui.components.status_bar.clear_active_job_id"),
         patch("yt_live_kit.ui.components.status_bar.st.rerun"),
     ):
@@ -688,43 +685,6 @@ def test_finished_pipeline_notification_does_not_change_selected_video_and_handl
         ("video-b", "done-video-b")
     ]
     _clear_pipeline_completion_notifications()
-
-
-def test_handle_finished_cut_clip_job_sets_cut_result(tmp_path) -> None:
-    from yt_live_kit.services.clips import cut_result_to_ref
-    from yt_live_kit.services.ffmpeg import CutResult
-    from yt_live_kit.ui.components import status_bar
-
-    cut_result = CutResult(
-        video_id="vid123",
-        output_path=tmp_path / "vid123" / "clips" / "output" / "clip_001.mp4",
-        command_log_path=tmp_path / "vid123" / "clips" / "output" / "clip_001.ffmpeg.log",
-        start="00:03:42",
-        end="00:16:30",
-        duration_sec=768,
-    )
-    job = JobState(
-        job_id="cut-done",
-        kind="cut_clip",
-        status="done",
-        result_ref=cut_result_to_ref(cut_result),
-    )
-
-    with (
-        patch("yt_live_kit.ui.components.status_bar.is_job_handled", return_value=False),
-        patch("yt_live_kit.ui.components.status_bar.mark_job_handled") as mark_handled,
-        patch("yt_live_kit.ui.components.status_bar.set_cut_result") as set_cut,
-        patch("yt_live_kit.ui.components.status_bar.load_result_from_disk") as load_result,
-        patch("yt_live_kit.ui.components.status_bar.clear_active_job_id") as clear_active,
-        patch("yt_live_kit.ui.components.status_bar.st.rerun") as rerun,
-    ):
-        status_bar._handle_finished_job(job)
-
-    load_result.assert_not_called()
-    set_cut.assert_called_once_with(cut_result)
-    clear_active.assert_called_once()
-    mark_handled.assert_called_once_with("cut-done")
-    rerun.assert_called_once_with(scope="app")
 
 
 @pytest.mark.parametrize("kind", ["batch", "shorts_queue", "upload", "short_cut"])
@@ -1051,53 +1011,6 @@ def test_finished_upload_operation_load_error_keeps_queue_detail() -> None:
     assert args[0] == "video-upload"
     assert "投稿状態を読み込めませんでした" in args[3]
     assert "operationが壊れています" in args[4]
-
-
-def test_finished_cut_without_ref_records_video_scoped_error() -> None:
-    from yt_live_kit.ui.components import status_bar
-
-    job = JobState(
-        job_id="cut-missing-ref",
-        kind="cut_clip",
-        status="done",
-        video_id="video-cut",
-    )
-    with (
-        patch("yt_live_kit.ui.components.status_bar.is_job_handled", return_value=False),
-        patch("yt_live_kit.ui.components.status_bar.mark_job_handled"),
-        patch("yt_live_kit.ui.components.status_bar.record_job_error") as record_error,
-        patch("yt_live_kit.ui.components.status_bar.clear_active_job_id"),
-        patch("yt_live_kit.ui.components.status_bar.st.rerun"),
-    ):
-        status_bar._handle_finished_job(job)
-
-    record_error.assert_called_once()
-    args = record_error.call_args.args
-    assert args[:3] == ("video-cut", "cut-missing-ref", "cut_clip")
-    assert "参照先" in args[3]
-
-
-def test_finished_cut_with_invalid_ref_records_restore_error() -> None:
-    from yt_live_kit.ui.components import status_bar
-
-    job = JobState(
-        job_id="cut-invalid-ref",
-        kind="cut_clip",
-        status="done",
-        video_id="video-cut",
-        result_ref="not-json",
-    )
-    with (
-        patch("yt_live_kit.ui.components.status_bar.is_job_handled", return_value=False),
-        patch("yt_live_kit.ui.components.status_bar.mark_job_handled"),
-        patch("yt_live_kit.ui.components.status_bar.record_job_error") as record_error,
-        patch("yt_live_kit.ui.components.status_bar.clear_active_job_id"),
-        patch("yt_live_kit.ui.components.status_bar.st.rerun"),
-    ):
-        status_bar._handle_finished_job(job)
-
-    record_error.assert_called_once()
-    assert "切り出し結果を読み込めません" in record_error.call_args.args[3]
 
 
 def test_pipeline_loader_exception_records_bounded_detail() -> None:

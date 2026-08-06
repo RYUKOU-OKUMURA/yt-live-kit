@@ -33,7 +33,11 @@ from yt_live_kit.services.subtitle_burn import (
     parse_vtt_with_end,
 )
 from yt_live_kit.services.telop import TelopError, normalize_segment_bounds
-from yt_live_kit.services.transcript_artifact import TranscriptArtifactError, TranscriptArtifactStore
+from yt_live_kit.services.transcript_artifact import (
+    TranscriptArtifactError,
+    TranscriptArtifactStore,
+    stored_artifact_lineage_is_current,
+)
 from yt_live_kit.services.whisper_runtime import run_selected_ranges
 
 logger = logging.getLogger(__name__)
@@ -476,6 +480,25 @@ def _artifact_lineage(
     except TranscriptArtifactError as exc:
         raise ShortCutError("高精度字幕 artifact の immutable reference を作成できません。") from exc
     return reference, artifact.artifact_fingerprint, tuple(artifact.used_range_cue_digests)
+
+
+def cutplan_artifact_lineage_is_current(
+    video_id: str,
+    document: ShortCutDocument,
+    settings: Settings,
+) -> bool:
+    """cutplan が参照する高精度 artifact が保存実体と adopted contract と一致するか判定する."""
+    if document.artifact_ref is None:
+        return True
+    if document.artifact_fingerprint is None or not document.used_range_cue_digests:
+        return False
+    return stored_artifact_lineage_is_current(
+        video_id=video_id,
+        artifact_ref=document.artifact_ref,
+        artifact_fingerprint=document.artifact_fingerprint,
+        used_range_cue_digests=document.used_range_cue_digests,
+        settings=settings,
+    )
 
 
 def _document_with_lineage(

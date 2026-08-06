@@ -523,6 +523,29 @@ class TestUploadPreflight:
             )
 
 
+def test_build_service_uses_explicit_http_timeout() -> None:
+    credentials = MagicMock()
+    http_instance = MagicMock()
+    authorized_http = MagicMock()
+    with (
+        patch(
+            "yt_live_kit.services.youtube_api.get_credentials",
+            return_value=credentials,
+        ),
+        patch("httplib2.Http", return_value=http_instance) as http_cls,
+        patch(
+            "google_auth_httplib2.AuthorizedHttp",
+            return_value=authorized_http,
+        ) as authorized_cls,
+        patch("googleapiclient.discovery.build") as build,
+    ):
+        youtube_api._build_service(MagicMock())
+
+    http_cls.assert_called_once_with(timeout=youtube_api._HTTP_TIMEOUT_SEC)
+    authorized_cls.assert_called_once_with(credentials, http=http_instance)
+    build.assert_called_once_with("youtube", "v3", http=authorized_http)
+
+
 def test_fetch_mine_channel_uses_mine_and_requires_one_channel() -> None:
     service = MagicMock()
     channels = service.channels.return_value

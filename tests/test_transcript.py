@@ -17,13 +17,13 @@ from yt_live_kit.services.transcript_artifact import (
     TranscriptArtifactError,
     TranscriptArtifactStore,
     TranscriptCacheError,
+    TranscriptResolver,
     absolute_cue_digest,
     build_transcript_artifact,
     make_cache_identity,
     parse_vtt_cues,
-    resolve_selected_range,
+    should_invalidate_used_range,
     used_range_cue_digest,
-    used_range_invalidated,
 )
 
 SAMPLE_VTT = """WEBVTT
@@ -501,23 +501,52 @@ def test_atomic_index_replace_failure_keeps_previous_index(tmp_path):
 
 
 def test_used_range_change_invalidates_only_when_selected_cue_changes():
-    ranges = [{"start_ms": 1_000, "end_ms": 2_000}]
-    old = [
-        {"start_ms": 500, "end_ms": 700, "text": "outside"},
-        {"start_ms": 1_100, "end_ms": 1_500, "text": "inside"},
+    compare_range = [TranscriptRange(start_ms=1_500, end_ms=2_000)]
+    base_cues = [
+        TranscriptCue(start_ms=1_000, end_ms=1_100, text="before"),
+        TranscriptCue(start_ms=1_200, end_ms=1_800, text="inside"),
     ]
-    outside_changed = [{**old[0], "text": "outside changed"}, old[1]]
-    inside_changed = [old[0], {**old[1], "text": "inside changed"}]
-    assert not used_range_invalidated(old, outside_changed, ranges)
-    assert used_range_invalidated(old, inside_changed, ranges)
+    base = build_transcript_artifact(
+        video_id="vid1234567",
+        source_kind="whisper_cpp",
+        source_ref="transcripts/audio/range-1.wav",
+        language="ja",
+        ranges=[TranscriptRange(start_ms=1_000, end_ms=3_000, padding_ms=200)],
+        cues=base_cues,
+        audio_bytes=b"audio-range-1",
+        sample_rate=16_000,
+        channel=1,
+        codec="pcm_s16le",
+        ffmpeg_settings={"sample_rate": 16_000, "channel": 1},
+        model={"name": "ggml-large-v3-turbo-q5_0", "file_sha256": "a" * 64},
+        runtime={"version": "1.9.1", "build": "metal"},
+        settings={"language": "ja", "decode": {"temperature": 0}},
+        source_metadata={"audio_spans": [{"audio_route": "local_source_accurate_seek"}]},
+    )
+    outside_changed = base.model_copy(
+        update={
+            "cues": (
+                TranscriptCue(start_ms=1_000, end_ms=1_100, text="before changed"),
+                base_cues[1],
+            )
+        }
+    )
+    inside_changed = base.model_copy(
+        update={
+            "cues": (
+                base_cues[0],
+                TranscriptCue(start_ms=1_200, end_ms=1_800, text="inside changed"),
+            )
+        }
+    )
+    assert not should_invalidate_used_range(base, outside_changed, compare_range)
+    assert should_invalidate_used_range(base, inside_changed, compare_range)
 
 
 def test_selected_range_resolver_prefers_whisper_and_coarse_keeps_vtt(tmp_path):
     settings = Settings(data_dir=tmp_path)
     vtt = b"WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nVTT\n"
-    resolver = resolve_selected_range(
-        "vid1234567",
-        settings,
+    resolver = TranscriptResolver("vid1234567", settings).selected_range(
         [{"start_ms": 1_000, "end_ms": 3_000}],
         vtt_content=vtt,
     )
@@ -527,9 +556,7 @@ def test_selected_range_resolver_prefers_whisper_and_coarse_keeps_vtt(tmp_path):
 
     whisper = _whisper_artifact()
     TranscriptArtifactStore("vid1234567", settings).save(whisper)
-    selected = resolve_selected_range(
-        "vid1234567",
-        settings,
+    selected = TranscriptResolver("vid1234567", settings).selected_range(
         [{"start_ms": 1_000, "end_ms": 3_000, "padding_ms": 200}],
         vtt_content=vtt,
         language=whisper.language,
@@ -552,15 +579,13 @@ def test_selected_range_requires_language_and_expected_whisper_provenance(tmp_pa
     vtt = b"WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nVTT fallback\n"
     ranges = [{"start_ms": 1_000, "end_ms": 3_000, "padding_ms": 200}]
 
-    missing = resolve_selected_range(
-        "vid1234567", settings, ranges, vtt_content=vtt
+    missing = TranscriptResolver("vid1234567", settings).selected_range(
+        ranges, vtt_content=vtt
     )
     assert missing.is_fallback is True
     assert "expected provenance" in (missing.fallback_reason or "")
 
-    wrong_language = resolve_selected_range(
-        "vid1234567",
-        settings,
+    wrong_language = TranscriptResolver("vid1234567", settings).selected_range(
         ranges,
         vtt_content=vtt,
         language="en",
@@ -575,9 +600,7 @@ def test_selected_range_requires_language_and_expected_whisper_provenance(tmp_pa
     assert wrong_language.artifact is not None
     assert wrong_language.artifact.source_kind.value == "youtube_vtt"
 
-    wrong_model = resolve_selected_range(
-        "vid1234567",
-        settings,
+    wrong_model = TranscriptResolver("vid1234567", settings).selected_range(
         ranges,
         vtt_content=vtt,
         language=whisper.language,
@@ -592,9 +615,7 @@ def test_selected_range_requires_language_and_expected_whisper_provenance(tmp_pa
     assert wrong_model.artifact is not None
     assert wrong_model.artifact.source_kind.value == "youtube_vtt"
 
-    missing_cache = resolve_selected_range(
-        "vid1234567",
-        settings,
+    missing_cache = TranscriptResolver("vid1234567", settings).selected_range(
         ranges,
         vtt_content=vtt,
         language=whisper.language,
@@ -607,9 +628,7 @@ def test_selected_range_requires_language_and_expected_whisper_provenance(tmp_pa
     assert missing_cache.is_fallback is True
     assert "cache identity" in (missing_cache.fallback_reason or "")
 
-    missing_used = resolve_selected_range(
-        "vid1234567",
-        settings,
+    missing_used = TranscriptResolver("vid1234567", settings).selected_range(
         ranges,
         vtt_content=vtt,
         language=whisper.language,
@@ -622,9 +641,7 @@ def test_selected_range_requires_language_and_expected_whisper_provenance(tmp_pa
     assert missing_used.is_fallback is True
     assert "used_range_cue_digests" in (missing_used.fallback_reason or "")
 
-    wrong_cache = resolve_selected_range(
-        "vid1234567",
-        settings,
+    wrong_cache = TranscriptResolver("vid1234567", settings).selected_range(
         ranges,
         vtt_content=vtt,
         language=whisper.language,
@@ -678,9 +695,7 @@ def test_selected_range_never_returns_partial_whisper_as_high_precision(tmp_path
     )
     TranscriptArtifactStore("vid1234567", settings).save(partial)
 
-    result = resolve_selected_range(
-        "vid1234567",
-        settings,
+    result = TranscriptResolver("vid1234567", settings).selected_range(
         [{"start_ms": 1_000, "end_ms": 3_000, "padding_ms": 200}],
         vtt_content=b"WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nVTT fallback\n",
     )

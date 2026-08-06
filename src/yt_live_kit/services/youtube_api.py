@@ -40,6 +40,7 @@ _MAX_UPLOAD_DURATION = 180.0
 _MIN_PUBLISH_LEAD = timedelta(minutes=10)
 _RETRYABLE_HTTP_STATUSES = frozenset({500, 502, 503, 504})
 _RETRY_DELAYS = (1, 2, 4, 8, 16)
+_HTTP_TIMEOUT_SEC = 60
 
 
 class YouTubeAPIError(Exception):
@@ -128,9 +129,15 @@ def get_credentials(settings: Settings) -> Any:
 
 
 def _build_service(settings: Settings) -> Any:
+    import httplib2
+    from google_auth_httplib2 import AuthorizedHttp
     from googleapiclient.discovery import build
 
-    return build("youtube", "v3", credentials=get_credentials(settings))
+    http = AuthorizedHttp(
+        get_credentials(settings),
+        http=httplib2.Http(timeout=_HTTP_TIMEOUT_SEC),
+    )
+    return build("youtube", "v3", http=http)
 
 
 def _require_aware(value: datetime | None, label: str) -> datetime:

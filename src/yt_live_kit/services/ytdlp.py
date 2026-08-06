@@ -27,7 +27,7 @@ import fcntl
 from yt_live_kit.config import Settings, get_settings
 from yt_live_kit.models.meta import VideoMeta
 from yt_live_kit.models.subtitle import SubtitleSourceMetadata
-from yt_live_kit.services._fsutil import write_text_atomically
+from yt_live_kit.services._fsutil import fsync_directory_fd, write_text_atomically
 from yt_live_kit.services._paths import (
     PathConfinementError,
     confined_video_path,
@@ -2053,12 +2053,7 @@ def _atomic_create_bytes(
             raise _retryable_subtitle_error(
                 f"{label}を原子的に保存できませんでした。"
             ) from exc
-        try:
-            os.fsync(directory_descriptor)
-        except OSError:
-            # directory entry の durability は filesystem に依存するが、link
-            # 自体は既に atomic に完了している。既存成果物を巻き戻さない。
-            pass
+        fsync_directory_fd(directory_descriptor)
         return True
     except YtdlpError:
         raise

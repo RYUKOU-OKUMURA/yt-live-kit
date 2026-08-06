@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
-from yt_live_kit.config import Settings
+from yt_live_kit.config import Settings, WHISPER_ADOPTED_CONTRACT
 from yt_live_kit.models.clips import ClipCandidate
 from yt_live_kit.models.highlights import HighlightSegment
 from yt_live_kit.models.short_cut import ShortCutDocument
@@ -19,6 +19,7 @@ from yt_live_kit.services.short_cut import (
     build_parent_transcript,
     build_short_cut_prompt,
     cut_plan_path,
+    cutplan_artifact_lineage_is_current,
     load_cut_plan,
     needs_short_cut,
     parent_bounds_ms,
@@ -29,7 +30,7 @@ from yt_live_kit.services.short_cut import (
     validate_short_cut,
     validate_short_cut_selection,
 )
-from yt_live_kit.services.transcript_artifact import build_transcript_artifact
+from yt_live_kit.services.transcript_artifact import TranscriptArtifactStore, build_transcript_artifact
 from yt_live_kit.models.transcript import TranscriptArtifactRef, TranscriptCue, TranscriptRange
 
 _VTT = """WEBVTT
@@ -97,7 +98,9 @@ def _prepare_video_dir(tmp_path: Path, video_id: str, *, vtt: str = _VTT) -> Set
     return Settings(data_dir=tmp_path)
 
 
-def _high_precision_artifact(video_id: str = "video-1"):
+def _high_precision_artifact(video_id: str = "video-1", *, model_sha256: str | None = None):
+    contract = WHISPER_ADOPTED_CONTRACT
+    model_sha = model_sha256 or contract.model_sha256
     return build_transcript_artifact(
         video_id=video_id,
         source_kind="whisper_cpp",
@@ -112,9 +115,23 @@ def _high_precision_artifact(video_id: str = "video-1"):
             TranscriptCue(start_ms=2_401_000, end_ms=2_405_000, text="二つ目"),
         ],
         audio_bytes=b"selected-ranges-audio",
-        model={"name": "fixed-model", "fingerprint": "a" * 64},
-        runtime={"version": "1.9.1", "fingerprint": "b" * 64},
-        settings={"language": "ja", "padding_ms": 0},
+        model={
+            "name": contract.model_name,
+            "sha256": model_sha,
+            "fingerprint": model_sha,
+        },
+        runtime={
+            "version": contract.binary_version,
+            "binary_sha256": contract.binary_sha256,
+        },
+        settings={
+            "language": contract.language,
+            "initial_prompt": contract.initial_prompt,
+            "output_schema": contract.output_schema,
+            "padding_ms": contract.padding_ms,
+            "vad": contract.vad,
+            "decode": contract.decode,
+        },
         # S9-6 以降、高精度扱いには音声 span の取得経路の記録が要る。
         source_metadata={
             "audio_spans": [
@@ -658,3 +675,39 @@ def test_cut_plan_path_sanitizes_parent_id(tmp_path: Path):
 
     with pytest.raises(ShortCutError):
         cut_plan_path("vid", "   ", settings)
+
+
+def _cutplan_document_from_artifact(
+    artifact,
+    *,
+    settings: Settings,
+) -> ShortCutDocument:
+    store = TranscriptArtifactStore("video-1", settings)
+    store.save(artifact)
+    reference = store.artifact_ref(artifact)
+    return ShortCutDocument(
+        parent_id="clip_002",
+        parent_start_ms=2_340_000,
+        parent_end_ms=3_000_000,
+        candidates=[_cut(1, start="00:39:10", end="00:40:00", duration_sec=50)],
+        artifact_ref=reference,
+        artifact_fingerprint=artifact.artifact_fingerprint,
+        used_range_cue_digests=artifact.used_range_cue_digests,
+    )
+
+
+def test_cutplan_artifact_lineage_stays_current_for_adopted_contract(tmp_path: Path) -> None:
+    settings = _prepare_video_dir(tmp_path, "video-1")
+    document = _cutplan_document_from_artifact(_high_precision_artifact(), settings=settings)
+    assert cutplan_artifact_lineage_is_current("video-1", document, settings) is True
+
+
+def test_cutplan_artifact_lineage_invalidates_when_whisper_contract_model_changes(
+    tmp_path: Path,
+) -> None:
+    settings = _prepare_video_dir(tmp_path, "video-1")
+    document = _cutplan_document_from_artifact(
+        _high_precision_artifact(model_sha256="0" * 64),
+        settings=settings,
+    )
+    assert cutplan_artifact_lineage_is_current("video-1", document, settings) is False

@@ -1086,6 +1086,76 @@ def test_details_keep_existing_content_after_error_history(tmp_path: Path) -> No
     )
 
 
+def test_render_transcript_offers_download_and_copy_buttons(tmp_path: Path) -> None:
+    result = _result(tmp_path)
+    with (
+        patch.object(video_detail.st, "subheader"),
+        patch.object(video_detail.st, "text_area"),
+        patch.object(video_detail.st, "columns", return_value=_dialog_contexts()),
+        patch.object(video_detail.st, "download_button") as download,
+        patch.object(video_detail, "render_copy_button") as copy,
+    ):
+        video_detail._render_transcript(result)
+
+    download.assert_called_once_with(
+        label="全文をダウンロード",
+        data=result.full_transcript_text,
+        file_name=f"{result.video_id}_transcript.txt",
+        mime="text/plain",
+        key=f"download_transcript_{result.video_id}",
+    )
+    copy.assert_called_once_with(
+        result.full_transcript_text,
+        label="全文をコピー",
+        key=f"detail_copy_transcript_{result.video_id}",
+    )
+
+
+def test_render_chapters_offers_download_when_present(tmp_path: Path) -> None:
+    video = _video(chapters=True)
+    result = _result(tmp_path, chapters="0:00 はじめに\n0:10 本題")
+    settings = MagicMock()
+    with (
+        patch.object(video_detail.st, "subheader"),
+        patch.object(video_detail.st, "code"),
+        patch.object(video_detail.st, "columns", return_value=_dialog_contexts()),
+        patch.object(video_detail.st, "download_button") as download,
+        patch.object(video_detail, "render_copy_button") as copy,
+        patch.object(video_detail, "_render_regenerate_control"),
+    ):
+        video_detail._render_chapters(video, result, busy=False, settings=settings)
+
+    download.assert_called_once_with(
+        label="タイムラインをテキストでダウンロード",
+        data=result.chapters_text,
+        file_name=f"{result.video_id}_chapters.txt",
+        mime="text/plain",
+        key=f"download_chapters_{result.video_id}",
+    )
+    copy.assert_called_once_with(
+        result.chapters_text,
+        label="タイムラインをコピー",
+        key=f"detail_copy_chapters_{result.video_id}",
+    )
+
+
+def test_render_chapters_skips_download_when_missing(tmp_path: Path) -> None:
+    video = _video(chapters=False)
+    result = _result(tmp_path, chapters="")
+    settings = MagicMock()
+    with (
+        patch.object(video_detail.st, "subheader"),
+        patch.object(video_detail.st, "info"),
+        patch.object(video_detail.st, "download_button") as download,
+        patch.object(video_detail, "render_copy_button") as copy,
+        patch.object(video_detail, "_render_regenerate_control"),
+    ):
+        video_detail._render_chapters(video, result, busy=False, settings=settings)
+
+    download.assert_not_called()
+    copy.assert_not_called()
+
+
 _VALID_CHAPTERS = "0:00 はじめに\n0:10 本題\n0:20 まとめ"
 
 

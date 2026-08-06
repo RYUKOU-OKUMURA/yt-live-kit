@@ -111,6 +111,58 @@ def test_run_batch_job_target_rejects_no_targets(tmp_path):
 
 
 @patch("yt_live_kit.services.batch.run")
+def test_run_batch_continues_on_unexpected_exception(mock_run, tmp_path):
+    """run() が PipelineError 以外の例外を投げても継続し、成功分は status.json に残る."""
+    settings = Settings(data_dir=tmp_path)
+    meta = VideoMeta(
+        id="success1234",
+        title="成功",
+        url="https://www.youtube.com/watch?v=success1234",
+        duration=100,
+        ytdlp_version="2026.7.4",
+        fetched_at=datetime(2026, 7, 30, tzinfo=timezone.utc),
+        subtitle_lang="ja",
+    )
+
+    def side_effect(url, *_args, **_kwargs):
+        if "fail" in url:
+            raise OSError("ディスク容量が不足しています")
+        return PipelineResult(
+            video_id=meta.id,
+            title=meta.title,
+            meta=meta,
+            chapters_text="0:00 x\n5:00 y\n10:00 z\n",
+            chapters_path=tmp_path / "chapters.md",
+            full_transcript_path=tmp_path / "full.txt",
+            full_transcript_text="full",
+            clips_candidates=(),
+            clips_candidates_path=None,
+        )
+
+    mock_run.side_effect = side_effect
+
+    urls = [
+        "https://www.youtube.com/watch?v=success1234",
+        "https://www.youtube.com/watch?v=fail1234567",
+    ]
+    results = run_batch(urls, settings, sleep_sec=0)
+
+    assert len(results) == 2
+    assert results[0].status == "success"
+    assert results[1].status == "failed"
+    assert results[1].error is not None
+    assert "ディスク容量" in results[1].error
+
+    loaded = load_batch_status(settings)
+    assert len(loaded) == 2
+    assert loaded[0].status == "success"
+    assert loaded[0].video_id == "success1234"
+    assert loaded[1].status == "failed"
+    assert loaded[1].error is not None
+    assert "ディスク容量" in loaded[1].error
+
+
+@patch("yt_live_kit.services.batch.run")
 def test_run_batch_continues_on_failure(mock_run, tmp_path):
     settings = Settings(data_dir=tmp_path)
     meta = VideoMeta(

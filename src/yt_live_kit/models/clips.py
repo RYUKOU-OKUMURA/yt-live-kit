@@ -11,6 +11,8 @@ _FINGERPRINT_PATTERN = r"^[0-9a-f]{64}$"
 class ClipCandidate(BaseModel):
     """切り抜き候補 1 件."""
 
+    model_config = ConfigDict(extra="forbid")
+
     id: str = Field(description="候補 ID（例: clip_001）")
     title: str = Field(description="切り抜きタイトル案")
     start: str = Field(description="開始時刻（HH:MM:SS または M:SS）")
@@ -42,6 +44,8 @@ class ClipCandidatesLineage(BaseModel):
 
 class ClipCandidatesDocument(BaseModel):
     """candidates.json のルートオブジェクト."""
+
+    model_config = ConfigDict(extra="forbid")
 
     candidates: list[ClipCandidate] = Field(description="切り抜き候補リスト")
     # 旧 candidates.json には存在しない任意 field。候補自体の shape と表示順は

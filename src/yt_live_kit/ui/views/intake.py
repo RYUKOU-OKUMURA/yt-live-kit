@@ -21,7 +21,6 @@ from yt_live_kit.services.jobs import JobBusyError, is_busy, start_job
 from yt_live_kit.services.pipeline import run_single_job_target
 from yt_live_kit.ui.state import (
     clear_batch_summary,
-    clear_cut_result,
     clear_result,
     get_batch_summary,
     set_active_job_id,
@@ -112,7 +111,6 @@ def batch_run_disabled(
 
 def _prepare_job_state() -> None:
     clear_result()
-    clear_cut_result()
     clear_batch_summary()
 
 

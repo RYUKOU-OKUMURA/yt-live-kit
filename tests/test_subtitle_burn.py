@@ -2,6 +2,7 @@
 
 from dataclasses import fields, replace
 from pathlib import Path
+import subprocess
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -197,6 +198,19 @@ def test_font_detection_via_fc_list(mock_run, mock_which):
     from yt_live_kit.services.subtitle_burn import _font_available_via_fc_list
 
     assert _font_available_via_fc_list("Hiragino Sans") is True
+    mock_run.assert_called_once()
+    assert mock_run.call_args.kwargs.get("timeout") == subtitle_burn._FC_LIST_TIMEOUT_SEC
+
+
+@patch("yt_live_kit.services.subtitle_burn.shutil.which")
+@patch("yt_live_kit.services.subtitle_burn.subprocess.run")
+def test_font_detection_via_fc_list_timeout_returns_false(mock_run, mock_which):
+    mock_which.return_value = "/usr/bin/fc-list"
+    mock_run.side_effect = subprocess.TimeoutExpired(cmd=["fc-list"], timeout=60)
+
+    from yt_live_kit.services.subtitle_burn import _font_available_via_fc_list
+
+    assert _font_available_via_fc_list("Hiragino Sans") is False
 
 
 # --- 修正1: PlayResX / PlayResY ---------------------------------------------

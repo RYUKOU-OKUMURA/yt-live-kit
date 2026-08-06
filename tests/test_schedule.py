@@ -388,6 +388,70 @@ def test_unconfigured_schedule_stops_before_preview_or_slot_side_effects(
     list_operations_mock.assert_not_called()
 
 
+def test_build_upload_preview_skips_fetch_when_channel_is_provided(
+    tmp_path: Path,
+) -> None:
+    settings = _settings(tmp_path)
+    save_schedule_policy(SchedulePolicy(daily_times=["09:00"]), settings)
+    with (
+        patch("yt_live_kit.services.schedule.fetch_mine_channel") as fetch,
+        patch("yt_live_kit.services.youtube_api.probe_duration", return_value=30.0),
+    ):
+        preview = build_upload_preview(
+            source_video_id="source-1",
+            source_kind="shorts_queue",
+            clip_id="clip-1",
+            video_path=_video(tmp_path),
+            title="予約タイトル",
+            description="説明文",
+            tags=("タグ1",),
+            settings=settings,
+            now=NOW,
+            channel=CHANNEL,
+        )
+    fetch.assert_not_called()
+    assert preview.channel == CHANNEL
+
+
+def test_confirm_fetches_channel_before_schedule_lock(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    preview = _preview(tmp_path, settings)
+    call_order: list[str] = []
+
+    class TrackingLock:
+        def __enter__(self) -> None:
+            call_order.append("lock_enter")
+
+        def __exit__(self, *args: object) -> bool:
+            return False
+
+    def track_fetch(*args: object, **kwargs: object) -> UploadChannel:
+        call_order.append("fetch_channel")
+        return CHANNEL
+
+    with (
+        patch("yt_live_kit.services.schedule.fetch_mine_channel", side_effect=track_fetch),
+        patch(
+            "yt_live_kit.services.schedule.schedule_lock",
+            return_value=TrackingLock(),
+        ),
+        patch("yt_live_kit.services.youtube_api.probe_duration", return_value=30.0),
+    ):
+        confirm_and_start_upload(
+            preview,
+            self_declared_made_for_kids=False,
+            contains_synthetic_media=False,
+            community_guidelines_confirmed=True,
+            settings=settings,
+            now=NOW,
+            operation_id_factory=lambda: "lock-order-operation",
+            job_id_factory=lambda: "lock-order-job",
+            start_job_fn=lambda *args, **kwargs: kwargs["requested_job_id"],
+        )
+
+    assert call_order.index("fetch_channel") < call_order.index("lock_enter")
+
+
 def test_assign_next_slot_requires_aware_now_and_returns_tokyo_aware() -> None:
     policy = SchedulePolicy(daily_time="12:00", interval_days=1)
     slot = assign_next_slot(policy, [], now=NOW)

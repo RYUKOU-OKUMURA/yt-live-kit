@@ -148,24 +148,17 @@ uv run streamlit run src/yt_live_kit/ui/app.py --server.address 127.0.0.1
 
 ---
 
-## 概要欄の定型文テンプレート
+## 長尺動画の概要欄反映
 
-`data/_config/description_template.txt` に、`{{timeline}}` という文字列を含むテキストファイルを置くと、タイムラインを埋め込んだ概要欄用テキストを動画詳細からワンクリックでコピーできるようになります。
+長尺動画の概要欄へチャプターを反映するには、**YouTube OAuth 設定（`client_secret.json` と `youtube_token.json`）が必須**です。動画詳細の「公開・投稿」ワークスペースから、反映前後の差分プレビューを確認してから更新します。
 
-```text
-【配信タイムライン】
-{{timeline}}
-
-チャンネル登録はこちら: https://example.com
-```
-
-テンプレートを設定していない場合でも、タイムラインだけのコピーは通常どおり利用できます。
+v3 以降、長尺用の `description_template.txt` によるローカル合成コピーは UI から廃止しています（サポート対象外）。既存ファイルが残っていても読み込まれません。
 
 ---
 
 ## ショート概要欄の定型文テンプレート
 
-`data/_config/shorts_description_template.txt` を置くと、予約投稿するショートの概要欄へ、チャンネル URL と元になったライブ配信のリンクを自動で差し込めます。上の長尺用テンプレート（`description_template.txt`）とは別ファイルで、互いに影響しません。
+`data/_config/shorts_description_template.txt` を置くと、予約投稿するショートの概要欄へ、チャンネル URL と元になったライブ配信のリンクを自動で差し込めます。長尺用の概要欄反映とは別ファイルで、互いに影響しません。
 
 ```text
 {{description}}
@@ -451,7 +444,6 @@ data/
   _channels/
     {handle}.json         # チャンネル一覧のキャッシュ
   _config/
-    description_template.txt   # 概要欄の定型文（ユーザー編集）
     shorts_description_template.txt  # ショート概要欄の定型文（ユーザー編集）
     client_secret.json         # YouTube Data API の OAuth クライアントシークレット（ユーザー配置）
     youtube_token.json         # OAuth 認証トークン（初回認証後に自動生成）

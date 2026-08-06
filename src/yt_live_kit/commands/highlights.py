@@ -1,8 +1,10 @@
 """highlights サブコマンド — ハイライト区間提案・連結."""
 
+from pathlib import Path
+
 import typer
 
-from yt_live_kit.config import get_settings
+from yt_live_kit.config import Settings, get_settings
 from yt_live_kit.models.highlights import HighlightSegment
 from yt_live_kit.services.ai_prompt import CodexNotFoundError
 from yt_live_kit.services.ffmpeg import FfmpegError, cut_and_concat
@@ -10,14 +12,20 @@ from yt_live_kit.services.highlights import (
     HighlightValidationError,
     HighlightsError,
     load_segments_file,
+    save_segments_from_file,
     suggest_highlights,
 )
+from yt_live_kit.services.pipeline import backup_file
 
 highlights_app = typer.Typer(
     name="highlights",
     help="ハイライト区間の提案とまとめ動画の生成",
     no_args_is_help=True,
 )
+
+
+def _segments_path(video_id: str, settings: Settings) -> Path:
+    return settings.data_dir / video_id / "highlights" / "segments.json"
 
 
 def _parse_segment_indices(text: str | None, total: int) -> list[int]:
@@ -63,11 +71,28 @@ def highlights_suggest_cmd(
         "--prompt-only",
         help="プロンプトファイルのみ生成（Codex を呼ばない）",
     ),
+    from_file: Path | None = typer.Option(
+        None,
+        "--from-file",
+        help="手動生成した segments.json を検証して保存",
+    ),
 ) -> None:
     """圧縮テキストからハイライト区間候補を生成する."""
     settings = get_settings()
 
     try:
+        if from_file is not None:
+            backup_file(_segments_path(video_id, settings))
+            segments_path, doc = save_segments_from_file(video_id, from_file, settings)
+            typer.echo(f"区間保存完了: {segments_path}")
+            typer.echo(f"区間数: {len(doc.candidates)}")
+            if doc.candidates:
+                _print_segments(list(doc.candidates))
+            return
+
+        if not prompt_only:
+            backup_file(_segments_path(video_id, settings))
+
         result = suggest_highlights(
             video_id,
             settings,

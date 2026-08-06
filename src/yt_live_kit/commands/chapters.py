@@ -4,7 +4,7 @@ from pathlib import Path
 
 import typer
 
-from yt_live_kit.config import get_settings
+from yt_live_kit.config import Settings, get_settings
 from yt_live_kit.services.ai_prompt import (
     AiPromptError,
     ChapterValidationError,
@@ -12,6 +12,11 @@ from yt_live_kit.services.ai_prompt import (
     generate_chapters,
     save_chapters_from_file,
 )
+from yt_live_kit.services.pipeline import backup_file
+
+
+def _chapters_path(video_id: str, settings: Settings) -> Path:
+    return settings.data_dir / video_id / "chapters" / "chapters.md"
 
 
 def chapters_cmd(
@@ -32,10 +37,14 @@ def chapters_cmd(
 
     try:
         if from_file is not None:
+            backup_file(_chapters_path(video_id, settings))
             chapters_path, validation = save_chapters_from_file(video_id, from_file, settings)
             typer.echo(f"チャプター保存完了: {chapters_path}")
             typer.echo(f"チャプター数: {len(validation.chapters)}")
             return
+
+        if not prompt_only:
+            backup_file(_chapters_path(video_id, settings))
 
         result = generate_chapters(video_id, settings, prompt_only=prompt_only)
         typer.echo(f"プロンプト: {result.prompt_path}")

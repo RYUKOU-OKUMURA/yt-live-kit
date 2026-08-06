@@ -583,6 +583,7 @@ def build_upload_preview(
     requirements: ShortsDescriptionRequirements
     | UploadDescriptionRequirementsSnapshot
     | None = None,
+    channel: UploadChannel | None = None,
 ) -> UploadPreview:
     """自動または手動 slot で read-only な immutable preview を作る."""
     reference = now or datetime.now(timezone.utc)
@@ -613,11 +614,13 @@ def build_upload_preview(
                 now=reference,
             )
         )
-        channel = fetch_mine_channel(settings)
+        resolved_channel = (
+            channel if channel is not None else fetch_mine_channel(settings)
+        )
         # audience / synthetic は preview では決めない。ここでは共通部分だけを
         # P1 validator に通し、値は UploadPreview へ保存しない。
         checked = build_upload_snapshot(
-            channel=channel,
+            channel=resolved_channel,
             video_path=video_path,
             title=title,
             description=description,
@@ -746,6 +749,11 @@ def confirm_and_start_upload(
     # 同じ本文を同じ immutable requirements で再検証する。
     validate_upload_description(preview.description, preview.requirements)
 
+    try:
+        channel = fetch_mine_channel(settings)
+    except YouTubeAPIError as exc:
+        raise ScheduleError(str(exc)) from exc
+
     with schedule_lock(settings):
         current = build_upload_preview(
             source_video_id=preview.source_video_id,
@@ -759,6 +767,7 @@ def confirm_and_start_upload(
             now=reference,
             requested_publish_at=preview.publish_at,
             requirements=preview.requirements,
+            channel=channel,
         )
         if not _same_preview(preview, current):
             raise ScheduleError("確認後に投稿内容・予約枠・試行枠が変わりました。新しく確認してください。")

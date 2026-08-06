@@ -666,6 +666,87 @@ def test_ensure_source_video_rejects_download_result_without_audio(
         ensure_source_video(video_id, Settings(data_dir=tmp_path))
 
 
+def test_ensure_source_video_quarantines_corrupt_candidate_and_uses_next(
+    tmp_path, monkeypatch
+):
+    video_id = "testvid1234"
+    video_dir = _setup_video_dir(tmp_path, video_id)
+    source_dir = video_dir / "clips" / "source"
+    corrupt = source_dir / "000-corrupt.mp4"
+    corrupt.write_bytes(b"corrupt")
+    valid = source_dir / f"{video_id}.mp4"
+    probe = MagicMock(
+        side_effect=[
+            FfmpegError("動画の映像・音声 stream を確認できませんでした。"),
+            MediaStreams(video_count=1, audio_count=1),
+        ]
+    )
+    download = MagicMock()
+    monkeypatch.setattr("yt_live_kit.services.ffmpeg.probe_media_streams", probe)
+    monkeypatch.setattr("yt_live_kit.services.ffmpeg.download_video", download)
+
+    result = ensure_source_video(video_id, Settings(data_dir=tmp_path))
+
+    assert result == valid
+    download.assert_not_called()
+    assert not corrupt.is_file()
+    quarantined = list(source_dir.glob(f".{corrupt.name}.corrupt-*"))
+    assert len(quarantined) == 1
+    assert quarantined[0].read_bytes() == b"corrupt"
+
+
+def test_ensure_source_video_quarantines_all_corrupt_candidates_and_downloads(
+    tmp_path, monkeypatch
+):
+    video_id = "testvid1234"
+    video_dir = tmp_path / video_id
+    source_dir = video_dir / "clips" / "source"
+    source_dir.mkdir(parents=True)
+    meta = VideoMeta(
+        id=video_id,
+        title="テスト",
+        url="https://www.youtube.com/watch?v=testvid1234",
+        upload_date="20260101",
+        duration=3600,
+        ytdlp_version="2026.7.4",
+        fetched_at=datetime(2026, 7, 30, tzinfo=timezone.utc),
+        subtitle_lang="ja",
+    )
+    (video_dir / "meta.json").write_text(meta.model_dump_json(), encoding="utf-8")
+    first = source_dir / "000-corrupt.mp4"
+    first.write_bytes(b"first-corrupt")
+    second = source_dir / "001-corrupt.mp4"
+    second.write_bytes(b"second-corrupt")
+    downloaded = source_dir / "downloaded.mp4"
+    probe = MagicMock(
+        side_effect=[
+            FfmpegError("動画の映像・音声 stream を確認できませんでした。"),
+            FfmpegError("動画の映像・音声 stream を確認できませんでした。"),
+            MediaStreams(video_count=1, audio_count=1),
+        ]
+    )
+
+    def download_result(*args):
+        downloaded.write_bytes(b"downloaded")
+        return downloaded
+
+    download = MagicMock(side_effect=download_result)
+    monkeypatch.setattr("yt_live_kit.services.ffmpeg.probe_media_streams", probe)
+    monkeypatch.setattr(
+        "yt_live_kit.services.ffmpeg.require_audio_video_streams",
+        lambda path, **kwargs: probe(path, **kwargs),
+    )
+    monkeypatch.setattr("yt_live_kit.services.ffmpeg.download_video", download)
+
+    result = ensure_source_video(video_id, Settings(data_dir=tmp_path))
+
+    assert result == downloaded
+    download.assert_called_once()
+    assert not first.is_file()
+    assert not second.is_file()
+    assert len(list(source_dir.glob(".*.corrupt-*"))) == 2
+
+
 def test_encode_segment_rejects_output_without_audio(tmp_path, monkeypatch):
     source = tmp_path / "source.mp4"
     source.write_bytes(b"source")

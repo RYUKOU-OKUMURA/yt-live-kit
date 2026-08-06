@@ -14,7 +14,7 @@ from yt_live_kit.config import Settings, get_settings
 from yt_live_kit.services._fsutil import write_text_atomically
 from yt_live_kit.services.history import is_video_targets_complete
 from yt_live_kit.services.jobs import get_active_job, update_job
-from yt_live_kit.services.pipeline import PipelineError, PipelineResult, run
+from yt_live_kit.services.pipeline import PipelineResult, run
 from yt_live_kit.services.ytdlp import YtdlpError, extract_video_id
 
 BatchStatus = Literal["success", "failed", "skipped"]
@@ -150,102 +150,103 @@ def run_batch(
     results: list[BatchItemResult] = []
     status_entries: list[BatchStatusEntry] = []
 
-    for i, url in enumerate(urls):
-        if on_progress is not None:
-            on_progress(i + 1, total, url, "開始")
+    try:
+        for i, url in enumerate(urls):
+            if on_progress is not None:
+                on_progress(i + 1, total, url, "開始")
 
-        video_id: str | None = None
-        try:
-            video_id = extract_video_id(url)
-        except YtdlpError:
-            pass
+            video_id: str | None = None
+            try:
+                video_id = extract_video_id(url)
+            except YtdlpError:
+                pass
 
-        if (
-            skip_existing
-            and video_id
-            and is_video_targets_complete(
-                video_id,
-                settings,
-                do_chapters=do_chapters,
-                do_clips=do_clips,
-            )
-        ):
-            item = BatchItemResult(
-                url=url,
-                video_id=video_id,
-                status="skipped",
-                error=None,
-            )
-            results.append(item)
-            status_entries.append(
-                BatchStatusEntry(
+            if (
+                skip_existing
+                and video_id
+                and is_video_targets_complete(
+                    video_id,
+                    settings,
+                    do_chapters=do_chapters,
+                    do_clips=do_clips,
+                )
+            ):
+                item = BatchItemResult(
                     url=url,
                     video_id=video_id,
                     status="skipped",
                     error=None,
-                    timestamp=datetime.now(timezone.utc).isoformat(),
                 )
-            )
-            if on_progress is not None:
-                on_progress(i + 1, total, url, "スキップ（処理済み）")
-            continue
-
-        try:
-            if on_progress is not None:
-                on_progress(i + 1, total, url, "処理中")
-
-            def item_progress(stage: str, message: str) -> None:
+                results.append(item)
+                status_entries.append(
+                    BatchStatusEntry(
+                        url=url,
+                        video_id=video_id,
+                        status="skipped",
+                        error=None,
+                        timestamp=datetime.now(timezone.utc).isoformat(),
+                    )
+                )
                 if on_progress is not None:
-                    on_progress(i + 1, total, url, message)
+                    on_progress(i + 1, total, url, "スキップ（処理済み）")
+                continue
 
-            result = run(
-                url,
-                settings,
-                on_progress=item_progress,
-                do_chapters=do_chapters,
-                do_clips=do_clips,
-            )
-            item = BatchItemResult(
-                url=url,
-                video_id=result.video_id,
-                status="success",
-                result=result,
-            )
-            results.append(item)
-            status_entries.append(
-                BatchStatusEntry(
+            try:
+                if on_progress is not None:
+                    on_progress(i + 1, total, url, "処理中")
+
+                def item_progress(stage: str, message: str) -> None:
+                    if on_progress is not None:
+                        on_progress(i + 1, total, url, message)
+
+                result = run(
+                    url,
+                    settings,
+                    on_progress=item_progress,
+                    do_chapters=do_chapters,
+                    do_clips=do_clips,
+                )
+                item = BatchItemResult(
                     url=url,
                     video_id=result.video_id,
                     status="success",
-                    error=None,
-                    timestamp=datetime.now(timezone.utc).isoformat(),
+                    result=result,
                 )
-            )
-        except (PipelineError, YtdlpError) as exc:
-            item = BatchItemResult(
-                url=url,
-                video_id=video_id,
-                status="failed",
-                error=str(exc),
-            )
-            results.append(item)
-            status_entries.append(
-                BatchStatusEntry(
+                results.append(item)
+                status_entries.append(
+                    BatchStatusEntry(
+                        url=url,
+                        video_id=result.video_id,
+                        status="success",
+                        error=None,
+                        timestamp=datetime.now(timezone.utc).isoformat(),
+                    )
+                )
+            except Exception as exc:
+                item = BatchItemResult(
                     url=url,
                     video_id=video_id,
                     status="failed",
                     error=str(exc),
-                    timestamp=datetime.now(timezone.utc).isoformat(),
                 )
-            )
-            if on_progress is not None:
-                on_progress(i + 1, total, url, f"失敗: {exc}")
+                results.append(item)
+                status_entries.append(
+                    BatchStatusEntry(
+                        url=url,
+                        video_id=video_id,
+                        status="failed",
+                        error=str(exc),
+                        timestamp=datetime.now(timezone.utc).isoformat(),
+                    )
+                )
+                if on_progress is not None:
+                    on_progress(i + 1, total, url, f"失敗: {exc}")
 
-        if i < total - 1 and sleep > 0:
-            time.sleep(sleep)
-
-    if status_entries:
-        append_batch_status(status_entries, settings)
+            if i < total - 1 and sleep > 0:
+                time.sleep(sleep)
+    finally:
+        if status_entries:
+            append_batch_status(status_entries, settings)
 
     return results
 

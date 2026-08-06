@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from yt_live_kit.config import Settings
+from yt_live_kit.config import Settings, WHISPER_ADOPTED_CONTRACT
 from yt_live_kit.models.clips import ClipCandidate
 from yt_live_kit.models.highlights import HighlightSegment
 from yt_live_kit.models.short_cut import ShortCutDocument
@@ -101,6 +101,7 @@ def _document() -> ShortCutDocument:
 
 
 def _high_precision_artifact(video_id: str = "video-1", *, suffix: str = "one"):
+    contract = WHISPER_ADOPTED_CONTRACT
     return build_transcript_artifact(
         video_id=video_id,
         source_kind="whisper_cpp",
@@ -109,9 +110,23 @@ def _high_precision_artifact(video_id: str = "video-1", *, suffix: str = "one"):
         ranges=[TranscriptRange(start_ms=10_000, end_ms=20_000)],
         cues=[TranscriptCue(start_ms=11_000, end_ms=12_000, text="artifact cue")],
         audio_bytes=f"audio-{suffix}".encode(),
-        model={"name": "fixed-model", "fingerprint": "a" * 64},
-        runtime={"version": "1.9.1", "fingerprint": "b" * 64},
-        settings={"language": "ja", "padding_ms": 0},
+        model={
+            "name": contract.model_name,
+            "sha256": contract.model_sha256,
+            "fingerprint": contract.model_sha256,
+        },
+        runtime={
+            "version": contract.binary_version,
+            "binary_sha256": contract.binary_sha256,
+        },
+        settings={
+            "language": contract.language,
+            "initial_prompt": contract.initial_prompt,
+            "output_schema": contract.output_schema,
+            "padding_ms": contract.padding_ms,
+            "vad": contract.vad,
+            "decode": contract.decode,
+        },
         # S9-6 以降、高精度扱いには音声 span の取得経路の記録が要る。
         source_metadata={
             "audio_spans": [{"audio_route": "local_source_accurate_seek"}]

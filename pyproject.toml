@@ -27,9 +27,69 @@ packages = ["src/yt_live_kit"]
 
 [dependency-groups]
 dev = [
+    "mypy>=2.3.0",
     "pytest>=8.0.0",
+    "ruff>=0.16.1",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+
+[tool.ruff]
+target-version = "py311"
+src = ["src", "tests"]
+line-length = 120
+extend-exclude = ["benchmarks"]
+
+[tool.ruff.lint]
+# 段階導入（CR-F18）: 既定ルールのうち大規模一括修正が必要なものを除外。
+# I001 / F401 / UP017 等は --fix で解消可能だが src/tests の一括変更は別タスクとする。
+ignore = [
+    "E501",    # line-too-long（1228 件）
+    "UP017",   # datetime-timezone-utc（274 件）
+    "SIM117",  # multiple-with-statements（53 件）
+    "BLE001",  # blind-except（意図的な広い except が多い）
+    "ISC004",  # implicit-string-concatenation-in-collection-literal
+    "TRY004",  # type-check-without-type-error
+    "DTZ001",  # call-datetime-without-tzinfo
+    "RUF059",  # unused-unpacked-variable
+    "SIM102",  # collapsible-if
+    "B008",    # function-call-in-default-argument（Typer/Streamlit で一般的）
+    "B023",    # function-uses-loop-variable
+    "FLY002",  # static-join-to-f-string
+    "FURB162", # fromisoformat-replace-z
+    "PLW1510", # subprocess-run-without-check（意図的 check=False）
+    "S102",    # exec-builtin（テスト用）
+    "S112",    # try-except-continue
+    "TRY203",  # useless-try-except
+    "C401",    # unnecessary-generator-set
+    "C408",    # unnecessary-collection-call
+    "PIE810",  # multiple-starts-ends-with
+    "PLR1704", # redefined-argument-from-local
+    "RUF046",  # unnecessary-cast-to-int
+    "I001",    # unsorted-imports（--fix 一括は別タスク）
+    "F401",    # unused-import（--fix 一括は別タスク）
+    "F841",    # unused-variable
+    "UP037",   # quoted-annotation
+    "UP035",   # deprecated-import
+    "UP012",   # unnecessary-encode-utf8
+    "B009",    # get-attr-with-constant
+    "PYI041",  # redundant-numeric-union
+    "RUF022",  # unsorted-dunder-all
+    "FURB157", # verbose-decimal-constructor
+    "PIE790",  # unnecessary-placeholder
+    "UP041",   # timeout-error-alias
+]
+
+[tool.mypy]
+python_version = "3.12"
+mypy_path = "src"
+packages = ["yt_live_kit"]
+explicit_package_bases = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+warn_unused_configs = true
+ignore_missing_imports = true
+exclude = ["benchmarks/", ".venv/"]
+# CI では未実行（現状 94 errors、段階導入）。ローカル確認: uv run mypy src

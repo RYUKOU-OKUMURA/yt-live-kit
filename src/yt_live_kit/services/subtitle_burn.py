@@ -33,6 +33,8 @@ _ASS_PLAY_RES_Y = 1920
 _MAC_FONT_FILENAME_ALIASES: dict[str, tuple[str, ...]] = {
     "hiraginosans": ("ヒラギノ角ゴシック", "ヒラギノ角ゴ"),
 }
+# fc-list はフォントキャッシュ破損時にハングしうるため、短いタイムアウトを付ける。
+_FC_LIST_TIMEOUT_SEC = 60
 
 
 class SubtitleBurnError(Exception):
@@ -689,12 +691,16 @@ def _font_available_via_fc_list(font_name: str) -> bool:
     fc_list = shutil.which("fc-list")
     if fc_list is None:
         return False
-    result = subprocess.run(
-        [fc_list, ":", "family"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    try:
+        result = subprocess.run(
+            [fc_list, ":", "family"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=_FC_LIST_TIMEOUT_SEC,
+        )
+    except subprocess.TimeoutExpired:
+        return False
     if result.returncode != 0:
         return False
     needle = font_name.casefold()

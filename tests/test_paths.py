@@ -21,6 +21,7 @@ from yt_live_kit.services._paths import (
 )
 from yt_live_kit.services.history import HistoryError, is_video_processed
 from yt_live_kit.services.jobs import create_job, update_job
+from yt_live_kit.services.pipeline import PipelineError, load_result_from_disk
 from yt_live_kit.services.shorts_line import (
     LineStateError,
     line_state_path,
@@ -32,6 +33,7 @@ from yt_live_kit.services.upload_queue import (
     create_reserved_operation,
     list_operations,
 )
+from yt_live_kit.services.transcript import TranscriptError, build_transcripts
 from yt_live_kit.services.ytdlp import YtdlpError, fetch
 
 
@@ -106,6 +108,8 @@ def test_exact_internal_names_remain_reserved_for_video_paths(
         ("shorts_queue", ShortsQueueError),
         ("shorts_line", LineStateError),
         ("upload_queue", UploadQueueError),
+        ("transcript", TranscriptError),
+        ("pipeline", PipelineError),
     ],
 )
 @pytest.mark.parametrize("identifier", ["", ".", "..", "../escape", "nested/id", "nul\x00id"])
@@ -125,6 +129,10 @@ def test_public_service_rejects_invalid_identifier_before_filesystem_side_effect
             run_shorts_queue(identifier, (), settings, job_id="job")
         elif service == "shorts_line":
             line_state_path(identifier, "clip", settings)
+        elif service == "transcript":
+            build_transcripts(identifier, settings)
+        elif service == "pipeline":
+            load_result_from_disk(identifier, settings)
         else:
             create_reserved_operation(
                 operation_id="op",

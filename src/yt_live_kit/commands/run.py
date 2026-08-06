@@ -9,6 +9,11 @@ from yt_live_kit.services.batch import load_urls_file, run_batch
 from yt_live_kit.services.pipeline import run
 from yt_live_kit.services.ytdlp import YtdlpError, check_ytdlp_version_warning
 
+_NO_TARGET_MESSAGE = (
+    "「チャプターを作る」「切り抜き候補を出す」"
+    "のどちらかを選んでください。"
+)
+
 
 def _apply_cli_overrides(
     data_dir: Path | None,
@@ -52,9 +57,23 @@ def run_cmd(
         "--yt-dlp-path",
         help="yt-dlp バイナリパス",
     ),
+    chapters: bool = typer.Option(
+        True,
+        "--chapters/--no-chapters",
+        help="チャプターを生成する",
+    ),
+    clips: bool = typer.Option(
+        True,
+        "--clips/--no-clips",
+        help="切り抜き候補を生成する",
+    ),
 ) -> None:
     """fetch → transcript → chapters → clips suggest を一括実行する."""
     settings = _apply_cli_overrides(data_dir, sleep, ytdlp_path)
+
+    if not chapters and not clips:
+        typer.secho(_NO_TARGET_MESSAGE, fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1)
 
     warning = check_ytdlp_version_warning(settings)
     if warning:
@@ -86,6 +105,8 @@ def run_cmd(
             skip_existing=skip_existing,
             sleep_sec=sleep,
             on_progress=on_progress,
+            do_chapters=chapters,
+            do_clips=clips,
         )
 
         success = sum(1 for r in results if r.status == "success")
@@ -99,7 +120,7 @@ def run_cmd(
 
     assert url is not None
     try:
-        result = run(url, settings)
+        result = run(url, settings, do_chapters=chapters, do_clips=clips)
     except Exception as exc:
         if isinstance(exc, YtdlpError):
             typer.secho(str(exc), fg=typer.colors.RED, err=True)

@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 import pytest
 
-from yt_live_kit.config import Settings
+from yt_live_kit.config import Settings, WHISPER_ADOPTED_CONTRACT
 from yt_live_kit.models.telop import (
     TelopLine,
     TelopScriptDocument,
@@ -33,6 +33,8 @@ from yt_live_kit.services.shorts_line import (
     LineStage,
     LineState,
     LineStateError,
+    _artifact_lineage_is_current,
+    _line_state_needs_invalidation,
     abandon_line_state,
     calculate_line_stage,
     confirm_preview,
@@ -140,7 +142,9 @@ def _lineage() -> tuple[TranscriptArtifactRef, str, tuple[str, ...]]:
     return reference, fingerprint, ("d" * 64,)
 
 
-def _stored_high_precision_artifact():
+def _stored_high_precision_artifact(*, model_sha256: str | None = None):
+    contract = WHISPER_ADOPTED_CONTRACT
+    model_sha = model_sha256 or contract.model_sha256
     return build_transcript_artifact(
         video_id="video-1",
         source_kind="whisper_cpp",
@@ -149,9 +153,24 @@ def _stored_high_precision_artifact():
         ranges=[TranscriptRange(start_ms=10_000, end_ms=20_000)],
         cues=[TranscriptCue(start_ms=11_000, end_ms=12_000, text="artifact cue")],
         audio_bytes=b"lineage-audio",
-        model={"name": "fixed-model", "fingerprint": "a" * 64},
-        runtime={"version": "1.9.1", "fingerprint": "b" * 64},
-        settings={"language": "ja", "padding_ms": 0},
+        model={
+            "name": contract.model_name,
+            "sha256": model_sha,
+            "fingerprint": model_sha,
+        },
+        runtime={
+            "version": contract.binary_version,
+            "binary_sha256": contract.binary_sha256,
+        },
+        settings={
+            "language": contract.language,
+            "initial_prompt": contract.initial_prompt,
+            "output_schema": contract.output_schema,
+            "padding_ms": contract.padding_ms,
+            "vad": contract.vad,
+            "decode": contract.decode,
+        },
+        source_metadata={"audio_spans": [{"audio_route": "local_source_accurate_seek"}]},
     )
 
 
@@ -338,6 +357,29 @@ def test_calculate_line_stage_covers_six_stages_and_terminal() -> None:
         assert calculate_line_stage(**base, upload_state=state) == LineStage.RESERVED
     for state in ("failed", "needs_reconciliation"):
         assert calculate_line_stage(**base, upload_state=state) == LineStage.RESERVATION
+
+
+def test_calculate_line_stage_matches_confirmed_state_transaction(tmp_path: Path) -> None:
+    """calculate_line_stage は参照実装として残す。実トランザクション結果と突き合わせる。"""
+    state, output_path = _confirmed_state(tmp_path)
+    review = state.review_fingerprint
+    assert review is not None
+    gate = evaluate_telop_gate(
+        (),
+        (),
+        review,
+        state.review_confirmed_fingerprint,
+    )
+    derived = calculate_line_stage(
+        material_selected=True,
+        segments_confirmed=True,
+        telop_gate=gate,
+        output_available=True,
+        output_fingerprint_current=True,
+        preview_confirmed=True,
+    )
+    assert derived == LineStage.RESERVATION
+    assert state.current_stage == derived
 
 
 def test_review_edit_invalidation_does_not_auto_restore_after_revert(tmp_path: Path) -> None:
@@ -555,6 +597,87 @@ def test_reservation_transaction_rejects_stale_state_and_serializes_tabs(
     assert any(isinstance(error, LineStateError) for error in errors)
     persisted = load_line_state("video-1", "clip-1", second_settings)
     assert persisted is not None and persisted.current_stage == LineStage.RESERVED
+
+
+def test_reservation_transaction_does_not_block_other_videos(
+    tmp_path: Path,
+) -> None:
+    settings = _settings(tmp_path)
+    state1, output1 = _confirmed_state(tmp_path)
+    save_line_state(state1, settings)
+
+    review2 = make_review_fingerprint("video-2", "clip-2", QUEUE_FP, _document())
+    state2 = create_line_state(
+        "video-2",
+        "clip-2",
+        QUEUE_FP,
+        review_fingerprint=review2,
+        now=NOW,
+    )
+    state2 = confirm_review(state2, review2, now=NOW + timedelta(seconds=1))
+    state2 = set_generation_spec(
+        state2,
+        review2,
+        _generation_spec(),
+        now=NOW + timedelta(milliseconds=1500),
+    )
+    output2 = _output(tmp_path / "video-2", content=b"mp4-v2")
+    state2 = record_output(state2, output2, now=NOW + timedelta(seconds=2))
+    state2 = confirm_preview(state2, output2, now=NOW + timedelta(seconds=3))
+    save_line_state(state2, settings)
+
+    operation1 = _operation(
+        tmp_path,
+        operation_id="tx-op-1",
+        source_video_id="video-1",
+        clip_id="clip-1",
+    ).model_copy(update={"video_path": output1})
+    callback_entered = threading.Event()
+    release_callback = threading.Event()
+    video2_saved = threading.Event()
+    errors: list[Exception] = []
+
+    def start_upload_v1() -> UploadOperation:
+        callback_entered.set()
+        assert release_callback.wait(2)
+        return operation1
+
+    def save_video2() -> None:
+        try:
+            previous = load_line_state("video-2", "clip-2", settings)
+            assert previous is not None
+            changed = set_review_fingerprint(previous, "e" * 64)
+            save_line_state(changed, settings, expected_state=previous)
+            video2_saved.set()
+        except Exception as exc:
+            errors.append(exc)
+
+    transaction = threading.Thread(
+        target=lambda: run_line_reservation_transaction(
+            "video-1",
+            "clip-1",
+            output1,
+            settings,
+            start_upload_v1,
+        )
+    )
+    transaction.start()
+    assert callback_entered.wait(2)
+
+    saver = threading.Thread(target=save_video2)
+    saver.start()
+    assert video2_saved.wait(2)
+
+    release_callback.set()
+    transaction.join(2)
+    saver.join(2)
+
+    assert not errors
+    persisted2 = load_line_state("video-2", "clip-2", settings)
+    assert persisted2 is not None
+    assert persisted2.review_fingerprint == "e" * 64
+    persisted1 = load_line_state("video-1", "clip-1", settings)
+    assert persisted1 is not None and persisted1.current_stage == LineStage.RESERVED
 
 
 def test_reservation_transaction_raises_started_error_if_output_changes_in_callback(
@@ -827,7 +950,7 @@ def test_save_compare_and_swap_rejects_concurrent_replacement(tmp_path: Path) ->
     assert load_line_state("video-1", "clip-1", settings) == first
 
 
-def test_record_upload_mismatch_returns_and_persists_invalidated_state(tmp_path: Path) -> None:
+def test_record_upload_mismatch_returns_invalidated_state(tmp_path: Path) -> None:
     settings = _settings(tmp_path)
     state, output = _confirmed_state(tmp_path)
     save_line_state(state, settings)
@@ -839,13 +962,39 @@ def test_record_upload_mismatch_returns_and_persists_invalidated_state(tmp_path:
         state,
         "op-not-recorded",
         output,
-        settings=settings,
         now=NOW + timedelta(seconds=4),
     )
     assert invalidated.current_stage == LineStage.FINAL_REVIEW
     assert invalidated.preview_confirmed_fingerprint is None
     assert invalidated.upload_operation_id is None
+    save_line_state(invalidated, settings, expected_state=state)
     assert load_line_state("video-1", "clip-1", settings) == invalidated
+
+
+def test_record_upload_operation_safe_under_line_lock_without_nested_persist(
+    tmp_path: Path,
+) -> None:
+    from yt_live_kit.services.shorts_line import _line_lock
+
+    settings = _settings(tmp_path)
+    state, output = _confirmed_state(tmp_path)
+    save_line_state(state, settings)
+
+    with _line_lock(state.video_id, settings):
+        updated = record_upload_operation(state, "op-under-lock", output)
+
+    save_line_state(updated, settings, expected_state=state)
+    persisted = load_line_state("video-1", "clip-1", settings)
+    assert persisted is not None
+    assert persisted.upload_operation_id == "op-under-lock"
+    assert persisted.current_stage == LineStage.RESERVED
+
+
+def test_record_upload_operation_does_not_persist_internally(tmp_path: Path) -> None:
+    state, output = _confirmed_state(tmp_path)
+    with patch("yt_live_kit.services.shorts_line.save_line_state") as save:
+        record_upload_operation(state, "op-1", output)
+    save.assert_not_called()
 
 
 def test_atomic_parent_creation_error_is_normalized(tmp_path: Path) -> None:
@@ -1219,3 +1368,39 @@ def test_latest_operation_tie_breaks_by_operation_id(tmp_path: Path) -> None:
     )
     assert summary.completed_count == 0
     assert summary.needs_attention_count == 1
+
+
+def _line_state_with_saved_artifact(
+    tmp_path: Path,
+    *,
+    model_sha256: str | None = None,
+) -> tuple[LineState, Settings]:
+    settings = _settings(tmp_path)
+    artifact = _stored_high_precision_artifact(model_sha256=model_sha256)
+    store = TranscriptArtifactStore("video-1", settings)
+    store.save(artifact)
+    reference = store.artifact_ref(artifact)
+    state = create_line_state(
+        "video-1",
+        "clip-1",
+        QUEUE_FP,
+        artifact_ref=reference,
+        artifact_fingerprint=artifact.artifact_fingerprint,
+        used_range_cue_digests=artifact.used_range_cue_digests,
+        now=NOW,
+    )
+    return state, settings
+
+
+def test_artifact_lineage_stays_current_for_adopted_contract(tmp_path: Path) -> None:
+    state, settings = _line_state_with_saved_artifact(tmp_path)
+    assert _artifact_lineage_is_current(state, settings) is True
+    assert _line_state_needs_invalidation(state, settings) is False
+
+
+def test_artifact_lineage_invalidates_when_whisper_contract_model_changes(
+    tmp_path: Path,
+) -> None:
+    state, settings = _line_state_with_saved_artifact(tmp_path, model_sha256="0" * 64)
+    assert _artifact_lineage_is_current(state, settings) is False
+    assert _line_state_needs_invalidation(state, settings) is True

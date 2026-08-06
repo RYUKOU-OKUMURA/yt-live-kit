@@ -6,6 +6,7 @@ from pathlib import Path
 
 from yt_live_kit.config import Settings, get_settings
 from yt_live_kit.services._fsutil import write_text_atomically
+from yt_live_kit.services._paths import PathConfinementError, confined_video_path
 from yt_live_kit.services.compressor import compress_lines
 from yt_live_kit.services.vtt_parser import EmptyVttError, parse_vtt_file
 
@@ -37,7 +38,10 @@ def _find_vtt_path(video_dir: Path) -> Path:
 def build_transcripts(video_id: str, settings: Settings | None = None) -> tuple[Path, Path]:
     """VTT から full.txt / compressed.txt を生成して保存する."""
     settings = settings or get_settings()
-    video_dir = settings.data_dir / video_id
+    try:
+        video_dir = confined_video_path(settings.data_dir, video_id)
+    except PathConfinementError as exc:
+        raise TranscriptError(str(exc)) from exc
 
     if not video_dir.is_dir():
         raise TranscriptError(f"動画ディレクトリが見つかりません: {video_dir}")

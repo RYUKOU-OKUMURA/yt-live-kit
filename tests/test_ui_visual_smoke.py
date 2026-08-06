@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -20,11 +21,26 @@ import pytest
 from streamlit.testing.v1 import AppTest
 from streamlit.util import calc_hash
 
-from yt_live_kit.services.ffmpeg import FfmpegError
+from yt_live_kit.config import Settings
+from yt_live_kit.models.clips import ClipCandidate, ClipCandidatesDocument
+from yt_live_kit.models.meta import VideoMeta
+from yt_live_kit.models.telop import TelopScriptDocument
+from yt_live_kit.services.ffmpeg import FfmpegError, MediaStreams
+from yt_live_kit.services.shorts import ShortResult
+from yt_live_kit.services.shorts_queue import (
+    build_shorts_queue_targets,
+    make_shorts_queue_clip_spec,
+    normalize_queue_candidates,
+    run_shorts_queue,
+)
 from yt_live_kit.services.whisper_runtime import WhisperRuntimeError
+from yt_live_kit.ui.session_keys import detail_workspace_key
+from yt_live_kit.ui.state import SESSION_SELECTED_VIDEO_ID
 
 _APP_PATH = Path(__file__).parents[1] / "src/yt_live_kit/ui/app.py"
 _RUN_TIMEOUT_SECONDS = 30.0
+_POPULATED_VIDEO_ID = "vid1234567"
+_POPULATED_CHAPTERS = "0:00 はじめに\n0:10 本題\n0:20 まとめ\n"
 
 
 @pytest.fixture(autouse=True)
@@ -54,6 +70,137 @@ def _stub_external_processes(monkeypatch: pytest.MonkeyPatch) -> None:
         "yt_live_kit.ui.views.settings.is_codex_available",
         lambda: False,
     )
+    monkeypatch.setattr(
+        "yt_live_kit.services.shorts_queue.probe_media_streams",
+        lambda *args, **kwargs: MediaStreams(video_count=1, audio_count=1),
+    )
+
+
+def _smoke_clip(index: int) -> ClipCandidate:
+    start = (index - 1) * 10
+    end = index * 10
+    return ClipCandidate(
+        id=f"clip_{index:03d}",
+        title=f"候補 {index}",
+        start=f"0:00:{start:02d}",
+        end=f"0:00:{end:02d}",
+        duration_sec=end - start,
+        reason=f"理由 {index}",
+    )
+
+
+def _smoke_telop_document(target) -> TelopScriptDocument:
+    return TelopScriptDocument.model_validate(
+        {
+            "hook_text": "重要ポイント",
+            "title_candidates": [f"タイトル {target.target_id}"],
+            "description": "説明文です。",
+            "tags": ["配信", "要点"],
+            "segments": [
+                {
+                    "start_sec": segment.start_ms / 1000,
+                    "end_sec": segment.end_ms / 1000,
+                    "lines": [
+                        {
+                            "text": "テロップ本文",
+                            "start_sec": segment.start_ms / 1000,
+                            "end_sec": segment.end_ms / 1000,
+                            "emphasis": False,
+                        }
+                    ],
+                }
+                for segment in target.segments
+            ],
+        }
+    )
+
+
+def _smoke_queue_spec():
+    candidates = [_smoke_clip(1)]
+    segments = normalize_queue_candidates(candidates, source="clips")
+    targets = build_shorts_queue_targets(segments, mode="individual")
+    target = targets[0]
+    return make_shorts_queue_clip_spec(
+        target,
+        _smoke_telop_document(target),
+        layout="blur",
+        preset="default",
+        hook_preset="hook",
+    )
+
+
+def _successful_short_result(
+    data_dir: Path,
+    video_id: str,
+    spec,
+) -> ShortResult:
+    output = data_dir / video_id / "shorts" / "output" / spec.output_name
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_bytes(b"complete mp4 fixture")
+    log = output.with_suffix(".ffmpeg.log")
+    log.write_text("fixture", encoding="utf-8")
+    return ShortResult(
+        video_id=video_id,
+        output_path=output,
+        command_log_path=log,
+        layout=spec.layout,
+        burned_subtitles=True,
+        duration_sec=10.0,
+    )
+
+
+def _populate_populated_video_detail_state(
+    data_dir: Path,
+    *,
+    video_id: str = _POPULATED_VIDEO_ID,
+) -> None:
+    """候補・チャプター・生成済みショートを含む動画詳細向けの最小 fixture."""
+    video_dir = data_dir / video_id
+    (video_dir / "chapters").mkdir(parents=True)
+    (video_dir / "transcript").mkdir()
+    (video_dir / "clips").mkdir()
+
+    meta = VideoMeta(
+        id=video_id,
+        title="テスト動画",
+        url=f"https://example.com/watch?v={video_id}",
+        upload_date="20260101",
+        duration=3600,
+        ytdlp_version="2026.7.4",
+        fetched_at=datetime(2026, 7, 30, tzinfo=timezone.utc),
+        subtitle_lang="ja",
+    )
+    (video_dir / "meta.json").write_text(meta.model_dump_json(), encoding="utf-8")
+    (video_dir / "chapters" / "chapters.md").write_text(
+        _POPULATED_CHAPTERS,
+        encoding="utf-8",
+    )
+    (video_dir / "transcript" / "full.txt").write_text(
+        "[00:00:00] 全文です\n",
+        encoding="utf-8",
+    )
+    clip_doc = ClipCandidatesDocument(
+        candidates=[
+            _smoke_clip(1),
+            _smoke_clip(2),
+        ]
+    )
+    (video_dir / "clips" / "candidates.json").write_text(
+        clip_doc.model_dump_json(),
+        encoding="utf-8",
+    )
+
+    settings = Settings(data_dir=data_dir)
+    spec = _smoke_queue_spec()
+    with patch(
+        "yt_live_kit.services.shorts_queue.build_short_from_segments",
+        side_effect=lambda *args, **kwargs: _successful_short_result(
+            data_dir,
+            video_id,
+            spec,
+        ),
+    ):
+        run_shorts_queue(video_id, [spec], settings, job_id="visual-smoke-job")
 
 
 def _run_page(url_path: str | None) -> AppTest:
@@ -67,6 +214,18 @@ def _run_page(url_path: str | None) -> AppTest:
     at = AppTest.from_file(str(_APP_PATH))
     if url_path is not None:
         at._page_hash = calc_hash(url_path)
+    return at.run(timeout=_RUN_TIMEOUT_SECONDS)
+
+
+def _run_populated_video_detail(
+    workspace: str,
+    video_id: str = _POPULATED_VIDEO_ID,
+) -> AppTest:
+    """データあり状態の動画詳細ページを、指定ワークスペースで描画する."""
+    at = AppTest.from_file(str(_APP_PATH))
+    at.session_state[SESSION_SELECTED_VIDEO_ID] = video_id
+    at.session_state[detail_workspace_key(video_id)] = workspace
+    at._page_hash = calc_hash("video-detail")
     return at.run(timeout=_RUN_TIMEOUT_SECONDS)
 
 
@@ -116,3 +275,27 @@ def test_video_detail_page_renders_empty_selection_without_exception() -> None:
     assert not list(at.exception)
     assert ":material/movie: 動画詳細" in [item.value for item in at.header]
     assert "ライブラリから動画を選択してください。" in [item.value for item in at.info]
+
+
+@pytest.mark.parametrize("workspace", ("materials", "shorts", "publish"))
+def test_video_detail_populated_workspace_renders_without_exception(
+    workspace: str,
+    tmp_path: Path,
+) -> None:
+    """候補・チャプター・生成済みショートがある状態で各ワークスペースが描画できる."""
+    data_dir = tmp_path / "data"
+    _populate_populated_video_detail_state(data_dir)
+
+    at = _run_populated_video_detail(workspace)
+
+    assert not list(at.exception)
+    assert ":material/movie: テスト動画" in [item.value for item in at.header]
+    markdown_values = [item.value for item in at.main.markdown]
+    if workspace == "materials":
+        caption_values = [item.value for item in at.main.caption]
+        assert any("候補を確認し" in value for value in caption_values)
+    elif workspace == "shorts":
+        subheader_values = [item.value for item in at.subheader]
+        assert any("素材を選び" in value for value in subheader_values)
+    else:
+        assert any("ショートの予約投稿" in value for value in markdown_values)

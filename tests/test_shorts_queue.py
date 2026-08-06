@@ -11,7 +11,7 @@ from unittest.mock import MagicMock, call, patch
 import pytest
 import yt_live_kit.services.shorts_queue as shorts_queue_service
 
-from yt_live_kit.config import Settings
+from yt_live_kit.config import Settings, WHISPER_ADOPTED_CONTRACT
 from yt_live_kit.models.clips import ClipCandidate
 from yt_live_kit.models.highlights import HighlightSegment
 from yt_live_kit.models.telop import TelopScriptDocument
@@ -193,6 +193,61 @@ def test_queue_spec_keeps_artifact_lineage_without_changing_queue_fingerprint():
     )
 
 
+def _high_precision_artifact_for_queue(*, model_sha256: str | None = None):
+    contract = WHISPER_ADOPTED_CONTRACT
+    model_sha = model_sha256 or contract.model_sha256
+    return build_transcript_artifact(
+        video_id="video-1",
+        source_kind="whisper_cpp",
+        source_ref="transcripts/audio/queue.wav",
+        language="ja",
+        ranges=[TranscriptRange(start_ms=10_000, end_ms=20_000)],
+        cues=[TranscriptCue(start_ms=11_000, end_ms=12_000, text="artifact cue")],
+        audio_bytes=b"queue-lineage-audio",
+        model={
+            "name": contract.model_name,
+            "sha256": model_sha,
+            "fingerprint": model_sha,
+        },
+        runtime={
+            "version": contract.binary_version,
+            "binary_sha256": contract.binary_sha256,
+        },
+        settings={
+            "language": contract.language,
+            "initial_prompt": contract.initial_prompt,
+            "output_schema": contract.output_schema,
+            "padding_ms": contract.padding_ms,
+            "vad": contract.vad,
+            "decode": contract.decode,
+        },
+        source_metadata={"audio_spans": [{"audio_route": "local_source_accurate_seek"}]},
+    )
+
+
+def _queue_spec_for_artifact(artifact, settings: Settings) -> ShortsQueueClipSpec:
+    store = TranscriptArtifactStore("video-1", settings)
+    store.save(artifact)
+    reference = store.artifact_ref(artifact)
+    candidate = _clip(1, 0, 20)
+    segments = normalize_queue_candidates([candidate], source="clips")
+    target = build_shorts_queue_targets(segments, mode="individual")[0]
+    document = _document(target).model_copy(
+        update={
+            "artifact_ref": reference,
+            "artifact_fingerprint": artifact.artifact_fingerprint,
+            "used_range_cue_digests": artifact.used_range_cue_digests,
+        }
+    )
+    return make_shorts_queue_clip_spec(
+        target,
+        document,
+        layout="blur",
+        preset="default",
+        hook_preset="hook",
+    )
+
+
 @pytest.mark.parametrize("status", ["fallback", "partial", "failed"])
 def test_queue_preflight_rejects_saved_non_high_precision_artifact(
     tmp_path: Path,
@@ -223,6 +278,15 @@ def test_queue_preflight_rejects_saved_non_high_precision_artifact(
 
     with pytest.raises(ShortsQueueError, match="高精度成功結果"):
         run_shorts_queue("video-1", (spec,), settings, job_id=f"job-{status}")
+
+
+def test_queue_preflight_rejects_whisper_contract_change(tmp_path: Path) -> None:
+    settings = Settings(data_dir=tmp_path)
+    artifact = _high_precision_artifact_for_queue(model_sha256="0" * 64)
+    spec = _queue_spec_for_artifact(artifact, settings)
+
+    with pytest.raises(ShortsQueueError, match="artifact lineage"):
+        run_shorts_queue("video-1", (spec,), settings, job_id="job-contract")
 
 
 def _spec_payload_for_duration(duration_ms: int) -> dict[str, object]:

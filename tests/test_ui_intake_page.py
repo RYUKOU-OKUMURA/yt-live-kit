@@ -1,9 +1,8 @@
-"""取り込みページと共通結果表示のテスト."""
+"""取り込みページのテスト."""
 
 from __future__ import annotations
 
 import inspect
-import json
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
@@ -11,20 +10,7 @@ import pytest
 
 from yt_live_kit.config import Settings
 from yt_live_kit.models.channel import ChannelVideo
-from yt_live_kit.services.storage import format_bytes
 from yt_live_kit.ui.components.clipboard import build_clipboard_copy_html
-from yt_live_kit.ui.components.results import (
-    _CHAPTERS_NOT_GENERATED_MESSAGE,
-    _CLIPS_EMPTY_NOT_REQUESTED_MESSAGE,
-    _CLIPS_EMPTY_REQUESTED_MESSAGE,
-    _TEMPLATE_NOT_SET_MESSAGE,
-    _start_cut_clip,
-    clip_candidate_radio_key,
-    clips_empty_message,
-    cut_clip_button_disabled,
-    cut_clip_button_key,
-    source_cache_note,
-)
 from yt_live_kit.ui.views import intake
 from yt_live_kit.ui.views._local_settings import (
     get_default_channel_handle,
@@ -192,6 +178,8 @@ def test_batch_summary_severity() -> None:
 
 
 def test_clipboard_html_remains_safe_after_page_merge() -> None:
+    import json
+
     text = '0:00 開始\n5:00 "引用"\n\\バックスラッシュ'
     html = build_clipboard_copy_html(
         text=text, button_id="copy_test123", button_label="コピー"
@@ -207,78 +195,3 @@ def test_clipboard_html_remains_safe_after_page_merge() -> None:
     )
     assert "</script><script>alert(1)</script>" not in hostile
     assert hostile.count("</script>") == 1
-
-
-def test_existing_result_guidance_messages_are_preserved() -> None:
-    assert "description_template.txt" in _TEMPLATE_NOT_SET_MESSAGE
-    assert "{{timeline}}" in _TEMPLATE_NOT_SET_MESSAGE
-    assert "チャプター" in _CHAPTERS_NOT_GENERATED_MESSAGE
-    assert clips_empty_message(True) == _CLIPS_EMPTY_REQUESTED_MESSAGE
-    assert clips_empty_message(False) == _CLIPS_EMPTY_NOT_REQUESTED_MESSAGE
-
-
-def test_source_cache_note_preserves_existing_behavior(tmp_path) -> None:
-    settings = Settings(data_dir=tmp_path)
-    source_dir = tmp_path / "video1" / "clips" / "source"
-    source_dir.mkdir(parents=True)
-    (source_dir / "source.mp4").write_bytes(b"x" * 2048)
-    note = source_cache_note("video1", settings)
-    assert note is not None
-    assert format_bytes(2048) in note
-
-    assert source_cache_note("missing", settings) is None
-
-
-def test_cut_clip_button_disabled_when_busy() -> None:
-    assert cut_clip_button_disabled(busy=True) is True
-    assert cut_clip_button_disabled(busy=False) is False
-
-
-def test_clip_widget_keys_are_scoped_by_video_id() -> None:
-    assert clip_candidate_radio_key("vid_a") == "clip_candidate_radio_vid_a"
-    assert cut_clip_button_key("vid_a") == "cut_clip_vid_a"
-    assert clip_candidate_radio_key("vid_a") != clip_candidate_radio_key("vid_b")
-    assert cut_clip_button_key("vid_a") != cut_clip_button_key("vid_b")
-
-
-def test_start_cut_clip_starts_job() -> None:
-    result = MagicMock(video_id="vid123", title="テスト動画")
-    selected = MagicMock(id="clip_001", start="00:03:42", end="00:16:30")
-    settings = MagicMock()
-    with (
-        patch("yt_live_kit.ui.components.results.start_job", return_value="job-cut-1") as start,
-        patch("yt_live_kit.ui.components.results.set_active_job_id") as set_active,
-        patch("yt_live_kit.ui.components.results.st.rerun") as rerun,
-    ):
-        _start_cut_clip(result, selected, settings)
-
-    start.assert_called_once()
-    assert start.call_args.args[0] == "cut_clip"
-    assert start.call_args.kwargs["video_id"] == "vid123"
-    assert start.call_args.kwargs["candidate_id"] == "clip_001"
-    set_active.assert_called_once_with("job-cut-1")
-    rerun.assert_called_once()
-
-
-def test_start_cut_clip_shows_busy_message_without_starting_job() -> None:
-    from yt_live_kit.services.jobs import JobBusyError
-
-    result = MagicMock(video_id="vid123", title="テスト動画")
-    selected = MagicMock(id="clip_001", start="00:03:42", end="00:16:30")
-    settings = MagicMock()
-    with (
-        patch(
-            "yt_live_kit.ui.components.results.start_job",
-            side_effect=JobBusyError(),
-        ) as start,
-        patch("yt_live_kit.ui.components.results.st.error") as show_error,
-        patch("yt_live_kit.ui.components.results.set_active_job_id") as set_active,
-        patch("yt_live_kit.ui.components.results.st.rerun") as rerun,
-    ):
-        _start_cut_clip(result, selected, settings)
-
-    start.assert_called_once()
-    show_error.assert_called_once()
-    assert "実行中" in show_error.call_args.args[0]
-    set_active.assert_not_called()
-    rerun.assert_not_called()

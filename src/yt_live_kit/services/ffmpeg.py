@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
+import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -475,6 +477,19 @@ def load_meta(video_dir: Path) -> VideoMeta:
 _load_meta = load_meta
 
 
+def _quarantine_corrupt_source_candidate(candidate: Path) -> None:
+    """壊れた元動画候補を同一ディレクトリへ隔離し、再取得を可能にする."""
+
+    try:
+        if not candidate.is_file():
+            return
+        quarantine = candidate.with_name(f".{candidate.name}.corrupt-{uuid.uuid4().hex}")
+        os.replace(candidate, quarantine)
+    except OSError:
+        # 隔離できない場合も、壊れた候補を成功扱いにはしない。
+        return
+
+
 def ensure_source_video(video_id: str, settings: Settings) -> Path:
     """切り出し用の元動画を取得する（未 DL なら yt-dlp でダウンロード）."""
     video_dir = settings.data_dir / video_id
@@ -487,11 +502,15 @@ def ensure_source_video(video_id: str, settings: Settings) -> Path:
         + sorted(source_dir.glob("*.webm"))
     )
     for candidate in existing:
-        streams = probe_media_streams(
-            candidate,
-            ffmpeg_path=settings.ffmpeg_path,
-            ffmpeg_timeout=settings.ffmpeg_timeout,
-        )
+        try:
+            streams = probe_media_streams(
+                candidate,
+                ffmpeg_path=settings.ffmpeg_path,
+                ffmpeg_timeout=settings.ffmpeg_timeout,
+            )
+        except FfmpegError:
+            _quarantine_corrupt_source_candidate(candidate)
+            continue
         if streams.has_audio_video:
             return candidate
 

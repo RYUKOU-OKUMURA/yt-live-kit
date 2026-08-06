@@ -67,7 +67,7 @@ def choose_initial_workspace(
             return "publish"
         if active_job.kind in {"shorts", "shorts_queue", "short_cut"}:
             return "shorts"
-        if active_job.kind in {"highlights", "regenerate", "cut_clip"}:
+        if active_job.kind in {"highlights", "regenerate"}:
             return "materials"
     if candidate_count <= 0:
         return "materials"

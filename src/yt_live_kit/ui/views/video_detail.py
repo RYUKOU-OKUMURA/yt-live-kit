@@ -564,11 +564,21 @@ def _render_transcript(result: PipelineResult) -> None:
         disabled=True,
         label_visibility="collapsed",
     )
-    render_copy_button(
-        result.full_transcript_text,
-        label="全文をコピー",
-        key=f"detail_copy_transcript_{result.video_id}",
-    )
+    transcript_col, transcript_copy_col = st.columns([3, 1])
+    with transcript_col:
+        st.download_button(
+            label="全文をダウンロード",
+            data=result.full_transcript_text,
+            file_name=f"{result.video_id}_transcript.txt",
+            mime="text/plain",
+            key=f"download_transcript_{result.video_id}",
+        )
+    with transcript_copy_col:
+        render_copy_button(
+            result.full_transcript_text,
+            label="全文をコピー",
+            key=f"detail_copy_transcript_{result.video_id}",
+        )
 
 
 def _render_job_error_notification(
@@ -658,11 +668,21 @@ def _render_chapters(
     has_chapters = video.has_chapters or bool(result.chapters_text.strip())
     if has_chapters:
         st.code(result.chapters_text, language="markdown")
-        render_copy_button(
-            result.chapters_text,
-            label="タイムラインをコピー",
-            key=f"detail_copy_chapters_{result.video_id}",
-        )
+        timeline_col, timeline_copy_col = st.columns([3, 1])
+        with timeline_col:
+            st.download_button(
+                label="タイムラインをテキストでダウンロード",
+                data=result.chapters_text,
+                file_name=f"{result.video_id}_chapters.txt",
+                mime="text/plain",
+                key=f"download_chapters_{result.video_id}",
+            )
+        with timeline_copy_col:
+            render_copy_button(
+                result.chapters_text,
+                label="タイムラインをコピー",
+                key=f"detail_copy_chapters_{result.video_id}",
+            )
     else:
         st.info("チャプターはまだ生成されていません。")
     _render_regenerate_control(

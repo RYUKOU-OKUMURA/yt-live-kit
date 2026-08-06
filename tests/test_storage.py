@@ -11,8 +11,10 @@ from yt_live_kit.services.storage import (
     StorageError,
     dir_size,
     format_bytes,
+    is_source_older_than,
     purge_source,
     purge_sources_older_than,
+    source_fetched_at,
     summarize,
 )
 
@@ -246,6 +248,23 @@ def test_purge_sources_older_than_skips_unreadable_meta(tmp_path: Path):
     results = purge_sources_older_than(7, settings)
     assert results == []
     assert (video_dir / "clips" / "source").exists()
+
+
+def test_is_source_older_than_rereads_meta_before_purge(tmp_path: Path):
+    settings = Settings(data_dir=tmp_path)
+    video_id = "staleCheck1"
+    video_dir = tmp_path / video_id
+    old_fetched = datetime(2020, 1, 1, tzinfo=timezone.utc)
+    recent_fetched = datetime.now(timezone.utc) - timedelta(days=1)
+    _build_video_tree(video_dir, video_id, fetched_at=old_fetched)
+
+    assert is_source_older_than(video_id, 7, settings) is True
+    assert source_fetched_at(video_id, settings) == old_fetched
+
+    _write_meta(video_dir, video_id, fetched_at=recent_fetched)
+
+    assert is_source_older_than(video_id, 7, settings) is False
+    assert source_fetched_at(video_id, settings) == recent_fetched
 
 
 def test_format_bytes_boundaries():

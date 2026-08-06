@@ -28,6 +28,7 @@ from yt_live_kit.services.short_cut import (
     ParentCandidate,
     ShortCutError,
     ShortCutValidationResult,
+    cutplan_artifact_lineage_is_current,
     load_cut_plan,
     needs_short_cut,
     refine_selected_short_cut,
@@ -435,23 +436,16 @@ def load_transcript_cues_for_document(
         return (), "高精度化済み cutplan が Whisper artifact ではないため表示を停止しました。"
     if document.artifact_fingerprint is None or not document.used_range_cue_digests:
         return (), "高精度字幕 artifact lineage が不完全なため表示を停止しました。"
-    try:
-        store = TranscriptArtifactStore(video_id, settings)
-        artifact = store.load_artifact(document.artifact_fingerprint)
-        actual_ref = store.artifact_ref(artifact)
-    except (TranscriptArtifactError, OSError, ValueError):
-        return (), "保存済み高精度字幕 artifact を読み込めないため表示を停止しました。"
-    if (
-        actual_ref != reference
-        or artifact.artifact_fingerprint != document.artifact_fingerprint
-        or tuple(artifact.used_range_cue_digests)
-        != tuple(document.used_range_cue_digests)
-        or not artifact.is_high_precision
-    ):
+    if not cutplan_artifact_lineage_is_current(video_id, document, settings):
         return (), (
             "保存済み高精度字幕 artifact が cutplan の lineage と一致しないため、"
             "表示を停止しました。既存 VTT へ自動差替えしません。"
         )
+    try:
+        store = TranscriptArtifactStore(video_id, settings)
+        artifact = store.load_artifact(document.artifact_fingerprint)
+    except (TranscriptArtifactError, OSError, ValueError):
+        return (), "保存済み高精度字幕 artifact を読み込めないため表示を停止しました。"
     cues = tuple(
         TimedCue(cue.start_ms / 1000, cue.end_ms / 1000, cue.text)
         for cue in artifact.cues
