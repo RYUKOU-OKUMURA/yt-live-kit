@@ -41,14 +41,53 @@ T1-1 ブランチ（`codex/t1-1-timing-spike`、13 コミット）を merge comm
 
 ## 人 preview の素材可用性（2026-08-06）
 
-| case | video ID | preview 要否 | 音声付き source | Whisper artifact |
+| case | video ID | preview 要否 | 音声付き source | case 区間の Whisper artifact |
 | --- | --- | --- | --- | --- |
-| `lb4-clip002-short-proper-nouns` | `LB4px1wRFnY` | 不要 | あり | あり |
-| `hpe-audio-variation` | `hPeRSA9YVIM` | 必要 | **なし**（`clips/source/hPeRSA9YVIM.f299.mp4` は video-only で HF4 契約により採用不可） | あり |
-| `cgal-proper-nouns` | `CGalA8SISPE` | 必要 | **なし** | **なし** |
-| `mkw-long-local-asr` | `mKwn-93gg90` | 必要 | **なし** | **なし** |
+| `lb4-clip002-short-proper-nouns` | `LB4px1wRFnY` | 不要 | あり（502,876,028 bytes） | あり |
+| `hpe-audio-variation` | `hPeRSA9YVIM` | **必要** | あり（1,528,294,692 bytes、2026-08-04 取得済み） | **なし**（既存 artifact は 3498000–3638000 ms のみで case 区間 8640000–8730000 ms を含まない） |
+| `cgal-proper-nouns` | `CGalA8SISPE` | 今回は対象外 | なし | なし |
+| `mkw-long-local-asr` | `mKwn-93gg90` | **必要** | あり（435,794,499 bytes、2026-08-06 に `ensure_source_video` で取得、45.2 秒） | **なし**（`transcripts/artifacts` 自体が未作成） |
 
-case2 / case3 / case4 の編集後 preview には音声付き source の再取得が必要であり、case3 / case4 は選択区間の Whisper artifact 生成も必要である。
+初回記録で `hpe-audio-variation` を「音声付き source なし」としたのは誤りで、ファイル一覧の出力切り詰めによる誤読だった。実際には 2026-08-04 時点で音声付き `hPeRSA9YVIM.mp4` が存在しており、上表が再確認後の事実である。今回の取得は `mKwn-93gg90` の 1 本だけである。
+
+## 人 preview の実施範囲（2026-08-06、ユーザー決定）
+
+- 対象: `hpe-audio-variation`（opening trim）と `mkw-long-local-asr`（internal gap removal）の 2 本
+- 対象外: `cgal-proper-nouns`
+- 根拠: editorial outcome の種類を網羅する最小構成である。`cgal-proper-nouns` は `hpe-audio-variation` と同じ `opening_trim_required_then_human_preview`（いずれも冒頭約 6 秒の無音）であり、個別 preview を実施しないことを明記した上で case2 の結果を援用する。
+
+## 音声活動の実測（2026-08-06）
+
+境界監査 policy が `whisper_timestamp_sole_authority: false` とし、`required_evidence` に `audio_activity` を含めているため、トリム位置は Whisper timestamp ではなく音声活動の実測で決めた。
+
+`hpe-audio-variation` の高精度 artifact は先頭 cue が range 開始と同値（8640000 ms）で、しかも 12 秒の無発話をまたいで 1 cue に併合していた。Whisper timestamp を境界の根拠にできないことは T1-1 の No-Go と整合する。
+
+| case | 実測 | 監査所見 | 差 |
+| --- | --- | --- | --- |
+| `hpe-audio-variation` | 0–1.194s 無音 → 1.194–4.115s 断続音 → **4.115–16.131s に 12.0 秒の無発話** → 16.131s 以降は連続発話 | 開始から約 6 秒まで意味ある発話がない | 方向は一致するが、持続的な発話開始は実測 **16.1 秒**で、監査の「約 6 秒」は無発話の長さを過小評価していた |
+| `mkw-long-local-asr` | 0–2.356s 発話 → **2.356–18.584s に 16.2 秒の無発話** → 20.1–25.9s も断続 → 34.961–50.535s に 15.6 秒 → 53.328–58.266s に 4.9 秒 | 冒頭に発話はあるが、約 2 秒から約 26 秒は大半が無発話 | 一致 |
+
+これに基づき決めた区間は次のとおりである。
+
+- `hpe-audio-variation`（opening trim）: **02:24:16 → 02:24:33**（17.0 秒）。開始は持続発話の起点、終了は 17.499s から始まる 5.3 秒の無発話の手前。
+- `mkw-long-local-asr`（internal gap removal）: **00:19:06 → 00:19:14** と **00:19:39 → 00:19:55**（合計 24.0 秒）。16.2 秒・15.6 秒・4.9 秒の無発話を除去した 2 区間の連結。
+
+## 実 UI ラインの進捗（2026-08-06）
+
+`http://127.0.0.1:8502` の実アプリを Playwright で操作し、両 case を **工程 3／6（テロップ確認）** まで進めた。
+
+| case | 候補 | 高精度字幕 | artifact fingerprint | テロップ |
+| --- | --- | --- | --- | --- |
+| `hpe-audio-variation` | `clip_003` | 固定済み | `30ee4756d26f581fb313b4c5f5c02b900a1c95930f580236b2a3c9db57e15098` | 初回は schema 不一致で失敗し、構造化日本語 error と再試行 UI が出て fail-closed で停止。再生成で成功し、自動ハード判定 通過 / 自動警告 なし |
+| `mkw-long-local-asr` | `clip_001` | 固定済み | `bedb198a442282ad9c5f39b0e2ed664368f15b22edb15565e4ad55488f6fcf09` | 初回で成功。自動ハード判定 通過 / 自動警告 なし |
+
+**「台本全体の誤字・固有名詞を確認した」チェックボックスは意図的に押していない。** これは人が行う確認ゲートであり、agent が代行すると人確認の事実を偽装することになるためである。
+
+残る人の作業は次の 3 つである。
+
+1. 両 case で台本の誤字・固有名詞を確認してチェックする
+2. 「台本を確定して生成へ」で生成する
+3. 工程 6 の最終確認で、冒頭に無発話がないこと・連結部が不自然でないことを preview で確認する
 
 ## fingerprint
 
