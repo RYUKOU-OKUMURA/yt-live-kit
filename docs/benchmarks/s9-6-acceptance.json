@@ -483,16 +483,30 @@
         "candidate_opening_ms": 8640000,
         "observed": "0–1.194s 無音、1.194–4.115s に断続音、4.115–16.131s に 12.0 秒の無発話、16.131s 以降は自然な間を挟む連続発話",
         "audit_said": "開始から約6秒まで意味ある発話がない",
-        "measurement_vs_audit": "実測では持続的な発話開始は 16.1 秒で、監査の約6秒より長い。監査所見の方向は一致するが、無発話の長さは過小評価だった",
+        "measurement_vs_audit": "確定値では冒頭の無発話は 6.19 秒で、境界監査の『約6秒』と一致する。2026-08-04 の cache 座標 16.131s も絶対時刻へ直すと 8646.18s で確定値と一致する",
         "chosen_trim_start": "02:24:16",
         "chosen_end": "02:24:33",
         "end_basis": "17.499s から 5.334 秒の無発話が始まるため、その手前で切る",
         "resulting_duration_s": 17.0,
-        "corrected_observed": "source 8640 起点で 0–28.604 秒が無音。以降も 30.431–33.872 秒に 3.4 秒、34.500–35.615 秒に 1.1 秒と断続する",
-        "corrected_dead_opening_s": 28.604,
+        "corrected_observed": "source 8640 起点・精密シーク（修正後経路）で再測定: 0–6.19s 無音、6.19–33.5s は 0.5〜1.8 秒の間を挟む連続発話、33.5–38.8s に 5.33 秒の無発話、38.8–45.9s 発話、45.9–50s 無音",
+        "corrected_dead_opening_s": 6.19,
         "chosen_trim_start_invalid": true,
         "short_generated": false,
-        "human_preview_on_wrong_range": false
+        "human_preview_on_wrong_range": false,
+        "corrected_dead_opening_absolute_ms": 8646190,
+        "chosen_trim_start_invalid_reason": "02:24:16 は無発話区間の内側ではなく発話の途中である（16 秒地点の RMS は -28.4 dBFS）。妥当な開始位置は 02:24:06.2 以降",
+        "superseded_measurements": [
+          {
+            "recorded": "0–28.604 秒が無音",
+            "recorded_date": "2026-08-06",
+            "why_wrong": "silencedetect の silence_start / silence_end を対で読まず、30 秒以内で最後の silence_end: 28.546 を『そこまで無音』と解釈した読み違い"
+          },
+          {
+            "recorded": "持続発話開始は 16.131s",
+            "recorded_date": "2026-08-04",
+            "why_wrong": "値は正しいが、9.95 秒ずれた cache 座標であることを明記していなかった。絶対時刻では 8646.18s"
+          }
+        ]
       },
       {
         "case_id": "mkw-long-local-asr",
@@ -514,7 +528,7 @@
         "measurement_basis": "source 由来の精密シーク。開始ずれの影響を受けない"
       }
     ],
-    "correction_2026_08_06": "hpe-audio-variation の測定は開始ずれのある cache wav を対象にしていたため誤りだった。source 8640 起点の精密シークで測り直すと 0–28.604 秒が無音であり、境界監査の『約6秒』も当方の『16.1秒』も過小評価だった。当方が設定した cut 開始 02:24:16 は無発話区間の内側で誤りである。詳細は docs/s9-6-audio-span-offset-2026-08-06.md"
+    "correction_2026_08_06": "hpe-audio-variation の測定は二度訂正した。2026-08-04 の 16.131s は開始ずれのある cache 座標の値で、絶対時刻としては正しい。同日の『0–28.604 秒が無音』という訂正は silencedetect の読み違いで誤り。修正後経路での確定値は冒頭 6.19 秒無音（絶対 8646.19s）であり、境界監査の『約6秒』と一致する。詳細は docs/s9-6-audio-span-offset-2026-08-06.md"
   },
   "ui_line_progress": {
     "date": "2026-08-06",
@@ -615,7 +629,112 @@
     "t1_1_reason": "benchmarks/t1/annotation_packet.py はローカル source に -accurate_seek で切り出しており開始位置が正確。T1-1 の No-Go 判定は有効",
     "existing_vtt_affected": false,
     "document": "docs/s9-6-audio-span-offset-2026-08-06.md",
-    "fix_started": false,
-    "fix_requires_separate_approval": true
+    "fix_started": true,
+    "fix_requires_separate_approval": false,
+    "fix_approved_by": "user",
+    "fix_approved_date": "2026-08-06",
+    "fix_approach": "修正方針 1（ローカル source からの精密切り出しを優先し、source が無い場合のみ yt-dlp fallback）。fallback にも --force-keyframes-at-cuts を追加",
+    "fix_commits": [
+      "272d5f3",
+      "3455910"
+    ],
+    "fix_verification": {
+      "method": "同じ絶対区間を別 anchor から切り出して PCM を照合する fail-closed チェック",
+      "warmup_excluded_ms": 250,
+      "tolerance": "max(64.0, 0.02 * 参照 RMS)",
+      "measured_rms_difference": {
+        "mKwn-93gg90/1179000-1195000": 0.059817,
+        "mKwn-93gg90/1146000-1154000": 0.206936,
+        "hPeRSA9YVIM/8640000-8690000": 0.089506,
+        "9秒ずれた旧cacheとの参考比較": 1010.39
+      }
+    },
+    "fix_resolves": [
+      "選択区間音声の開始ずれ",
+      "artifact cue の絶対時刻ずれ"
+    ],
+    "fix_does_not_resolve": [
+      "cue 粒度（16 秒区間が 1 cue にまとまる）",
+      "cue 内でテロップ行を比例配分すること"
+    ],
+    "fix_does_not_resolve_owner": "T1（T1-1 は No-Go / fallback-only）"
+  },
+  "artifact_invalidation_2026_08_06": {
+    "method": "TranscriptArtifact.is_high_precision に『全音声 span が audio_route を記録していること』を追加し、旧 artifact をファイル移動なしで失効させた",
+    "why_not_physical_removal": "旧 artifact と旧音声 cache は benchmarks/t1/manifest.json の不変証跡に含まれる。一度物理退避したところ T1 テスト 16 件が落ちたため復元した",
+    "invalidated": [
+      {
+        "video_id": "LB4px1wRFnY",
+        "artifact_fingerprint": "35a9b5413a361e9498ffd875155fb2301d1f400a5c023c8e9ccbf5464396f571",
+        "regenerated": false
+      },
+      {
+        "video_id": "gZAoIbp4lBc",
+        "artifact_fingerprint": "340c6983e95b2ffb4c81413bb5322d80da651d7374cd69677762d3e95725bdc2",
+        "regenerated": false
+      },
+      {
+        "video_id": "gZAoIbp4lBc",
+        "artifact_fingerprint": "6f2935df54d8b34aca5c76e371168b579d64a310b6cebf8a7115e504f5db9acc",
+        "regenerated": false
+      },
+      {
+        "video_id": "hPeRSA9YVIM",
+        "artifact_fingerprint": "21d4e0873219abbf5cb41da32993cf0a4e7bf47607d262d7e3b3799353bb8fd7",
+        "regenerated": false
+      },
+      {
+        "video_id": "hPeRSA9YVIM",
+        "artifact_fingerprint": "30ee4756d26f581fb313b4c5f5c02b900a1c95930f580236b2a3c9db57e15098",
+        "regenerated": true
+      },
+      {
+        "video_id": "mKwn-93gg90",
+        "artifact_fingerprint": "bedb198a442282ad9c5f39b0e2ed664368f15b22edb15565e4ad55488f6fcf09",
+        "regenerated": true
+      }
+    ],
+    "regenerated": [
+      {
+        "case_id": "mkw-long-local-asr",
+        "video_id": "mKwn-93gg90",
+        "artifact_fingerprint": "1b1c8643a89deadf29489c8f64001a414dadf4851c2456ffa92d70d26d2b0c2a",
+        "ranges_ms": [
+          [
+            1146000,
+            1154000
+          ],
+          [
+            1179000,
+            1195000
+          ]
+        ],
+        "audio_route": "local_source_accurate_seek",
+        "alignment_verified": true
+      },
+      {
+        "case_id": "hpe-audio-variation",
+        "video_id": "hPeRSA9YVIM",
+        "artifact_fingerprint": "7ef6883035577ece85c3bd85ebbe67374043aee0270d624526fbd508c9a4d2a2",
+        "ranges_ms": [
+          [
+            8640000,
+            8690000
+          ]
+        ],
+        "audio_route": "local_source_accurate_seek",
+        "alignment_verified": true
+      }
+    ],
+    "cue_alignment_check": {
+      "case_id": "mkw-long-local-asr",
+      "verified_against": "docs/s9-6-audio-span-offset-2026-08-06.md の絶対時刻の正解",
+      "result": "1146000-1154000 と 1179000-1195000 の内容が宣言区間と一致。修正前の -9 秒ずれは解消",
+      "human_confirmation": false
+    },
+    "production_evidence_unchanged": {
+      "file_count": 15,
+      "unchanged": 15
+    }
   }
 }
