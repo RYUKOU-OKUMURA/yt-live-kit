@@ -223,16 +223,42 @@ def test_human_and_existing_test_evidence_are_not_misclassified() -> None:
 def test_pending_and_case_outcomes_keep_human_gates_explicit() -> None:
     evidence = _load_json(ACCEPTANCE_PATH)
 
-    assert evidence["human_evidence"]["current_ui_pending"] == [
+    # 2026-08-06 の実 UI 確認で case2 と final short の無発話確認は解消した。
+    # 解消したものは消さずに resolved 側へ移し、当初の pending も保持する。
+    human = evidence["human_evidence"]
+    assert human["current_ui_pending_as_of_2026_08_06_initial"] == [
         "case2/3のopening trim後preview",
         "case4のinternal gap removal後preview",
         "final shortに致命的な無発話がないことの確認",
     ]
+    assert human["current_ui_pending"] == ["case4のinternal gap removal後preview"]
+    assert len(human["current_ui_resolved_2026_08_06"]) == 3
     assert evidence["pending"] == [
-        "case2/3 opening trim後preview",
-        "case4 internal gap removal後preview",
-        "final shortに致命的無発話なし確認",
+        "case4 internal gap removal後preview（mkw-long-local-asr）",
     ]
+
+    # 解消した case2 は、実 UI の人確認 fingerprint を伴っていることを固定する。
+    after_fix = evidence["human_preview_result_after_fix_2026_08_06"]
+    assert after_fix["reviewer"] == "user"
+    assert after_fix["confirmed_in_real_ui"] is True
+    hpe = next(
+        item for item in after_fix["cases"] if item["case_id"] == "hpe-audio-variation"
+    )
+    assert hpe["preview_confirmed_fingerprint"] == (
+        "c1691d534898e68fcd018c9b558eede78257bbccf45909dd2f240a80e4646198"
+    )
+    assert hpe["alignment_verified"] is True
+    assert hpe["audio_route"] == "local_source_accurate_seek"
+    assert hpe["timing_verdict"] == "acceptable"
+
+    # mkw は当の指摘素材であり、人確認が済むまで pending のままにする。
+    mkw = next(
+        item
+        for item in after_fix["pending_cases"]
+        if item["case_id"] == "mkw-long-local-asr"
+    )
+    assert mkw["current_stage"] == "telop_review"
+    assert mkw["ready_for_human_gate"] is True
     # gold 監査は pending から外れているが、それは 2026-08-06 のユーザー承認
     # waiver が明示記録されているからである。未承認のまま消えていないことを
     # ここで固定する。exact gold 未承認という事実自体は維持される。

@@ -149,14 +149,39 @@ cue の粒度は変わっていない。16 秒の区間は依然 1 cue にまと
 
 `mkw-long-local-asr` 側の実測は source 由来の精密シークで行っており、この誤りの影響を受けない。
 
+## 実 UI での人確認（2026-08-06、修正後）
+
+修正後の経路で作り直した素材を実アプリ（`http://127.0.0.1:8502`）で確認した。
+
+### 実機で見つけた UI 欠陥
+
+artifact を失効させた cutplan では、lineage 不一致の通知が「高精度字幕を準備」まで無効化し、**失効状態から復旧する操作そのものができなかった**。全件テストは通過しており、実ブラウザで初めて出た。`07e0e9f` で、区間自体が不正な場合は従来どおり両方を止め、artifact lineage の不一致は「区間列を確定してテロップ確認へ」だけを止めるようにした。回帰テストは `tests/test_ui_short_cut.py::test_invalidated_artifact_still_allows_preparing_high_precision_again`。
+
+### `hpe-audio-variation`: 確認済み
+
+| 項目 | 内容 |
+| --- | --- |
+| 区間 | 02:24:06 → 02:24:27（8646000–8667000 ms、21.0 秒） |
+| 区間の根拠 | 冒頭 6.19 秒の無音を外し、第 1 文が終わる 27.2 秒地点で切る |
+| artifact | `37fe26c2eb6f…`（local_source_accurate_seek、alignment verified） |
+| 完成物 | `short_ca2a38ddfa36.mp4`（21.037 秒、1080×1920 H.264 + AAC） |
+| 台本確認 | 2026-08-06T06:01:52Z |
+| 最終確認 | 2026-08-06T06:21:30Z、fingerprint `c1691d534898…`（output fingerprint と一致） |
+| ユーザー所見 | 「音声もテロップも問題ないと思うよ」 |
+| 無発話 | 全 21 秒で毎秒 RMS −25〜−35 dBFS、末尾 1 秒のみ −44.6 dBFS。致命的無発話なし |
+
+この case は 21 秒を 1 cue にして 5 行のテロップを配分する構造であり、S9-6 で問題になった cue 内配分の挙動を通過している。
+
+テロップ区間 1 行 1 は自動ハード判定（16 文字上限）を超過したため、`MacでHHKBを最大限に使うには` から `MacでHHKBを活かすには` へ短縮した。UI 上は「AI 案から変更」と表示される。
+
+### `mkw-long-local-asr`: 未確認
+
+工程 3 まで再構築済みで、artifact は `1b1c8643a89d…`（local_source_accurate_seek、alignment verified）、自動ハード判定 通過・自動警告 なし。**人確認と生成は未実施**である。前回タイミング不整合を指摘された当の素材であり、8 秒 + 16 秒の 2 区間連結という別条件でもある。
+
 ## 残タスク
 
-修正は完了し、以下はいずれも**ユーザーが行う人確認 gate** である。
-
-1. `mkw-long-local-asr` を再生成後の状態でテロップと発話のタイミングを再確認する
-2. `hpe-audio-variation` を正しい区間（02:24:06.2 以降を開始とする opening trim）で preview し確認する
-3. final short に致命的な無発話がないことを確認する
-4. 上記 PASS 後に S9-6 のフェーズ判定を行う。Go でも AC-40 は T1-1 が No-Go / fallback-only であるため未完了のまま残す
+1. `mkw-long-local-asr` の工程 3 で台本を確認し、生成した完成物のテロップと発話のタイミングを確認する（ユーザーが行う人確認 gate）
+2. 上記 PASS 後に S9-6 のフェーズ判定を行う。Go でも AC-40 は T1-1 が No-Go / fallback-only であるため未完了のまま残す
 
 ## fingerprint
 
