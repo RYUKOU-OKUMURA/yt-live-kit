@@ -174,14 +174,30 @@ artifact を失効させた cutplan では、lineage 不一致の通知が「高
 
 テロップ区間 1 行 1 は自動ハード判定（16 文字上限）を超過したため、`MacでHHKBを最大限に使うには` から `MacでHHKBを活かすには` へ短縮した。UI 上は「AI 案から変更」と表示される。
 
-### `mkw-long-local-asr`: 未確認
+### `mkw-long-local-asr`: 確認済み
 
-工程 3 まで再構築済みで、artifact は `1b1c8643a89d…`（local_source_accurate_seek、alignment verified）、自動ハード判定 通過・自動警告 なし。**人確認と生成は未実施**である。前回タイミング不整合を指摘された当の素材であり、8 秒 + 16 秒の 2 区間連結という別条件でもある。
+| 項目 | 内容 |
+| --- | --- |
+| 区間 | 00:19:06 → 00:19:14 と 00:19:39 → 00:19:55（1146000–1154000 / 1179000–1195000 ms、計 24 秒） |
+| artifact | `1b1c8643a89d…`（local_source_accurate_seek、alignment verified） |
+| 完成物 | `short_f381c6753d13.mp4`（24.045 秒、1080×1920 H.264 + AAC） |
+| 台本確認 | 2026-08-06T06:51:20Z |
+| 最終確認 | 2026-08-06T06:52:28Z、fingerprint `07473fcce0c6…`（output fingerprint と一致） |
+| ユーザー所見 | 「音声とテロップのタイミングは合格点だったよ」 |
+| 無発話 | silencedetect noise=−35dB:d=0.4 で最長 2.028 秒。区間内の自然な間であり致命的無発話なし |
 
-## 残タスク
+これは 2026-08-05 の人 preview でタイミング不整合を指摘された当の素材であり、8 秒 + 16 秒の 2 区間連結という `hpe-audio-variation` とは別条件でもある。**指摘された不整合は解消した。**
 
-1. `mkw-long-local-asr` の工程 3 で台本を確認し、生成した完成物のテロップと発話のタイミングを確認する（ユーザーが行う人確認 gate）
-2. 上記 PASS 後に S9-6 のフェーズ判定を行う。Go でも AC-40 は T1-1 が No-Go / fallback-only であるため未完了のまま残す
+## 人確認 gate の状況
+
+| gate | 状況 |
+| --- | --- |
+| case2 `hpe-audio-variation` opening trim 後 preview | 確認済み（2026-08-06T06:21:30Z） |
+| case3 `cgal-proper-nouns` | 承認済み援用（case2 と同一 editorial outcome）。個別 preview は実施しない |
+| case4 `mkw-long-local-asr` internal gap removal 後 preview | 確認済み（2026-08-06T06:52:28Z） |
+| final short に致命的な無発話がないこと | 2 本とも確認済み（ユーザー確認と機械測定の双方） |
+
+**残る人確認 gate は無い。** S9-6 のフェーズ判定を行える状態である。
 
 ## fingerprint
 

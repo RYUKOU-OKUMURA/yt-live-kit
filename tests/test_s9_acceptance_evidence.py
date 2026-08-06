@@ -231,34 +231,30 @@ def test_pending_and_case_outcomes_keep_human_gates_explicit() -> None:
         "case4のinternal gap removal後preview",
         "final shortに致命的な無発話がないことの確認",
     ]
-    assert human["current_ui_pending"] == ["case4のinternal gap removal後preview"]
-    assert len(human["current_ui_resolved_2026_08_06"]) == 3
-    assert evidence["pending"] == [
-        "case4 internal gap removal後preview（mkw-long-local-asr）",
-    ]
+    assert human["current_ui_pending"] == []
+    assert len(human["current_ui_resolved_2026_08_06"]) == 4
+    assert evidence["pending"] == []
 
-    # 解消した case2 は、実 UI の人確認 fingerprint を伴っていることを固定する。
+    # 選択した 2 case は、いずれも実 UI の人確認 fingerprint を伴うこと。
     after_fix = evidence["human_preview_result_after_fix_2026_08_06"]
     assert after_fix["reviewer"] == "user"
     assert after_fix["confirmed_in_real_ui"] is True
-    hpe = next(
-        item for item in after_fix["cases"] if item["case_id"] == "hpe-audio-variation"
-    )
-    assert hpe["preview_confirmed_fingerprint"] == (
+    assert after_fix["all_selected_cases_confirmed"] is True
+    assert after_fix["pending_cases"] == []
+
+    confirmed = {item["case_id"]: item for item in after_fix["cases"]}
+    assert set(confirmed) == {"hpe-audio-variation", "mkw-long-local-asr"}
+    assert confirmed["hpe-audio-variation"]["preview_confirmed_fingerprint"] == (
         "c1691d534898e68fcd018c9b558eede78257bbccf45909dd2f240a80e4646198"
     )
-    assert hpe["alignment_verified"] is True
-    assert hpe["audio_route"] == "local_source_accurate_seek"
-    assert hpe["timing_verdict"] == "acceptable"
-
-    # mkw は当の指摘素材であり、人確認が済むまで pending のままにする。
-    mkw = next(
-        item
-        for item in after_fix["pending_cases"]
-        if item["case_id"] == "mkw-long-local-asr"
+    assert confirmed["mkw-long-local-asr"]["preview_confirmed_fingerprint"] == (
+        "07473fcce0c6028d2b5bc9323c2af6ef2bc6d3bbeec4445954550ef784618162"
     )
-    assert mkw["current_stage"] == "telop_review"
-    assert mkw["ready_for_human_gate"] is True
+    for case in confirmed.values():
+        assert case["alignment_verified"] is True
+        assert case["audio_route"] == "local_source_accurate_seek"
+        assert case["timing_verdict"] == "acceptable"
+        assert case["dead_air_verdict"] == "acceptable"
     # gold 監査は pending から外れているが、それは 2026-08-06 のユーザー承認
     # waiver が明示記録されているからである。未承認のまま消えていないことを
     # ここで固定する。exact gold 未承認という事実自体は維持される。

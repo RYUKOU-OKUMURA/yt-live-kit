@@ -303,9 +303,7 @@
       ],
       "transcript_scope": "4本とも文字起こしは概ね問題なし。ただし displayed transcript の operational reference 限定であり、exact gold/glossary/cue anchor 承認ではない"
     },
-    "current_ui_pending": [
-      "case4のinternal gap removal後preview"
-    ],
+    "current_ui_pending": [],
     "current_ui_pending_as_of_2026_08_06_initial": [
       "case2/3のopening trim後preview",
       "case4のinternal gap removal後preview",
@@ -314,7 +312,8 @@
     "current_ui_resolved_2026_08_06": [
       "case2のopening trim後preview（hpe-audio-variation、preview_confirmed_at 2026-08-06T06:21:30Z）",
       "case3は承認済み援用のため個別previewを実施しない",
-      "final shortに致命的な無発話がないことの確認（hpe の完成 21.0 秒。ユーザー確認と機械測定の双方）"
+      "final shortに致命的な無発話がないことの確認（hpe の完成 21.0 秒。ユーザー確認と機械測定の双方）",
+      "case4のinternal gap removal後preview（mkw-long-local-asr、preview_confirmed_at 2026-08-06T06:52:28Z）"
     ]
   },
   "existing_test_evidence": {
@@ -327,9 +326,7 @@
     ],
     "current_ui_edit_after_preview_verified": false
   },
-  "pending": [
-    "case4 internal gap removal後preview（mkw-long-local-asr）"
-  ],
+  "pending": [],
   "decision": {
     "verdict": "no_go",
     "reason": [
@@ -770,23 +767,46 @@
         "user_words": "音声もテロップも問題ないと思うよ",
         "timing_verdict": "acceptable",
         "dead_air_verdict": "acceptable",
-        "dead_air_measurement": "全 21 秒で毎秒 RMS -25〜-35 dBFS、末尾 1 秒のみ -44.6 dBFS。致命的無発話なし",
+        "dead_air_measurement": "全 21 秒で毎秒 RMS -25〜-35 dBFS、末尾 1 秒のみ -44.6 dBFS。silencedetect noise=-35dB:d=0.4 で最長 0.898 秒。致命的無発話なし",
         "telop_line_edit": "区間 1 行 1 を自動ハード判定（16 文字上限）超過のため『MacでHHKBを最大限に使うには』から『MacでHHKBを活かすには』へ短縮。UI 上は AI 案から変更と表示"
-      }
-    ],
-    "pending_cases": [
+      },
       {
         "case_id": "mkw-long-local-asr",
         "video_id": "mKwn-93gg90",
         "clip_id": "f381c6753d13",
         "editorial_outcome": "internal_gap_removal",
-        "current_stage": "telop_review",
+        "ranges": [
+          "00:19:06 → 00:19:14",
+          "00:19:39 → 00:19:55"
+        ],
+        "ranges_ms": [
+          [
+            1146000,
+            1154000
+          ],
+          [
+            1179000,
+            1195000
+          ]
+        ],
         "artifact_fingerprint": "1b1c8643a89deadf29489c8f64001a414dadf4851c2456ffa92d70d26d2b0c2a",
-        "ready_for_human_gate": true,
-        "note": "工程 3 まで再構築済み。自動ハード判定 通過・自動警告 なし。人確認と生成は未実施。前回タイミング不整合を指摘された当の素材である"
+        "audio_route": "local_source_accurate_seek",
+        "alignment_verified": true,
+        "output": "short_f381c6753d13.mp4",
+        "output_duration_s": 24.045,
+        "script_confirmed_at": "2026-08-06T06:51:20.931155Z",
+        "preview_confirmed_at": "2026-08-06T06:52:28.165358Z",
+        "preview_confirmed_fingerprint": "07473fcce0c6028d2b5bc9323c2af6ef2bc6d3bbeec4445954550ef784618162",
+        "user_words": "音声とテロップのタイミングは合格点だったよ",
+        "timing_verdict": "acceptable",
+        "dead_air_verdict": "acceptable",
+        "dead_air_measurement": "silencedetect noise=-35dB:d=0.4 で最長 2.028 秒。区間内の自然な間であり致命的無発話なし",
+        "significance": "2026-08-05 の人 preview でタイミング不整合を指摘された当の素材。8 秒 + 16 秒の 2 区間連結という hpe とは別条件でもある"
       }
     ],
-    "note": "hpe は 21 秒を 1 cue にして 5 行のテロップを配分する構造であり、S9-6 で問題になった cue 内配分の挙動を通過している"
+    "pending_cases": [],
+    "note": "hpe は 21 秒を 1 cue にして 5 行のテロップを配分する構造であり、S9-6 で問題になった cue 内配分の挙動を通過している",
+    "all_selected_cases_confirmed": true
   },
   "ui_defect_found_in_real_browser_2026_08_06": {
     "summary": "artifact を失効させた cutplan では lineage 不一致の通知が『高精度字幕を準備』まで無効化し、失効状態から復旧できなかった",
