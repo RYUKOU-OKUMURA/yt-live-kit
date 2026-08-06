@@ -54,8 +54,8 @@
 | T1-3 | pure aligner・telop・fingerprint 統合 | [ ] 未着手 |
 | T1-4 | Streamlit UI 時刻確認 gate | [ ] 未着手 |
 | T1-5 | 同期 component acceptance | [ ] 未着手 |
-| S9-6 | A/B 受け入れ・回帰・フェーズ判定 | [~] 進行中 |
-| S9 | 選択親候補区間のローカル Whisper 精査（実装） | [~] 進行中 |
+| S9-6 | A/B 受け入れ・回帰・フェーズ判定 | [x] 完了（2026-08-06 判定 **Go**。AC-40 は T1 未成立のため `[ ]` のまま） |
+| S9 | 選択親候補区間のローカル Whisper 精査（実装） | [x] 完了 |
 | P6-PLAN | Shorts 投稿メタデータ品質ゲート計画（docs-only） | [x] 完了 |
 | P6-1 | タイトル 3 方向生成・検証 | [x] 完了 |
 | P6-2 | 概要欄必須構成・投稿前再検証 service | [x] 完了 |
@@ -79,7 +79,7 @@
 | M13 | テロップ付きショートが量産できる（S5 完了） | [x] |
 | M14 | 予約投稿が実際に公開される（v3 完了・P3 完了） | [x] |
 | M15 | 毎日 3 本のショート生産ラインが確立する（S8 → U6 → P5 完了、実機でライン 3 周） | [x] |
-| M16 | 親候補探索は VTT、選択区間は provenance 付き Whisper artifact で精査できる | [ ] |
+| M16 | 親候補探索は VTT、選択区間は provenance 付き Whisper artifact で精査できる | [x] |
 | M17 | 投稿前のタイトル・概要欄と、アップロード後の関連動画設定を人が保証できる（P6 完了） | [x] |
 
 ---
@@ -1511,7 +1511,7 @@ data/{video_id}/ ...
 ### S9: 選択親候補区間のローカル Whisper 精査（v3.2 追加）
 
 **目的:** 良好な YouTube VTT を候補探索の粗い親入力として維持しながら、人が選択した親候補の必要区間だけをローカル Whisper で精査し、サブ区間判断とテロップ台本で同じ字幕結果を再利用する。全編再文字起こしを通常経路にしない。
-**フェーズ状態:** [~] 進行中。S9-PLAN（要件・計画の確定）は [x] 完了し、S9-6 は最終受け入れ専用として未完了のまま T1 を先行する。
+**フェーズ状態:** [x] 完了。S9-PLAN〜S9-6 がすべて [x] 完了し、2026-08-06 に S9-6 の formal phase acceptance を **Go** と判定した。AC-30 / AC-35 / AC-37 は完了、M16 は達成。**AC-40 は `[ ]` のまま残す**（T1-1 が No-Go / fallback-only で T1-2〜T1-5 が未着手のため。根拠は S9-6-5 の 2026-08-06 改訂と [`docs/requirements-v3.md`](requirements-v3.md) の「AC-40 の完了タイミング」）。
 **前提:** U6、S8、S6、S1、S3、S4、U8、R1、H1、G1 が完了済みで、既存の `(video_id, clip_id)` ライン状態、FR-30 の cutplan、FR-22 の telop、FR-25 の整数ミリ秒境界を正本として再利用する。S9 で `video_id` を `asset_id` へ移行しない。
 
 **背景（実機で観測した事実）:** S8 の実機確認で、焼き込まれた字幕に固有名詞の誤認識が目立つことを確認した。実データ例（`data/LB4px1wRFnY`）では「クロード」が次行で「フロード」になり、「感覚すけど」のように助詞が脱落している。原因は YouTube 自動字幕（VTT）そのものの精度であり、区間の切り方や連結処理の問題ではない。U6 の AI 案と人の全文確認で直る誤りもあるため、先に S9 の A/B で追加効果を測定する。
@@ -1719,7 +1719,7 @@ data/{video_id}/ ...
 ### T1: テロップ行時刻同期・明示確認（v3.2 追加）
 
 **目的:** S9-6 を受け入れ専用の未完了状態で保持したまま、Codex が作成したテロップ draft の行時刻を、既存の production 境界を変えずに評価・保存・補正・表示する独立した実装列を追加する。低信頼行は元時刻を維持して警告し、誤字・固有名詞の全文確認とは別に、要確認行の時刻確認を明示的に記録する。
-**フェーズ状態:** [~] 進行中。T1-PLAN と T1-1 は [x] 完了。T1-1 の判定は **No-Go（fallback-only）** であり、T1-2〜T1-5 は着手条件を満たさない。fallback-only の記録を保持したまま、S9-6 の受け入れ方針（T1 なしでの正式受け入れ、または gold 精度改善後の T1-1 再測定を別承認で行うか）はユーザー判断待ち。
+**フェーズ状態:** [~] 進行中。T1-PLAN と T1-1 は [x] 完了。T1-1 の判定は **No-Go（fallback-only）** であり、T1-2〜T1-5 は着手条件を満たさない。fallback-only の記録を保持したまま、2026-08-06 に **T1 なしで S9-6 を正式受け入れ（Go）** とする方針をユーザーが決定した。S9-6 は Go、AC-40 は T1 の実体が満たされていないため `[ ]` のまま残す。cue 粒度（16 秒区間が 1 cue で行は比例配分）は T1 の担当として未解決である。T1 再開時は T1-1 の再測定から行う。
 **対応要件 / AC:** FR-22、FR-25、FR-33、FR-35、FR-36、FR-39、AC-23、AC-35、AC-37、AC-40。
 **依存:** `S9-5 → T1-PLAN → T1-1 → T1-2 → T1-3 → T1-4 → T1-5 → S9-6`。既存 S9-6 の ID・目的・受け入れ専用性は変更しない。
 
@@ -1872,7 +1872,7 @@ data/{video_id}/ ...
 
 **テスト / 検証:** T1 A/B と fixed gold、in / out range 失効、cache restart、failure / fallback、legacy、scope guard、隔離 `data_dir` / 検証用 copy への再生成 preview、production hash unchanged、全 pytest、diff check、compileall、独立レビュー。
 
-**Done 条件:** T1 の全契約と AC-40 の証跡が揃い、T1-5 の component Go / No-Go を記録できる。T1-5 が PASS しても S9-6 が一度だけ人 preview・最終 A/B・gold・失効・cache・fallback・scope の formal phase 判定を行うまで、S9-6、S9、M16、AC-37、AC-40 は未完了のまま残る。AC-40 は S9-6 formal PASS 時にだけ `[x]` へ更新する。
+**Done 条件:** T1 の全契約と AC-40 の証跡が揃い、T1-5 の component Go / No-Go を記録できる。T1-5 が PASS しても S9-6 が一度だけ人 preview・最終 A/B・gold・失効・cache・fallback・scope の formal phase 判定を行うまで、S9-6、S9、M16、AC-37、AC-40 は未完了のまま残る。**2026-08-06 改訂:** S9-6 は T1 を fallback-only 記録のまま 2026-08-06 に **Go** と判定し、S9-6 / S9 / M16 / AC-37 は完了へ更新済みである。AC-40 の更新条件は「S9-6 formal PASS」に加えて「**T1 の実体が満たされていること**」を必要とし、T1-1 が No-Go / fallback-only で T1-2〜T1-5 が未着手である現状では `[ ]` のまま残す。T1 を再開して T1-5 まで完了した時点で改めて AC-40 を判定する。
 **コミット境界:** T1 受け入れ harness / 証跡 / tests と事実ベースの計画更新だけを `T1-5` としてコミットする。S9-6 の判定や production code の追加変更を混ぜない。
 **推定工数:** 1 日。
 **禁止事項:** 実 upload、公開データ変更、Studio、production data / artifact / cache / output の再生成、全編 Whisper、47 本 backfill、S9-6 の先行完了、AC-37 / AC-40 の先行完了。preview は必ず隔離 `data_dir` または検証用 copy へ出力する。
@@ -1893,20 +1893,22 @@ data/{video_id}/ ...
 
 **作業:**
 
-- [ ] S9-6-1. 同じ親候補について VTT route と精査 route を比較し、CER、固有名詞、cue 欠落 / 重複、境界確認、テロップの人確認結果、wall time、cache hit 時間を記録する
-- [ ] S9-6-2. 代表素材で「VTT で親候補選定 → 選択区間だけ Whisper → cutplan → 同じ artifact で telop → 人確認 → 生成」を通し、180 秒以下の単一区間経路も確認する
-- [ ] S9-6-3. VTT を使用範囲内・範囲外で変え、candidate / cutplan / telop / review / output の失効差を確認する。Whisper artifact の model / settings / audio input を変えた場合は高精度扱いが解除されることを確認する
-- [ ] S9-6-4. `uv run pytest` 全件、`git diff --check`、S9 benchmark の再現 command、手動 UI 証跡、導入できない runtime の日本語 fallback をまとめる
-- [ ] S9-6-5. Go の場合だけ進捗サマリーの S9 実装タスクと AC-30 / AC-35 / AC-37 / AC-40 を更新する。AC-40 は T1-5 で証跡が揃っていても、この formal PASS 時にだけ `[x]` にする。No-Go または fallback-only の場合は S9 と AC-40 を完了にせず、根拠と次段階候補を記録する
-- [ ] S9-6-6. S9-1 の CER 相対改善 10％、固有名詞 exact match 非悪化、cue 欠落 / 重複 baseline +5％以内、wall time / peak memory budget を同じ fixture で再判定し、閾値未達は No-Go のまま残す
+- [x] S9-6-1. 同じ親候補について VTT route と精査 route を比較し、CER、固有名詞、cue 欠落 / 重複、境界確認、テロップの人確認結果、wall time、cache hit 時間を記録する
+- [x] S9-6-2. 代表素材で「VTT で親候補選定 → 選択区間だけ Whisper → cutplan → 同じ artifact で telop → 人確認 → 生成」を通し、180 秒以下の単一区間経路も確認する
+- [x] S9-6-3. VTT を使用範囲内・範囲外で変え、candidate / cutplan / telop / review / output の失効差を確認する。Whisper artifact の model / settings / audio input を変えた場合は高精度扱いが解除されることを確認する
+- [x] S9-6-4. `uv run pytest` 全件、`git diff --check`、S9 benchmark の再現 command、手動 UI 証跡、導入できない runtime の日本語 fallback をまとめる
+- [x] S9-6-5. Go の場合だけ進捗サマリーの S9 実装タスクと AC-30 / AC-35 / AC-37 / AC-40 を更新する。AC-40 は T1-5 で証跡が揃っていても、この formal PASS 時にだけ `[x]` にする。No-Go または fallback-only の場合は S9 と AC-40 を完了にせず、根拠と次段階候補を記録する
+  - **2026-08-06 改訂:** AC-40 の更新条件は「S9-6 formal PASS」だけでは足りず、**T1 の実体が満たされていること**を併せて必要とする。T1-1 が No-Go / fallback-only で T1-2〜T1-5 が未着手である現状では、S9-6 が Go でも AC-40 は `[ ]` のまま残す。根拠は [`docs/requirements-v3.md`](requirements-v3.md) の「AC-40 の完了タイミング」と [`docs/benchmarks/s9-6-acceptance.md`](benchmarks/s9-6-acceptance.md) の「AC-40 を未完了に残す根拠」に記録する
+- [x] S9-6-6. S9-1 の CER 相対改善 10％、固有名詞 exact match 非悪化、cue 欠落 / 重複 baseline +5％以内、wall time / peak memory budget を同じ fixture で再判定し、閾値未達は No-Go のまま残す
 
 **テスト:** unit / integration / UI tests、同じ 3〜5 本の fixture A/B、実配信アーカイブ 2 本以上（取得できる場合）、cache restart、failure injection、実機 UI 1 本。実 YouTube の字幕取得は承認済み素材に限り、投稿・概要欄反映・削除・全本 backfill は行わない。
 
 **Done 条件:**
-- [ ] A/B 数値と目視・人確認の証跡、選択モデル、処理時間、失効差、回帰結果、fallback の挙動、Go / No-Go が独立レビュー可能な形で残る
-- [ ] S9-1 と同じ gold / glossary / threshold / budget が再現 command と fixture fingerprint に結び付き、代表素材と実配信アーカイブの差が記録される
-- [ ] S9 初版の scope 外（全編 Whisper、字幕なし通常経路、local video、asset ID）は実装されていない
-- [ ] T1-5 の immutable evidence の再利用条件が確認され、人 preview、A/B、gold、失効、cache、fallback、scope の formal gate を独立に通過し、AC-40 を `[x]` に更新する
+- [x] A/B 数値と目視・人確認の証跡、選択モデル、処理時間、失効差、回帰結果、fallback の挙動、Go / No-Go が独立レビュー可能な形で残る
+- [x] S9-1 と同じ gold / glossary / threshold / budget が再現 command と fixture fingerprint に結び付き、代表素材と実配信アーカイブの差が記録される
+- [x] S9 初版の scope 外（全編 Whisper、字幕なし通常経路、local video、asset ID）は実装されていない
+- [x] T1-5 の immutable evidence の再利用条件が確認され、人 preview、A/B、gold、失効、cache、fallback、scope の formal gate を独立に通過する
+  - **2026-08-06 改訂:** 初版はこの条件の末尾に「AC-40 を `[x]` に更新する」を含めていたが、これは T1-1 が Go で T1-5 まで完了した場合だけ成立する記述だった。T1-1 が No-Go / fallback-only である現状では T1-5 の immutable evidence 自体が生成されず、再利用条件は「参照しないこと」を確認する形で満たす。AC-40 の更新は S9-6 の Done 条件から外し、T1 の実体成立を条件に切り出した
 
 **S9-6 受け入れ証跡の追記:** 2026-08-04 main の `3d113ef` / `071929d` 統合後、初回レビューで P1 二点を指摘し、follow-up で APPROVE とした。main focused S9 は123件 passedしたが、判定は fallback-only のまま人 UI 確認待ちである。次の具体的な確認は case2 / case3 の opening trim 後 preview、case4 の internal gap removal 後 preview、final short に無発話がないことの確認とする。exact gold / glossary / cue anchor 監査または明示的 waiverも未完了であり、S9-6 の全チェック、S9、M16、AC-30 / AC-35 / AC-37 の受け入れ判定は未完了を維持し、AC-40 も S9-6 formal PASS まで未完了とする。
 
@@ -1921,6 +1923,17 @@ data/{video_id}/ ...
 **S9-6 実 UI 確認・UI 欠陥 HF6（2026-08-06）:** HF5 の修正後、実ブラウザで両 case を作り直した。その過程で、artifact を失効させた cutplan では lineage 不一致の通知が「高精度字幕を準備」まで無効化し、失効状態から復旧する操作そのものができない欠陥を実機で検出した。全件テストは通過しており、ブラウザでのみ再現した。`07e0e9f` で、区間自体が不正な場合（validation / parse error）は従来どおり高精度化も確定も止め、artifact lineage の不一致は「区間列を確定してテロップ確認へ」だけを止めるようにし、回帰 test を追加した。`hpe-audio-variation` は実測に基づき 02:24:06 → 02:24:27（8646000–8667000 ms、21.0 秒）へ設定し直して artifact `37fe26c2eb6f…` を local_source_accurate_seek / alignment verified で取得し、完成 `short_ca2a38ddfa36.mp4`（21.037 秒、1080×1920 H.264 + AAC）をユーザーが実 UI で確認した。台本確認は 2026-08-06T06:01:52Z、最終確認は同 06:21:30Z で `preview_confirmed_fingerprint` は output fingerprint と一致する。ユーザー所見は「音声もテロップも問題ないと思うよ」で、機械測定でも全 21 秒に致命的無発話はなかった（毎秒 RMS −25〜−35 dBFS、末尾 1 秒のみ −44.6 dBFS）。この case は 21 秒を 1 cue にして 5 行を配分する構造であり、S9-6 で問題になった cue 内配分の挙動を通過している。テロップ区間 1 行 1 は 16 文字上限超過のため `MacでHHKBを活かすには` へ短縮し、UI 上は AI 案から変更と表示される。`mkw-long-local-asr` は artifact `1b1c8643a89d…` で工程 3 まで再構築し自動ハード判定 通過・自動警告 なしだが、**人確認と生成は未実施**である。全体 1840 passed / 2 skipped、`git diff --check` / compile を再確認し、production 15 evidence file は 15/15 不変である。残る人確認 gate は `mkw-long-local-asr` の 1 件のみで、S9-6 の全チェック、S9、M16、AC-30 / AC-35 / AC-37 は未完了を維持し、AC-40 も未完了のまま残す。
 
 **S9-6 人確認 gate の完了（2026-08-06）:** 残っていた `mkw-long-local-asr` をユーザーが実 UI で確認し、**人確認 gate はすべて解消した**。工程 3 の台本確認は 2026-08-06T06:51:20Z、工程 5 の最終確認は同 06:52:28Z で `preview_confirmed_fingerprint` `07473fcce0c6…` は output fingerprint と一致する。完成 `short_f381c6753d13.mp4` は 24.045 秒、1080×1920 H.264 + AAC で、artifact は `1b1c8643a89d…`（local_source_accurate_seek、alignment verified）である。ユーザー所見は「音声とテロップのタイミングは合格点だったよ」で、**2026-08-05 に指摘されたタイミング不整合は解消した**。無発話は silencedetect noise=−35dB:d=0.4 で最長 2.028 秒であり、区間内の自然な間で致命的無発話は無い（`hpe-audio-variation` は最長 0.898 秒）。これで case2 の opening trim 後 preview、case4 の internal gap removal 後 preview、final short の致命的無発話なし確認が揃い、case3 は承認済み援用のため個別 preview を実施しない。S9-6 のフェーズ判定を行える状態になったが、**判定自体はまだ実施しておらず**、S9-6 の全チェック、S9、M16、AC-30 / AC-35 / AC-37 / AC-40 は未完了のまま維持する。
+
+**S9-6 フェーズ判定: Go（2026-08-06）:** 人確認 gate がすべて解消したのを受けて formal phase acceptance を実施し、**Go** と判定した。S9-6-1〜S9-6-6 と Done 条件 4 件を `[x]`、S9 フェーズ状態を `[x] 完了`、M16 と AC-30 / AC-35 / AC-37 を完了へ更新した。
+
+- **人 preview:** `hpe-audio-variation`（`short_ca2a38ddfa36.mp4` 21.037 秒、最終確認 2026-08-06T06:21:30Z）と `mkw-long-local-asr`（`short_f381c6753d13.mp4` 24.045 秒、最終確認 同 06:52:28Z）の 2 本をユーザーが実 UI で確認し、いずれも `preview_confirmed_fingerprint` が output fingerprint と一致する。所見は「音声もテロップも問題ないと思うよ」「音声とテロップのタイミングは合格点だったよ」。`cgal-proper-nouns` は `hpe-audio-variation` と同一 editorial outcome のため承認済み援用とし、個別 preview は実施しない。final short の致命的無発話なしは両本ともユーザー確認と機械測定（最長無発話 0.898 秒 / 2.028 秒）で確認した
+- **A/B 数値（S9-6-6 の再判定）:** CER 相対改善 78.694％（閾値 10％を満たす）、固有名詞 exact match は q5 13/19 対 VTT 10/19 で非悪化、cue error は q5 2.35 対 VTT 6.95 で baseline 以下。wall time は q5 cold 2,331〜5,286 ms、peak RSS は 904,462,336〜926,924,800 bytes で budget 内。canonical fixture fingerprint と q5 run manifest fingerprint、`reproduction_metrics.command_argv_by_case` により再現条件が固定されている
+- **gold:** `unverified_provisional` のままだが、2026-08-06 の明示 waiver により operational 判定から除外済みである。waiver は `gold_audit_status` を `audited` へ変えず、`benchmark_quality_gate` は未達のまま維持する
+- **失効:** HF5 の `is_high_precision` 追加条件により旧 artifact 6 件が実際に失効し、UI に日本語の理由が表示されること、HF6 の修正後は失効状態から「高精度字幕を準備」で復旧できることを実ブラウザで確認した
+- **cache / fallback / scope guard:** 音声 cache v2 の hit を確認し、ローカル source が無い場合の yt-dlp fallback を維持した。実 YouTube upload・概要欄反映・削除・全本 backfill は行っていない。production の 15 evidence file は判定作業の前後で 15/15 不変（`docs/benchmarks/s9-1-production-hash-after.json` の `root` + `files` dict で照合）
+- **AC-40 を未完了に残す:** AC-40 の 11 項目は T1-1〜T1-5 の内容であり、T1-1 が No-Go / fallback-only、T1-2 以降が未着手のため実体として満たされていない。S9-6-5 と Done 条件 4 番目、および `requirements-v3.md` の「AC-40 の完了タイミング」は T1 成功を前提にした記述だったため、2026-08-06 に 3 か所を改訂し、AC-40 の更新条件へ「T1 の実体成立」を明示した
+- **未解決（S9 の範囲外、T1 の担当）:** cue の粒度は変わっていない。16 秒の区間は依然 1 cue にまとまり、その中のテロップ行は比例配分のままである。今回は人確認で合格点だったため Go の妨げにはならないが、行単位の時刻同期は T1（FR-39 / AC-40）の担当として未解決のまま残す
+- **実機確認:** 今回の更新は docs / benchmark JSON / test のみで `src/` を変更していない。UI 実装の実機確認は HF6（`07e0e9f`）の時点で実ブラウザ済みであり、本判定では新たな UI 変更を行っていない
 
 **コミット境界:** benchmark / acceptance docs と進捗更新を `S9-6` のフェーズ受け入れコミットに含める。S9 を完了にする場合だけフェーズ状態を `[x] 完了`、M16 と AC の該当チェックを更新する。
 
@@ -2519,6 +2532,7 @@ U7（概要欄 fingerprint 化）は保留 = v4 候補（優先度③: チャプ
 | **M13: テロップ付きショートが量産できる** | S5 完了。複数区間を連結したショートがテロップ・フックタイトル付きで複数本まとめて作れる |
 | **M14: 予約投稿が実際に公開される（v3 完了）** | P3 完了。AC-18〜AC-28 充足、実際の予約公開を確認済み |
 | **M15: 毎日 3 本のショート生産ラインが確立する（v3.2）** | S8（AC-34）→ U6（AC-31 / AC-35）→ P5（AC-36）完了。実機でライン 3 周（3 本を予約まで）を通し確認済み。安定性の仕上げである U8（AC-33）も完了 |
+| **M16: 親候補探索は VTT、選択区間は provenance 付き Whisper artifact で精査できる** | S9-PLAN〜S9-6 完了。2026-08-06 の S9-6 formal phase acceptance が Go。AC-30 / AC-35 / AC-37 充足。既存 `ja.vtt` を上書きせずに親候補探索へ残し、選択区間だけを whisper.cpp の TranscriptArtifact で精査して cutplan / telop / review へ同じ lineage を伝播する経路を、実 UI の人 preview 2 本と A/B 数値で確認した。行単位の時刻同期（AC-40 / T1）は未完了として分離する |
 | **M17: 投稿導線の品質ゲートが確立する** | P6-1〜P6-5 と AC-38 / AC-39 完了。投稿前にタイトル 3 方向と概要欄の登録 CTA・元動画案内を保証し、アップロード後の関連動画 Studio 人確認を再起動後も追跡できる |
 
 ---
@@ -2634,7 +2648,8 @@ S9 初版で実装するのは、既存 YouTube `video_id` の良好な VTT を�
 15. ~~**R2 を完了する。**~~ 完了。手動 E2E 済みの現行挙動を基準に、UI 大幅刷新前の page / session / durable state / upload gate を整理し、監査文書・characterization test・独立レビューで固定した
 16. ~~**T1-PLAN を docs-only で完了する。**~~ 完了。FR-39 / AC-40、T1-1〜T1-5 の独立境界、S9-6 最終受け入れ順、R2 安全境界を 4 docs に反映した
 17. ~~**U9（UI 視覚刷新）を第 1 弾から進める。**~~ 完了。`.streamlit/config.toml` のネイティブテーマ適用（案 A+）、AppTest 視覚回帰スモーク、shell 刷新まで閉じた。テロップ編集器の刷新は T1-4 へ合流させ、U9 には含めていない
-18. ~~**T1-1（production 非変更 timing spike と評価 manifest 固定）を完了する。**~~ 完了。判定は **No-Go / fallback-only** で、T1-2〜T1-5 は着手条件を満たさない。**次は S9-6（A/B 受け入れ・回帰・フェーズ判定）** を、T1 を fallback-only 記録のまま formal phase acceptance として一度だけ行う。最終 short preview の人確認を含む
+18. ~~**T1-1（production 非変更 timing spike と評価 manifest 固定）を完了する。**~~ 完了。判定は **No-Go / fallback-only** で、T1-2〜T1-5 は着手条件を満たさない
+19. ~~**S9-6（A/B 受け入れ・回帰・フェーズ判定）を、T1 を fallback-only 記録のまま formal phase acceptance として一度だけ行う。**~~ 完了。2026-08-06 に判定 **Go**。人 preview 2 本（`hpe-audio-variation` / `mkw-long-local-asr`）をユーザーが実 UI で確認し、A/B 数値・失効・cache・fallback・scope guard を確認した。S9 と M16、AC-30 / AC-35 / AC-37 を完了へ更新し、**AC-40 は T1 の実体が未成立のため `[ ]` のまま残した**。**次の候補は T1 の再開可否**（cue 粒度と行単位の時刻同期。T1-1 の再測定から始める）であり、着手には別承認が必要である
 
 ---
 
@@ -2642,6 +2657,7 @@ S9 初版で実装するのは、既存 YouTube `video_id` の良好な VTT を�
 
 | 日付 | 内容 |
 |------|------|
+| 2026-08-06 | **S9-6 のフェーズ判定を Go とし、S9 フェーズと M16 を完了した。** 修正後経路で作り直した 2 本の完成ショートをユーザーが実 UI で確認し（`preview_confirmed_fingerprint` は両方とも output fingerprint と一致）、CER 相対改善 78.694％、固有名詞 exact match の非悪化、cue error の改善、失効・cache・fallback・scope guard、production 15 evidence file の 15/15 不変を確認した。S9-6-1〜S9-6-6 と Done 条件 4 件、AC-30 / AC-35 / AC-37 を `[x]` にした。**AC-40 は `[ ]` のまま残す**。AC-40 の 11 項目は T1-1〜T1-5 の内容であり、T1-1 が No-Go / fallback-only、T1-2 以降が未着手のため実体として満たされていない。これに伴い、T1 成功を前提にしていた S9-6-5・S9-6 Done 条件 4 番目・`requirements-v3.md` の「AC-40 の完了タイミング」の 3 か所を改訂し、AC-40 の更新条件へ「T1 の実体成立」を明示した。cue 粒度（16 秒区間が 1 cue で行は比例配分）は S9 の範囲外・T1 の担当として未解決のまま記録した。 |
 | 2026-08-05 | **T1-1 を完了（No-Go / fallback-only）。** 波形付きローカル review UI で human gold 63/64 行を入力し、`t1-fallback-008` は対象発話不在の fail-closed 記録とした。bounded whisper-cli を 8 invocation 以内で実行（hash 全一致、peak memory 付き証跡）、current / segment_snap / token_alignment の 3 候補を同一 fixture・同一 policy で A/B 測定した。token_alignment は pooled median 370 ms / p90 1640 ms で全群 gate FAIL、事後緩和なしで No-Go とし、T1-2 以降は着手しない。gold 45/63 行の 1000 ms 単位入力という測定限界と、gold 精度改善後の再測定には別承認が必要である旨を報告書に記録した。証跡: `docs/benchmarks/t1-1-report.md` / `t1-1-report.json` / `t1-1-timing-inputs.json` / `t1-1-human-gold-packet.json` |
 | 2026-08-05 | **U9（UI 視覚刷新）を計画。** R2 完了により残るのは視覚レイヤーのみと確認し、実行計画に未定義だったフェーズを追加した。Streamlit 1.60 のネイティブテーマ 23 オプションを使い切る案 A+ を第 1 弾、限定 CSS 注入の案 B を A+ 適用後の残差実測まで保留、カスタムコンポーネントの案 C は不採用と決めた。AppTest による視覚回帰スモークを第 2 弾の前提として追加し、テロップ編集器の刷新は T1-4 へ合流させて U9 に含めない。R2 §5 の安全境界を全項目継承し、`st.tabs` への単純置換禁止を不変条件として明記した。調査根拠は `docs/ui-visual-refresh-plan-2026-08-05.md` に分離した。 |
 | 2026-08-04 | **T1-PLAN 親レビュー指摘を反映。** T1-1 に固定選択 span の隔離 bounded whisper-cli benchmark を許可し、pooled / 長い単一 cue / multi-cross-cue の群別 gate、VTT fallback + 連結の非回帰、再現 fingerprint を追加した。T1-5 を同期 component acceptance、S9-6 を formal phase acceptance と明記し、隔離 preview、production 不変、T1-5 evidence の条件付き再利用、AC-40 を S9-6 formal PASS 時だけ完了する規約、T1-1〜T1-5 の進捗行、標準 ADR path を反映した。 |

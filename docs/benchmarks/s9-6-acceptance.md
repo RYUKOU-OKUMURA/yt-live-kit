@@ -2,17 +2,44 @@
 
 ## 判定
 
-status は `fallback_only_human_confirmation_pending`。今回の判定は `no_go` であり、fallback-only のまま人確認待ちとする。
+status は `go_phase_accepted`。2026-08-06 の formal phase acceptance で判定は `go` である。
 
-- `phase_complete`: `false`
-- `s9_complete`: `false`
-- `m16_complete`: `false`
-- `ac30`: `false`
-- `ac35`: `false`
-- `ac37`: `false`
+- `phase_complete`: `true`
+- `s9_complete`: `true`
+- `m16_complete`: `true`
+- `ac30`: `true`
+- `ac35`: `true`
+- `ac37`: `true`
 - `ac40`: `false`
 
-canonical evidence の gold は `unverified_provisional` であり、用途は operational transcript reference に限定する。transcript が概ね許容可能であることだけでは Go に不十分である。2026-08-06 の gold 監査 waiver（下記）により gold は判定阻害要因から外れたが、case2 / case3 / case4 の編集後 preview と final short の致命的無発話確認が未完了のため、判定は `no_go`（fallback-only、人確認待ち）のまま維持する。
+canonical evidence の gold は `unverified_provisional` であり、用途は operational transcript reference に限定する。transcript が概ね許容可能であることだけでは Go に不十分である。この点は 2026-08-06 の gold 監査 waiver（下記）で判定阻害要因から外し、Go の根拠は人 preview 2 本の実 UI 確認と A/B 数値・失効・cache・fallback・scope guard に置いた。
+
+### Go の根拠（2026-08-06）
+
+| 観点 | 内容 |
+| --- | --- |
+| 人 preview | `hpe-audio-variation`（`short_ca2a38ddfa36.mp4` 21.037 秒、最終確認 06:21:30Z）と `mkw-long-local-asr`（`short_f381c6753d13.mp4` 24.045 秒、最終確認 06:52:28Z）をユーザーが実 UI で確認。両方とも `preview_confirmed_fingerprint` が output fingerprint と一致。`cgal-proper-nouns` は同一 editorial outcome のため承認済み援用 |
+| final short の無発話 | ユーザー確認と機械測定の双方で致命的無発話なし。最長無発話は 0.898 秒と 2.028 秒 |
+| A/B 数値 | CER 相対改善 78.694％（閾値 10％）、固有名詞 exact match q5 13/19 対 VTT 10/19 で非悪化、cue error q5 2.35 対 VTT 6.95 |
+| 再現性 | canonical fixture fingerprint、q5 run manifest fingerprint、`reproduction_metrics.command_argv_by_case` で再現条件を固定 |
+| 失効 | HF5 で旧 artifact 6 件が実際に失効し、HF6 の修正後は失効状態から「高精度字幕を準備」で復旧できることを実ブラウザで確認 |
+| cache / fallback / scope | 音声 cache v2 の hit、ローカル source 不在時の yt-dlp fallback 維持、実 upload なし、production 15 evidence file は 15/15 不変 |
+| 境界の自動確定 | `whisper_timestamp_auto_boundary_confirmation` は `false` のまま維持 |
+
+判定は自己承認ではない。人確認 gate はすべてユーザーが実 UI で実施した。
+
+### AC-40 を未完了に残す根拠
+
+`ac40` は `false` のまま残す。
+
+- AC-40 の 11 項目は T1-1〜T1-5 の内容である。T1-1 は **No-Go / fallback-only** で確定し、T1-2〜T1-5 は着手条件を満たさないため、保存契約・aligner・UI gate・component acceptance は実装自体が存在しない
+- 初版の [`docs/requirements-v3.md`](../requirements-v3.md) の「AC-40 の完了タイミング」、[`docs/execution-plan-v3.md`](../execution-plan-v3.md) の S9-6-5、同 S9-6 Done 条件 4 番目は、いずれも **T1-5 まで成功した状態**を前提に「残る条件は S9-6 の formal PASS だけ」と書かれていた。現状の T1-1 No-Go には当てはまらない
+- そのため 2026-08-06 に上記 3 か所を改訂し、AC-40 の更新条件へ「**T1 の実体が満たされていること**」を明示的に追加した。S9-6 の Go は AC-40 の完了を意味しない
+- T1 を再開する場合は T1-1 の再測定から行い、着手には別承認を要する
+
+### 未解決（S9 の範囲外、T1 の担当）
+
+cue の粒度は今回の修正で変わっていない。16 秒の区間は依然 1 cue にまとまり、その中のテロップ行は比例配分のままである。2026-08-06 の人確認では両 case とも合格点だったため Go の妨げにはならないが、行単位の時刻同期は T1（FR-39 / AC-40）の担当として未解決のまま残す。
 
 ## gold 監査 waiver（2026-08-06）
 
@@ -278,10 +305,12 @@ auditor は `user`、audit date は `2026-08-03`。
 
 ### current_ui_pending
 
-今回、実 UI で編集後 preview は未確認である。未完了は次のとおり。
+2026-08-06 時点で **pending は無い**。当初 pending としていた 3 件は次のとおり解消した。
 
-- case2 / case3 の opening trim 後 preview
-- case4 の internal gap removal 後 preview
-- final short に致命的な無発話がないことの確認
+| 当初 pending | 解消 |
+| --- | --- |
+| case2 / case3 の opening trim 後 preview | case2 は 2026-08-06T06:21:30Z にユーザーが実 UI で確認。case3 は同一 editorial outcome のため承認済み援用 |
+| case4 の internal gap removal 後 preview | 2026-08-06T06:52:28Z にユーザーが実 UI で確認 |
+| final short に致命的な無発話がないことの確認 | 2 本ともユーザー確認と機械測定の双方で確認 |
 
-exact gold / glossary / cue anchor 監査は 2026-08-06 の明示 waiver で判定阻害要因から外した。上記 3 件が残るため、AC と S9 の完了状態は更新しない。AC-40 は T1-1 が No-Go / fallback-only であるため、上記 3 件が PASS しても未完了のまま残す。
+exact gold / glossary / cue anchor 監査は 2026-08-06 の明示 waiver で判定阻害要因から外した。上記 3 件の解消により AC-30 / AC-35 / AC-37、S9、M16 を完了へ更新した。AC-40 は T1-1 が No-Go / fallback-only であるため未完了のまま残す。

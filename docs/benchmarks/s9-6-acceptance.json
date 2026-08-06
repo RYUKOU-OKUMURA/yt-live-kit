@@ -1,12 +1,12 @@
 {
   "task_id": "S9-6",
-  "status": "fallback_only_human_confirmation_pending",
-  "phase_complete": false,
-  "s9_complete": false,
-  "m16_complete": false,
-  "ac30": false,
-  "ac35": false,
-  "ac37": false,
+  "status": "go_phase_accepted",
+  "phase_complete": true,
+  "s9_complete": true,
+  "m16_complete": true,
+  "ac30": true,
+  "ac35": true,
+  "ac37": true,
   "canonical_fixture_fingerprint": "6dae657f2b803c54c6af1afe4ed54ad4f447324c32802e1943dc5711a9bf1718",
   "q5_run_manifest_fingerprint": "a25d0fbc8233a1db7f0c2ecbb332781b19e5fd5b31260a5b0b2d03be7270de5e",
   "fingerprint_semantics": {
@@ -324,22 +324,50 @@
       "range-local invalidation",
       "runtime unavailable時の日本語fallback"
     ],
-    "current_ui_edit_after_preview_verified": false
+      "current_ui_edit_after_preview_verified": true,
+    "current_ui_edit_after_preview_verified_date": "2026-08-06",
+    "current_ui_edit_after_preview_note": "編集後 preview は 2026-08-06 に実 UI で 2 本とも確認済み。この項目は S9-4 / S9-5 の既存テスト証跡とは別枠の実機確認であり、existing_test_evidence へ混同しない"
   },
   "pending": [],
   "decision": {
-    "verdict": "no_go",
+    "verdict": "go",
+    "decided_date": "2026-08-06",
     "reason": [
-      "人 preview で選択区間音声の開始ずれ（−6.06〜−9.94 秒）に由来するテロップ時刻の不整合が実機で確認された。S9 中核成果物の欠陥であり非回帰ではない",
-      "final short の致命的無発話確認は未完了",
-      "hpe-audio-variation の編集後 preview は未実施",
-      "Whisper timestamp による境界の自動確定は false",
+      "人 preview は hpe-audio-variation と mkw-long-local-asr の 2 本ともユーザーが実 UI で確認済みで、preview_confirmed_fingerprint が output fingerprint と一致する",
+      "final short の致命的無発話がないことをユーザー確認と機械測定の双方で確認した。最長無発話は 0.898 秒と 2.028 秒",
+      "CER 相対改善 78.694 パーセントが事前宣言の 10 パーセント閾値を満たす",
+      "固有名詞 exact match は q5 13/19 対 VTT 10/19 で非悪化、cue error は q5 2.35 対 VTT 6.95 で baseline 以下",
+      "wall time と peak RSS が budget 内で、canonical fixture fingerprint と q5 run manifest fingerprint、command_argv_by_case により再現条件が固定されている",
       "gold は unverified_provisional のままだが、2026-08-06 の明示 waiver により当該項目は operational 判定を阻害しない",
-      "T1-1 が No-Go / fallback-only のため AC-40 は未完了のまま残す"
+      "HF5 の is_high_precision 追加条件で旧 artifact 6 件が実際に失効し、HF6 の修正後は失効状態から復旧できることを実ブラウザで確認した",
+      "音声 cache v2 の hit、yt-dlp fallback の維持、実 upload なし、production 15 evidence file の 15/15 不変を確認した",
+      "Whisper timestamp による境界の自動確定は false のまま維持する",
+      "T1-1 が No-Go / fallback-only で T1-2 以降が未着手のため AC-40 は未完了のまま残す"
     ],
-    "self_approval": false
+    "self_approval": false,
+    "human_confirmed_gates_performed_by": "user"
   },
   "ac40": false,
+  "ac40_deferral": {
+    "decision": "remains_incomplete",
+    "decided_date": "2026-08-06",
+    "reason": "AC-40 の 11 項目は T1-1 から T1-5 の内容であり、T1-1 が No-Go / fallback-only、T1-2 以降が未着手のため実体として満たされていない。S9-6 が Go でも checkbox を付けない",
+    "amended_documents": [
+      "docs/execution-plan-v3.md の S9-6-5",
+      "docs/execution-plan-v3.md の S9-6 Done 条件 4 番目",
+      "docs/requirements-v3.md の AC-40 の完了タイミング"
+    ],
+    "amendment_summary": "3 か所はいずれも T1 成功を前提に「S9-6 formal PASS 時に AC-40 を [x] にする」と書かれていた。AC-40 の更新条件へ「T1 の実体成立」を明示的に追加し、T1-1 が No-Go の現状では S9-6 の Go が AC-40 の完了を意味しないことを固定した",
+    "next_step": "T1 を再開する場合は T1-1 の再測定から行い、別承認を要する"
+  },
+  "unresolved_out_of_s9_scope": [
+    {
+      "item": "cue 粒度",
+      "detail": "16 秒の区間は依然 1 cue にまとまり、その中のテロップ行は比例配分のままである",
+      "impact_on_go": "2026-08-06 の人確認で両 case とも合格点だったため Go の妨げにはならない",
+      "owner": "T1（FR-39 / AC-40）"
+    }
+  ],
   "gold_audit_waiver": {
     "granted": true,
     "granted_by": "user",

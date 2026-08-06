@@ -729,19 +729,19 @@ Streamlit は、エントリスクリプト（[`src/yt_live_kit/ui/app.py`](../s
 
 ### AC-37: 選択区間 Whisper と TranscriptArtifact（FR-35 / FR-36 / S9）
 
-- [ ] `subtitles/ja.vtt` が S9 実行前後で上書きされず、粗い親候補探索と既存 v1〜v3 経路が回帰しない
-- [ ] 再取得は incoming VTT を隔離して保存し、既存 `ja.vtt` がある場合はその bytes を変えず、無い場合だけ初回 bootstrap する。新しい source VTT は `subtitles/sources/` の immutable artifact とし、取得失敗時は既存成果物を変更しない
-- [ ] artifact が strict schema（schema version、未知 field 拒否、`source_kind` enum、整数ミリ秒、`success` / `fallback` / `failed` / `partial` status）で、取得元、video ID、対象区間、絶対時刻 cue、cue digest、音声入力 fingerprint、モデル / runtime / 設定、artifact fingerprint を持ち、atomic 保存を通過する
-- [ ] cache identity と artifact fingerprint が分離され、音声 bytes・sample rate・channel・codec・ffmpeg 設定・source、model file・whisper-cli build / capability・language・initial prompt・decode / VAD / padding・output schema を含む。path / mtime だけの再利用が無い
-- [ ] resolver / artifact index が lock・crash recovery・破損検出を備え、部分 JSON、偽 fingerprint、範囲外 cue、未知 field、不一致 cache は fail closed になる
-- [ ] resolver が親候補探索には有効な YouTube VTT、選択済み区間には有効な whisper.cpp artifact を返し、無効・不一致・部分成果物は高精度として返さない
-- [ ] whisper.cpp 1.9.1 の capability とモデル fingerprint を実行前に検証し、新規 pip 依存・従量課金 API・モデル自動ダウンロードが無い
-- [ ] 音声のみの入力を永続 cache し、複数区間を現行の 1 ジョブ内で入力順に処理できる。動画全体を取得して字幕精査する経路は無い
-- [ ] coarse 候補 document が VTT artifact fingerprint、全 cue digest、candidate fingerprint を持ち、同じ候補内容・表示順から決定的に再構成できる。使用区間に関係する cue の変更だけが downstream を失効させる
-- [ ] 同じ immutable artifact reference と順序付き `used_range_cue_digest` 配列が FR-30 の cutplan、FR-22 の telop、FR-25 の preflight、queue / line、FR-33 の review fingerprint で再利用され、downstream が resolver を再実行しない
-- [ ] 進捗と失敗が job ID、range index、全区間数、cache hit / miss、partial / failed status、retry 可否とともに表示され、runtime 不備・timeout・malformed output・cache corruption は日本語で fallback または停止を示す
-- [ ] 代表素材 3〜5 本の A/B で YouTube VTT と whisper.cpp の精度・固有名詞・境界確認・処理時間を記録し、固定 gold transcript / 固有名詞表、事前宣言した改善閾値・wall time・peak memory budget、採用モデルと Go / No-Go 根拠を docs に残す
-- [ ] 字幕なし・低品質字幕の全編 Whisper、47 本の一括 backfill、local video 入力、asset ID 移行は S9 初版の受け入れ対象に含めず、将来フェーズとして明記されている
+- [x] `subtitles/ja.vtt` が S9 実行前後で上書きされず、粗い親候補探索と既存 v1〜v3 経路が回帰しない
+- [x] 再取得は incoming VTT を隔離して保存し、既存 `ja.vtt` がある場合はその bytes を変えず、無い場合だけ初回 bootstrap する。新しい source VTT は `subtitles/sources/` の immutable artifact とし、取得失敗時は既存成果物を変更しない
+- [x] artifact が strict schema（schema version、未知 field 拒否、`source_kind` enum、整数ミリ秒、`success` / `fallback` / `failed` / `partial` status）で、取得元、video ID、対象区間、絶対時刻 cue、cue digest、音声入力 fingerprint、モデル / runtime / 設定、artifact fingerprint を持ち、atomic 保存を通過する
+- [x] cache identity と artifact fingerprint が分離され、音声 bytes・sample rate・channel・codec・ffmpeg 設定・source、model file・whisper-cli build / capability・language・initial prompt・decode / VAD / padding・output schema を含む。path / mtime だけの再利用が無い
+- [x] resolver / artifact index が lock・crash recovery・破損検出を備え、部分 JSON、偽 fingerprint、範囲外 cue、未知 field、不一致 cache は fail closed になる
+- [x] resolver が親候補探索には有効な YouTube VTT、選択済み区間には有効な whisper.cpp artifact を返し、無効・不一致・部分成果物は高精度として返さない
+- [x] whisper.cpp 1.9.1 の capability とモデル fingerprint を実行前に検証し、新規 pip 依存・従量課金 API・モデル自動ダウンロードが無い
+- [x] 音声のみの入力を永続 cache し、複数区間を現行の 1 ジョブ内で入力順に処理できる。動画全体を取得して字幕精査する経路は無い
+- [x] coarse 候補 document が VTT artifact fingerprint、全 cue digest、candidate fingerprint を持ち、同じ候補内容・表示順から決定的に再構成できる。使用区間に関係する cue の変更だけが downstream を失効させる
+- [x] 同じ immutable artifact reference と順序付き `used_range_cue_digest` 配列が FR-30 の cutplan、FR-22 の telop、FR-25 の preflight、queue / line、FR-33 の review fingerprint で再利用され、downstream が resolver を再実行しない
+- [x] 進捗と失敗が job ID、range index、全区間数、cache hit / miss、partial / failed status、retry 可否とともに表示され、runtime 不備・timeout・malformed output・cache corruption は日本語で fallback または停止を示す
+- [x] 代表素材 3〜5 本の A/B で YouTube VTT と whisper.cpp の精度・固有名詞・境界確認・処理時間を記録し、固定 gold transcript / 固有名詞表、事前宣言した改善閾値・wall time・peak memory budget、採用モデルと Go / No-Go 根拠を docs に残す
+- [x] 字幕なし・低品質字幕の全編 Whisper、47 本の一括 backfill、local video 入力、asset ID 移行は S9 初版の受け入れ対象に含めず、将来フェーズとして明記されている
 
 ### AC-38: タイトル 3 方向と概要欄必須構成（FR-37 / P6）
 
@@ -784,7 +784,12 @@ Streamlit は、エントリスクリプト（[`src/yt_live_kit/ui/app.py`](../s
 - [ ] `subtitle_burn`、FFmpeg、cut 境界、queue fingerprint の意味、投稿予約、Codex 回数に変更が無く、実 upload、公開データ変更、Studio 操作、全編 Whisper、47 本 backfill を行わない
 - [ ] T1-5 の A/B・gold・scope guard・全 pytest・diff check・compileall・隔離 `data_dir` または検証用 copy への再生成 preview の証跡が揃い、production artifact / cache / output / hash が不変で、S9-6 は formal phase acceptance 専用の未完了状態に残る
 
-**AC-40 の完了タイミング:** T1-5 は同期 component acceptance として AC-40 の証跡を揃えるが、AC-40 の checkbox は `[ ]` のまま維持する。S9-6 が人 preview、A/B、gold、失効、cache、fallback、scope の formal phase acceptance を一度だけ PASS した時点で、AC-40 を `[x]` に更新する。T1-5 の PASS や immutable evidence の再利用は、S9-6 の最終 gate を省略する根拠にならない。
+**AC-40 の完了タイミング（2026-08-06 改訂）:** AC-40 を `[x]` にするには、**T1 の実体が満たされていること**と、**S9-6 の formal phase acceptance を一度だけ PASS していること**の両方が必要である。どちらか一方では足りない。
+
+- 初版の記述は「T1-5 が PASS して証跡が揃った状態」を前提に、残る条件を S9-6 の formal PASS だけとしていた。この前提は T1-1 が Go の場合にのみ成立する
+- 実際には T1-1 が **No-Go / fallback-only** で確定し、T1-2〜T1-5 は着手条件を満たさない。上記 11 項目のうち T1-2 以降の保存契約・aligner・UI gate・component acceptance を要求する項目は実装自体が存在しないため、S9-6 が Go でも AC-40 は `[x]` にしない
+- したがって 2026-08-06 の S9-6 formal PASS では AC-40 を `[ ]` のまま残す。T1 を再開して T1-1 の Go 条件を満たし、T1-2〜T1-5 が完了した時点で改めて判定する
+- T1-5 の PASS や immutable evidence の再利用は、S9-6 の最終 gate を省略する根拠にならない（初版から不変）
 
 ---
 
@@ -825,6 +830,7 @@ Streamlit は、エントリスクリプト（[`src/yt_live_kit/ui/app.py`](../s
 
 | 日付 | 内容 |
 |------|------|
+| 2026-08-06 | **S9-6 formal phase acceptance が Go。AC-37 を完了とした。** 修正後経路で作り直した `hpe-audio-variation` と `mkw-long-local-asr` の完成ショートをユーザーが実 UI で確認し（`preview_confirmed_fingerprint` は両方とも output fingerprint と一致）、A/B 数値（CER 相対改善 78.694％、固有名詞 exact match q5 13/19 対 VTT 10/19 で非悪化、cue error q5 2.35 対 VTT 6.95）、失効・cache・fallback・scope guard、production 15 evidence file の 15/15 不変を確認した。AC-30 / AC-35 の S9 非回帰も同時に確認した。**AC-40 は `[ ]` のまま残す**（下記「AC-40 の完了タイミング」を改訂）。gold は `unverified_provisional` のままで、2026-08-06 の明示 waiver により operational 判定から除外した扱いを維持する。 |
 | 2026-08-04 | **T1-PLAN を追加。** FR-22 / FR-25 / FR-33 / FR-35 / FR-36 と新設 FR-39 に、低信頼行の元時刻維持、token timing の provenance、pure monotonic alignment、独立した timing confirmation、入力変更時の失効、T1-1 の隔離 bounded whisper-cli benchmark、T1-5 component acceptance と S9-6 formal phase acceptance の分離を追加。AC-40 と timing 用語を追加し、実装方式の ADR は T1-2 まで保留した。 |
 | 2026-08-03 | **P6 投稿メタデータ品質ゲートを追加。** FR-37 / AC-38 に同一 Codex 呼び出し内のタイトル固定 3 方向、概要欄の生成説明・チャンネル登録 CTA・元動画タイトル・開始秒付き URL、合成時と投稿確定時の再検証を定義。FR-38 / AC-39 に YouTube API 自動設定を行わない Studio 手動確認と `not_ready` / `pending` / `confirmed` の永続状態を定義し、P4 の歴史的 fallback と P6 投稿ゲートの優先関係を明記した |
 | 2026-08-03 | **AC-33 完了。** ジョブエラーを必須 6 field の構造化通知へ移行し、上部 1 行要約、対象動画導線、動画別直近 3 件、上限付き global 要約、現在動画だけの技術詳細表示を実装。長い ffmpeg log の実ブラウザ確認、全件テスト、独立レビューを通過した |

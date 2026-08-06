@@ -470,7 +470,7 @@ T1 は既存 S9 の transcript / telop / FFmpeg 経路を置き換えるので�
 - T1 の依存は `S9-5 → T1-PLAN → T1-1 → T1-2 → T1-3 → T1-4 → T1-5 → S9-6`。S9-6 は T1-5 後の最終受け入れ専用として未完了のまま保持する
 - 新規 pip 依存、従量課金 API、T1-2 以降・本番経路の追加 Whisper、manifest 外の解析、全動画再解析、全編 Whisper、47 本 backfill、実 upload、Studio 操作は追加しない。T1-1 の isolated bounded benchmark 以外の Whisper 実行は許可しない
 - T1-1 は固定 manifest、`max_selected_spans` / `max_whisper_invocations` と実績、human audio onset gold、coverage、pooled / 群別 gate、各群の signed bias、CER、固有名詞、cue 欠落 / 重複、VTT fallback + 連結の現行出力同等性、wall、peak memory、bounded whisper-cli の再現情報を証跡化する。T1-5 は同じ evidence に加え、scope guard、全 pytest、diff check、compileall、隔離 data_dir / 検証用 copy への再生成 preview、production hash unchanged を証跡化する。結果後に gate を緩和しない
-- T1-5 は同期 component acceptance、S9-6 は formal phase acceptance とする。T1-5 の immutable evidence は入力 fingerprint が一致する場合に S9-6 が参照できるが、人 preview、A/B、gold、失効、cache、fallback、scope の最終 gate を省略しない。AC-40 は S9-6 formal PASS 時にだけ完了へ更新する
+- T1-5 は同期 component acceptance、S9-6 は formal phase acceptance とする。T1-5 の immutable evidence は入力 fingerprint が一致する場合に S9-6 が参照できるが、人 preview、A/B、gold、失効、cache、fallback、scope の最終 gate を省略しない。AC-40 は S9-6 formal PASS 時にだけ完了へ更新する。**2026-08-06 改訂:** S9-6 formal PASS は AC-40 完了の必要条件であって十分条件ではない。AC-40 の 11 項目は T1-1〜T1-5 の実体であるため、T1-1 が No-Go / fallback-only である現状では S9-6 が Go でも AC-40 は未完了のまま残す
 
 ---
 

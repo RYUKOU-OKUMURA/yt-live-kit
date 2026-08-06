@@ -9,6 +9,7 @@ ACCEPTANCE_PATH = ROOT / "docs/benchmarks/s9-6-acceptance.json"
 ACCEPTANCE_MARKDOWN_PATH = ROOT / "docs/benchmarks/s9-6-acceptance.md"
 S9_1_REPORT_PATH = ROOT / "docs/benchmarks/s9-1-report.json"
 EXECUTION_PLAN_PATH = ROOT / "docs/execution-plan-v3.md"
+REQUIREMENTS_PATH = ROOT / "docs/requirements-v3.md"
 
 CANONICAL_FIXTURE_FINGERPRINT = (
     "6dae657f2b803c54c6af1afe4ed54ad4f447324c32802e1943dc5711a9bf1718"
@@ -37,11 +38,11 @@ def _flag_value(argv: list[str], flag: str) -> str:
     return argv[argv.index(flag) + 1]
 
 
-def test_acceptance_decision_is_fail_closed() -> None:
+def test_acceptance_decision_is_go_with_ac40_still_open() -> None:
     evidence = _load_json(ACCEPTANCE_PATH)
 
     assert evidence["task_id"] == "S9-6"
-    assert evidence["status"] == "fallback_only_human_confirmation_pending"
+    assert evidence["status"] == "go_phase_accepted"
     assert {
         key: evidence[key]
         for key in (
@@ -53,26 +54,79 @@ def test_acceptance_decision_is_fail_closed() -> None:
             "ac37",
         )
     } == {
-        "phase_complete": False,
-        "s9_complete": False,
-        "m16_complete": False,
-        "ac30": False,
-        "ac35": False,
-        "ac37": False,
+        "phase_complete": True,
+        "s9_complete": True,
+        "m16_complete": True,
+        "ac30": True,
+        "ac35": True,
+        "ac37": True,
     }
 
     decision = evidence["decision"]
-    assert decision["verdict"] == "no_go"
+    assert decision["verdict"] == "go"
+    assert decision["decided_date"] == "2026-08-06"
+    # 判定は自己承認ではなく、人確認 gate はユーザーが実 UI で実施した。
     assert decision["self_approval"] is False
-    assert decision["reason"] == [
-        "人 preview で選択区間音声の開始ずれ（−6.06〜−9.94 秒）に由来するテロップ時刻の不整合が実機で確認された。S9 中核成果物の欠陥であり非回帰ではない",
-        "final short の致命的無発話確認は未完了",
-        "hpe-audio-variation の編集後 preview は未実施",
-        "Whisper timestamp による境界の自動確定は false",
-        "gold は unverified_provisional のままだが、2026-08-06 の明示 waiver により当該項目は operational 判定を阻害しない",
-        "T1-1 が No-Go / fallback-only のため AC-40 は未完了のまま残す",
-    ]
+    assert decision["human_confirmed_gates_performed_by"] == "user"
+    reason = decision["reason"]
+    assert reason[0].startswith("人 preview は hpe-audio-variation と mkw-long-local-asr の 2 本とも")
+    assert "CER 相対改善 78.694 パーセントが事前宣言の 10 パーセント閾値を満たす" in reason
+    assert (
+        "固有名詞 exact match は q5 13/19 対 VTT 10/19 で非悪化、cue error は q5 2.35 対 VTT 6.95 で baseline 以下"
+        in reason
+    )
+    assert (
+        "T1-1 が No-Go / fallback-only で T1-2 以降が未着手のため AC-40 は未完了のまま残す"
+        in reason
+    )
+
+
+def test_ac40_stays_incomplete_with_recorded_amendment() -> None:
+    """Go でも AC-40 を [x] にしない根拠と、改訂した 3 か所が証跡に残ること。"""
+
+    evidence = _load_json(ACCEPTANCE_PATH)
+
     assert evidence["ac40"] is False
+    deferral = evidence["ac40_deferral"]
+    assert deferral["decision"] == "remains_incomplete"
+    assert deferral["decided_date"] == "2026-08-06"
+    assert "T1-1 が No-Go / fallback-only" in deferral["reason"]
+    assert deferral["amended_documents"] == [
+        "docs/execution-plan-v3.md の S9-6-5",
+        "docs/execution-plan-v3.md の S9-6 Done 条件 4 番目",
+        "docs/requirements-v3.md の AC-40 の完了タイミング",
+    ]
+    assert "T1 の実体成立" in deferral["amendment_summary"]
+
+    # cue 粒度は S9 の範囲外として未解決のまま残す。
+    unresolved = evidence["unresolved_out_of_s9_scope"]
+    assert [item["item"] for item in unresolved] == ["cue 粒度"]
+    assert unresolved[0]["owner"] == "T1（FR-39 / AC-40）"
+    assert "1 cue" in unresolved[0]["detail"]
+
+
+def test_requirements_amendment_keeps_ac40_conditional_on_t1() -> None:
+    requirements = REQUIREMENTS_PATH.read_text(encoding="utf-8")
+
+    start = requirements.index("**AC-40 の完了タイミング")
+    end = requirements.index("---", start)
+    clause = requirements[start:end]
+
+    assert "T1 の実体が満たされていること" in clause
+    assert "S9-6 が Go でも AC-40 は `[x]` にしない" in clause
+    assert "AC-40 を `[ ]` のまま残す" in clause
+
+    # AC-40 の 11 項目そのものは未チェックのまま維持する。
+    ac40_start = requirements.index("### AC-40: テロップ行時刻同期と明示確認")
+    ac40_items = requirements[ac40_start:start]
+    assert ac40_items.count("- [ ] ") == 11
+    assert "- [x] " not in ac40_items
+
+    # AC-37 は 13 項目すべて完了へ更新した。
+    ac37_start = requirements.index("### AC-37: 選択区間 Whisper と TranscriptArtifact")
+    ac37_items = requirements[ac37_start : requirements.index("### AC-38:", ac37_start)]
+    assert ac37_items.count("- [x] ") == 13
+    assert "- [ ] " not in ac37_items
 
 
 def test_fingerprints_are_complete_distinct_and_linked_to_s9_1() -> None:
@@ -217,7 +271,13 @@ def test_human_and_existing_test_evidence_are_not_misclassified() -> None:
         "range-local invalidation",
         "runtime unavailable時の日本語fallback",
     ]
-    assert existing_tests["current_ui_edit_after_preview_verified"] is False
+    # 編集後 preview は 2026-08-06 に実 UI で確認済みだが、これは実機確認であって
+    # S9-4 / S9-5 の既存テスト証跡ではない。両者を混同しないことを固定する。
+    assert existing_tests["current_ui_edit_after_preview_verified"] is True
+    assert existing_tests["current_ui_edit_after_preview_verified_date"] == "2026-08-06"
+    assert "existing_test_evidence へ混同しない" in existing_tests[
+        "current_ui_edit_after_preview_note"
+    ]
 
 
 def test_pending_and_case_outcomes_keep_human_gates_explicit() -> None:
@@ -320,7 +380,8 @@ def test_json_and_markdown_repeat_the_same_major_values_without_angles() -> None
         "ac35",
         "ac37",
     ):
-        assert f"- `{key}`: `false`" in markdown
+        assert f"- `{key}`: `true`" in markdown
+    assert "- `ac40`: `false`" in markdown
 
     assert f"- canonical fixture: `{evidence['canonical_fixture_fingerprint']}`" in markdown
     assert f"- q5 run manifest: `{evidence['q5_run_manifest_fingerprint']}`" in markdown
@@ -355,27 +416,37 @@ def test_json_and_markdown_repeat_the_same_major_values_without_angles() -> None
     assert "transcript が概ね許容可能であることだけでは Go に不十分" in markdown
 
 
-def test_execution_plan_keeps_s9_acceptance_unfinished_and_records_next_checks() -> None:
+def test_execution_plan_records_s9_acceptance_go_and_keeps_history() -> None:
     plan = EXECUTION_PLAN_PATH.read_text(encoding="utf-8")
     start = plan.index("#### S9-6: A/B 受け入れ・回帰・フェーズ判定")
     end = plan.index("### P6:", start)
     s9_6_section = plan[start:end]
 
-    assert "| S9-6 | A/B 受け入れ・回帰・フェーズ判定 | [~] 進行中 |" in plan
-    assert "| S9 | 選択親候補区間のローカル Whisper 精査（実装） | [~] 進行中 |" in plan
-    assert "| M16 | 親候補探索は VTT、選択区間は provenance 付き Whisper artifact で精査できる | [ ] |" in plan
+    assert (
+        "| S9-6 | A/B 受け入れ・回帰・フェーズ判定 | [x] 完了（2026-08-06 判定 **Go**。"
+        "AC-40 は T1 未成立のため `[ ]` のまま） |"
+    ) in plan
+    assert "| S9 | 選択親候補区間のローカル Whisper 精査（実装） | [x] 完了 |" in plan
+    assert "| M16 | 親候補探索は VTT、選択区間は provenance 付き Whisper artifact で精査できる | [x] |" in plan
     for index in range(1, 7):
-        assert f"- [ ] S9-6-{index}." in s9_6_section
-        assert f"- [x] S9-6-{index}." not in s9_6_section
+        assert f"- [x] S9-6-{index}." in s9_6_section
+        assert f"- [ ] S9-6-{index}." not in s9_6_section
     done_conditions = (
         "A/B 数値と目視・人確認の証跡、選択モデル、処理時間、失効差、回帰結果、fallback の挙動、Go / No-Go が独立レビュー可能な形で残る",
         "S9-1 と同じ gold / glossary / threshold / budget が再現 command と fixture fingerprint に結び付き、代表素材と実配信アーカイブの差が記録される",
         "S9 初版の scope 外（全編 Whisper、字幕なし通常経路、local video、asset ID）は実装されていない",
     )
     for condition in done_conditions:
-        assert f"- [ ] {condition}" in s9_6_section
-        assert f"- [x] {condition}" not in s9_6_section
+        assert f"- [x] {condition}" in s9_6_section
+        assert f"- [ ] {condition}" not in s9_6_section
 
+    # Go の記録と、AC-40 を残す根拠・未解決事項が同じ節に残ること。
+    assert "**S9-6 フェーズ判定: Go（2026-08-06）:**" in s9_6_section
+    assert "AC-40 を未完了に残す" in s9_6_section
+    assert "cue の粒度は変わっていない" in s9_6_section
+    assert "T1 の実体成立" in s9_6_section
+
+    # No-Go だった当時の経緯は削除せず履歴として残すこと。
     assert "2026-08-04 main の `3d113ef` / `071929d` 統合" in s9_6_section
     assert "初回レビューで P1 二点を指摘し、follow-up で APPROVE" in s9_6_section
     assert "main focused S9 は123件 passed" in s9_6_section
@@ -384,4 +455,3 @@ def test_execution_plan_keeps_s9_acceptance_unfinished_and_records_next_checks()
     assert "case4 の internal gap removal 後 preview" in s9_6_section
     assert "final short に無発話がないことの確認" in s9_6_section
     assert "exact gold / glossary / cue anchor 監査または明示的 waiver" in s9_6_section
-    assert "AC-30 / AC-35 / AC-37 の受け入れ判定は未完了" in s9_6_section
