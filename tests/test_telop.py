@@ -143,6 +143,10 @@ def _high_precision_artifact(video_id: str = "video123"):
         model={"name": "fixed-model", "fingerprint": "a" * 64},
         runtime={"version": "1.9.1", "fingerprint": "b" * 64},
         settings={"language": "ja", "padding_ms": 0},
+        # S9-6 以降、高精度扱いには音声 span の取得経路の記録が要る。
+        source_metadata={
+            "audio_spans": [{"audio_route": "local_source_accurate_seek"}]
+        },
     )
 
 

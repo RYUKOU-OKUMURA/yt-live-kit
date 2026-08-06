@@ -334,6 +334,28 @@ class TranscriptArtifact(_StrictFrozenModel):
         return self.used_range_cue_digests[0]
 
     @property
+    def audio_spans_declare_route(self) -> bool:
+        """全音声 span が S9-6 以降の取得経路を記録しているかを返す.
+
+        S9-6 で修正した開始ずれは、経路を記録していなかった旧 span 取得で
+        起きた。旧 artifact は benchmark の不変証跡として disk に残ってよい
+        が、高精度字幕として再利用させない。
+        """
+
+        if self.source_kind != TranscriptSourceKind.WHISPER_CPP:
+            return True
+        spans = self.source_metadata.get("audio_spans")
+        if not isinstance(spans, list) or not spans:
+            return False
+        for span in spans:
+            if not isinstance(span, dict):
+                return False
+            route = span.get("audio_route")
+            if not isinstance(route, str) or not route.strip():
+                return False
+        return True
+
+    @property
     def is_high_precision(self) -> bool:
         return (
             self.source_kind == TranscriptSourceKind.WHISPER_CPP
@@ -343,6 +365,7 @@ class TranscriptArtifact(_StrictFrozenModel):
             and bool(self.runtime)
             and bool(self.settings)
             and bool(self.audio_input_fingerprint)
+            and self.audio_spans_declare_route
         )
 
     def canonical_dict(self) -> dict[str, Any]:

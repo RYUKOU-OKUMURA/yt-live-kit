@@ -110,6 +110,10 @@ def _whisper_artifact(*, video_id: str = "vid1234567", text: str = "こんにち
         model={"name": "ggml-large-v3-turbo-q5_0", "file_sha256": "a" * 64},
         runtime={"version": "1.9.1", "build": "metal"},
         settings={"language": "ja", "decode": {"temperature": 0}},
+        # S9-6 以降、高精度扱いには音声 span の取得経路の記録が要る。
+        source_metadata={
+            "audio_spans": [{"audio_route": "local_source_accurate_seek"}]
+        },
     )
 
 
@@ -685,3 +689,62 @@ def test_selected_range_never_returns_partial_whisper_as_high_precision(tmp_path
     assert result.artifact is not None
     assert result.artifact.source_kind.value == "youtube_vtt"
     assert result.invalidated is True
+
+
+def test_whisper_artifact_without_audio_route_is_not_high_precision():
+    """S9-6 の開始ずれ修正前に作った artifact を高精度として再利用しない.
+
+    旧 artifact は benchmark の不変証跡として disk に残ってよいが、経路を
+    記録していない span から作られているため高精度扱いを外す。
+    """
+
+    legacy = build_transcript_artifact(
+        video_id="vid1234567",
+        source_kind="whisper_cpp",
+        source_ref="transcripts/audio/range-1.wav",
+        language="ja",
+        ranges=[TranscriptRange(start_ms=1_000, end_ms=3_000)],
+        cues=[TranscriptCue(start_ms=1_200, end_ms=1_800, text="旧 artifact")],
+        audio_bytes=b"legacy-audio",
+        model={"name": "ggml-large-v3-turbo-q5_0", "file_sha256": "a" * 64},
+        runtime={"version": "1.9.1", "build": "metal"},
+        settings={"language": "ja"},
+        source_metadata={
+            "audio_spans": [{"range": {"start_ms": 1_000, "end_ms": 3_000}}]
+        },
+    )
+
+    assert legacy.status is TranscriptArtifactStatus.SUCCESS
+    assert legacy.audio_spans_declare_route is False
+    assert legacy.is_high_precision is False
+
+    current = _whisper_artifact()
+    assert current.audio_spans_declare_route is True
+    assert current.is_high_precision is True
+
+
+def test_whisper_artifact_with_fallback_route_stays_high_precision():
+    """source が無い環境の yt-dlp fallback 経路も高精度扱いは維持する."""
+
+    fallback = build_transcript_artifact(
+        video_id="vid1234567",
+        source_kind="whisper_cpp",
+        source_ref="transcripts/audio/range-1.wav",
+        language="ja",
+        ranges=[TranscriptRange(start_ms=1_000, end_ms=3_000)],
+        cues=[TranscriptCue(start_ms=1_200, end_ms=1_800, text="fallback")],
+        audio_bytes=b"fallback-audio",
+        model={"name": "ggml-large-v3-turbo-q5_0", "file_sha256": "a" * 64},
+        runtime={"version": "1.9.1", "build": "metal"},
+        settings={"language": "ja"},
+        source_metadata={
+            "audio_spans": [
+                {
+                    "audio_route": "ytdlp_download_sections_force_keyframes",
+                    "alignment": {"method": "none", "verified": False},
+                }
+            ]
+        },
+    )
+
+    assert fallback.is_high_precision is True

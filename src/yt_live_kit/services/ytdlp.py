@@ -114,9 +114,13 @@ _AUDIO_ROUTE_LOCAL_SOURCE = "local_source_accurate_seek"
 _AUDIO_ROUTE_YTDLP_SECTIONS = "ytdlp_download_sections_force_keyframes"
 _AUDIO_ROUTES = frozenset({_AUDIO_ROUTE_LOCAL_SOURCE, _AUDIO_ROUTE_YTDLP_SECTIONS})
 # 開始位置検証は、同じ絶対区間を別 anchor から切り出して PCM を照合する。
-# 実測（ffmpeg-full 8.1.2、mp4/AAC）では decoder priming 差だけが残り、
-# RMS 差は 0.06 LSB 程度、数秒ずれた場合は 3 桁大きくなる。
+# anchor が違っても sample lag は 0 になるが、AAC decoder の warm-up 差だけは
+# 先頭に残る。実測（ffmpeg-full 8.1.2、mKwn-93gg90 1146000-1154000）では
+# 不一致 sample は 128,000 中 833 個で、うち大半が先頭 50 ms 未満に集中し、
+# 先頭を除くと RMS 差は 0.204 まで落ちる。数秒ずれた場合の RMS 差は 1,000
+# 前後になるため、warm-up 窓を除外しても検出力は落ちない。
 _AUDIO_ALIGNMENT_LEAD_MS = 5_000
+_AUDIO_ALIGNMENT_WARMUP_MS = 250
 _AUDIO_ALIGNMENT_ABSOLUTE_TOLERANCE = 64.0
 _AUDIO_ALIGNMENT_RELATIVE_TOLERANCE = 0.02
 
@@ -843,21 +847,32 @@ def _audio_span_samples(content: bytes, label: str) -> array.array:
 def _audio_alignment_metrics(
     primary: array.array,
     reference: array.array,
-) -> tuple[float, float]:
-    """本体と別 anchor 参照の RMS 差、参照側の RMS を返す."""
+    *,
+    skip_frames: int,
+) -> tuple[float, float, int]:
+    """本体と別 anchor 参照の RMS 差、参照側の RMS、比較した frame 数を返す.
+
+    ``skip_frames`` は decoder warm-up 窓で、開始位置のずれは区間全体を動かす
+    ため、先頭を除いても検出力は落ちない。
+    """
 
     if len(primary) != len(reference):
         raise AudioSpanError("開始位置検証用音声の長さが一致しません。")
     if not primary:
         raise AudioSpanError("開始位置検証用音声が空です。")
+    offset = min(max(skip_frames, 0), len(primary) - 1)
     difference_square = 0
     reference_square = 0
-    for left, right in zip(primary, reference):
-        delta = left - right
+    for index in range(offset, len(primary)):
+        delta = primary[index] - reference[index]
         difference_square += delta * delta
-        reference_square += right * right
-    count = len(primary)
-    return (difference_square / count) ** 0.5, (reference_square / count) ** 0.5
+        reference_square += reference[index] * reference[index]
+    count = len(primary) - offset
+    return (
+        (difference_square / count) ** 0.5,
+        (reference_square / count) ** 0.5,
+        count,
+    )
 
 
 def _prepare_audio_span_from_local_source(
@@ -912,9 +927,14 @@ def _prepare_audio_span_from_local_source(
     )
     _assert_audio_file_identity(source_path, source_identity, label="元動画 source")
 
-    rms_difference, rms_reference = _audio_alignment_metrics(
+    warmup_frames = min(
+        _AUDIO_ALIGNMENT_WARMUP_MS * sample_rate // 1000,
+        requested_frames // 4,
+    )
+    rms_difference, rms_reference, compared_frames = _audio_alignment_metrics(
         _audio_span_samples(content, "選択区間の切り出し音声"),
         _audio_span_samples(reference_content, "開始位置検証用音声"),
+        skip_frames=warmup_frames,
     )
     tolerance = max(
         _AUDIO_ALIGNMENT_ABSOLUTE_TOLERANCE,
@@ -932,6 +952,8 @@ def _prepare_audio_span_from_local_source(
         "verified": True,
         "reference_seek_ms": reference_seek_ms,
         "reference_skip_frames": skip_frames,
+        "warmup_frames": warmup_frames,
+        "compared_frames": compared_frames,
         "rms_difference": round(rms_difference, 6),
         "rms_reference": round(rms_reference, 6),
         "tolerance": round(tolerance, 6),

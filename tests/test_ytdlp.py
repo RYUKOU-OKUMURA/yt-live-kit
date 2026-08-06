@@ -1386,6 +1386,7 @@ def _fake_source_toolchain(
     tmp_path: Path,
     *,
     misalign_reference_ms: int = 0,
+    warmup_noise_frames: int = 0,
     duration_ms: int = 3_600_000,
     stream_types: tuple[str, ...] = ("video", "audio"),
 ) -> tuple[Path, Path]:
@@ -1393,7 +1394,9 @@ def _fake_source_toolchain(
 
     切り出しは絶対 sample 位置だけで決まる決定的な波形を返すため、anchor が
     違っても内容が一致する。``misalign_reference_ms`` を与えると別 anchor 側
-    だけがずれ、開始位置検証の失敗経路を再現できる。
+    だけがずれ、開始位置検証の失敗経路を再現できる。``warmup_noise_frames``
+    は直接 anchor 側の先頭だけを汚し、実機で観測される AAC decoder warm-up
+    差を再現する。
     """
 
     bin_dir = tmp_path / "source tools"
@@ -1431,10 +1434,13 @@ else:
     seconds, _, milliseconds = args[args.index("-ss") + 1].partition(".")
     seek_ms = int(seconds) * 1000 + int(milliseconds or 0)
     shift_ms = {misalign_reference_ms} if start_sample else 0
+    warmup = 0 if start_sample else {warmup_noise_frames}
     base = (seek_ms + shift_ms) * 16 + start_sample
     payload = bytearray()
     for index in range(end_sample - start_sample):
         value = ((base + index) * 7919) % 20001 - 10000
+        if index < warmup:
+            value = -value
         payload.extend(int(value).to_bytes(2, "little", signed=True))
 with wave.open(str(output_path), "wb") as output:
     output.setnchannels(1)
@@ -1665,3 +1671,45 @@ def test_prepare_audio_span_regenerates_fallback_cache_when_source_appears(
     assert second.alignment["verified"] is True
     assert second.audio_bytes != first.audio_bytes
     assert len(calls) == 1
+
+
+def test_prepare_audio_span_tolerates_decoder_warmup_at_span_head(tmp_path):
+    """先頭の decoder warm-up 差は開始位置ずれではないので通す."""
+
+    data_dir = tmp_path / "data"
+    # 実機で観測された warm-up は 50 ms 未満。検証窓の除外は 250 ms である。
+    ffmpeg_path, _ = _fake_source_toolchain(tmp_path, warmup_noise_frames=800)
+    settings = Settings(
+        data_dir=data_dir,
+        ytdlp_path="yt-dlp-test",
+        ffmpeg_path=str(ffmpeg_path),
+    )
+    _write_local_source(data_dir, "IJvd6k6ZmUo")
+
+    result = prepare_audio_span("IJvd6k6ZmUo", (1_146_000, 1_154_000), settings)
+
+    assert result.audio_route == "local_source_accurate_seek"
+    assert result.alignment["verified"] is True
+    assert result.alignment["warmup_frames"] == 4_000
+    assert result.alignment["compared_frames"] == 128_000 - 4_000
+    assert result.alignment["rms_difference"] == 0.0
+
+
+def test_prepare_audio_span_still_rejects_offset_beyond_warmup_window(tmp_path):
+    """warm-up 窓の除外があっても、区間全体のずれは fail closed のままである."""
+
+    data_dir = tmp_path / "data"
+    ffmpeg_path, _ = _fake_source_toolchain(
+        tmp_path,
+        misalign_reference_ms=6_060,
+        warmup_noise_frames=800,
+    )
+    settings = Settings(
+        data_dir=data_dir,
+        ytdlp_path="yt-dlp-test",
+        ffmpeg_path=str(ffmpeg_path),
+    )
+    _write_local_source(data_dir, "IJvd6k6ZmUo")
+
+    with pytest.raises(AudioSpanError, match="開始位置"):
+        prepare_audio_span("IJvd6k6ZmUo", (1_146_000, 1_154_000), settings)
