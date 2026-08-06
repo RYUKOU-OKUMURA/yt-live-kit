@@ -12,7 +12,11 @@ from yt_live_kit.config import Settings
 from yt_live_kit.models.clips import ClipCandidate
 from yt_live_kit.models.highlights import HighlightSegment
 from yt_live_kit.models.short_cut import ShortCutDocument
-from yt_live_kit.models.transcript import TranscriptCue, TranscriptRange
+from yt_live_kit.models.transcript import (
+    TranscriptArtifactRef,
+    TranscriptCue,
+    TranscriptRange,
+)
 from yt_live_kit.services.short_cut import ShortCutError, validate_short_cut_selection
 from yt_live_kit.services.subtitle_burn import TimedCue, parse_vtt_with_end
 from yt_live_kit.services.transcript_artifact import (
@@ -1133,3 +1137,80 @@ def test_standalone_section_migrates_legacy_index_and_writes_session_state(
     assert session_state["short_cut_parent_video-1"] == "clip:clip_002"
     assert radio.call_args.kwargs["persist_state"] == "session"
     assert radio.call_args.args[1] == ("clip:clip_002",)
+
+
+def test_invalidated_artifact_still_allows_preparing_high_precision_again(
+    tmp_path: Path,
+) -> None:
+    """失効した cutplan から復旧できることを固定する.
+
+    S9-6 で旧 artifact を失効させたところ、`artifact_ref` を持つ cutplan では
+    lineage 不一致の通知が「高精度字幕を準備」まで無効化し、失効状態から
+    抜け出せなくなっていた（実機で確認）。復旧操作は止めず、先へ進む操作
+    だけを止める。
+    """
+
+    settings = Settings(data_dir=tmp_path)
+    option = ParentOption("切り抜き", _clip())
+    document = _document().model_copy(
+        update={
+            "artifact_ref": TranscriptArtifactRef(
+                video_id="video-1",
+                artifact_fingerprint="a" * 64,
+                source_kind="whisper_cpp",
+                path="transcripts/artifacts/" + "a" * 64 + ".json",
+            ),
+            "artifact_fingerprint": "a" * 64,
+            "used_range_cue_digests": ("b" * 64, "c" * 64),
+        }
+    )
+    notice = "保存済み高精度字幕 artifact が cutplan の lineage と一致しないため、表示を停止しました。"
+    columns = [MagicMock(), MagicMock()]
+    confirmed: list[object] = []
+
+    with (
+        patch("yt_live_kit.ui.components.short_cut.st.session_state", {}),
+        patch("yt_live_kit.ui.components.short_cut.st.markdown"),
+        patch("yt_live_kit.ui.components.short_cut.st.caption"),
+        patch("yt_live_kit.ui.components.short_cut.st.write"),
+        patch("yt_live_kit.ui.components.short_cut.st.warning"),
+        patch("yt_live_kit.ui.components.short_cut.st.error"),
+        patch("yt_live_kit.ui.components.short_cut.st.info"),
+        patch("yt_live_kit.ui.components.short_cut.st.success"),
+        patch("yt_live_kit.ui.components.short_cut.st.checkbox", return_value=True),
+        patch("yt_live_kit.ui.components.short_cut.st.text_input") as text_input,
+        patch("yt_live_kit.ui.components.short_cut.st.button", return_value=False) as button,
+        patch("yt_live_kit.ui.components.short_cut.st.columns", return_value=columns),
+        patch("yt_live_kit.ui.components.short_cut.st.container"),
+        patch(
+            "yt_live_kit.ui.components.short_cut.load_transcript_cues_for_document",
+            return_value=((), notice),
+        ),
+        patch("yt_live_kit.ui.components.short_cut.render_cutplan_provenance"),
+        patch("yt_live_kit.ui.components.short_cut._render_refine_preview") as refine,
+        patch("yt_live_kit.ui.components.short_cut.is_busy", return_value=False),
+    ):
+        text_input.side_effect = lambda *args, **kwargs: kwargs.get("value", "")
+        _render_plan(
+            video_id="video-1",
+            title="動画",
+            option=option,
+            document=document,
+            settings=settings,
+            on_segments_confirmed=lambda *args: confirmed.append(args),
+        )
+
+    # 復旧操作（高精度字幕の準備）は有効のまま渡す。
+    refine.assert_called_once()
+    assert refine.call_args.kwargs["disabled_message"] is None
+    assert refine.call_args.kwargs["busy"] is False
+
+    # 先へ進む操作は失効通知で止める。
+    confirm_calls = [
+        call
+        for call in button.call_args_list
+        if call.args and call.args[0] == "区間列を確定してテロップ確認へ"
+    ]
+    assert len(confirm_calls) == 1
+    assert confirm_calls[0].kwargs["disabled"] is True
+    assert confirmed == []

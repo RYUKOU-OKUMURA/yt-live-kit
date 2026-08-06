@@ -1127,7 +1127,11 @@ def _render_plan(
         f"（{int(MIN_TOTAL_MS / 1000)}〜{int(MAX_TOTAL_MS / 1000)} 秒に収める必要があります）"
     )
 
-    disabled_message = build_disabled_message(validation, parse_errors)
+    # 区間そのものが不正なら高精度化も先へ進むのも止める。artifact lineage の
+    # 不一致は「先へ進む」だけを止める。高精度字幕の準備はその失効を解消する
+    # 復旧操作であり、これを無効化すると失効した cutplan から抜け出せない。
+    selection_disabled_message = build_disabled_message(validation, parse_errors)
+    disabled_message = selection_disabled_message
     if document.artifact_ref is not None and transcript_notice:
         disabled_message = transcript_notice
     if disabled_message:
@@ -1151,7 +1155,7 @@ def _render_plan(
             segments=segments,
             settings=settings,
             busy=busy,
-            disabled_message=disabled_message,
+            disabled_message=selection_disabled_message,
         )
     if on_segments_confirmed is not None:
         if st.button(
