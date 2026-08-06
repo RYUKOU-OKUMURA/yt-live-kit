@@ -1,0 +1,107 @@
+- generic [ref=f2e2]:
+  - generic [ref=f2e3075]:
+    - list [ref=f2e3078]:
+      - listitem [ref=f2e3079]:
+        - link "video_library ライブラリ" [ref=f2e3081] [cursor=pointer]:
+          - /url: http://127.0.0.1:8502/
+          - generic [ref=f2e3082]: video_library
+          - paragraph [ref=f2e3087]: ライブラリ
+      - listitem [ref=f2e3088]:
+        - link "input 取り込み" [ref=f2e3090] [cursor=pointer]:
+          - /url: http://127.0.0.1:8502/intake
+          - generic [ref=f2e3091]: input
+          - paragraph [ref=f2e3096]: 取り込み
+      - listitem [ref=f2e3097]:
+        - link "settings 設定" [ref=f2e3099] [cursor=pointer]:
+          - /url: http://127.0.0.1:8502/settings
+          - generic [ref=f2e3100]: settings
+          - paragraph [ref=f2e3105]: 設定
+    - generic [ref=f2e3109]:
+      - heading "yt-live-kit" [level=3] [ref=f2e3114]
+      - paragraph [ref=f2e3119]: v0.3.0
+      - separator [ref=f2e3124]
+      - paragraph [ref=f2e3135]:
+        - strong [ref=f2e5277]: 作成中のショート
+      - paragraph [ref=f2e3140]: "対象ショート: HHKBの仕組みを完全に誤解していた"
+      - paragraph [ref=f2e3145]: ✅ 1 素材選定
+      - paragraph [ref=f2e3150]: │
+      - paragraph [ref=f2e3155]: ✅ 2 区間決定
+      - paragraph [ref=f2e3160]: │
+      - paragraph [ref=f2e3165]: ◉ 3 テロップ確認 ← 今
+      - paragraph [ref=f2e3170]: │
+      - paragraph [ref=f2e3175]: 🔒 4 生成
+      - paragraph [ref=f2e3180]: │
+      - paragraph [ref=f2e3185]: 🔒 5 最終確認
+      - paragraph [ref=f2e3190]: │
+      - paragraph [ref=f2e3195]: 🔒 6 予約
+      - paragraph [ref=f2e3200]: ── 次にやること ──
+      - paragraph [ref=f2e3205]: 台本全体を確認
+      - paragraph [ref=f2e5282]: 本日 0／3 ・ 要対応 0 件
+  - generic [ref=f2e3]:
+    - banner [ref=f2e3208]:
+      - generic [ref=f2e3211]:
+        - button "Deploy" [ref=f2e3213] [cursor=pointer]
+        - button "Main menu" [ref=f2e3217] [cursor=pointer]
+    - generic [ref=f2e6]:
+      - heading [level=2] [ref=f2e3225]:
+        - generic [ref=f2e3226]:
+          - img "movie icon" [ref=f2e3227]: movie
+          - text: 【#ライブ配信 No.73】そうだ！ノープランでライブ配信しよう！
+        - generic [ref=f2e3228]:
+          - link "Link to heading":
+            - /url: "#movie-no-73"
+      - paragraph [ref=f2e3233]: "動画 ID: hPeRSA9YVIM"
+      - generic [ref=f2e5085]:
+        - generic [ref=f2e5090]:
+          - paragraph [ref=f2e5093]:
+            - img "video_library icon" [ref=f2e5094]: video_library
+            - text: 素材候補
+          - paragraph [ref=f2e5097]: 3 件
+        - generic [ref=f2e5102]:
+          - paragraph [ref=f2e5105]:
+            - img "vertical_shades icon" [ref=f2e5106]: vertical_shades
+            - text: ショート
+          - paragraph [ref=f2e5109]: 生成 1 本
+          - paragraph [ref=f2e5113]: 予約可能 1 本
+        - generic [ref=f2e5118]:
+          - paragraph [ref=f2e5121]:
+            - img "description icon" [ref=f2e5122]: description
+            - text: 概要欄
+          - paragraph [ref=f2e5125]: 未反映
+      - paragraph [ref=f2e5287]: 工程 3／6
+      - radiogroup "作業を選択" [ref=f2e4675]:
+        - radio "video_library 素材候補" [ref=f2e4676] [cursor=pointer]:
+          - generic [ref=f2e4678]:
+            - generic [ref=f2e4679]: video_library
+            - paragraph [ref=f2e4682]: 素材候補
+        - radio "vertical_shades ショート作成" [checked] [ref=f2e4683] [cursor=pointer]:
+          - generic [ref=f2e4685]:
+            - generic [ref=f2e4686]: vertical_shades
+            - paragraph [ref=f2e4689]: ショート作成
+        - radio "campaign 公開・投稿" [ref=f2e4690] [cursor=pointer]:
+          - generic [ref=f2e4692]:
+            - generic [ref=f2e4693]: campaign
+            - paragraph [ref=f2e4696]: 公開・投稿
+      - paragraph [ref=f2e5136]: "適用中: ぼかし背景・default・Hook hook 設定で変更"
+      - alert [ref=f2e5290]:
+        - generic [ref=f2e5293]:
+          - paragraph [ref=f2e5294]: "テロップ台本の形式が正しくありません:"
+          - list [ref=f2e5295]:
+            - listitem [ref=f2e5296]: テロップ台本の JSON 形式が想定と異なります。必須項目の不足か、値の型が誤っています。新規生成では検索明快型・仕事影響型・好奇心型のタイトル案を固定順で 3 件返してください。再生成するか、不足案を手動補完し、余分な案は整理してください。
+      - status [ref=f2e5298]:
+        - paragraph [ref=f2e5302]: テロップ台本がありません。再生成するか、素材選定へ戻れます。
+      - generic [ref=f2e5304]:
+        - button [ref=f2e5307] [cursor=pointer]:
+          - paragraph [ref=f2e5311]: テロップ台本を再生成
+        - button [ref=f2e5314] [cursor=pointer]:
+          - paragraph [ref=f2e5318]: ラインを終了して素材選定へ戻る
+      - group [ref=f2e3821]:
+        - 'generic "keyboard_arrow_right 補助: 単体手動作成・まとめて生成" [ref=f2e3822] [cursor=pointer]':
+          - generic [ref=f2e3823]:
+            - generic [ref=f2e3824]: keyboard_arrow_right
+            - paragraph [ref=f2e3828]: "補助: 単体手動作成・まとめて生成"
+      - group [ref=f2e3675]:
+        - generic "keyboard_arrow_right 詳細・再生成" [ref=f2e3676] [cursor=pointer]:
+          - generic [ref=f2e3677]:
+            - generic [ref=f2e3678]: keyboard_arrow_right
+            - paragraph [ref=f2e3682]: 詳細・再生成

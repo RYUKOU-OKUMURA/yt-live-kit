@@ -1,0 +1,164 @@
+- generic [ref=f2e2]:
+  - generic [ref=f2e3075]:
+    - list [ref=f2e3078]:
+      - listitem [ref=f2e3079]:
+        - link "video_library ライブラリ" [ref=f2e3081] [cursor=pointer]:
+          - /url: http://127.0.0.1:8502/
+          - generic [ref=f2e3082]: video_library
+          - paragraph [ref=f2e3087]: ライブラリ
+      - listitem [ref=f2e3088]:
+        - link "input 取り込み" [ref=f2e3090] [cursor=pointer]:
+          - /url: http://127.0.0.1:8502/intake
+          - generic [ref=f2e3091]: input
+          - paragraph [ref=f2e3096]: 取り込み
+      - listitem [ref=f2e3097]:
+        - link "settings 設定" [ref=f2e3099] [cursor=pointer]:
+          - /url: http://127.0.0.1:8502/settings
+          - generic [ref=f2e3100]: settings
+          - paragraph [ref=f2e3105]: 設定
+    - generic [ref=f2e3109]:
+      - heading "yt-live-kit" [level=3] [ref=f2e3114]
+      - paragraph [ref=f2e3119]: v0.3.0
+      - separator [ref=f2e3124]
+      - paragraph [ref=f2e3129]:
+        - strong [ref=f2e3130]: 作成中のショート
+      - paragraph [ref=f2e3135]: まだ開始していません
+      - paragraph [ref=f2e3140]: ◉ 1 素材選定 ← 今
+      - paragraph [ref=f2e3145]: │
+      - paragraph [ref=f2e3150]: 🔒 2 区間決定
+      - paragraph [ref=f2e3155]: │
+      - paragraph [ref=f2e3160]: 🔒 3 テロップ確認
+      - paragraph [ref=f2e3165]: │
+      - paragraph [ref=f2e3170]: 🔒 4 生成
+      - paragraph [ref=f2e3175]: │
+      - paragraph [ref=f2e3180]: 🔒 5 最終確認
+      - paragraph [ref=f2e3185]: │
+      - paragraph [ref=f2e3190]: 🔒 6 予約
+      - paragraph [ref=f2e3195]: ── 次にやること ──
+      - paragraph [ref=f2e3200]: 素材を選び、区間を決める
+      - paragraph [ref=f2e3205]: 本日 0／3 ・ 要対応 0 件
+  - generic [ref=f2e3]:
+    - banner [ref=f2e3208]:
+      - generic [ref=f2e3211]:
+        - button "Deploy" [ref=f2e3213] [cursor=pointer]
+        - button "Main menu" [ref=f2e3217] [cursor=pointer]
+    - generic [ref=f2e6]:
+      - heading [level=2] [ref=f2e3225]:
+        - generic [ref=f2e3226]:
+          - img "movie icon" [ref=f2e3227]: movie
+          - text: 【#ライブ配信 No.73】そうだ！ノープランでライブ配信しよう！
+        - generic [ref=f2e3228]:
+          - link "Link to heading":
+            - /url: "#movie-no-73"
+      - paragraph [ref=f2e3233]: "動画 ID: hPeRSA9YVIM"
+      - generic [ref=f2e5085]:
+        - generic [ref=f2e5090]:
+          - paragraph [ref=f2e5093]:
+            - img "video_library icon" [ref=f2e5094]: video_library
+            - text: 素材候補
+          - paragraph [ref=f2e5097]: 3 件
+        - generic [ref=f2e5102]:
+          - paragraph [ref=f2e5105]:
+            - img "vertical_shades icon" [ref=f2e5106]: vertical_shades
+            - text: ショート
+          - paragraph [ref=f2e5109]: 生成 1 本
+          - paragraph [ref=f2e5113]: 予約可能 1 本
+        - generic [ref=f2e5118]:
+          - paragraph [ref=f2e5121]:
+            - img "description icon" [ref=f2e5122]: description
+            - text: 概要欄
+          - paragraph [ref=f2e5125]: 未反映
+      - radiogroup "作業を選択" [ref=f2e4675]:
+        - radio "video_library 素材候補" [ref=f2e4676] [cursor=pointer]:
+          - generic [ref=f2e4678]:
+            - generic [ref=f2e4679]: video_library
+            - paragraph [ref=f2e4682]: 素材候補
+        - radio "vertical_shades ショート作成" [checked] [ref=f2e4683] [cursor=pointer]:
+          - generic [ref=f2e4685]:
+            - generic [ref=f2e4686]: vertical_shades
+            - paragraph [ref=f2e4689]: ショート作成
+        - radio "campaign 公開・投稿" [ref=f2e4690] [cursor=pointer]:
+          - generic [ref=f2e4692]:
+            - generic [ref=f2e4693]: campaign
+            - paragraph [ref=f2e4696]: 公開・投稿
+      - heading "素材を選び、区間を決める" [level=3] [ref=f2e5130]:
+        - text: 素材を選び、区間を決める
+        - generic [ref=f2e5131]:
+          - link "Link to heading":
+            - /url: "#c209072"
+      - paragraph [ref=f2e5136]:
+        - strong [ref=f2e5137]: "今回作る候補:"
+        - text: "［切り抜き］clip_003: HHKBのファンクションキーを理解するまで（02:24:00 → 02:37:20）"
+      - group [ref=f2e4706]:
+        - generic "keyboard_arrow_right 対象を選び直す（全 3 件）" [ref=f2e4707] [cursor=pointer]:
+          - generic [ref=f2e4708]:
+            - generic [ref=f2e4709]: keyboard_arrow_right
+            - paragraph [ref=f2e4713]: 対象を選び直す（全 3 件）
+      - paragraph [ref=f2e3805]: 180 秒を超える候補から、ショート 1 本分の区間を AI に提案させます。提案は必ず確認・調整してから作成してください。
+      - button [ref=f2e4020] [cursor=pointer]:
+        - paragraph [ref=f2e3958]: 区間を提案し直す
+      - paragraph [ref=f2e3951]:
+        - strong [ref=f2e5138]: 提案された区間
+        - text: （採用するものにチェックし、必要なら時刻を調整）
+      - generic [ref=f2e4024] [cursor=pointer]:
+        - 'checkbox "cut_001: HHKBの仕組みを完全に誤解していた（50 秒）" [checked] [ref=f2e5139]'
+        - paragraph [ref=f2e4032]: "cut_001: HHKBの仕組みを完全に誤解していた（50 秒）"
+      - generic [ref=f2e5141]:
+        - generic [ref=f2e5143]:
+          - generic [ref=f2e5145]:
+            - paragraph [ref=f2e5150]: 開始を調整
+            - button [ref=f2e5153] [cursor=pointer]:
+              - paragraph [ref=f2e5157]: "-5 秒"
+            - button [ref=f2e5160] [cursor=pointer]:
+              - paragraph [ref=f2e5164]: "-1 秒"
+            - button [ref=f2e5167] [cursor=pointer]:
+              - paragraph [ref=f2e5171]: +1 秒
+            - button [ref=f2e5174] [cursor=pointer]:
+              - paragraph [ref=f2e5178]: +5 秒
+          - generic [ref=f2e5180]:
+            - paragraph [ref=f2e5184]: 開始
+            - textbox "開始" [ref=f2e5187]:
+              - /placeholder: ""
+              - text: 02:24:16
+        - generic [ref=f2e5189]:
+          - generic [ref=f2e5191]:
+            - paragraph [ref=f2e5196]: 終了を調整
+            - button [ref=f2e5199] [cursor=pointer]:
+              - paragraph [ref=f2e5203]: "-5 秒"
+            - button [ref=f2e5206] [cursor=pointer]:
+              - paragraph [ref=f2e5210]: "-1 秒"
+            - button [ref=f2e5213] [cursor=pointer]:
+              - paragraph [ref=f2e5217]: +1 秒
+            - button [ref=f2e5220] [cursor=pointer]:
+              - paragraph [ref=f2e5224]: +5 秒
+          - generic [ref=f2e5226]:
+            - paragraph [ref=f2e5230]: 終了
+            - textbox "終了" [active] [ref=f2e5233]:
+              - /placeholder: ""
+              - text: 02:24:33
+      - paragraph [ref=f2e5238]: 「完全に誤解しました」という強い告白から始まり、Fnキーでキーマップの世界が切り替わる仕組みをドラクエに例えて説明しているため、続きを見たくなる導入になります。
+      - paragraph [ref=f2e5243]:
+        - strong [ref=f2e5244]: この区間の文字起こし
+      - paragraph [ref=f2e5251]: マックでHHKBを最大限に利用するには、HHKBの物理的なファンクションキーとは別に、 マックオーエス固有のファンクション、うん、地球ギキーの、地球ギキーを、HHKB上のどこかのキーに割り当てるのが最も、最もスマートな方法です。
+      - paragraph [ref=f2e4823]:
+        - strong [ref=f2e4824]: "合計: 17.0 秒"
+        - text: （10〜180 秒に収める必要があります）
+      - group [ref=f2e5253]:
+        - generic "keyboard_arrow_right 字幕の照合データ" [ref=f2e5254] [cursor=pointer]:
+          - generic [ref=f2e5255]:
+            - generic [ref=f2e5256]: keyboard_arrow_right
+            - paragraph [ref=f2e5260]: 字幕の照合データ
+      - status [ref=f2e5263]:
+        - paragraph [ref=f2e5267]: 選択区間の高精度字幕を固定済みです。
+      - button [ref=f2e4473] [cursor=pointer]:
+        - paragraph [ref=f2e4477]: 区間列を確定してテロップ確認へ
+      - group [ref=f2e3821]:
+        - 'generic "keyboard_arrow_right 補助: 単体手動作成・まとめて生成" [ref=f2e3822] [cursor=pointer]':
+          - generic [ref=f2e3823]:
+            - generic [ref=f2e3824]: keyboard_arrow_right
+            - paragraph [ref=f2e3828]: "補助: 単体手動作成・まとめて生成"
+      - group [ref=f2e3675]:
+        - generic "keyboard_arrow_right 詳細・再生成" [ref=f2e3676] [cursor=pointer]:
+          - generic [ref=f2e3677]:
+            - generic [ref=f2e3678]: keyboard_arrow_right
+            - paragraph [ref=f2e3682]: 詳細・再生成

@@ -1,0 +1,122 @@
+- generic [ref=f2e2]:
+  - generic [ref=f2e3075]:
+    - list [ref=f2e3078]:
+      - listitem [ref=f2e3079]:
+        - link "video_library ライブラリ" [ref=f2e3081] [cursor=pointer]:
+          - /url: http://127.0.0.1:8502/
+          - generic [ref=f2e3082]: video_library
+          - paragraph [ref=f2e3087]: ライブラリ
+      - listitem [ref=f2e3088]:
+        - link "input 取り込み" [ref=f2e3090] [cursor=pointer]:
+          - /url: http://127.0.0.1:8502/intake
+          - generic [ref=f2e3091]: input
+          - paragraph [ref=f2e3096]: 取り込み
+      - listitem [ref=f2e3097]:
+        - link "settings 設定" [ref=f2e3099] [cursor=pointer]:
+          - /url: http://127.0.0.1:8502/settings
+          - generic [ref=f2e3100]: settings
+          - paragraph [ref=f2e3105]: 設定
+    - generic [ref=f2e3109]:
+      - heading "yt-live-kit" [level=3] [ref=f2e3114]
+      - paragraph [ref=f2e3119]: v0.3.0
+      - separator [ref=f2e3124]
+      - paragraph [ref=f2e3129]:
+        - strong [ref=f2e3130]: 作成中のショート
+      - paragraph [ref=f2e3135]: まだ開始していません
+      - paragraph [ref=f2e3140]: ◉ 1 素材選定 ← 今
+      - paragraph [ref=f2e3145]: │
+      - paragraph [ref=f2e3150]: 🔒 2 区間決定
+      - paragraph [ref=f2e3155]: │
+      - paragraph [ref=f2e3160]: 🔒 3 テロップ確認
+      - paragraph [ref=f2e3165]: │
+      - paragraph [ref=f2e3170]: 🔒 4 生成
+      - paragraph [ref=f2e3175]: │
+      - paragraph [ref=f2e3180]: 🔒 5 最終確認
+      - paragraph [ref=f2e3185]: │
+      - paragraph [ref=f2e3190]: 🔒 6 予約
+      - paragraph [ref=f2e3195]: ── 次にやること ──
+      - paragraph [ref=f2e3200]: 素材を選び、区間を決める
+      - paragraph [ref=f2e3205]: 本日 0／3 ・ 要対応 0 件
+  - generic [ref=f2e3]:
+    - banner [ref=f2e3208]:
+      - generic [ref=f2e3211]:
+        - button "Deploy" [ref=f2e3213] [cursor=pointer]
+        - button "Main menu" [ref=f2e3217] [cursor=pointer]
+    - generic [ref=f2e6]:
+      - heading [level=2] [ref=f2e3225]:
+        - generic [ref=f2e3226]:
+          - img "movie icon" [ref=f2e3227]: movie
+          - text: 【#ライブ配信 No.73】そうだ！ノープランでライブ配信しよう！
+        - generic [ref=f2e3228]:
+          - link "Link to heading":
+            - /url: "#movie-no-73"
+      - paragraph [ref=f2e3233]: "動画 ID: hPeRSA9YVIM"
+      - generic [ref=f2e3235]:
+        - generic [ref=f2e3240]:
+          - paragraph [ref=f2e3243]:
+            - img "video_library icon" [ref=f2e3244]: video_library
+            - text: 素材候補
+          - paragraph [ref=f2e3247]: 3 件
+        - generic [ref=f2e3252]:
+          - paragraph [ref=f2e3255]:
+            - img "vertical_shades icon" [ref=f2e3256]: vertical_shades
+            - text: ショート
+          - paragraph [ref=f2e3259]: 生成 1 本
+          - paragraph [ref=f2e3263]: 予約可能 1 本
+        - generic [ref=f2e3268]:
+          - paragraph [ref=f2e3271]:
+            - img "description icon" [ref=f2e3272]: description
+            - text: 概要欄
+          - paragraph [ref=f2e3275]: 未反映
+      - radiogroup "作業を選択" [ref=f2e3278]:
+        - radio "video_library 素材候補" [checked] [active] [ref=f2e3279] [cursor=pointer]:
+          - generic [ref=f2e3281]:
+            - generic [ref=f2e3282]: video_library
+            - paragraph [ref=f2e3285]: 素材候補
+        - radio "vertical_shades ショート作成" [ref=f2e3286] [cursor=pointer]:
+          - generic [ref=f2e3288]:
+            - generic [ref=f2e3289]: vertical_shades
+            - paragraph [ref=f2e3292]: ショート作成
+        - radio "campaign 公開・投稿" [ref=f2e3293] [cursor=pointer]:
+          - generic [ref=f2e3295]:
+            - generic [ref=f2e3296]: campaign
+            - paragraph [ref=f2e3299]: 公開・投稿
+      - paragraph [ref=f2e3683]: 候補を確認し、作成するショートへ同じ順序で引き継ぎます。
+      - paragraph [ref=f2e3311]: 自動字幕から抽出した候補です（抽出記録は未保存）。
+      - generic [ref=f2e3313]:
+        - paragraph [ref=f2e3318]:
+          - strong [ref=f2e3319]: 無料の音声入力アプリ「アミカル」を実演レビュー
+        - paragraph [ref=f2e3688]: 00:50:40 → 01:00:40（600 秒）
+        - paragraph [ref=f2e3692]: アミカルの初期設定から日本語の音声入力テストまでを実演し、速度と精度を確認している区間です。導入時のつまずきと解決も含まれ、一本のレビューとして完結しています。
+        - button [ref=f2e3695] [cursor=pointer]:
+          - paragraph [ref=f2e3699]: ショート作成対象へ追加
+      - generic [ref=f2e3701]:
+        - paragraph [ref=f2e3706]:
+          - strong [ref=f2e3707]: 整体師が教えるデスクワークの負担対策
+        - paragraph [ref=f2e3712]: 01:08:00 → 01:22:20（860 秒）
+        - paragraph [ref=f2e3717]: パソコン作業による手首・肩・首への負担を解説し、ウォーキングやストレッチポールを使った具体的なケア方法まで紹介しています。実践時の注意点も含む、まとまりのよい健康解説です。
+        - button [ref=f2e3720] [cursor=pointer]:
+          - paragraph [ref=f2e3724]: ショート作成対象へ追加
+      - generic [ref=f2e3726]:
+        - paragraph [ref=f2e3731]:
+          - strong [ref=f2e3732]: HHKBのファンクションキーを理解するまで
+        - paragraph [ref=f2e3737]: 02:24:00 → 02:37:20（800 秒）
+        - paragraph [ref=f2e3742]: HHKBとMacのファンクションキーの違いを調べながら、キーマップの二層構造を理解していく区間です。ドラクエに例えた説明を交え、疑問から納得までの流れが完結しています。
+        - button [ref=f2e3745] [cursor=pointer]:
+          - paragraph [ref=f2e3749]: ショート作成対象へ追加
+      - separator [ref=f2e3750]
+      - heading "補助操作" [level=4] [ref=f2e3752]:
+        - text: 補助操作
+        - generic [ref=f2e3753]:
+          - link "Link to heading":
+            - /url: "#1b2e1240"
+      - group [ref=f2e3756]:
+        - 'generic "keyboard_arrow_right 補助: ハイライトまとめ動画" [ref=f2e3757] [cursor=pointer]':
+          - generic [ref=f2e3758]:
+            - generic [ref=f2e3759]: keyboard_arrow_right
+            - paragraph [ref=f2e3763]: "補助: ハイライトまとめ動画"
+      - group [ref=f2e3675]:
+        - generic "keyboard_arrow_right 詳細・再生成" [ref=f2e3676] [cursor=pointer]:
+          - generic [ref=f2e3677]:
+            - generic [ref=f2e3678]: keyboard_arrow_right
+            - paragraph [ref=f2e3682]: 詳細・再生成

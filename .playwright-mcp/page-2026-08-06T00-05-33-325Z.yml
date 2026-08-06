@@ -1,0 +1,204 @@
+- generic [ref=f3e2]:
+  - generic [ref=f3e3075]:
+    - list [ref=f3e3078]:
+      - listitem [ref=f3e3079]:
+        - link "video_library ライブラリ" [ref=f3e3081] [cursor=pointer]:
+          - /url: http://127.0.0.1:8502/
+          - generic [ref=f3e3082]: video_library
+          - paragraph [ref=f3e3087]: ライブラリ
+      - listitem [ref=f3e3088]:
+        - link "input 取り込み" [ref=f3e3090] [cursor=pointer]:
+          - /url: http://127.0.0.1:8502/intake
+          - generic [ref=f3e3091]: input
+          - paragraph [ref=f3e3096]: 取り込み
+      - listitem [ref=f3e3097]:
+        - link "settings 設定" [ref=f3e3099] [cursor=pointer]:
+          - /url: http://127.0.0.1:8502/settings
+          - generic [ref=f3e3100]: settings
+          - paragraph [ref=f3e3105]: 設定
+    - generic [ref=f3e3109]:
+      - heading "yt-live-kit" [level=3] [ref=f3e3114]
+      - paragraph [ref=f3e3119]: v0.3.0
+      - separator [ref=f3e3124]
+      - paragraph [ref=f3e3129]:
+        - strong [ref=f3e3130]: 作成中のショート
+      - paragraph [ref=f3e3135]: まだ開始していません
+      - paragraph [ref=f3e3140]: ◉ 1 素材選定 ← 今
+      - paragraph [ref=f3e3145]: │
+      - paragraph [ref=f3e3150]: 🔒 2 区間決定
+      - paragraph [ref=f3e3155]: │
+      - paragraph [ref=f3e3160]: 🔒 3 テロップ確認
+      - paragraph [ref=f3e3165]: │
+      - paragraph [ref=f3e3170]: 🔒 4 生成
+      - paragraph [ref=f3e3175]: │
+      - paragraph [ref=f3e3180]: 🔒 5 最終確認
+      - paragraph [ref=f3e3185]: │
+      - paragraph [ref=f3e3190]: 🔒 6 予約
+      - paragraph [ref=f3e3195]: ── 次にやること ──
+      - paragraph [ref=f3e3200]: 素材を選び、区間を決める
+      - paragraph [ref=f3e3205]: 本日 0／3 ・ 要対応 0 件
+  - generic [ref=f3e3]:
+    - banner [ref=f3e3208]:
+      - generic [ref=f3e3211]:
+        - button "Deploy" [ref=f3e3213] [cursor=pointer]
+        - button "Main menu" [ref=f3e3217] [cursor=pointer]
+    - generic [ref=f3e6]:
+      - heading [level=2] [ref=f3e3221]:
+        - generic [ref=f3e3222]:
+          - img "movie icon" [ref=f3e3223]: movie
+          - text: 【#ライブ配信 No.93】そそるぜぇ、これは！（21時まで）
+        - generic [ref=f3e12]:
+          - link "Link to heading":
+            - /url: "#34738ae7"
+      - paragraph [ref=f3e17]: "動画 ID: mKwn-93gg90"
+      - generic [ref=f3e4822]:
+        - generic [ref=f3e4827]:
+          - paragraph [ref=f3e4830]:
+            - img "video_library icon" [ref=f3e4831]: video_library
+            - text: 素材候補
+          - paragraph [ref=f3e4834]: 2 件
+        - generic [ref=f3e4839]:
+          - paragraph [ref=f3e4842]:
+            - img "vertical_shades icon" [ref=f3e4843]: vertical_shades
+            - text: ショート
+          - paragraph [ref=f3e4846]: 生成 0 本
+          - paragraph [ref=f3e4850]: 予約可能 0 本
+        - generic [ref=f3e4855]:
+          - paragraph [ref=f3e4858]:
+            - img "description icon" [ref=f3e4859]: description
+            - text: 概要欄
+          - paragraph [ref=f3e4862]: 未反映
+      - radiogroup "作業を選択" [ref=f3e4302]:
+        - radio "video_library 素材候補" [ref=f3e4303] [cursor=pointer]:
+          - generic [ref=f3e4305]:
+            - generic [ref=f3e4306]: video_library
+            - paragraph [ref=f3e4309]: 素材候補
+        - radio "vertical_shades ショート作成" [checked] [ref=f3e4310] [cursor=pointer]:
+          - generic [ref=f3e4312]:
+            - generic [ref=f3e4313]: vertical_shades
+            - paragraph [ref=f3e4316]: ショート作成
+        - radio "campaign 公開・投稿" [ref=f3e4317] [cursor=pointer]:
+          - generic [ref=f3e4319]:
+            - generic [ref=f3e4320]: campaign
+            - paragraph [ref=f3e4323]: 公開・投稿
+      - heading "素材を選び、区間を決める" [level=3] [ref=f3e4867]:
+        - text: 素材を選び、区間を決める
+        - generic [ref=f3e4868]:
+          - link "Link to heading":
+            - /url: "#c209072"
+      - paragraph [ref=f3e4873]:
+        - strong [ref=f3e4874]: "今回作る候補:"
+        - text: "［切り抜き］clip_001: 無料のローカル文字起こし環境を徹底検討（00:18:40 → 00:30:40）"
+      - group [ref=f3e4333]:
+        - generic "keyboard_arrow_right 対象を選び直す（全 2 件）" [ref=f3e4334] [cursor=pointer]:
+          - generic [ref=f3e4335]:
+            - generic [ref=f3e4336]: keyboard_arrow_right
+            - paragraph [ref=f3e4340]: 対象を選び直す（全 2 件）
+      - paragraph [ref=f3e3319]: 180 秒を超える候補から、ショート 1 本分の区間を AI に提案させます。提案は必ず確認・調整してから作成してください。
+      - button [ref=f3e3538] [cursor=pointer]:
+        - paragraph [ref=f3e3326]: 区間を提案し直す
+      - paragraph [ref=f3e3476]:
+        - strong [ref=f3e4875]: 提案された区間
+        - text: （採用するものにチェックし、必要なら時刻を調整）
+      - generic [ref=f3e3542] [cursor=pointer]:
+        - 'checkbox "cut_001: M1 Macで約35倍速の文字起こし（8 秒）" [checked] [ref=f3e4876]'
+        - paragraph [ref=f3e3550]: "cut_001: M1 Macで約35倍速の文字起こし（8 秒）"
+      - generic [ref=f3e4878]:
+        - generic [ref=f3e4880]:
+          - generic [ref=f3e4882]:
+            - paragraph [ref=f3e4887]: 開始を調整
+            - button [ref=f3e4890] [cursor=pointer]:
+              - paragraph [ref=f3e4894]: "-5 秒"
+            - button [ref=f3e4897] [cursor=pointer]:
+              - paragraph [ref=f3e4901]: "-1 秒"
+            - button [ref=f3e4904] [cursor=pointer]:
+              - paragraph [ref=f3e4908]: +1 秒
+            - button [ref=f3e4911] [cursor=pointer]:
+              - paragraph [ref=f3e4915]: +5 秒
+          - generic [ref=f3e4917]:
+            - paragraph [ref=f3e4921]: 開始
+            - textbox "開始" [ref=f3e4924]:
+              - /placeholder: ""
+              - text: 00:19:06
+        - generic [ref=f3e4926]:
+          - generic [ref=f3e4928]:
+            - paragraph [ref=f3e4933]: 終了を調整
+            - button [ref=f3e4936] [cursor=pointer]:
+              - paragraph [ref=f3e4940]: "-5 秒"
+            - button [ref=f3e4943] [cursor=pointer]:
+              - paragraph [ref=f3e4947]: "-1 秒"
+            - button [ref=f3e4950] [cursor=pointer]:
+              - paragraph [ref=f3e4954]: +1 秒
+            - button [ref=f3e4957] [cursor=pointer]:
+              - paragraph [ref=f3e4961]: +5 秒
+          - generic [ref=f3e4963]:
+            - paragraph [ref=f3e4967]: 終了
+            - textbox "終了" [ref=f3e4970]:
+              - /placeholder: ""
+              - text: 00:19:14
+      - paragraph [ref=f3e4975]: 3300秒の音声を約94秒で処理できたという驚きの実績から始まり、ローカル導入を決意する流れが視聴者の興味を引く。
+      - paragraph [ref=f3e4980]:
+        - strong [ref=f3e4981]: この区間の文字起こし
+      - paragraph [ref=f3e4988]: オラマとかで、ローカル LHPは、
+      - generic [ref=f3e3665] [cursor=pointer]:
+        - 'checkbox "cut_002: Whisperをローカル導入したい理由（16 秒）" [checked] [ref=f3e4989]'
+        - paragraph [ref=f3e3673]: "cut_002: Whisperをローカル導入したい理由（16 秒）"
+      - generic [ref=f3e3675]:
+        - generic [ref=f3e4991]:
+          - generic [ref=f3e4993]:
+            - paragraph [ref=f3e4998]: 開始を調整
+            - button [ref=f3e5001] [cursor=pointer]:
+              - paragraph [ref=f3e5005]: "-5 秒"
+            - button [ref=f3e5008] [cursor=pointer]:
+              - paragraph [ref=f3e5012]: "-1 秒"
+            - button [ref=f3e5015] [cursor=pointer]:
+              - paragraph [ref=f3e5019]: +1 秒
+            - button [ref=f3e5022] [cursor=pointer]:
+              - paragraph [ref=f3e5026]: +5 秒
+          - generic [ref=f3e5028]:
+            - paragraph [ref=f3e5032]: 開始
+            - textbox "開始" [ref=f3e5035]:
+              - /placeholder: ""
+              - text: 00:19:39
+        - generic [ref=f3e5037]:
+          - generic [ref=f3e5039]:
+            - paragraph [ref=f3e5044]: 終了を調整
+            - button [ref=f3e5047] [cursor=pointer]:
+              - paragraph [ref=f3e5051]: "-5 秒"
+            - button [ref=f3e5054] [cursor=pointer]:
+              - paragraph [ref=f3e5058]: "-1 秒"
+            - button [ref=f3e5061] [cursor=pointer]:
+              - paragraph [ref=f3e5065]: +1 秒
+            - button [ref=f3e5068] [cursor=pointer]:
+              - paragraph [ref=f3e5072]: +5 秒
+          - generic [ref=f3e5074]:
+            - paragraph [ref=f3e5078]: 終了
+            - textbox "終了" [ref=f3e5081]:
+              - /placeholder: ""
+              - text: 00:19:55
+      - paragraph [ref=f3e5086]: 字幕生成サービスを試して失敗した経緯と、Whisperをローカルで無料運用したい目的が簡潔に説明されている。
+      - paragraph [ref=f3e5091]:
+        - strong [ref=f3e5092]: この区間の文字起こし
+      - paragraph [ref=f3e5099]: これワンチャンローカルで行けるんだったらマジアリだよなぁ。 Together AIの料金がわかんねぇなぁ。 Wisper Large V3…あ、こっちか。
+      - paragraph [ref=f3e4560]:
+        - strong [ref=f3e4561]: "合計: 24.0 秒"
+        - text: （10〜180 秒に収める必要があります）
+      - group [ref=f3e5101]:
+        - generic "keyboard_arrow_right 字幕の照合データ" [ref=f3e5102] [cursor=pointer]:
+          - generic [ref=f3e5103]:
+            - generic [ref=f3e5104]: keyboard_arrow_right
+            - paragraph [ref=f3e5108]: 字幕の照合データ
+      - status [ref=f3e5111]:
+        - paragraph [ref=f3e5115]: 選択区間の高精度字幕を固定済みです。
+      - button [ref=f3e4119] [cursor=pointer]:
+        - paragraph [ref=f3e4123]: 区間列を確定してテロップ確認へ
+      - group [ref=f3e4126]:
+        - 'generic "keyboard_arrow_right 補助: 単体手動作成・まとめて生成" [ref=f3e4127] [cursor=pointer]':
+          - generic [ref=f3e4128]:
+            - generic [ref=f3e4129]: keyboard_arrow_right
+            - paragraph [ref=f3e4133]: "補助: 単体手動作成・まとめて生成"
+      - group [ref=f3e4136]:
+        - generic "keyboard_arrow_right 詳細・再生成" [ref=f3e4137] [cursor=pointer]:
+          - generic [ref=f3e4138]:
+            - generic [ref=f3e4139]: keyboard_arrow_right
+            - paragraph [ref=f3e4143]: 詳細・再生成

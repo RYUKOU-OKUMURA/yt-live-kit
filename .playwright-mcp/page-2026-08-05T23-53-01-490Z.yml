@@ -1,0 +1,225 @@
+- generic [ref=f2e2]:
+  - generic [ref=f2e3075]:
+    - list [ref=f2e3078]:
+      - listitem [ref=f2e3079]:
+        - link "video_library ライブラリ" [ref=f2e3081] [cursor=pointer]:
+          - /url: http://127.0.0.1:8502/
+          - generic [ref=f2e3082]: video_library
+          - paragraph [ref=f2e3087]: ライブラリ
+      - listitem [ref=f2e3088]:
+        - link "input 取り込み" [ref=f2e3090] [cursor=pointer]:
+          - /url: http://127.0.0.1:8502/intake
+          - generic [ref=f2e3091]: input
+          - paragraph [ref=f2e3096]: 取り込み
+      - listitem [ref=f2e3097]:
+        - link "settings 設定" [ref=f2e3099] [cursor=pointer]:
+          - /url: http://127.0.0.1:8502/settings
+          - generic [ref=f2e3100]: settings
+          - paragraph [ref=f2e3105]: 設定
+    - generic [ref=f2e3109]:
+      - heading "yt-live-kit" [level=3] [ref=f2e3114]
+      - paragraph [ref=f2e3119]: v0.3.0
+      - separator [ref=f2e3124]
+      - paragraph [ref=f2e3129]:
+        - strong [ref=f2e3130]: 作成中のショート
+      - paragraph [ref=f2e3135]: まだ開始していません
+      - paragraph [ref=f2e3140]: ◉ 1 素材選定 ← 今
+      - paragraph [ref=f2e3145]: │
+      - paragraph [ref=f2e3150]: 🔒 2 区間決定
+      - paragraph [ref=f2e3155]: │
+      - paragraph [ref=f2e3160]: 🔒 3 テロップ確認
+      - paragraph [ref=f2e3165]: │
+      - paragraph [ref=f2e3170]: 🔒 4 生成
+      - paragraph [ref=f2e3175]: │
+      - paragraph [ref=f2e3180]: 🔒 5 最終確認
+      - paragraph [ref=f2e3185]: │
+      - paragraph [ref=f2e3190]: 🔒 6 予約
+      - paragraph [ref=f2e3195]: ── 次にやること ──
+      - paragraph [ref=f2e3200]: 素材を選び、区間を決める
+      - paragraph [ref=f2e3205]: 本日 0／3 ・ 要対応 0 件
+  - generic [ref=f2e3]:
+    - banner [ref=f2e3208]:
+      - generic [ref=f2e3211]:
+        - button "Deploy" [ref=f2e3213] [cursor=pointer]
+        - button "Main menu" [ref=f2e3217] [cursor=pointer]
+    - generic [ref=f2e6]:
+      - heading [level=2] [ref=f2e3225]:
+        - generic [ref=f2e3226]:
+          - img "movie icon" [ref=f2e3227]: movie
+          - text: 【#ライブ配信 No.73】そうだ！ノープランでライブ配信しよう！
+        - generic [ref=f2e3228]:
+          - link "Link to heading":
+            - /url: "#movie-no-73"
+      - paragraph [ref=f2e3233]: "動画 ID: hPeRSA9YVIM"
+      - generic [ref=f2e3235]:
+        - generic [ref=f2e3240]:
+          - paragraph [ref=f2e3243]:
+            - img "video_library icon" [ref=f2e3244]: video_library
+            - text: 素材候補
+          - paragraph [ref=f2e3247]: 3 件
+        - generic [ref=f2e3252]:
+          - paragraph [ref=f2e3255]:
+            - img "vertical_shades icon" [ref=f2e3256]: vertical_shades
+            - text: ショート
+          - paragraph [ref=f2e3259]: 生成 1 本
+          - paragraph [ref=f2e3263]: 予約可能 1 本
+        - generic [ref=f2e3268]:
+          - paragraph [ref=f2e3271]:
+            - img "description icon" [ref=f2e3272]: description
+            - text: 概要欄
+          - paragraph [ref=f2e3275]: 未反映
+      - radiogroup "作業を選択" [ref=f2e3278]:
+        - radio "video_library 素材候補" [ref=f2e3279] [cursor=pointer]:
+          - generic [ref=f2e3281]:
+            - generic [ref=f2e3282]: video_library
+            - paragraph [ref=f2e3285]: 素材候補
+        - radio "vertical_shades ショート作成" [ref=f2e3286] [cursor=pointer]:
+          - generic [ref=f2e3288]:
+            - generic [ref=f2e3289]: vertical_shades
+            - paragraph [ref=f2e3292]: ショート作成
+        - radio "campaign 公開・投稿" [checked] [ref=f2e3293] [cursor=pointer]:
+          - generic [ref=f2e3295]:
+            - generic [ref=f2e3296]: campaign
+            - paragraph [ref=f2e3299]: 公開・投稿
+      - heading "ショートの予約投稿" [level=4] [ref=f2e3305]:
+        - text: ショートの予約投稿
+        - generic [ref=f2e3306]:
+          - link "Link to heading":
+            - /url: "#43dcb912"
+      - paragraph [ref=f2e3311]: ショート制作ラインの工程 6 です。生成済みショートを private 固定・通知なしでアップロードし、次の空き枠へ予約します。
+      - generic [ref=f2e3313]:
+        - paragraph [ref=f2e3318]:
+          - strong [ref=f2e3319]: アミカルの音声入力を日本語で実演
+        - group [ref=f2e3322]:
+          - generic "keyboard_arrow_right このショートの内部 ID" [ref=f2e3323] [cursor=pointer]:
+            - generic [ref=f2e3324]:
+              - generic [ref=f2e3325]: keyboard_arrow_right
+              - paragraph [ref=f2e3329]: このショートの内部 ID
+        - alert [ref=f2e3332]:
+          - paragraph [ref=f2e3336]: このショートは既存の投稿 operation を追跡中のため、新しい予約投稿は開始できません。投稿履歴を確認してください。
+        - paragraph [ref=f2e3341]:
+          - strong [ref=f2e3342]: タイトル候補（固定3方向）
+        - paragraph [ref=f2e3347]:
+          - strong [ref=f2e3348]: 検索明快型
+        - paragraph [ref=f2e3353]: アミカルの音声入力を日本語で実演
+        - alert [ref=f2e3356]:
+          - paragraph [ref=f2e3360]: 検索明快型は18〜32文字推奨の範囲外です（現在 16 文字）。保存は可能です。
+        - paragraph [ref=f2e3365]:
+          - strong [ref=f2e3366]: 仕事影響型
+        - paragraph [ref=f2e3371]: 音声入力アプリで文字起こしが快適に
+        - alert [ref=f2e3374]:
+          - paragraph [ref=f2e3378]: 仕事影響型は18〜32文字推奨の範囲外です（現在 17 文字）。保存は可能です。
+        - paragraph [ref=f2e3383]:
+          - strong [ref=f2e3384]: 好奇心型
+        - paragraph [ref=f2e3389]: ローカル音声入力の実力は？
+        - alert [ref=f2e3392]:
+          - paragraph [ref=f2e3396]: 好奇心型は18〜32文字推奨の範囲外です（現在 13 文字）。保存は可能です。
+        - generic [ref=f2e3398]:
+          - paragraph [ref=f2e3402]: タイトル候補
+          - group [ref=f2e3404]:
+            - combobox "タイトル候補" [disabled] [ref=f2e3405]: "検索明快型: アミカルの音声入力を日本語で実演"
+            - button "Open" [disabled] [ref=f2e3406]
+        - generic [ref=f2e3411]:
+          - generic [ref=f2e3412]:
+            - paragraph [ref=f2e3415]: タイトル
+            - button "Help for タイトル" [ref=f2e3419] [cursor=pointer]
+          - textbox "タイトル" [disabled] [ref=f2e3425]:
+            - /placeholder: ""
+            - text: アミカルの音声入力を日本語で実演
+        - generic [ref=f2e3427]:
+          - generic [ref=f2e3428]:
+            - paragraph [ref=f2e3431]: 説明文
+            - button "Help for 説明文" [ref=f2e3435] [cursor=pointer]
+          - textbox "説明文" [disabled] [ref=f2e3440]:
+            - /placeholder: ""
+            - text: ローカルで使える音声入力アプリ「アミカル」を日本語でテスト。言語設定を直して、文字起こしの精度と入力速度を確かめます。 ▼ 元のライブ配信 【#ライブ配信 No.73】そうだ！ノープランでライブ配信しよう！ https://www.youtube.com/watch?v=hPeRSA9YVIM&t=3498s チャンネル登録は動画下のチャンネル名からお願いします。
+        - generic [ref=f2e3442]:
+          - generic [ref=f2e3443]:
+            - paragraph [ref=f2e3446]: タグ
+            - button "Help for タグ" [ref=f2e3450] [cursor=pointer]
+          - generic [ref=f2e3456]:
+            - generic [ref=f2e3457]:
+              - generic "アミカル" [ref=f2e3458]
+              - generic "音声入力" [ref=f2e3462]
+              - generic "文字起こし" [ref=f2e3466]
+              - generic "ローカルAI" [ref=f2e3470]
+              - combobox "Selected アミカル, 音声入力, 文字起こし, ローカルAI. タグ" [disabled] [ref=f2e3475]
+            - img "open" [ref=f2e3477] [cursor=pointer]
+        - paragraph [ref=f2e3483]: 編集後は、予約日時と投稿内容をあらためて確認してください。
+        - paragraph [ref=f2e3488]: "予約日時の timezone: Asia/Tokyo"
+        - generic [ref=f2e3490]:
+          - paragraph [ref=f2e3494]: 予約日
+          - textbox "Select a date." [disabled] [ref=f2e3498]:
+            - /placeholder: YYYY/MM/DD
+            - text: 2026/08/07
+          - paragraph: Press the down arrow key to interact with the calendar and select a date. Press the escape button to close the calendar.
+          - paragraph: Selected date is 2026/08/07. Select the second date.
+        - generic [ref=f2e3500]:
+          - paragraph [ref=f2e3504]: 予約時刻
+          - generic [ref=f2e3506]:
+            - generic [ref=f2e3507]:
+              - generic [ref=f2e3508]: 14:00
+              - combobox "Selected 14:00. Select a time, 24-hour format." [disabled] [ref=f2e3510]
+            - img "open" [ref=f2e3512]
+        - button [disabled] [ref=f2e3516]:
+          - paragraph [ref=f2e3520]: 予約日時と投稿内容を確認
+      - separator [ref=f2e3525]
+      - heading "投稿後のフォローアップ" [level=4] [ref=f2e3531]:
+        - text: 投稿後のフォローアップ
+        - generic [ref=f2e3532]:
+          - link "Link to heading":
+            - /url: "#ecf1ddac"
+      - paragraph [ref=f2e3537]: 予約・投稿が済んだショートの追跡と、YouTube Studio での関連動画設定です。
+      - paragraph [ref=f2e3542]:
+        - strong [ref=f2e3543]: この動画から開始した投稿の追跡
+      - generic [ref=f2e3545]:
+        - paragraph [ref=f2e3550]:
+          - strong [ref=f2e3551]: "投稿状態: アップロード済み"
+        - paragraph [ref=f2e3556]: "予約日時: 2026-08-07T00:00:00+00:00"
+        - paragraph [ref=f2e3561]: "公開判定: 未確認"
+        - paragraph [ref=f2e3566]: 最終確認 2026-08-04T09:29:53.997021+00:00 / 処理完了
+        - group [ref=f2e3569]:
+          - generic "keyboard_arrow_right この投稿の内部 ID" [ref=f2e3570] [cursor=pointer]:
+            - generic [ref=f2e3571]:
+              - generic [ref=f2e3572]: keyboard_arrow_right
+              - paragraph [ref=f2e3576]: この投稿の内部 ID
+        - paragraph [ref=f2e3581]: 公開予定時刻までは公開状態を確認できません。予約時刻後にこの画面から確認してください。
+        - generic [ref=f2e3583]:
+          - paragraph [ref=f2e3588]:
+            - strong [ref=f2e3589]: 関連動画の Studio 手動確認
+          - paragraph [ref=f2e3594]: "状態: Studio 設定の確認待ち"
+          - paragraph [ref=f2e3599]:
+            - link "YouTube Studio の編集画面を開く" [ref=f2e3600] [cursor=pointer]:
+              - /url: https://studio.youtube.com/video/VOnXpQqE_l0/edit
+          - group [ref=f2e3603]:
+            - generic "keyboard_arrow_right Studio で設定する ID と手順" [ref=f2e3604] [cursor=pointer]:
+              - generic [ref=f2e3605]:
+                - generic [ref=f2e3606]: keyboard_arrow_right
+                - paragraph [ref=f2e3610]: Studio で設定する ID と手順
+          - button [ref=f2e3613] [cursor=pointer]:
+            - paragraph [ref=f2e3617]: Studioで関連動画を設定済みとして確認
+      - group [ref=f2e3620]:
+        - generic "keyboard_arrow_right 他の動画の確認待ち（2 件）" [ref=f2e3621] [cursor=pointer]:
+          - generic [ref=f2e3622]:
+            - generic [ref=f2e3623]: keyboard_arrow_right
+            - paragraph [ref=f2e3627]: 他の動画の確認待ち（2 件）
+      - separator [ref=f2e3632]
+      - heading "元動画の概要欄" [level=4] [ref=f2e3638]:
+        - text: 元動画の概要欄
+        - generic [ref=f2e3639]:
+          - link "Link to heading":
+            - /url: "#8770d613"
+      - paragraph [ref=f2e3644]: ショート制作ラインとは別の作業です。元動画の説明にチャプターを反映します。
+      - generic [ref=f2e3646]:
+        - status [ref=f2e3649]:
+          - paragraph [ref=f2e3653]: チャプター生成済み・31 件・形式 OK
+        - paragraph [ref=f2e3658]: 未反映
+        - alert [ref=f2e3661]:
+          - paragraph [ref=f2e3665]: 概要欄への反映は YouTube 上の公開データを書き換えます。確定前に更新前後を必ず確認できます。
+        - button [ref=f2e3668] [cursor=pointer]:
+          - paragraph [ref=f2e3672]: 概要欄に反映
+      - group [ref=f2e3675]:
+        - generic "keyboard_arrow_right 詳細・再生成" [ref=f2e3676] [cursor=pointer]:
+          - generic [ref=f2e3677]:
+            - generic [ref=f2e3678]: keyboard_arrow_right
+            - paragraph [ref=f2e3682]: 詳細・再生成

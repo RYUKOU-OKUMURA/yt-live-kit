@@ -1,0 +1,330 @@
+- generic [ref=f3e2]:
+  - generic [ref=f3e3075]:
+    - list [ref=f3e3078]:
+      - listitem [ref=f3e3079]:
+        - link "video_library ライブラリ" [ref=f3e3081] [cursor=pointer]:
+          - /url: http://127.0.0.1:8502/
+          - generic [ref=f3e3082]: video_library
+          - paragraph [ref=f3e3087]: ライブラリ
+      - listitem [ref=f3e3088]:
+        - link "input 取り込み" [ref=f3e3090] [cursor=pointer]:
+          - /url: http://127.0.0.1:8502/intake
+          - generic [ref=f3e3091]: input
+          - paragraph [ref=f3e3096]: 取り込み
+      - listitem [ref=f3e3097]:
+        - link "settings 設定" [ref=f3e3099] [cursor=pointer]:
+          - /url: http://127.0.0.1:8502/settings
+          - generic [ref=f3e3100]: settings
+          - paragraph [ref=f3e3105]: 設定
+    - generic [ref=f3e3109]:
+      - heading "yt-live-kit" [level=3] [ref=f3e3114]
+      - paragraph [ref=f3e3119]: v0.3.0
+      - separator [ref=f3e3124]
+      - paragraph [ref=f3e3135]:
+        - strong [ref=f3e5125]: 作成中のショート
+      - paragraph [ref=f3e3140]: "対象ショート: M1 Macで約35倍速の文字起こし + Whisperをローカル導入したい理由"
+      - paragraph [ref=f3e3145]: ✅ 1 素材選定
+      - paragraph [ref=f3e3150]: │
+      - paragraph [ref=f3e3155]: ✅ 2 区間決定
+      - paragraph [ref=f3e3160]: │
+      - paragraph [ref=f3e3165]: ◉ 3 テロップ確認 ← 今
+      - paragraph [ref=f3e3170]: │
+      - paragraph [ref=f3e3175]: 🔒 4 生成
+      - paragraph [ref=f3e3180]: │
+      - paragraph [ref=f3e3185]: 🔒 5 最終確認
+      - paragraph [ref=f3e3190]: │
+      - paragraph [ref=f3e3195]: 🔒 6 予約
+      - paragraph [ref=f3e3200]: ── 次にやること ──
+      - paragraph [ref=f3e3205]: 台本全体を確認
+      - paragraph [ref=f3e5130]: 本日 0／3 ・ 要対応 0 件
+  - generic [ref=f3e3]:
+    - banner [ref=f3e3208]:
+      - generic [ref=f3e3211]:
+        - button "Deploy" [ref=f3e3213] [cursor=pointer]
+        - button "Main menu" [ref=f3e3217] [cursor=pointer]
+    - generic [ref=f3e6]:
+      - heading [level=2] [ref=f3e3221]:
+        - generic [ref=f3e3222]:
+          - img "movie icon" [ref=f3e3223]: movie
+          - text: 【#ライブ配信 No.93】そそるぜぇ、これは！（21時まで）
+        - generic [ref=f3e12]:
+          - link "Link to heading":
+            - /url: "#34738ae7"
+      - paragraph [ref=f3e17]: "動画 ID: mKwn-93gg90"
+      - generic [ref=f3e4822]:
+        - generic [ref=f3e4827]:
+          - paragraph [ref=f3e4830]:
+            - img "video_library icon" [ref=f3e4831]: video_library
+            - text: 素材候補
+          - paragraph [ref=f3e4834]: 2 件
+        - generic [ref=f3e4839]:
+          - paragraph [ref=f3e4842]:
+            - img "vertical_shades icon" [ref=f3e4843]: vertical_shades
+            - text: ショート
+          - paragraph [ref=f3e4846]: 生成 0 本
+          - paragraph [ref=f3e4850]: 予約可能 0 本
+        - generic [ref=f3e4855]:
+          - paragraph [ref=f3e4858]:
+            - img "description icon" [ref=f3e4859]: description
+            - text: 概要欄
+          - paragraph [ref=f3e4862]: 未反映
+      - paragraph [ref=f3e5135]: 工程 3／6
+      - radiogroup "作業を選択" [ref=f3e4302]:
+        - radio "video_library 素材候補" [ref=f3e4303] [cursor=pointer]:
+          - generic [ref=f3e4305]:
+            - generic [ref=f3e4306]: video_library
+            - paragraph [ref=f3e4309]: 素材候補
+        - radio "vertical_shades ショート作成" [checked] [ref=f3e4310] [cursor=pointer]:
+          - generic [ref=f3e4312]:
+            - generic [ref=f3e4313]: vertical_shades
+            - paragraph [ref=f3e4316]: ショート作成
+        - radio "campaign 公開・投稿" [ref=f3e4317] [cursor=pointer]:
+          - generic [ref=f3e4319]:
+            - generic [ref=f3e4320]: campaign
+            - paragraph [ref=f3e4323]: 公開・投稿
+      - paragraph [ref=f3e4873]: "適用中: ぼかし背景・default・Hook hook 設定で変更"
+      - paragraph [ref=f3e5140]: テロップの時刻は高精度字幕に合わせています。
+      - group [ref=f3e5143]:
+        - generic "keyboard_arrow_right 字幕の照合データ" [ref=f3e5144] [cursor=pointer]:
+          - generic [ref=f3e5145]:
+            - generic [ref=f3e5146]: keyboard_arrow_right
+            - paragraph [ref=f3e5150]: 字幕の照合データ
+      - generic [ref=f3e5152]:
+        - paragraph [ref=f3e5156]: フック文言
+        - textbox "フック文言" [ref=f3e5159]:
+          - /placeholder: ""
+          - text: ローカルLLM、ワンチャンあり？
+      - generic [ref=f3e5161]:
+        - paragraph [ref=f3e5165]: タイトル案（1 行 1 件）
+        - textbox "タイトル案（1 行 1 件）" [ref=f3e5167]:
+          - /placeholder: ""
+          - text: OllamaでローカルLLMは動かせる？ AI開発者に広がるローカル実行の選択肢 Together AIよりローカルがアリかも？
+      - generic [ref=f3e5169]:
+        - paragraph [ref=f3e5173]: 説明文
+        - textbox "説明文" [ref=f3e5175]:
+          - /placeholder: ""
+          - text: Ollamaなどを使ったローカルLLM実行の可能性を検討。Together AIの料金やWhisper Large V3を確認します。
+      - generic [ref=f3e5177]:
+        - paragraph [ref=f3e5181]: タグ（カンマ区切り）
+        - textbox "タグ（カンマ区切り）" [ref=f3e5184]:
+          - /placeholder: ""
+          - text: Ollama,ローカルLLM,Together AI,Whisper Large V3,生成AI
+      - paragraph [ref=f3e4975]:
+        - strong [ref=f3e5185]: 区間 1
+      - generic [ref=f3e5187]:
+        - generic [ref=f3e5189]:
+          - paragraph [ref=f3e5193]: テロップ本文
+          - textbox "テロップ本文" [ref=f3e5196]:
+            - /placeholder: ""
+            - text: Ollamaとかで
+        - generic [ref=f3e5198]:
+          - generic [ref=f3e5202]:
+            - paragraph [ref=f3e5206]: 開始秒
+            - generic [ref=f3e5208]:
+              - spinbutton "開始秒" [ref=f3e5209]: "1146.000"
+              - generic [ref=f3e5210]:
+                - button "Decrement" [ref=f3e5211] [cursor=pointer]
+                - button "Increment" [ref=f3e5214] [cursor=pointer]
+          - generic [ref=f3e5220]:
+            - paragraph [ref=f3e5224]: 終了秒
+            - generic [ref=f3e5226]:
+              - spinbutton "終了秒" [ref=f3e5227]: "1150.000"
+              - generic [ref=f3e5228]:
+                - button "Decrement" [ref=f3e5229] [cursor=pointer]
+                - button "Increment" [ref=f3e5232] [cursor=pointer]
+        - generic [ref=f3e5237] [cursor=pointer]:
+          - switch "行全体を強調" [ref=f3e5239]
+          - paragraph [ref=f3e5244]: 行全体を強調
+      - generic [ref=f3e4983]:
+        - generic [ref=f3e5246]:
+          - paragraph [ref=f3e5250]: テロップ本文
+          - textbox "テロップ本文" [ref=f3e5253]:
+            - /placeholder: ""
+            - text: ローカルLLMは
+        - generic [ref=f3e5255]:
+          - generic [ref=f3e5259]:
+            - paragraph [ref=f3e5263]: 開始秒
+            - generic [ref=f3e5265]:
+              - spinbutton "開始秒" [ref=f3e5266]: "1150.000"
+              - generic [ref=f3e5267]:
+                - button "Decrement" [ref=f3e5268] [cursor=pointer]
+                - button "Increment" [ref=f3e5271] [cursor=pointer]
+          - generic [ref=f3e5277]:
+            - paragraph [ref=f3e5281]: 終了秒
+            - generic [ref=f3e5283]:
+              - spinbutton "終了秒" [ref=f3e5284]: "1154.000"
+              - generic [ref=f3e5285]:
+                - button "Decrement" [ref=f3e5286] [cursor=pointer]
+                - button "Increment" [ref=f3e5289] [cursor=pointer]
+        - generic [ref=f3e5294] [cursor=pointer]:
+          - switch "行全体を強調" [ref=f3e5296]
+          - paragraph [ref=f3e5301]: 行全体を強調
+      - paragraph [ref=f3e5306]:
+        - strong [ref=f3e5307]: 区間 2
+      - generic [ref=f3e3675]:
+        - generic [ref=f3e5309]:
+          - paragraph [ref=f3e5313]: テロップ本文
+          - textbox "テロップ本文" [ref=f3e5316]:
+            - /placeholder: ""
+            - text: ローカルで行けるなら
+        - generic [ref=f3e5318]:
+          - generic [ref=f3e5322]:
+            - paragraph [ref=f3e5326]: 開始秒
+            - generic [ref=f3e5328]:
+              - spinbutton "開始秒" [ref=f3e5329]: "1179.000"
+              - generic [ref=f3e5330]:
+                - button "Decrement" [ref=f3e5331] [cursor=pointer]
+                - button "Increment" [ref=f3e5334] [cursor=pointer]
+          - generic [ref=f3e5340]:
+            - paragraph [ref=f3e5344]: 終了秒
+            - generic [ref=f3e5346]:
+              - spinbutton "終了秒" [ref=f3e5347]: "1181.300"
+              - generic [ref=f3e5348]:
+                - button "Decrement" [ref=f3e5349] [cursor=pointer]
+                - button "Increment" [ref=f3e5352] [cursor=pointer]
+        - generic [ref=f3e5357] [cursor=pointer]:
+          - switch "行全体を強調" [ref=f3e5359]
+          - paragraph [ref=f3e5364]: 行全体を強調
+      - generic [ref=f3e5366]:
+        - generic [ref=f3e5368]:
+          - paragraph [ref=f3e5372]: テロップ本文
+          - textbox "テロップ本文" [ref=f3e5375]:
+            - /placeholder: ""
+            - text: マジでアリだよな
+        - generic [ref=f3e5377]:
+          - generic [ref=f3e5381]:
+            - paragraph [ref=f3e5385]: 開始秒
+            - generic [ref=f3e5387]:
+              - spinbutton "開始秒" [ref=f3e5388]: "1181.300"
+              - generic [ref=f3e5389]:
+                - button "Decrement" [ref=f3e5390] [cursor=pointer]
+                - button "Increment" [ref=f3e5393] [cursor=pointer]
+          - generic [ref=f3e5399]:
+            - paragraph [ref=f3e5403]: 終了秒
+            - generic [ref=f3e5405]:
+              - spinbutton "終了秒" [ref=f3e5406]: "1183.000"
+              - generic [ref=f3e5407]:
+                - button "Decrement" [ref=f3e5408] [cursor=pointer]
+                - button "Increment" [ref=f3e5411] [cursor=pointer]
+        - generic [ref=f3e5416] [cursor=pointer]:
+          - switch "行全体を強調" [checked] [ref=f3e5418]
+          - paragraph [ref=f3e5423]: 行全体を強調
+      - generic [ref=f3e5425]:
+        - generic [ref=f3e5427]:
+          - paragraph [ref=f3e5431]: テロップ本文
+          - textbox "テロップ本文" [ref=f3e5434]:
+            - /placeholder: ""
+            - text: Together AIの料金が
+        - generic [ref=f3e5436]:
+          - generic [ref=f3e5440]:
+            - paragraph [ref=f3e5444]: 開始秒
+            - generic [ref=f3e5446]:
+              - spinbutton "開始秒" [ref=f3e5447]: "1187.000"
+              - generic [ref=f3e5448]:
+                - button "Decrement" [ref=f3e5449] [cursor=pointer]
+                - button "Increment" [ref=f3e5452] [cursor=pointer]
+          - generic [ref=f3e5458]:
+            - paragraph [ref=f3e5462]: 終了秒
+            - generic [ref=f3e5464]:
+              - spinbutton "終了秒" [ref=f3e5465]: "1191.000"
+              - generic [ref=f3e5466]:
+                - button "Decrement" [ref=f3e5467] [cursor=pointer]
+                - button "Increment" [ref=f3e5470] [cursor=pointer]
+        - generic [ref=f3e5475] [cursor=pointer]:
+          - switch "行全体を強調" [ref=f3e5477]
+          - paragraph [ref=f3e5482]: 行全体を強調
+      - generic [ref=f3e5094]:
+        - generic [ref=f3e5484]:
+          - paragraph [ref=f3e5488]: テロップ本文
+          - textbox "テロップ本文" [ref=f3e5491]:
+            - /placeholder: ""
+            - text: 分からないな
+        - generic [ref=f3e5493]:
+          - generic [ref=f3e5497]:
+            - paragraph [ref=f3e5501]: 開始秒
+            - generic [ref=f3e5503]:
+              - spinbutton "開始秒" [ref=f3e5504]: "1191.000"
+              - generic [ref=f3e5505]:
+                - button "Decrement" [ref=f3e5506] [cursor=pointer]
+                - button "Increment" [ref=f3e5509] [cursor=pointer]
+          - generic [ref=f3e5515]:
+            - paragraph [ref=f3e5519]: 終了秒
+            - generic [ref=f3e5521]:
+              - spinbutton "終了秒" [ref=f3e5522]: "1193.500"
+              - generic [ref=f3e5523]:
+                - button "Decrement" [ref=f3e5524] [cursor=pointer]
+                - button "Increment" [ref=f3e5527] [cursor=pointer]
+        - generic [ref=f3e5532] [cursor=pointer]:
+          - switch "行全体を強調" [ref=f3e5534]
+          - paragraph [ref=f3e5539]: 行全体を強調
+      - generic [ref=f3e5541]:
+        - generic [ref=f3e5543]:
+          - paragraph [ref=f3e5547]: テロップ本文
+          - textbox "テロップ本文" [ref=f3e5550]:
+            - /placeholder: ""
+            - text: Whisper Large V3
+        - generic [ref=f3e5552]:
+          - generic [ref=f3e5556]:
+            - paragraph [ref=f3e5560]: 開始秒
+            - generic [ref=f3e5562]:
+              - spinbutton "開始秒" [ref=f3e5563]: "1193.500"
+              - generic [ref=f3e5564]:
+                - button "Decrement" [ref=f3e5565] [cursor=pointer]
+                - button "Increment" [ref=f3e5568] [cursor=pointer]
+          - generic [ref=f3e5574]:
+            - paragraph [ref=f3e5578]: 終了秒
+            - generic [ref=f3e5580]:
+              - spinbutton "終了秒" [ref=f3e5581]: "1194.500"
+              - generic [ref=f3e5582]:
+                - button "Decrement" [ref=f3e5583] [cursor=pointer]
+                - button "Increment" [ref=f3e5586] [cursor=pointer]
+        - generic [ref=f3e5591] [cursor=pointer]:
+          - switch "行全体を強調" [ref=f3e5593]
+          - paragraph [ref=f3e5598]: 行全体を強調
+      - generic [ref=f3e5599]:
+        - generic [ref=f3e5601]:
+          - paragraph [ref=f3e5605]: テロップ本文
+          - textbox "テロップ本文" [ref=f3e5608]:
+            - /placeholder: ""
+            - text: あ、こっちか
+        - generic [ref=f3e5610]:
+          - generic [ref=f3e5614]:
+            - paragraph [ref=f3e5618]: 開始秒
+            - generic [ref=f3e5620]:
+              - spinbutton "開始秒" [ref=f3e5621]: "1194.500"
+              - generic [ref=f3e5622]:
+                - button "Decrement" [ref=f3e5623] [cursor=pointer]
+                - button "Increment" [ref=f3e5626] [cursor=pointer]
+          - generic [ref=f3e5632]:
+            - paragraph [ref=f3e5636]: 終了秒
+            - generic [ref=f3e5638]:
+              - spinbutton "終了秒" [ref=f3e5639]: "1195.000"
+              - generic [ref=f3e5640]:
+                - button "Decrement" [ref=f3e5641] [cursor=pointer]
+                - button "Increment" [ref=f3e5644] [cursor=pointer]
+        - generic [ref=f3e5649] [cursor=pointer]:
+          - switch "行全体を強調" [ref=f3e5651]
+          - paragraph [ref=f3e5656]: 行全体を強調
+      - generic [ref=f3e5658]:
+        - status [ref=f3e5661]:
+          - paragraph [ref=f3e5665]: "自動ハード判定: 通過"
+        - status [ref=f3e5668]:
+          - paragraph [ref=f3e5672]: "自動警告: なし"
+      - generic [ref=f3e5675] [cursor=pointer]:
+        - checkbox "台本全体の誤字・固有名詞を確認した" [ref=f3e5677]
+        - paragraph [ref=f3e5681]: 台本全体の誤字・固有名詞を確認した
+      - button [disabled] [ref=f3e5684]:
+        - paragraph [ref=f3e5688]: 確認内容を確定して生成条件を保存
+      - paragraph [ref=f3e5693]: "生成できる条件: 自動チェックを通過・台本を人が確認済み・確認したあとに内容が変わっていない"
+      - button [disabled] [ref=f3e5696]:
+        - paragraph [ref=f3e5700]: 台本を確定して生成へ
+      - group [ref=f3e5703]:
+        - 'generic "keyboard_arrow_right 補助: 単体手動作成・まとめて生成" [ref=f3e5704] [cursor=pointer]':
+          - generic [ref=f3e5705]:
+            - generic [ref=f3e5706]: keyboard_arrow_right
+            - paragraph [ref=f3e5710]: "補助: 単体手動作成・まとめて生成"
+      - group [ref=f3e5713]:
+        - generic "keyboard_arrow_right 詳細・再生成" [ref=f3e5714] [cursor=pointer]:
+          - generic [ref=f3e5715]:
+            - generic [ref=f3e5716]: keyboard_arrow_right
+            - paragraph [ref=f3e5720]: 詳細・再生成

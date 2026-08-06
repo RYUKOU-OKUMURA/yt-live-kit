@@ -1,0 +1,256 @@
+- generic [ref=f2e2]:
+  - generic [ref=f2e3075]:
+    - list [ref=f2e3078]:
+      - listitem [ref=f2e3079]:
+        - link "video_library ライブラリ" [ref=f2e3081] [cursor=pointer]:
+          - /url: http://127.0.0.1:8502/
+          - generic [ref=f2e3082]: video_library
+          - paragraph [ref=f2e3087]: ライブラリ
+      - listitem [ref=f2e3088]:
+        - link "input 取り込み" [ref=f2e3090] [cursor=pointer]:
+          - /url: http://127.0.0.1:8502/intake
+          - generic [ref=f2e3091]: input
+          - paragraph [ref=f2e3096]: 取り込み
+      - listitem [ref=f2e3097]:
+        - link "settings 設定" [ref=f2e3099] [cursor=pointer]:
+          - /url: http://127.0.0.1:8502/settings
+          - generic [ref=f2e3100]: settings
+          - paragraph [ref=f2e3105]: 設定
+    - generic [ref=f2e3109]:
+      - heading "yt-live-kit" [level=3] [ref=f2e3114]
+      - paragraph [ref=f2e3119]: v0.3.0
+      - separator [ref=f2e3124]
+      - paragraph [ref=f2e3135]:
+        - strong [ref=f2e5277]: 作成中のショート
+      - paragraph [ref=f2e3140]: "対象ショート: HHKBの仕組みを完全に誤解していた"
+      - paragraph [ref=f2e3145]: ✅ 1 素材選定
+      - paragraph [ref=f2e3150]: │
+      - paragraph [ref=f2e3155]: ✅ 2 区間決定
+      - paragraph [ref=f2e3160]: │
+      - paragraph [ref=f2e3165]: ◉ 3 テロップ確認 ← 今
+      - paragraph [ref=f2e3170]: │
+      - paragraph [ref=f2e3175]: 🔒 4 生成
+      - paragraph [ref=f2e3180]: │
+      - paragraph [ref=f2e3185]: 🔒 5 最終確認
+      - paragraph [ref=f2e3190]: │
+      - paragraph [ref=f2e3195]: 🔒 6 予約
+      - paragraph [ref=f2e3200]: ── 次にやること ──
+      - paragraph [ref=f2e3205]: 台本全体を確認
+      - paragraph [ref=f2e5282]: 本日 0／3 ・ 要対応 0 件
+  - generic [ref=f2e3]:
+    - banner [ref=f2e3208]:
+      - generic [ref=f2e3211]:
+        - button "Deploy" [ref=f2e3213] [cursor=pointer]
+        - button "Main menu" [ref=f2e3217] [cursor=pointer]
+    - generic [ref=f2e6]:
+      - heading [level=2] [ref=f2e3225]:
+        - generic [ref=f2e3226]:
+          - img "movie icon" [ref=f2e3227]: movie
+          - text: 【#ライブ配信 No.73】そうだ！ノープランでライブ配信しよう！
+        - generic [ref=f2e3228]:
+          - link "Link to heading":
+            - /url: "#movie-no-73"
+      - paragraph [ref=f2e3233]: "動画 ID: hPeRSA9YVIM"
+      - generic [ref=f2e5085]:
+        - generic [ref=f2e5090]:
+          - paragraph [ref=f2e5093]:
+            - img "video_library icon" [ref=f2e5094]: video_library
+            - text: 素材候補
+          - paragraph [ref=f2e5097]: 3 件
+        - generic [ref=f2e5102]:
+          - paragraph [ref=f2e5105]:
+            - img "vertical_shades icon" [ref=f2e5106]: vertical_shades
+            - text: ショート
+          - paragraph [ref=f2e5109]: 生成 1 本
+          - paragraph [ref=f2e5113]: 予約可能 1 本
+        - generic [ref=f2e5118]:
+          - paragraph [ref=f2e5121]:
+            - img "description icon" [ref=f2e5122]: description
+            - text: 概要欄
+          - paragraph [ref=f2e5125]: 未反映
+      - paragraph [ref=f2e5287]: 工程 3／6
+      - radiogroup "作業を選択" [ref=f2e4675]:
+        - radio "video_library 素材候補" [ref=f2e4676] [cursor=pointer]:
+          - generic [ref=f2e4678]:
+            - generic [ref=f2e4679]: video_library
+            - paragraph [ref=f2e4682]: 素材候補
+        - radio "vertical_shades ショート作成" [checked] [ref=f2e4683] [cursor=pointer]:
+          - generic [ref=f2e4685]:
+            - generic [ref=f2e4686]: vertical_shades
+            - paragraph [ref=f2e4689]: ショート作成
+        - radio "campaign 公開・投稿" [ref=f2e4690] [cursor=pointer]:
+          - generic [ref=f2e4692]:
+            - generic [ref=f2e4693]: campaign
+            - paragraph [ref=f2e4696]: 公開・投稿
+      - paragraph [ref=f2e5136]: "適用中: ぼかし背景・default・Hook hook 設定で変更"
+      - paragraph [ref=f2e5330]: テロップの時刻は高精度字幕に合わせています。
+      - group [ref=f2e5333]:
+        - generic "keyboard_arrow_right 字幕の照合データ" [ref=f2e5334] [cursor=pointer]:
+          - generic [ref=f2e5335]:
+            - generic [ref=f2e5336]: keyboard_arrow_right
+            - paragraph [ref=f2e5340]: 字幕の照合データ
+      - generic [ref=f2e5342]:
+        - paragraph [ref=f2e5346]: フック文言
+        - textbox "フック文言" [ref=f2e5349]:
+          - /placeholder: ""
+          - text: HHKBの最適解は地球儀キー
+      - generic [ref=f2e5351]:
+        - paragraph [ref=f2e5355]: タイトル案（1 行 1 件）
+        - textbox "タイトル案（1 行 1 件）" [ref=f2e5357]:
+          - /placeholder: ""
+          - text: MacでHHKBを使いこなす地球儀キー設定 Mac作業が快適になるHHKBキー割り当て術 HHKBに地球儀キーを割り当てる理由とは？
+      - generic [ref=f2e5359]:
+        - paragraph [ref=f2e5363]: 説明文
+        - textbox "説明文" [ref=f2e5365]:
+          - /placeholder: ""
+          - text: MacでHHKBを最大限に活用するための、地球儀キーの割り当て方法を紹介します。
+      - generic [ref=f2e5367]:
+        - paragraph [ref=f2e5371]: タグ（カンマ区切り）
+        - textbox "タグ（カンマ区切り）" [ref=f2e5374]:
+          - /placeholder: ""
+          - text: HHKB,Mac,macOS,キーボード設定
+      - paragraph [ref=f2e5379]:
+        - strong [ref=f2e5380]: 区間 1
+      - generic [ref=f2e5382]:
+        - generic [ref=f2e5384]:
+          - paragraph [ref=f2e5388]: テロップ本文
+          - textbox "テロップ本文" [ref=f2e5391]:
+            - /placeholder: ""
+            - text: ファンクションキーとは別に
+        - generic [ref=f2e5393]:
+          - generic [ref=f2e5397]:
+            - paragraph [ref=f2e5401]: 開始秒
+            - generic [ref=f2e5403]:
+              - spinbutton "開始秒" [ref=f2e5404]: "8656.000"
+              - generic [ref=f2e5405]:
+                - button "Decrement" [ref=f2e5406] [cursor=pointer]
+                - button "Increment" [ref=f2e5409] [cursor=pointer]
+          - generic [ref=f2e5415]:
+            - paragraph [ref=f2e5419]: 終了秒
+            - generic [ref=f2e5421]:
+              - spinbutton "終了秒" [ref=f2e5422]: "8662.900"
+              - generic [ref=f2e5423]:
+                - button "Decrement" [ref=f2e5424] [cursor=pointer]
+                - button "Increment" [ref=f2e5427] [cursor=pointer]
+        - generic [ref=f2e5432] [cursor=pointer]:
+          - switch "行全体を強調" [ref=f2e5434]
+          - paragraph [ref=f2e5439]: 行全体を強調
+      - generic [ref=f2e5441]:
+        - generic [ref=f2e5443]:
+          - paragraph [ref=f2e5447]: テロップ本文
+          - textbox "テロップ本文" [ref=f2e5450]:
+            - /placeholder: ""
+            - text: macOS固有の機能
+        - generic [ref=f2e5452]:
+          - generic [ref=f2e5456]:
+            - paragraph [ref=f2e5460]: 開始秒
+            - generic [ref=f2e5462]:
+              - spinbutton "開始秒" [ref=f2e5463]: "8662.900"
+              - generic [ref=f2e5464]:
+                - button "Decrement" [ref=f2e5465] [cursor=pointer]
+                - button "Increment" [ref=f2e5468] [cursor=pointer]
+          - generic [ref=f2e5474]:
+            - paragraph [ref=f2e5478]: 終了秒
+            - generic [ref=f2e5480]:
+              - spinbutton "終了秒" [ref=f2e5481]: "8666.200"
+              - generic [ref=f2e5482]:
+                - button "Decrement" [ref=f2e5483] [cursor=pointer]
+                - button "Increment" [ref=f2e5486] [cursor=pointer]
+        - generic [ref=f2e5491] [cursor=pointer]:
+          - switch "行全体を強調" [ref=f2e5493]
+          - paragraph [ref=f2e5498]: 行全体を強調
+      - generic [ref=f2e5500]:
+        - generic [ref=f2e5502]:
+          - paragraph [ref=f2e5506]: テロップ本文
+          - textbox "テロップ本文" [ref=f2e5509]:
+            - /placeholder: ""
+            - text: 地球儀キーを
+        - generic [ref=f2e5511]:
+          - generic [ref=f2e5515]:
+            - paragraph [ref=f2e5519]: 開始秒
+            - generic [ref=f2e5521]:
+              - spinbutton "開始秒" [ref=f2e5522]: "8666.200"
+              - generic [ref=f2e5523]:
+                - button "Decrement" [ref=f2e5524] [cursor=pointer]
+                - button "Increment" [ref=f2e5527] [cursor=pointer]
+          - generic [ref=f2e5533]:
+            - paragraph [ref=f2e5537]: 終了秒
+            - generic [ref=f2e5539]:
+              - spinbutton "終了秒" [ref=f2e5540]: "8668.600"
+              - generic [ref=f2e5541]:
+                - button "Decrement" [ref=f2e5542] [cursor=pointer]
+                - button "Increment" [ref=f2e5545] [cursor=pointer]
+        - generic [ref=f2e5550] [cursor=pointer]:
+          - switch "行全体を強調" [checked] [ref=f2e5552]
+          - paragraph [ref=f2e5557]: 行全体を強調
+      - generic [ref=f2e5559]:
+        - generic [ref=f2e5561]:
+          - paragraph [ref=f2e5565]: テロップ本文
+          - textbox "テロップ本文" [ref=f2e5568]:
+            - /placeholder: ""
+            - text: HHKB上のどこかに
+        - generic [ref=f2e5570]:
+          - generic [ref=f2e5574]:
+            - paragraph [ref=f2e5578]: 開始秒
+            - generic [ref=f2e5580]:
+              - spinbutton "開始秒" [ref=f2e5581]: "8668.600"
+              - generic [ref=f2e5582]:
+                - button "Decrement" [ref=f2e5583] [cursor=pointer]
+                - button "Increment" [ref=f2e5586] [cursor=pointer]
+          - generic [ref=f2e5592]:
+            - paragraph [ref=f2e5596]: 終了秒
+            - generic [ref=f2e5598]:
+              - spinbutton "終了秒" [ref=f2e5599]: "8670.800"
+              - generic [ref=f2e5600]:
+                - button "Decrement" [ref=f2e5601] [cursor=pointer]
+                - button "Increment" [ref=f2e5604] [cursor=pointer]
+        - generic [ref=f2e5609] [cursor=pointer]:
+          - switch "行全体を強調" [ref=f2e5611]
+          - paragraph [ref=f2e5616]: 行全体を強調
+      - generic [ref=f2e5618]:
+        - generic [ref=f2e5620]:
+          - paragraph [ref=f2e5624]: テロップ本文
+          - textbox "テロップ本文" [ref=f2e5627]:
+            - /placeholder: ""
+            - text: 割り当てるのがスマート
+        - generic [ref=f2e5629]:
+          - generic [ref=f2e5633]:
+            - paragraph [ref=f2e5637]: 開始秒
+            - generic [ref=f2e5639]:
+              - spinbutton "開始秒" [ref=f2e5640]: "8670.800"
+              - generic [ref=f2e5641]:
+                - button "Decrement" [ref=f2e5642] [cursor=pointer]
+                - button "Increment" [ref=f2e5645] [cursor=pointer]
+          - generic [ref=f2e5651]:
+            - paragraph [ref=f2e5655]: 終了秒
+            - generic [ref=f2e5657]:
+              - spinbutton "終了秒" [ref=f2e5658]: "8673.000"
+              - generic [ref=f2e5659]:
+                - button "Decrement" [ref=f2e5660] [cursor=pointer]
+                - button "Increment" [ref=f2e5663] [cursor=pointer]
+        - generic [ref=f2e5668] [cursor=pointer]:
+          - switch "行全体を強調" [checked] [ref=f2e5670]
+          - paragraph [ref=f2e5675]: 行全体を強調
+      - generic [ref=f2e5677]:
+        - status [ref=f2e5680]:
+          - paragraph [ref=f2e5684]: "自動ハード判定: 通過"
+        - status [ref=f2e5687]:
+          - paragraph [ref=f2e5691]: "自動警告: なし"
+      - generic [ref=f2e5694] [cursor=pointer]:
+        - checkbox "台本全体の誤字・固有名詞を確認した" [ref=f2e5696]
+        - paragraph [ref=f2e5700]: 台本全体の誤字・固有名詞を確認した
+      - button [disabled] [ref=f2e5703]:
+        - paragraph [ref=f2e5707]: 確認内容を確定して生成条件を保存
+      - paragraph [ref=f2e5712]: "生成できる条件: 自動チェックを通過・台本を人が確認済み・確認したあとに内容が変わっていない"
+      - button [disabled] [ref=f2e5715]:
+        - paragraph [ref=f2e5719]: 台本を確定して生成へ
+      - group [ref=f2e5722]:
+        - 'generic "keyboard_arrow_right 補助: 単体手動作成・まとめて生成" [ref=f2e5723] [cursor=pointer]':
+          - generic [ref=f2e5724]:
+            - generic [ref=f2e5725]: keyboard_arrow_right
+            - paragraph [ref=f2e5729]: "補助: 単体手動作成・まとめて生成"
+      - group [ref=f2e5732]:
+        - generic "keyboard_arrow_right 詳細・再生成" [ref=f2e5733] [cursor=pointer]:
+          - generic [ref=f2e5734]:
+            - generic [ref=f2e5735]: keyboard_arrow_right
+            - paragraph [ref=f2e5739]: 詳細・再生成

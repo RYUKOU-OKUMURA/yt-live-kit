@@ -1,0 +1,11 @@
+[10523198ms] [ERROR] Access to fetch at 'https://webhooks.fivetran.com/webhooks/615b5e5c-9fde-4c75-a034-f642dba74c1f' from origin 'http://127.0.0.1:8502' has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present on the requested resource. @ http://127.0.0.1:8502/video-detail:0
+[10523199ms] [ERROR] Failed to load resource: net::ERR_FAILED @ https://webhooks.fivetran.com/webhooks/615b5e5c-9fde-4c75-a034-f642dba74c1f:0
+[10523202ms] TypeError: Failed to fetch
+    at mw.track (http://127.0.0.1:8502/static/js/index.BvGIeCyC.js:38:10590)
+    at mw.send (http://127.0.0.1:8502/static/js/index.BvGIeCyC.js:38:10337)
+    at mw.enqueue (http://127.0.0.1:8502/static/js/index.BvGIeCyC.js:38:9707)
+    at y.handleNewSession (http://127.0.0.1:8502/static/js/index.BvGIeCyC.js:38:24759)
+    at Object.newSession (http://127.0.0.1:8502/static/js/index.BvGIeCyC.js:38:18511)
+    at t (http://127.0.0.1:8502/static/js/index.BvGIeCyC.js:38:18426)
+    at Object.handleMessage [as onMessage] (http://127.0.0.1:8502/static/js/index.BvGIeCyC.js:38:18480)
+    at gS.handleMessage (http://127.0.0.1:8502/static/js/index.BvGIeCyC.js:34:4644)

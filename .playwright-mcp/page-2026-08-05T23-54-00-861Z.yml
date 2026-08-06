@@ -1,0 +1,111 @@
+- generic [ref=f2e2]:
+  - generic [ref=f2e3075]:
+    - list [ref=f2e3078]:
+      - listitem [ref=f2e3079]:
+        - link "video_library ライブラリ" [ref=f2e3081] [cursor=pointer]:
+          - /url: http://127.0.0.1:8502/
+          - generic [ref=f2e3082]: video_library
+          - paragraph [ref=f2e3087]: ライブラリ
+      - listitem [ref=f2e3088]:
+        - link "input 取り込み" [ref=f2e3090] [cursor=pointer]:
+          - /url: http://127.0.0.1:8502/intake
+          - generic [ref=f2e3091]: input
+          - paragraph [ref=f2e3096]: 取り込み
+      - listitem [ref=f2e3097]:
+        - link "settings 設定" [ref=f2e3099] [cursor=pointer]:
+          - /url: http://127.0.0.1:8502/settings
+          - generic [ref=f2e3100]: settings
+          - paragraph [ref=f2e3105]: 設定
+    - generic [ref=f2e3109]:
+      - heading "yt-live-kit" [level=3] [ref=f2e3114]
+      - paragraph [ref=f2e3119]: v0.3.0
+      - separator [ref=f2e3124]
+      - paragraph [ref=f2e3129]:
+        - strong [ref=f2e3130]: 作成中のショート
+      - paragraph [ref=f2e3135]: まだ開始していません
+      - paragraph [ref=f2e3140]: ◉ 1 素材選定 ← 今
+      - paragraph [ref=f2e3145]: │
+      - paragraph [ref=f2e3150]: 🔒 2 区間決定
+      - paragraph [ref=f2e3155]: │
+      - paragraph [ref=f2e3160]: 🔒 3 テロップ確認
+      - paragraph [ref=f2e3165]: │
+      - paragraph [ref=f2e3170]: 🔒 4 生成
+      - paragraph [ref=f2e3175]: │
+      - paragraph [ref=f2e3180]: 🔒 5 最終確認
+      - paragraph [ref=f2e3185]: │
+      - paragraph [ref=f2e3190]: 🔒 6 予約
+      - paragraph [ref=f2e3195]: ── 次にやること ──
+      - paragraph [ref=f2e3200]: 素材を選び、区間を決める
+      - paragraph [ref=f2e3205]: 本日 0／3 ・ 要対応 0 件
+  - generic [ref=f2e3]:
+    - banner [ref=f2e3208]:
+      - generic [ref=f2e3211]:
+        - button "Deploy" [ref=f2e3213] [cursor=pointer]
+        - button "Main menu" [ref=f2e3217] [cursor=pointer]
+    - generic [ref=f2e6]:
+      - heading [level=2] [ref=f2e3225]:
+        - generic [ref=f2e3226]:
+          - img "movie icon" [ref=f2e3227]: movie
+          - text: 【#ライブ配信 No.73】そうだ！ノープランでライブ配信しよう！
+        - generic [ref=f2e3228]:
+          - link "Link to heading":
+            - /url: "#movie-no-73"
+      - paragraph [ref=f2e3233]: "動画 ID: hPeRSA9YVIM"
+      - generic [ref=f2e3235]:
+        - generic [ref=f2e3240]:
+          - paragraph [ref=f2e3243]:
+            - img "video_library icon" [ref=f2e3244]: video_library
+            - text: 素材候補
+          - paragraph [ref=f2e3247]: 3 件
+        - generic [ref=f2e3252]:
+          - paragraph [ref=f2e3255]:
+            - img "vertical_shades icon" [ref=f2e3256]: vertical_shades
+            - text: ショート
+          - paragraph [ref=f2e3259]: 生成 1 本
+          - paragraph [ref=f2e3263]: 予約可能 1 本
+        - generic [ref=f2e3268]:
+          - paragraph [ref=f2e3271]:
+            - img "description icon" [ref=f2e3272]: description
+            - text: 概要欄
+          - paragraph [ref=f2e3275]: 未反映
+      - radiogroup "作業を選択" [ref=f2e3278]:
+        - radio "video_library 素材候補" [active] [ref=f2e3279] [cursor=pointer]:
+          - generic [ref=f2e3281]:
+            - generic [ref=f2e3282]: video_library
+            - paragraph [ref=f2e3285]: 素材候補
+        - radio "vertical_shades ショート作成" [checked] [ref=f2e3286] [cursor=pointer]:
+          - generic [ref=f2e3288]:
+            - generic [ref=f2e3289]: vertical_shades
+            - paragraph [ref=f2e3292]: ショート作成
+        - radio "campaign 公開・投稿" [ref=f2e3293] [cursor=pointer]:
+          - generic [ref=f2e3295]:
+            - generic [ref=f2e3296]: campaign
+            - paragraph [ref=f2e3299]: 公開・投稿
+      - heading "素材を選び、区間を決める" [level=3] [ref=f2e3788]:
+        - text: 素材を選び、区間を決める
+        - generic [ref=f2e3789]:
+          - link "Link to heading":
+            - /url: "#c209072"
+      - paragraph [ref=f2e3311]:
+        - strong [ref=f2e3790]: "今回作る候補:"
+        - text: "［切り抜き］clip_003: HHKBのファンクションキーを理解するまで（02:24:00 → 02:37:20）"
+      - group [ref=f2e3793]:
+        - generic "keyboard_arrow_right 対象を選び直す（全 3 件）" [ref=f2e3794] [cursor=pointer]:
+          - generic [ref=f2e3795]:
+            - generic [ref=f2e3796]: keyboard_arrow_right
+            - paragraph [ref=f2e3800]: 対象を選び直す（全 3 件）
+      - paragraph [ref=f2e3805]: 180 秒を超える候補から、ショート 1 本分の区間を AI に提案させます。提案は必ず確認・調整してから作成してください。
+      - button [ref=f2e3808] [cursor=pointer]:
+        - paragraph [ref=f2e3812]: ショート用の区間を提案
+      - status [ref=f2e3814]:
+        - paragraph [ref=f2e3818]: まだ提案がありません。「ショート用の区間を提案」を押してください。
+      - group [ref=f2e3821]:
+        - 'generic "keyboard_arrow_right 補助: 単体手動作成・まとめて生成" [ref=f2e3822] [cursor=pointer]':
+          - generic [ref=f2e3823]:
+            - generic [ref=f2e3824]: keyboard_arrow_right
+            - paragraph [ref=f2e3828]: "補助: 単体手動作成・まとめて生成"
+      - group [ref=f2e3675]:
+        - generic "keyboard_arrow_right 詳細・再生成" [ref=f2e3676] [cursor=pointer]:
+          - generic [ref=f2e3677]:
+            - generic [ref=f2e3678]: keyboard_arrow_right
+            - paragraph [ref=f2e3682]: 詳細・再生成
