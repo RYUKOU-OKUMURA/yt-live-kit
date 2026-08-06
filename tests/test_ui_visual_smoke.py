@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
@@ -275,6 +276,40 @@ def test_video_detail_page_renders_empty_selection_without_exception() -> None:
     assert not list(at.exception)
     assert ":material/movie: 動画詳細" in [item.value for item in at.header]
     assert "ライブラリから動画を選択してください。" in [item.value for item in at.info]
+
+
+def test_video_detail_shorts_workspace_renders_broken_line_recovery_once(
+    tmp_path: Path,
+) -> None:
+    """破損ライン状態でも、要約と工程が同一 run で widget key を衝突させない.
+
+    ``render_main_line_summary`` は無条件に、``render_shorts_line`` は
+    ショートワークスペース選択時に描画される。両方が復旧ボタンを出すと
+    ``StreamlitDuplicateElementKey`` でページごと落ちるため、復旧操作は
+    工程側だけが持つ（CR-2026-08-06 F-19 の回帰）。
+    """
+    data_dir = tmp_path / "data"
+    _populate_populated_video_detail_state(data_dir)
+    line_dir = data_dir / _POPULATED_VIDEO_ID / "shorts" / "line"
+    line_dir.mkdir(parents=True, exist_ok=True)
+    (line_dir / "line_clip_001.json").write_text(
+        "{ broken json", encoding="utf-8"
+    )
+    (line_dir / "active_line.json").write_text(
+        json.dumps({"clip_id": "clip_001"}), encoding="utf-8"
+    )
+
+    at = _run_populated_video_detail("shorts")
+
+    assert not list(at.exception)
+    evacuate_buttons = [
+        widget
+        for widget in at.button
+        if widget.label == "破損状態を退避して素材選定へ戻る"
+    ]
+    assert len(evacuate_buttons) == 1
+    error_values = [item.value for item in at.error]
+    assert any("安全に復元できません" in value for value in error_values)
 
 
 @pytest.mark.parametrize("workspace", ("materials", "shorts", "publish"))

@@ -647,22 +647,37 @@ def test_render_shorts_line_offers_recovery_for_corrupt_line_state(
     assert recovery.call_args.args[2] == "ショート生産ラインの状態が壊れているため安全に復元できません。"
 
 
-def test_render_main_line_summary_offers_recovery_for_corrupt_line_state(
+def test_render_main_line_summary_reports_corrupt_line_state_without_widgets(
     tmp_path: Path,
 ) -> None:
+    """要約は表示専用で、復旧 widget は出さない.
+
+    ``render_main_line_summary`` は無条件に、``render_shorts_line`` は
+    ショートワークスペース選択時に描画される。両方が復旧ボタンを出すと
+    同一 run で widget key が衝突して落ちるため、復旧操作は工程側だけが持つ
+    （CR-2026-08-06 F-19 の回帰）。
+    """
     settings = Settings(data_dir=tmp_path)
     state = create_line_state("video-1", "clip-1", "a" * 64)
     path = save_line_state(state, settings)
     save_active_line("video-1", "clip-1", settings)
     path.write_text("{broken", encoding="utf-8")
 
-    with patch.object(
-        shorts_line,
-        "_render_line_state_failure_recovery",
-    ) as recovery:
+    with (
+        patch.object(
+            shorts_line,
+            "_render_line_state_failure_recovery",
+        ) as recovery,
+        patch.object(shorts_line.st, "error") as error,
+        patch.object(shorts_line.st, "caption") as caption,
+    ):
         shorts_line.render_main_line_summary("video-1", settings)
 
-    recovery.assert_called_once()
+    recovery.assert_not_called()
+    error.assert_called_once_with(
+        "ショート生産ラインの状態が壊れているため安全に復元できません。"
+    )
+    assert "「ショート」作業" in caption.call_args.args[0]
 
 
 def test_evacuate_broken_line_file_archives_and_clears_pointer(tmp_path: Path) -> None:

@@ -2664,7 +2664,11 @@ S9 初版で実装するのは、既存 YouTube `video_id` の良好な VTT を�
 
 **完了 ID:** F-01〜F-22 すべて実装済み（2026-08-06）。回帰: `uv run pytest -q` → **1889 passed / 2 skipped**。CI: ruff + pytest（mypy は設定のみ・段階導入）。
 
-**残メモ:** UI 変更の実機ブラウザ確認は別途推奨。mypy 94 errors の解消と CI 配線は後続。
+**追修正 F-19a（2026-08-07）:** F-19 の復旧 UI が、対象である破損状態そのもので `StreamlitDuplicateElementKey` を出して落ちていた。`render_main_line_summary`（無条件描画）と `render_shorts_line`（ショート作業選択時）が同一 run で同じ widget key の復旧ボタンを作っていたため。要約側を docstring どおり表示専用へ戻し、復旧操作は工程側だけが持つようにした。回帰: **1890 passed / 2 skipped**。
+
+**実機ブラウザ確認（2026-08-07・完了）:** 隔離 `YTLK_DATA_DIR` に破損 `line_*.json` を置いて Streamlit を起動し、Playwright で確認。ショート作業で例外なく復旧導線が 1 つだけ出ること、退避を実行するとライン UI が工程 1 へ復帰すること、破損ファイルが `abandoned_*.json` へ退避され active pointer が消えることを確認した。console error 0 件。
+
+**残メモ:** mypy 94 errors の解消と CI 配線は後続。
 
 ---
 

@@ -1560,17 +1560,16 @@ def render_sidebar_line_context(video_id: str | None, settings: Settings) -> Non
 def render_main_line_summary(video_id: str, settings: Settings) -> None:
     """サイドバー折り畳み時にも残る表示専用の工程要約."""
     state, load_error, broken = _resolve_line_state_for_ui(video_id, settings)
-    primary_broken = _primary_broken_entry(broken, video_id, settings)
     if load_error is not None:
-        if primary_broken is not None:
-            _render_line_state_failure_recovery(
-                video_id,
-                settings,
-                load_error,
-                primary_broken,
+        # ここは表示専用である。復旧操作は render_shorts_line だけが持つ。
+        # 同一 run で両方が widget を出すと key が衝突して描画ごと落ちるため、
+        # 要約側は状態の提示と導線の案内までに留める。
+        st.error(_safe(load_error))
+        if _primary_broken_entry(broken, video_id, settings) is not None:
+            st.caption(
+                "「ショート」作業を選ぶと、機械的証跡からの再構成または"
+                "破損状態の退避を実行できます。"
             )
-        else:
-            st.error(_safe(load_error))
         return
     if state is None:
         return
