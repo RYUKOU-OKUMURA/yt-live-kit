@@ -466,34 +466,66 @@ def _canonical_json_bytes(value: Any) -> bytes:
         raise WhisperRuntimeError("whisper runtime の fingerprint を計算できません。") from exc
 
 
-def _file_fingerprint(path: Path, label: str) -> tuple[Path, int, str]:
+def _config_hint(configured_path: str | None, env_var: str | None) -> str:
+    """設定パスと環境変数名を診断メッセージへ添える末尾文を組み立てる.
+
+    どちらも省略した場合は従来どおり句点だけを返し、既存メッセージと互換にする。
+    """
+
+    suffix = f"（設定: {configured_path}）" if configured_path else ""
+    hint = f"{suffix}。"
+    if env_var:
+        hint += f"設定ページで {env_var} を確認してください。"
+    return hint
+
+
+def _file_fingerprint(
+    path: Path,
+    label: str,
+    *,
+    configured_path: str | None = None,
+    env_var: str | None = None,
+) -> tuple[Path, int, str]:
+    hint = _config_hint(configured_path, env_var)
     try:
         resolved = path.resolve(strict=True)
         stat_result = resolved.stat()
     except (OSError, RuntimeError) as exc:
-        raise WhisperPreflightError(f"{label}が見つかりません。", retryable=True) from exc
+        raise WhisperPreflightError(f"{label}が見つかりません{hint}", retryable=True) from exc
     if not stat.S_ISREG(stat_result.st_mode) or not os.access(resolved, os.R_OK):
-        raise WhisperPreflightError(f"{label}を通常のファイルとして読み取れません。", retryable=True)
+        raise WhisperPreflightError(f"{label}を通常のファイルとして読み取れません{hint}", retryable=True)
     digest = hashlib.sha256()
     try:
         with resolved.open("rb") as file:
             for chunk in iter(lambda: file.read(1024 * 1024), b""):
                 digest.update(chunk)
     except OSError as exc:
-        raise WhisperPreflightError(f"{label}の fingerprint を計算できません。", retryable=True) from exc
+        raise WhisperPreflightError(f"{label}の fingerprint を計算できません{hint}", retryable=True) from exc
     return resolved, int(stat_result.st_size), digest.hexdigest()
 
 
-def _resolved_executable(value: str, label: str) -> Path:
+def _resolved_executable(
+    value: str,
+    label: str,
+    *,
+    configured_path: str | None = None,
+    env_var: str | None = None,
+) -> Path:
+    hint = _config_hint(configured_path, env_var)
     try:
         resolved_text = shutil.which(value)
     except (OSError, TypeError) as exc:
-        raise WhisperPreflightError(f"{label}のパスを確認できません。", retryable=True) from exc
+        raise WhisperPreflightError(f"{label}のパスを確認できません{hint}", retryable=True) from exc
     if resolved_text is None:
-        raise WhisperPreflightError(f"{label}が見つかりません。設定を確認してください。", retryable=True)
-    resolved, _, _ = _file_fingerprint(Path(resolved_text), label)
+        raise WhisperPreflightError(f"{label}が見つかりません{hint}", retryable=True)
+    resolved, _, _ = _file_fingerprint(
+        Path(resolved_text),
+        label,
+        configured_path=configured_path,
+        env_var=env_var,
+    )
     if not os.access(resolved, os.X_OK):
-        raise WhisperPreflightError(f"{label}に実行権限がありません。", retryable=True)
+        raise WhisperPreflightError(f"{label}に実行権限がありません{hint}", retryable=True)
     return resolved
 
 
@@ -580,8 +612,18 @@ def _preflight_whisper_runtime(
     if adopted_contract.model_name != ADOPTED_WHISPER_MODEL_NAME:
         raise WhisperPreflightError("S9 の採用 model name と設定が一致しません。", retryable=False)
 
-    binary = _resolved_executable(settings.whisper_binary_path, "whisper-cli")
-    binary_path, binary_bytes, binary_sha256 = _file_fingerprint(binary, "whisper-cli")
+    binary = _resolved_executable(
+        settings.whisper_binary_path,
+        "whisper-cli",
+        configured_path=settings.whisper_binary_path,
+        env_var="YTLK_WHISPER_BINARY_PATH",
+    )
+    binary_path, binary_bytes, binary_sha256 = _file_fingerprint(
+        binary,
+        "whisper-cli",
+        configured_path=settings.whisper_binary_path,
+        env_var="YTLK_WHISPER_BINARY_PATH",
+    )
     if binary_sha256 != adopted_contract.binary_sha256:
         raise WhisperPreflightError(
             "whisper-cli の SHA-256 が設定値と一致しません。モデルや実行ファイルを自動更新せず確認してください。",
@@ -619,6 +661,8 @@ def _preflight_whisper_runtime(
     model_path, model_bytes, model_sha256 = _file_fingerprint(
         Path(settings.whisper_model_path),
         "whisper.cpp model",
+        configured_path=settings.whisper_model_path,
+        env_var="YTLK_WHISPER_MODEL_PATH",
     )
     if model_sha256 != adopted_contract.model_sha256:
         raise WhisperPreflightError(

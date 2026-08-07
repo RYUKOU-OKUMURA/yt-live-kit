@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import streamlit as st
 
 from yt_live_kit.config import Settings, get_settings
@@ -50,3 +52,21 @@ def check_ytdlp_version_warning_cached(
 def clear_ytdlp_version_warning_cache() -> None:
     """テストまたは設定変更時に warning cache を明示的に破棄する."""
     _cached_ytdlp_version_warning.clear()
+
+
+def check_whisper_model_warning(settings: Settings | None = None) -> str | None:
+    """whisper.cpp model file の存在だけを軽量に確認する.
+
+    高精度字幕の preflight は SHA256 まで検証するが、モデルは 500MB 級のため
+    Streamlit の rerun のたびに毎回ハッシュ計算すると致命的に遅くなる。
+    ここでは ``Path.is_file()`` 相当の存在確認だけを行い、設定パスと
+    設定すべき環境変数名を含む日本語警告を返す。
+    """
+    settings = settings or get_settings()
+    model_path = Path(settings.whisper_model_path)
+    if model_path.is_file():
+        return None
+    return (
+        f"Whisper モデルファイルが見つかりません（設定: {settings.whisper_model_path}）。"
+        "設定ページで YTLK_WHISPER_MODEL_PATH を確認するか、モデルファイルを配置してください。"
+    )

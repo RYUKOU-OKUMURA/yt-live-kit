@@ -58,6 +58,10 @@ def _stub_external_processes(monkeypatch: pytest.MonkeyPatch) -> None:
         lambda settings=None: None,
     )
     monkeypatch.setattr(
+        "yt_live_kit.ui.runtime_checks.check_whisper_model_warning",
+        lambda settings=None: None,
+    )
+    monkeypatch.setattr(
         "yt_live_kit.ui.views.settings.diagnose_ffmpeg",
         lambda configured_path: (_ for _ in ()).throw(FfmpegError("smoke test stub")),
     )

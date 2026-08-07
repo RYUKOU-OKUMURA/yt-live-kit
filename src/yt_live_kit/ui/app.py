@@ -16,7 +16,10 @@ from yt_live_kit.ui.components.status_bar import (
     render_status_bar,
     retry_hint_for_job,
 )
-from yt_live_kit.ui.runtime_checks import check_ytdlp_version_warning_cached
+from yt_live_kit.ui.runtime_checks import (
+    check_whisper_model_warning,
+    check_ytdlp_version_warning_cached,
+)
 from yt_live_kit.services.jobs import read_job, read_job_error_log
 from yt_live_kit.ui.state import (
     consume_unread_job_error_notifications,
@@ -174,6 +177,10 @@ render_pipeline_completion_notices(detail_page=detail_page)
 ytdlp_warning = check_ytdlp_version_warning_cached(app_settings)
 if ytdlp_warning:
     st.warning(ytdlp_warning)
+
+whisper_model_warning = check_whisper_model_warning(app_settings)
+if whisper_model_warning:
+    st.warning(whisper_model_warning)
 
 with st.sidebar:
     _render_sidebar_brand()

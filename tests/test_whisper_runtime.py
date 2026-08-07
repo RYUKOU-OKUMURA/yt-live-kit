@@ -336,6 +336,87 @@ def test_preflight_rejects_missing_or_wrong_model(monkeypatch, tmp_path, wrong_p
         _preflight_whisper_runtime(settings, adopted_contract=contract)
 
 
+def test_preflight_missing_model_error_includes_configured_path_and_env_var(monkeypatch, tmp_path):
+    """恒久対策: model 実体が無いとき、設定パスと環境変数名がエラーに含まれること."""
+    settings = _fake_settings(tmp_path)
+    contract = _fake_contract(settings)
+    missing_model_path = str(tmp_path / "missing-model.bin")
+    settings = settings.model_copy(update={"whisper_model_path": missing_model_path})
+    _patch_successful_preflight(monkeypatch)
+
+    with pytest.raises(WhisperPreflightError) as excinfo:
+        _preflight_whisper_runtime(settings, adopted_contract=contract)
+
+    message = str(excinfo.value)
+    assert missing_model_path in message
+    assert "YTLK_WHISPER_MODEL_PATH" in message
+
+
+def test_preflight_missing_binary_error_includes_configured_path_and_env_var(monkeypatch, tmp_path):
+    """恒久対策: whisper-cli 実体が無いとき、設定パスと環境変数名がエラーに含まれること."""
+    settings = _fake_settings(tmp_path)
+    contract = _fake_contract(settings)
+    missing_binary_path = str(tmp_path / "missing-whisper-cli")
+    settings = settings.model_copy(update={"whisper_binary_path": missing_binary_path})
+    monkeypatch.setattr(
+        "yt_live_kit.services.whisper_runtime.shutil.which",
+        lambda value: None,
+    )
+
+    with pytest.raises(WhisperPreflightError) as excinfo:
+        _preflight_whisper_runtime(settings, adopted_contract=contract)
+
+    message = str(excinfo.value)
+    assert missing_binary_path in message
+    assert "YTLK_WHISPER_BINARY_PATH" in message
+
+
+def test_file_fingerprint_missing_includes_configured_path_and_env_var(tmp_path):
+    """_file_fingerprint 単体でも設定パス・環境変数名をメッセージへ含めること."""
+    from yt_live_kit.services.whisper_runtime import _file_fingerprint
+
+    missing = tmp_path / "missing.bin"
+    with pytest.raises(WhisperPreflightError) as excinfo:
+        _file_fingerprint(
+            missing,
+            "whisper.cpp model",
+            configured_path=str(missing),
+            env_var="YTLK_WHISPER_MODEL_PATH",
+        )
+    message = str(excinfo.value)
+    assert str(missing) in message
+    assert "YTLK_WHISPER_MODEL_PATH" in message
+
+
+def test_file_fingerprint_rejects_directory_with_configured_path(tmp_path):
+    """通常ファイルでない場合のエラーにも設定パス・環境変数名を含めること."""
+    from yt_live_kit.services.whisper_runtime import _file_fingerprint
+
+    directory = tmp_path / "not-a-file"
+    directory.mkdir()
+    with pytest.raises(WhisperPreflightError) as excinfo:
+        _file_fingerprint(
+            directory,
+            "whisper.cpp model",
+            configured_path=str(directory),
+            env_var="YTLK_WHISPER_MODEL_PATH",
+        )
+    message = str(excinfo.value)
+    assert str(directory) in message
+    assert "YTLK_WHISPER_MODEL_PATH" in message
+    assert "通常のファイル" in message
+
+
+def test_file_fingerprint_without_hints_matches_legacy_message(tmp_path):
+    """呼び出し側が configured_path / env_var を渡さない場合は既存文言のまま."""
+    from yt_live_kit.services.whisper_runtime import _file_fingerprint
+
+    missing = tmp_path / "missing.bin"
+    with pytest.raises(WhisperPreflightError) as excinfo:
+        _file_fingerprint(missing, "whisper.cpp model")
+    assert str(excinfo.value) == "whisper.cpp modelが見つかりません。"
+
+
 def test_preflight_rejects_missing_json_capability_and_ffmpeg(monkeypatch, tmp_path):
     settings = _fake_settings(tmp_path)
     _patch_successful_preflight(monkeypatch)

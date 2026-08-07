@@ -109,6 +109,39 @@ def test_ytdlp_warning_cache_stores_missing_binary_warning(monkeypatch):
     assert len(calls) == 1
 
 
+def test_check_whisper_model_warning_when_file_missing(tmp_path):
+    """恒久対策: model が無いとき設定パスと環境変数名を含む警告を返すこと."""
+    missing_model_path = str(tmp_path / "missing-model.bin")
+    settings = Settings(whisper_model_path=missing_model_path)
+
+    warning = runtime_checks.check_whisper_model_warning(settings)
+
+    assert warning is not None
+    assert missing_model_path in warning
+    assert "YTLK_WHISPER_MODEL_PATH" in warning
+
+
+def test_check_whisper_model_warning_when_file_present(tmp_path):
+    model_path = tmp_path / "model.bin"
+    model_path.write_bytes(b"model-fixture")
+    settings = Settings(whisper_model_path=str(model_path))
+
+    assert runtime_checks.check_whisper_model_warning(settings) is None
+
+
+def test_check_whisper_model_warning_defaults_to_current_settings(monkeypatch):
+    monkeypatch.setattr(
+        runtime_checks,
+        "get_settings",
+        lambda: Settings(whisper_model_path="definitely-missing-model.bin"),
+    )
+
+    warning = runtime_checks.check_whisper_model_warning()
+
+    assert warning is not None
+    assert "YTLK_WHISPER_MODEL_PATH" in warning
+
+
 def test_ytdlp_warning_cache_rechecks_when_missing_binary_appears(monkeypatch):
     installed_identity = YtdlpBinaryIdentity(
         resolved_path="/usr/local/bin/yt-dlp",

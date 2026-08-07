@@ -393,6 +393,26 @@ YTLK_FFMPEG_PATH=/opt/homebrew/opt/ffmpeg-full/bin/ffmpeg
 
 ---
 
+## Whisper（選択区間の高精度字幕）
+
+動画詳細の「詳細・再生成」で選択区間を高精度化する機能は、`whisper-cli`（whisper.cpp）と固定採用済みの model file を実体として必要とします。**リポジトリのデフォルト設定にはマシン固有の絶対パスを含めていないため、初回は次のいずれかの方法で実体を用意してください。**
+
+1. **model file を既定パスに配置する**（推奨・追加設定不要）  
+   `./data/_config/whisper/models/ggml-large-v3-turbo-q5_0.bin` に model file を配置します。
+2. **既に別の場所へ配置済みの model を使う**  
+   `.env` に `YTLK_WHISPER_MODEL_PATH` で実体の絶対パスを指定します。
+
+```dotenv
+# 例: Homebrew や手動セットアップで別の場所に配置した場合
+YTLK_WHISPER_MODEL_PATH=/path/to/ggml-large-v3-turbo-q5_0.bin
+```
+
+`whisper-cli` は既定で PATH 上を探索します。別の場所にインストールしている場合は、同様に `.env` の `YTLK_WHISPER_MODEL_PATH` と対になる `YTLK_WHISPER_BINARY_PATH` で実行ファイルのパスを指定してください。
+
+model / binary とも、採用時に固定した SHA-256 と一致する実体だけを利用します。実体が見つからない場合や SHA-256 が一致しない場合、高精度字幕は実行されず、画面には設定パスと確認すべき環境変数名を含む日本語エラーが表示されます。設定変更後は、起動中の yt-live-kit をいったん終了して再起動してください。
+
+---
+
 ## 日本語字幕のフォントについて
 
 縦型ショート動画に字幕を焼き込む際は、日本語フォントが必要です。次の優先順でフォントを探します。
@@ -427,6 +447,7 @@ export YTLK_SUBTITLE_FONT="Noto Sans CJK JP"
 | 字幕対応版 FFmpeg を用意できない | 単一区間の通常ショートは CLI の `--no-subtitles` で生成可能。字幕が必要な生成では自動的に字幕なしへ切り替えない |
 | yt-dlp が「No supported JavaScript runtime」と警告 | 字幕取得のみの用途では通常問題なし。警告を消す場合は [deno](https://deno.com/) のインストールを検討 |
 | ショート動画の字幕が豆腐（□）になる | 日本語フォントが見つかっていません。上記「日本語字幕のフォントについて」を参照し、`YTLK_SUBTITLE_FONT` を設定 |
+| 「選択区間の高精度字幕に失敗しました」 | 上記「Whisper（選択区間の高精度字幕）」を参照。model file を既定パスに配置するか、`.env` の `YTLK_WHISPER_MODEL_PATH` を設定して再起動 |
 | チャンネル一覧が表示されない | 限定公開・メンバー限定の配信は対象外。`@handle` の綴りを確認し、「再取得」を試す |
 
 ---
@@ -477,6 +498,8 @@ data/
 | `YTLK_DOWNLOAD_TIMEOUT` | yt-dlp の動画本体ダウンロードタイムアウト秒数 | `3600` |
 | `YTLK_FFMPEG_TIMEOUT` | ffmpeg / ffprobe のタイムアウト秒数 | `3600` |
 | `YTLK_SUBTITLE_FONT` | 字幕焼き込みに使うフォント名（未指定時は自動検出） | 自動検出 |
+| `YTLK_WHISPER_BINARY_PATH` | 選択区間の高精度字幕に使う `whisper-cli` のパス（詳細は「Whisper」節） | `whisper-cli`（PATH 上を探索） |
+| `YTLK_WHISPER_MODEL_PATH` | 選択区間の高精度字幕に使う whisper.cpp model file のパス（詳細は「Whisper」節） | `./data/_config/whisper/models/ggml-large-v3-turbo-q5_0.bin` |
 | `YTLK_YOUTUBE_CLIENT_SECRET` | YouTube Data API の OAuth クライアントシークレット JSON のパス | `./data/_config/client_secret.json` |
 
 ## セキュリティ
