@@ -48,7 +48,7 @@
 | S9-4 | 親候補区間 Whisper 精査 → short_cut / telop / line 再利用 | [x] 完了 |
 | S9-5 | UI 設定・進捗・エラー・失効表示 | [x] 完了 |
 | T1-PLAN | テロップ行時刻同期計画（docs-only） | [x] 完了 |
-| T1 | テロップ行時刻同期・明示確認 | [~] 進行中 |
+| T1 | テロップ行時刻同期・明示確認（保留: T1-1 が No-Go のため v4 候補。再開には T1-1 の Go 条件充足が必要） | [保留] |
 | T1-1 | production 非変更 timing spike・評価 manifest | [x] 完了（2026-08-05 測定済み、**No-Go / fallback-only**。T1-2 は着手条件未成立） |
 | T1-2 | timing 保存契約・extractor | [ ] 未着手（T1-1 No-Go のため着手しない。fallback-only 記録） |
 | T1-3 | pure aligner・telop・fingerprint 統合 | [ ] 未着手 |
@@ -1720,7 +1720,7 @@ data/{video_id}/ ...
 ### T1: テロップ行時刻同期・明示確認（v3.2 追加）
 
 **目的:** S9-6 を受け入れ専用の未完了状態で保持したまま、Codex が作成したテロップ draft の行時刻を、既存の production 境界を変えずに評価・保存・補正・表示する独立した実装列を追加する。低信頼行は元時刻を維持して警告し、誤字・固有名詞の全文確認とは別に、要確認行の時刻確認を明示的に記録する。
-**フェーズ状態:** [~] 進行中。T1-PLAN と T1-1 は [x] 完了。T1-1 の判定は **No-Go（fallback-only）** であり、T1-2〜T1-5 は着手条件を満たさない。fallback-only の記録を保持したまま、2026-08-06 に **T1 なしで S9-6 を正式受け入れ（Go）** とする方針をユーザーが決定した。S9-6 は Go、AC-40 は T1 の実体が満たされていないため `[ ]` のまま残す。cue 粒度（16 秒区間が 1 cue で行は比例配分）は T1 の担当として未解決である。T1 再開時は T1-1 の再測定から行う。
+**フェーズ状態:** [保留]（v4 候補）。T1-PLAN と T1-1 は [x] 完了。T1-1 の判定は **No-Go（fallback-only）** であり、T1-2〜T1-5 は着手条件を満たさない。fallback-only の記録を保持したまま、2026-08-06 に **T1 なしで S9-6 を正式受け入れ（Go）** とする方針をユーザーが決定した。S9-6 は Go、AC-40 は T1 の実体が満たされていないため `[ ]` のまま残す。cue 粒度（16 秒区間が 1 cue で行は比例配分）は T1 の担当として未解決である。T1-1 が No-Go のまま T1-2〜T1-5 が未着手で、親フェーズだけ `[~] 進行中` 表示が残っていた不整合を解消するため、2026-08-07 に T1 全体を [保留]（v4 候補）へ変更した。再開は T1-1 の再測定から行い、Go 条件を満たすまで T1-2 以降には着手しない。**AC-40 は保留化後も `[ ]` のまま変更しない**（完了条件は T1 の実体成立であり、保留化では満たされない）。
 **対応要件 / AC:** FR-22、FR-25、FR-33、FR-35、FR-36、FR-39、AC-23、AC-35、AC-37、AC-40。
 **依存:** `S9-5 → T1-PLAN → T1-1 → T1-2 → T1-3 → T1-4 → T1-5 → S9-6`。既存 S9-6 の ID・目的・受け入れ専用性は変更しない。
 
@@ -2695,6 +2695,7 @@ S9 初版で実装するのは、既存 YouTube `video_id` の良好な VTT を�
 
 | 日付 | 内容 |
 |------|------|
+| 2026-08-07 | **T1 のフェーズ状態を `[~] 進行中` から `[保留]`（v4 候補）へ変更した。** T1-1 は No-Go / fallback-only 判定済み、T1-2 は「T1-1 No-Go のため着手しない」とフェーズ表に既に明記済み、T1-3〜T1-5 は未着手であり、実質「今はやらない」と決定済みであるにもかかわらず親フェーズ T1 だけ `[~] 進行中` が残っていた不整合を解消した。再開には T1-1 の再測定で Go 条件を満たすことが必要である。**AC-40 は `[ ]` のまま変更しない**（完了条件は T1 の実体成立であり、保留化では満たされない）。 |
 | 2026-08-07 | **CR-F18 の残作業を完了。** mypy を 94 errors → 0 にし、CI（`.github/workflows/ci.yml`）へ必須ステップとして配線した。`# type: ignore` / `disable_error_code` による一括抑止は使わず、None ガード・Literal narrowing・TypedDict 導入・型注釈修正で解消した。94 件を分類判定した結果、**実バグは 1 件**（`_render_batch_summary` が壊れた永続 JSON の件数欄で未捕捉例外を出しサマリー表示ごと落ちる）で、修正と回帰テスト 11 件を追加した。ほかに実害はないが正当な指摘 1 件（復旧 callback が再代入される `state` を捕捉）を構造修正した。残る 92 件は型注釈のみの問題と判定した。回帰 **1901 passed / 2 skipped**、ruff pass、mypy 0（CI と同じ Python 3.11 でも確認）。UI 変更は隔離 `YTLK_DATA_DIR` + Playwright で全経路を実機確認し、console error / サーバ traceback ともに 0 件 |
 | 2026-08-06 | **S9-6 のフェーズ判定を Go とし、S9 フェーズと M16 を完了した。** 修正後経路で作り直した 2 本の完成ショートをユーザーが実 UI で確認し（`preview_confirmed_fingerprint` は両方とも output fingerprint と一致）、CER 相対改善 78.694％、固有名詞 exact match の非悪化、cue error の改善、失効・cache・fallback・scope guard、production 15 evidence file の 15/15 不変を確認した。S9-6-1〜S9-6-6 と Done 条件 4 件、AC-30 / AC-35 / AC-37 を `[x]` にした。**AC-40 は `[ ]` のまま残す**。AC-40 の 11 項目は T1-1〜T1-5 の内容であり、T1-1 が No-Go / fallback-only、T1-2 以降が未着手のため実体として満たされていない。これに伴い、T1 成功を前提にしていた S9-6-5・S9-6 Done 条件 4 番目・`requirements-v3.md` の「AC-40 の完了タイミング」の 3 か所を改訂し、AC-40 の更新条件へ「T1 の実体成立」を明示した。cue 粒度（16 秒区間が 1 cue で行は比例配分）は S9 の範囲外・T1 の担当として未解決のまま記録した。 |
 | 2026-08-05 | **T1-1 を完了（No-Go / fallback-only）。** 波形付きローカル review UI で human gold 63/64 行を入力し、`t1-fallback-008` は対象発話不在の fail-closed 記録とした。bounded whisper-cli を 8 invocation 以内で実行（hash 全一致、peak memory 付き証跡）、current / segment_snap / token_alignment の 3 候補を同一 fixture・同一 policy で A/B 測定した。token_alignment は pooled median 370 ms / p90 1640 ms で全群 gate FAIL、事後緩和なしで No-Go とし、T1-2 以降は着手しない。gold 45/63 行の 1000 ms 単位入力という測定限界と、gold 精度改善後の再測定には別承認が必要である旨を報告書に記録した。証跡: `docs/benchmarks/t1-1-report.md` / `t1-1-report.json` / `t1-1-timing-inputs.json` / `t1-1-human-gold-packet.json` |
