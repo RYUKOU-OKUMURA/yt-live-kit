@@ -376,7 +376,7 @@ def validate_clip_candidates(
 
     if errors:
         return ClipCandidatesDocument(
-            candidates=tuple(normalized), lineage=doc.lineage
+            candidates=list(normalized), lineage=doc.lineage
         ), tuple(errors)
 
     return ClipCandidatesDocument(candidates=normalized, lineage=doc.lineage), ()

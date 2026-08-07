@@ -12,7 +12,7 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Iterator, Literal
+from typing import Final, Iterator, Literal
 from zoneinfo import ZoneInfo
 
 import fcntl
@@ -40,7 +40,7 @@ from yt_live_kit.services._paths import (
     validate_confined_candidate,
 )
 
-_SCHEMA_VERSION = 2
+_SCHEMA_VERSION: Final = 2
 _VIDEO_WRITE_LOCKS: dict[str, threading.RLock] = {}
 _VIDEO_WRITE_LOCKS_GUARD = threading.Lock()
 _COMPLETED_UPLOAD_STATES = frozenset({"reserved", "uploading", "uploaded"})
@@ -683,7 +683,7 @@ def create_line_state(
         material_fingerprint = make_material_context_fingerprint(
             video_id,
             clip_id,
-            queue_fingerprint,  # type: ignore[arg-type]
+            queue_fingerprint,
             material,
         )
     try:

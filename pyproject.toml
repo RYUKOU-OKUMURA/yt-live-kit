@@ -92,4 +92,7 @@ warn_redundant_casts = true
 warn_unused_configs = true
 ignore_missing_imports = true
 exclude = ["benchmarks/", ".venv/"]
-# CI では未実行（現状 94 errors、段階導入）。ローカル確認: uv run mypy src
+# CI の必須ステップ（.github/workflows/ci.yml の Mypy）。src は 0 errors を維持する。
+# ローカル確認: uv run mypy src
+# `# type: ignore` と disable_error_code による一括抑止は使わない（CR-F18）。
+# Optional の narrowing 不足は None ガードか型注釈の修正で解消すること。

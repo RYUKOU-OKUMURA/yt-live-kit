@@ -732,6 +732,9 @@ def publication_poll_job_target(
             for observation in operation.poll_history
         )
 
+        def _record_publication_observation(item: UploadStatusObservation) -> None:
+            append_poll_observation(operation_id, item, settings)
+
         try:
             poll_publication_status(
                 operation.video_id or "",
@@ -741,9 +744,7 @@ def publication_poll_job_target(
                 service=service,
                 sleep_fn=sleep_fn,
                 clock=clock,
-                on_observation=lambda item: append_poll_observation(
-                    operation_id, item, settings
-                ),
+                on_observation=_record_publication_observation,
             )
         except YouTubeAPIError as exc:
             raise UploadQueueError(
@@ -878,8 +879,8 @@ def recover_upload_operations(settings: Settings) -> tuple[UploadOperation, ...]
         attempt_by_operation: dict[str, list[UploadAttempt]] = {}
         operation_by_id = {item.operation_id: item for item in operations}
         for attempt in attempts:
-            operation = operation_by_id.get(attempt.operation_id)
-            if operation is None:
+            attempt_operation = operation_by_id.get(attempt.operation_id)
+            if attempt_operation is None:
                 raise UploadQueueError(
                     "試行台帳と投稿キューが不整合です。データを変更せず新規投稿を停止しました。"
                 )
@@ -1008,7 +1009,9 @@ def upload_job_target(
             attempt_exists = has_upload_attempt(operation_id, job_id, settings)
         except UploadQueueError:
             attempt_exists = True  # 有無を確定できない場合は自動再送禁止。
-        state = "needs_reconciliation" if attempt_exists else "failed"
+        state: Literal["failed", "needs_reconciliation"] = (
+            "needs_reconciliation" if attempt_exists else "failed"
+        )
         message = (
             "試行台帳を安全に確認できないため upload を開始していません。手動確認が必要です。"
             if attempt_exists
@@ -1050,13 +1053,15 @@ def upload_job_target(
     from yt_live_kit.services.jobs import update_job
     update_job(job_id, settings=settings, result_ref=operation_id)
     report(stage="processing", message="YouTube 側の動画処理を確認しています")
+
+    def _record_processing_observation(item: UploadStatusObservation) -> None:
+        append_poll_observation(operation_id, item, settings)
+
     try:
         poll_processing_status(
             uploaded.video_id or "",
             settings,
-            on_observation=lambda item: append_poll_observation(
-                operation_id, item, settings
-            ),
+            on_observation=_record_processing_observation,
         )
     except YouTubeAPIError as exc:
         raise UploadQueueError(

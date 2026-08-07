@@ -374,12 +374,12 @@ def render_shorts_section(
                     label_visibility="collapsed",
                     key=f"{key_prefix}_clip",
                 )
-                selected = clip_candidates[selected_idx]
+                selected_clip = clip_candidates[selected_idx]
                 interval, interval_error = interval_from_timestamps(
-                    selected.start,
-                    selected.end,
+                    selected_clip.start,
+                    selected_clip.end,
                 )
-                st.markdown(f"**理由:** {selected.reason}")
+                st.markdown(f"**理由:** {selected_clip.reason}")
 
         elif source == SOURCE_HIGHLIGHTS:
             labels = [
@@ -393,12 +393,12 @@ def render_shorts_section(
                 label_visibility="collapsed",
                 key=f"{key_prefix}_highlight",
             )
-            selected = highlight_candidates[selected_idx]
+            selected_highlight = highlight_candidates[selected_idx]
             interval, interval_error = interval_from_timestamps(
-                selected.start,
-                selected.end,
+                selected_highlight.start,
+                selected_highlight.end,
             )
-            st.markdown(f"**理由:** {selected.reason}")
+            st.markdown(f"**理由:** {selected_highlight.reason}")
 
         else:
             manual_cols = st.columns(2)

@@ -186,9 +186,10 @@ def _parse_utc_datetime(value: object, label: str) -> datetime:
         parsed = datetime.fromisoformat(text)
     except ValueError as exc:
         raise ShortsQueueError(f"{label} の日時形式が正しくありません。") from exc
-    if parsed.tzinfo is None or parsed.utcoffset() is None:
+    offset = parsed.utcoffset()
+    if parsed.tzinfo is None or offset is None:
         raise ShortsQueueError(f"{label} はタイムゾーン付き UTC 日時にしてください。")
-    if parsed.utcoffset().total_seconds() != 0:
+    if offset.total_seconds() != 0:
         raise ShortsQueueError(f"{label} は UTC 日時にしてください。")
     return parsed.astimezone(timezone.utc)
 
@@ -461,8 +462,13 @@ class ShortsQueueItemResult:
         if not isinstance(value, Mapping):
             raise ShortsQueueError("生成結果はオブジェクトで指定してください。")
         _require_exact_keys(value, _LEGACY_ITEM_KEYS if legacy else _ITEM_KEYS)
-        status = _require_string(value["status"], "生成結果の状態")
-        if status not in {"succeeded", "failed"}:
+        status_text = _require_string(value["status"], "生成結果の状態")
+        status: Literal["succeeded", "failed"]
+        if status_text == "succeeded":
+            status = "succeeded"
+        elif status_text == "failed":
+            status = "failed"
+        else:
             raise ShortsQueueError("生成結果の状態が正しくありません。")
         title_candidates = _string_tuple(value["title_candidates"], "タイトル案")
         tags = _string_tuple(value["tags"], "タグ")
@@ -540,9 +546,16 @@ class ShortsQueueResult:
         if schema_version not in {LEGACY_SCHEMA_VERSION, SCHEMA_VERSION}:
             raise ShortsQueueError("対応していないショート量産 manifest です。")
         _require_exact_keys(value, _LEGACY_MANIFEST_KEYS if legacy else _MANIFEST_KEYS)
-        status = _require_string(value["status"], "キュー状態")
-        allowed_statuses = {"running", "done"} | ({"interrupted"} if not legacy else set())
-        if status not in allowed_statuses:
+        status_text = _require_string(value["status"], "キュー状態")
+        # legacy manifest には interrupted が存在しない。
+        status: Literal["running", "done", "interrupted"]
+        if status_text == "running":
+            status = "running"
+        elif status_text == "done":
+            status = "done"
+        elif status_text == "interrupted" and not legacy:
+            status = "interrupted"
+        else:
             raise ShortsQueueError("キュー状態が正しくありません。")
         raw_specs = value["clip_specs"]
         raw_items = value["items"]

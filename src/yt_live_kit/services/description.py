@@ -9,6 +9,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Lock
+from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from pydantic import ValidationError
@@ -343,8 +344,12 @@ def requirements_from_snapshot(
     """
     if not isinstance(snapshot, Mapping):
         raise DescriptionError("概要欄要件 snapshot の形式が正しくありません。")
+    # snapshot は永続 payload 由来で field 名も型も静的には決まらない。
+    # 過不足・型違いは dataclass の TypeError / __post_init__ の ValueError で
+    # 検出する契約なので、ここでは Any にして構築時検証へ委ねる。
+    fields: dict[str, Any] = dict(snapshot)
     try:
-        return ShortsDescriptionRequirements(**dict(snapshot))
+        return ShortsDescriptionRequirements(**fields)
     except (TypeError, ValueError) as exc:
         message = str(exc).strip() or "概要欄要件 snapshot の形式が正しくありません。"
         raise DescriptionError(message) from exc

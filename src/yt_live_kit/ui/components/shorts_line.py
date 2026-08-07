@@ -9,7 +9,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Literal
+from typing import Literal, TypedDict
 
 import streamlit as st
 from pydantic import ValidationError
@@ -18,6 +18,7 @@ from yt_live_kit.config import Settings
 from yt_live_kit.models.clips import ClipCandidate
 from yt_live_kit.models.highlights import HighlightSegment
 from yt_live_kit.models.telop import TelopScriptDocument
+from yt_live_kit.models.transcript import TranscriptArtifactRef
 from yt_live_kit.models.upload import UploadOperation
 from yt_live_kit.services.ai_prompt import AiPromptError
 from yt_live_kit.services.jobs import get_active_job
@@ -58,6 +59,7 @@ from yt_live_kit.services.shorts_line import (
     make_review_fingerprint,
 )
 from yt_live_kit.services.shorts_queue import (
+    QueueSource,
     ShortsQueueClipSpec,
     ShortsQueueError,
     ShortsQueueSegmentSpec,
@@ -97,6 +99,7 @@ from yt_live_kit.ui.components.shorts_queue import (
     start_or_confirm_line_generation,
 )
 from yt_live_kit.ui.controllers.upload import LineUploadAdapter
+from yt_live_kit.ui.state import session_state_mapping
 from yt_live_kit.ui.session_keys import (
     detail_workspace_key,
     line_material_selection_key,
@@ -148,12 +151,26 @@ class _LineRecoveryEvidence:
     queue_fingerprint: str
     review_fingerprint: str | None = None
     material_context: Mapping[str, object] | None = None
-    artifact_ref: object | None = None
+    artifact_ref: TranscriptArtifactRef | None = None
     artifact_fingerprint: str | None = None
     used_range_cue_digests: tuple[str, ...] = ()
     generation_spec: Mapping[str, object] | None = None
     output_fingerprint: str | None = None
     upload_operation: UploadOperation | None = None
+
+
+class _ArtifactLineageKwargs(TypedDict, total=False):
+    """artifact provenance を kwargs として渡すときの key と型。
+
+    cutplan / line state に artifact が無い場合は空 dict になるため
+    ``total=False``。3 key は必ず揃うか、まとめて欠けるかのどちらかである。
+    値の None 許容は受け側 (``create_line_state`` 等) の既定と揃えてあり、
+    ref だけがあり fingerprint が無い不完全な組は受け側が LineStateError で弾く。
+    """
+
+    artifact_ref: TranscriptArtifactRef | None
+    artifact_fingerprint: str | None
+    used_range_cue_digests: tuple[str, ...]
 
 
 def _safe(value: object) -> str:
@@ -265,7 +282,7 @@ def _current_context_spec(
     return None
 
 
-def _source_for(option: ParentOption) -> str:
+def _source_for(option: ParentOption) -> QueueSource:
     return "clips" if isinstance(option.candidate, ClipCandidate) else "highlights"
 
 
@@ -311,7 +328,7 @@ def _material_context_payload(
 def _restore_material_context(
     state: LineState,
 ) -> tuple[
-    str,
+    QueueSource,
     ClipCandidate | HighlightSegment,
     ShortsQueueTarget,
     ShortsLineDefaults,
@@ -329,10 +346,14 @@ def _restore_material_context(
             "defaults",
         }:
             return None
-        source = raw["source"]
-        kind = raw["original_kind"]
-        if source not in {"clips", "highlights"}:
+        source: QueueSource
+        if raw["source"] == "clips":
+            source = "clips"
+        elif raw["source"] == "highlights":
+            source = "highlights"
+        else:
             return None
+        kind = raw["original_kind"]
         if kind == "clip" and source == "clips":
             original: ClipCandidate | HighlightSegment = ClipCandidate.model_validate(
                 raw["original_candidate"]
@@ -412,7 +433,7 @@ def _cutplan_lineage(
     video_id: str,
     option: ParentOption,
     settings: Settings,
-) -> dict[str, object]:
+) -> _ArtifactLineageKwargs:
     """明示高精度化済み cutplan の provenance だけを line に引き渡す."""
     document = load_cut_plan(video_id, option.id, settings)
     if document is None or document.artifact_ref is None:
@@ -595,10 +616,14 @@ def _queue_fingerprint_from_material_json(
         "defaults",
     }:
         return None
-    source = raw["source"]
-    kind = raw["original_kind"]
-    if source not in {"clips", "highlights"}:
+    source: QueueSource
+    if raw["source"] == "clips":
+        source = "clips"
+    elif raw["source"] == "highlights":
+        source = "highlights"
+    else:
         return None
+    kind = raw["original_kind"]
     if kind == "clip" and source == "clips":
         original: ClipCandidate | HighlightSegment = ClipCandidate.model_validate(
             raw["original_candidate"]
@@ -727,7 +752,9 @@ def _gather_line_recovery_evidence(
             (value for value in result.clip_specs if value.target_id == clip_id),
             None,
         )
-    if spec is not None and queue_fingerprint is not None:
+    # spec は result が None でない場合にだけ設定されるが、result の narrowing は
+    # ここまで伝播しない。後段で result.items を読むため明示的に並べて確認する。
+    if result is not None and spec is not None and queue_fingerprint is not None:
         document = spec.telop_document
         review_fingerprint = make_review_fingerprint(
             video_id,
@@ -973,7 +1000,9 @@ def _render_line_recovery_actions(
     state: LineState,
     settings: Settings,
     *,
-    retry: Callable[[], None] | None = None,
+    # retry の戻り値は使わない。復元結果は callee 側が session state へ
+    # 永続化しており、直後の st.rerun() が再取得するため object で受ける。
+    retry: Callable[[], object] | None = None,
     retry_label: str = "テロップ台本を再生成",
 ) -> None:
     """失敗・復元不能時の retry と確認付き終了を必ず提示する。"""
@@ -1131,15 +1160,13 @@ def _restore_context(
             # review fingerprintだけが一致する旧/別artifactの台本は復元しない。
             document = None
     try:
-        lineage = (
-            {
+        lineage: _ArtifactLineageKwargs = {}
+        if state.artifact_ref is not None:
+            lineage = {
                 "artifact_ref": state.artifact_ref,
                 "artifact_fingerprint": state.artifact_fingerprint,
-                "used_range_cue_digests": state.used_range_cue_digests,
+                "used_range_cue_digests": tuple(state.used_range_cue_digests),
             }
-            if state.artifact_ref is not None
-            else {}
-        )
         restore_line_snapshot(
             video_id=video_id,
             source=source,
@@ -1203,7 +1230,7 @@ def _editor_document(
     queue_fingerprint: str,
 ) -> TelopScriptDocument:
     prefix = sync_telop_editor_state(
-        st.session_state,
+        session_state_mapping(),
         draft,
         video_id=video_id,
         clip_id=clip_id,
@@ -1267,7 +1294,7 @@ def _editor_document(
                 ):
                     st.caption("AI案から変更")
     return telop_document_from_editor_state(
-        st.session_state,
+        session_state_mapping(),
         draft,
         prefix=prefix,
     )
@@ -1898,6 +1925,11 @@ def render_shorts_line(
             )
         return
 
+    # state はこの先の工程で射影結果へ再代入される。復旧用 callback は
+    # 再代入前の値だけを使うため、再代入しない別名に束縛してから捕捉する
+    # （narrowing 済みの state を closure が捕捉すると型が広がるため）。
+    line_state = state
+
     # 6 工程の進行表示はサイドバー（render_compact_line_status）へ一本化した。
     if context is None:
         st.error(
@@ -1907,7 +1939,7 @@ def render_shorts_line(
         _render_line_recovery_actions(
             state,
             settings,
-            retry=lambda: _restore_context(video_id, state, settings),
+            retry=lambda: _restore_context(video_id, line_state, settings),
             retry_label="保存状態を再読み込み",
         )
         return
@@ -1921,7 +1953,7 @@ def render_shorts_line(
         _render_line_recovery_actions(
             state,
             settings,
-            retry=lambda: _restore_context(video_id, state, settings),
+            retry=lambda: _restore_context(video_id, line_state, settings),
             retry_label="保存状態を再読み込み",
         )
         return
@@ -1945,7 +1977,7 @@ def render_shorts_line(
             retry=lambda: _generate_line_telop(
                 video_id=video_id,
                 target=target,
-                state=state,
+                state=line_state,
                 context=context,
                 settings=settings,
             ),

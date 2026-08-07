@@ -28,14 +28,12 @@ def channel_cmd(
         raise typer.Exit(code=1) from exc
 
     try:
-        if refresh:
+        cached = None if refresh else load_cache(cache_handle, settings=settings)
+        if cached is None:
             doc = list_archives(channel_url, limit=limit, settings=settings)
             save_cache(doc, settings)
         else:
-            doc = load_cache(cache_handle, settings=settings)
-            if doc is None:
-                doc = list_archives(channel_url, limit=limit, settings=settings)
-                save_cache(doc, settings)
+            doc = cached
     except ChannelError as exc:
         typer.secho(str(exc), fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1) from exc

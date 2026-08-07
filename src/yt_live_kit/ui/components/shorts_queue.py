@@ -4,15 +4,16 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping, Sequence
+from functools import partial
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, BinaryIO, Final
 
 import streamlit as st
 
 from yt_live_kit.config import Settings
-from yt_live_kit.models.clips import ClipCandidate
-from yt_live_kit.models.highlights import HighlightSegment
+from yt_live_kit.models.clips import ClipCandidate, ClipCandidatesDocument
+from yt_live_kit.models.highlights import HighlightSegment, HighlightsDocument
 from yt_live_kit.models.telop import TelopScriptDocument
 from yt_live_kit.models.transcript import TranscriptArtifactRef
 from yt_live_kit.services.ai_prompt import AiPromptError
@@ -21,6 +22,8 @@ from yt_live_kit.services.ffmpeg import FfmpegError, ensure_subtitles_filter
 from yt_live_kit.services.highlights import load_segments_file
 from yt_live_kit.services.jobs import JobBusyError, is_busy, start_job
 from yt_live_kit.services.shorts_queue import (
+    QueueMode,
+    QueueSource,
     ShortsQueueClipSpec,
     ShortsQueueError,
     ShortsQueueResult,
@@ -48,6 +51,24 @@ from yt_live_kit.ui.state import get_selected_video_id, set_active_job_id
 _JOB_IDS_KEY = "shorts_queue_job_ids"
 _SOURCE_LABELS = {"clips": "切り抜き候補", "highlights": "ハイライト候補"}
 _MODE_LABELS = {"individual": "個別", "concat": "連結"}
+_QUEUE_SOURCES: Final[tuple[QueueSource, ...]] = ("clips", "highlights")
+_QUEUE_MODES: Final[tuple[QueueMode, ...]] = ("individual", "concat")
+
+
+def _as_queue_source(value: object) -> QueueSource:
+    """session state / widget 由来の値を候補ソースの Literal へ検証して返す."""
+    for candidate in _QUEUE_SOURCES:
+        if value == candidate:
+            return candidate
+    raise ShortsQueueError("候補ソースは切り抜き候補またはハイライトを選んでください。")
+
+
+def _as_queue_mode(value: object) -> QueueMode:
+    """session state / widget 由来の値を生成モードの Literal へ検証して返す."""
+    for candidate in _QUEUE_MODES:
+        if value == candidate:
+            return candidate
+    raise ShortsQueueError("生成モードは個別または連結を選んでください。")
 _BUSY_MESSAGE = "他の処理が実行中です。完了までお待ちください。"
 
 
@@ -106,7 +127,7 @@ def _candidate_label(candidate: ClipCandidate | HighlightSegment) -> str:
 def prepare_line_snapshot(
     *,
     video_id: str,
-    source: str,
+    source: QueueSource,
     original_candidate: ClipCandidate | HighlightSegment,
     segments: Sequence[HighlightSegment],
     layout: str,
@@ -161,7 +182,7 @@ def install_prepared_line_snapshot(prepared: PreparedLineSnapshot) -> None:
 def install_line_snapshot(
     *,
     video_id: str,
-    source: str,
+    source: QueueSource,
     original_candidate: ClipCandidate | HighlightSegment,
     segments: Sequence[HighlightSegment],
     layout: str,
@@ -209,7 +230,7 @@ def clear_line_snapshot(video_id: str) -> None:
 def restore_line_snapshot(
     *,
     video_id: str,
-    source: str,
+    source: QueueSource,
     original_candidate: ClipCandidate | HighlightSegment,
     target: ShortsQueueTarget,
     layout: str,
@@ -281,19 +302,22 @@ def _start_queue_job(
         st.error(_safe_text(exc))
         return
     try:
-        job_kwargs: dict[str, object] = {
-            "video_id": video_id,
-            "title": title,
-            "total": len(specs),
-            "settings": settings,
+        # start_job の名前付き引数は型検査させ、target 固有の追加 kwargs だけを
+        # dict で渡す。以前は全部を dict[str, object] に入れており、video_id や
+        # total の型が呼び出し側で検査されていなかった。
+        target_kwargs: dict[str, Any] = {
             "clip_spec_dicts": [spec.to_dict() for spec in specs],
         }
         if resume_job_id is not None:
-            job_kwargs["resume_job_id"] = resume_job_id
+            target_kwargs["resume_job_id"] = resume_job_id
         job_id = start_job(
             "shorts_queue",
             run_shorts_queue_job_target,
-            **job_kwargs,
+            video_id=video_id,
+            title=title,
+            total=len(specs),
+            settings=settings,
+            **target_kwargs,
         )
     except JobBusyError:
         st.error(_BUSY_MESSAGE)
@@ -322,10 +346,14 @@ def _validate_overwrite_confirmation(
         current_targets = tuple(snapshot.get("targets", ()))
     else:
         try:
-            source = str(snapshot["source"])
-            if source == "clips":
+            source_text = str(snapshot["source"])
+            source: QueueSource
+            document: ClipCandidatesDocument | HighlightsDocument | None
+            if source_text == "clips":
+                source = "clips"
                 document = load_candidates_file(video_id, settings)
-            elif source == "highlights":
+            elif source_text == "highlights":
+                source = "highlights"
                 document = load_segments_file(video_id, settings)
             else:
                 return False, "候補ソースが変わりました。選択し直してください。"
@@ -342,7 +370,7 @@ def _validate_overwrite_confirmation(
             current_fingerprint = make_shorts_queue_fingerprint(
                 video_id=video_id,
                 source=source,
-                mode=str(snapshot["mode"]),
+                mode=_as_queue_mode(snapshot["mode"]),
                 original_candidates=current_selected,
                 segments=current_segments,
                 layout=str(snapshot["layout"]),
@@ -351,7 +379,7 @@ def _validate_overwrite_confirmation(
             )
             current_targets = build_shorts_queue_targets(
                 current_segments,
-                mode=str(snapshot["mode"]),
+                mode=_as_queue_mode(snapshot["mode"]),
             )
         except (ShortsQueueError, TelopError, OSError, ValueError) as exc:
             return False, _safe_text(exc)
@@ -488,7 +516,7 @@ def _confirm_interrupted_queue_recovery_dialog(
 def _render_snapshot_form(
     *,
     video_id: str,
-    source: str,
+    source: QueueSource,
     candidates: Sequence[ClipCandidate | HighlightSegment],
 ) -> None:
     """候補表示順の選択と設定を一括 submit する."""
@@ -504,7 +532,7 @@ def _render_snapshot_form(
                 selected.append(candidate)
         mode = st.segmented_control(
             "生成モード",
-            ["individual", "concat"],
+            list(_QUEUE_MODES),
             default="individual",
             required=True,
             format_func=lambda value: _MODE_LABELS[value],
@@ -732,7 +760,7 @@ def _render_target_editor(
     st.rerun()
 
 
-def _open_video(path: Path):
+def _open_video(path: Path) -> BinaryIO:
     """download_button の別 thread で file-like を遅延生成する."""
     try:
         return path.open("rb")
@@ -809,18 +837,21 @@ def _render_result(
             primary_title = item.title_candidates[0]
             st.markdown(f"**{_safe_text(primary_title)}**")
             output_path = item.output_path
+            missing_message = "生成済み動画ファイルが見つからないか、空になっています。"
             output_ready = False
-            output_warning = "生成済み動画ファイルが見つからないか、空になっています。"
+            output_warning: str | None = missing_message
             if output_path is not None:
                 output_ready, output_warning = _is_nonempty_file(output_path)
-            if not output_ready:
-                st.warning(output_warning)
+            if output_path is None or not output_ready:
+                st.warning(output_warning or missing_message)
             else:
                 with st.container(width=360):
                     st.video(output_path)
                 st.download_button(
                     "mp4 を保存",
-                    data=lambda path=output_path: _open_video(path),
+                    # partial で path を束縛する。lambda の既定引数だと
+                    # ループ変数の捕捉を避けられても型が推論できない。
+                    data=partial(_open_video, output_path),
                     file_name=output_path.name,
                     mime="video/mp4",
                     key=f"queue_download_{result.job_id}_{item.target_id}",
@@ -895,7 +926,7 @@ def render_shorts_queue(
         )
         _render_current_result(video_id, settings, title=title)
         return
-    available_sources: list[str] = []
+    available_sources: list[QueueSource] = []
     if clip_candidates:
         available_sources.append("clips")
     if highlight_candidates:
@@ -951,7 +982,7 @@ def render_shorts_queue(
             current_fingerprint = make_shorts_queue_fingerprint(
                 video_id=video_id,
                 source=source,
-                mode=str(snapshot["mode"]),
+                mode=_as_queue_mode(snapshot["mode"]),
                 original_candidates=current_selected,
                 segments=current_segments,
                 layout=str(snapshot["layout"]),

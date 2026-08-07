@@ -177,6 +177,43 @@ def test_batch_summary_severity() -> None:
     assert batch_summary_severity(0, 1) == "error"
 
 
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (3, 3),
+        (0, 0),
+        (2.7, 2),
+        ("4", 4),
+        (None, 0),
+        (True, 0),
+        ("abc", 0),
+        ([1, 2], 0),
+        ({"count": 1}, 0),
+        (float("nan"), 0),
+    ],
+)
+def test_coerce_summary_count_never_raises(value: object, expected: int) -> None:
+    """壊れた summary JSON の件数欄でもサマリー表示を落とさない（CR-F18）.
+
+    ``read_batch_summary`` は永続 JSON をそのまま返すため件数欄に任意の型が
+    入りうる。以前は ``int()`` へ直接渡しており ``"abc"`` や ``[1, 2]`` で
+    TypeError / ValueError が送出され、取り込みページのサマリーごと落ちていた。
+    """
+    assert intake._coerce_summary_count(value) == expected
+
+
+def test_render_batch_summary_survives_corrupt_counts() -> None:
+    """件数欄が壊れていても _render_batch_summary が例外を送出しない（CR-F18）."""
+    corrupt = {"summary": "一括処理の結果", "failed": "abc", "success": [1, 2]}
+    with (
+        patch.object(intake, "get_batch_summary", return_value=corrupt),
+        patch.object(intake, "st") as fake_st,
+    ):
+        intake._render_batch_summary()
+    # severity は success=0 / failed=0 の "info" になり、本文はそのまま渡る。
+    fake_st.info.assert_called_once_with("一括処理の結果")
+
+
 def test_clipboard_html_remains_safe_after_page_merge() -> None:
     import json
 

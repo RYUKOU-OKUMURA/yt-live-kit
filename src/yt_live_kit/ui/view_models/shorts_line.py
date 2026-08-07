@@ -261,6 +261,25 @@ def sync_telop_editor_state(
     return prefix
 
 
+def _editor_float(value: object) -> float:
+    """テロップ編集バッファの数値欄を float へ変換する。
+
+    値は number_input が書き戻す int / float を想定する。解釈できない値を
+    0.0 などへ丸めると台本の時刻が黙って壊れるため、ここでは落とさず
+    ValueError を送出して呼び出し側の検証へ返す。
+    """
+    if isinstance(value, bool):
+        raise ValueError("テロップ時刻の編集値が数値ではありません。")
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except ValueError as exc:
+            raise ValueError("テロップ時刻の編集値が数値ではありません。") from exc
+    raise ValueError("テロップ時刻の編集値が数値ではありません。")
+
+
 def telop_document_from_editor_state(
     state: MutableMapping[str, object],
     draft: TelopScriptDocument,
@@ -275,8 +294,8 @@ def telop_document_from_editor_state(
             lines.append(
                 TelopLine(
                     text=str(state[f"{line_prefix}_text"]),
-                    start_sec=float(state[f"{line_prefix}_start"]),
-                    end_sec=float(state[f"{line_prefix}_end"]),
+                    start_sec=_editor_float(state[f"{line_prefix}_start"]),
+                    end_sec=_editor_float(state[f"{line_prefix}_end"]),
                     emphasis=bool(state[f"{line_prefix}_emphasis"]),
                 )
             )
@@ -289,17 +308,17 @@ def telop_document_from_editor_state(
         )
     return TelopScriptDocument(
         hook_text=str(state[f"{prefix}_hook"]),
-        title_candidates=tuple(
+        title_candidates=[
             line
             for line in str(state[f"{prefix}_titles"]).splitlines()
             if line.strip()
-        ),
+        ],
         description=str(state[f"{prefix}_description"]),
-        tags=tuple(
+        tags=[
             value.strip()
             for value in str(state[f"{prefix}_tags"]).split(",")
             if value.strip()
-        ),
+        ],
         segments=segments,
         artifact_ref=draft.artifact_ref,
         artifact_fingerprint=draft.artifact_fingerprint,

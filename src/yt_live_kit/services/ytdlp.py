@@ -1173,13 +1173,16 @@ def _resolve_audio_ffmpeg(ffmpeg_path: str) -> Path:
     try:
         configured_path = Path(configured).expanduser()
         has_path_component = configured_path.is_absolute() or os.sep in configured
-        resolved_command = None if has_path_component else shutil.which(configured)
-        if resolved_command is None and not has_path_component:
-            raise AudioSpanError(
-                f"FFmpeg が見つかりません（設定: {configured}）。"
-                "設定ページで YTLK_FFMPEG_PATH を確認してください。"
-            )
-        candidate = configured_path if has_path_component else Path(resolved_command)
+        if has_path_component:
+            candidate = configured_path
+        else:
+            resolved_command = shutil.which(configured)
+            if resolved_command is None:
+                raise AudioSpanError(
+                    f"FFmpeg が見つかりません（設定: {configured}）。"
+                    "設定ページで YTLK_FFMPEG_PATH を確認してください。"
+                )
+            candidate = Path(resolved_command)
         resolved = candidate.resolve(strict=True)
         stat_result = resolved.stat()
     except AudioSpanError:
@@ -2261,7 +2264,9 @@ def _persist_source_artifact(
     source_stat = _lstat_without_symlink(source_path, "字幕 source artifact")
     metadata_stat = _lstat_without_symlink(metadata_path, "字幕 source metadata")
     pending_path = pending_paths[0] if pending_paths else None
-    staged_by_this_call = False
+    # この呼び出しで staging した pending path だけを rollback 対象にする。
+    # path と「自分が作ったか」を 1 変数に持たせ、None ガードと一致させる。
+    staged_pending_path: Path | None = None
     staged_identity: os.stat_result | None = None
     metadata_created_by_this_call = False
     metadata_created_identity: os.stat_result | None = None
@@ -2291,7 +2296,7 @@ def _persist_source_artifact(
             settings,
             label="字幕 pending source",
         )
-        staged_by_this_call = True
+        staged_pending_path = pending_path
         staged_identity = _lstat_without_symlink(
             pending_path,
             "字幕 pending source",
@@ -2337,9 +2342,9 @@ def _persist_source_artifact(
                 settings=settings,
             )
     except BaseException:
-        if staged_by_this_call:
+        if staged_pending_path is not None:
             _unlink_if_identity_matches(
-                pending_path,
+                staged_pending_path,
                 staged_identity,
                 label="字幕 pending source",
             )

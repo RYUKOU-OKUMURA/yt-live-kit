@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import datetime
 
 import streamlit as st
@@ -23,6 +24,7 @@ from yt_live_kit.ui.state import (
     clear_batch_summary,
     clear_result,
     get_batch_summary,
+    session_state_mapping,
     set_active_job_id,
 )
 from yt_live_kit.ui.views._local_settings import get_default_channel_handle
@@ -74,7 +76,7 @@ def checkbox_key(video_id: str) -> str:
 
 def collect_selected_urls(
     items: list[tuple[ChannelVideo, bool]],
-    session_state: dict[str, object],
+    session_state: Mapping[str, object],
 ) -> list[str]:
     """表示中の未処理動画から選択済み URL を返す."""
     return [
@@ -193,13 +195,33 @@ def start_single_url_job(
     return job_id
 
 
+def _coerce_summary_count(value: object) -> int:
+    """バッチサマリー JSON の件数を、壊れていても表示を止めずに int へ落とす。
+
+    ``read_batch_summary`` は永続 JSON をそのまま返すため、件数欄に文字列や
+    配列が入りうる。以前は ``int()`` へ直接渡しており、``"abc"`` や
+    ``[1, 2]`` のような値で TypeError / ValueError が送出され、サマリー表示
+    ごと落ちていた。解釈できない値は 0 件として扱う。
+    """
+    if isinstance(value, bool):
+        return 0
+    if isinstance(value, int):
+        return value
+    if isinstance(value, (float, str)):
+        try:
+            return int(float(value))
+        except (TypeError, ValueError, OverflowError):
+            return 0
+    return 0
+
+
 def _render_batch_summary() -> None:
     summary = get_batch_summary()
     if not summary:
         return
     text = str(summary.get("summary", ""))
-    failed = int(summary.get("failed", 0) or 0)
-    success = int(summary.get("success", 0) or 0)
+    failed = _coerce_summary_count(summary.get("failed", 0))
+    success = _coerce_summary_count(summary.get("success", 0))
     severity = batch_summary_severity(success, failed)
     getattr(st, severity)(text)
     lines = summary.get("lines", [])
@@ -307,7 +329,7 @@ def _render_channel_intake(*, busy: bool, settings: Settings) -> None:
             st.caption(format_duration(video.duration))
             st.caption(format_upload_date(video.upload_date))
 
-    selected_urls = collect_selected_urls(items, st.session_state)
+    selected_urls = collect_selected_urls(items, session_state_mapping())
     with st.container(border=True):
         st.markdown("**選択した新着を処理**")
         do_chapters, do_clips = _render_flags("intake_channel")

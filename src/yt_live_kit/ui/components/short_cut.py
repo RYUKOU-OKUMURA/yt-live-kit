@@ -13,6 +13,7 @@ import stat
 from collections.abc import Callable, Mapping, MutableMapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TypedDict
 
 import streamlit as st
 
@@ -47,7 +48,7 @@ from yt_live_kit.services.transcript_artifact import (
     TranscriptArtifactStore,
 )
 from yt_live_kit.services.whisper_runtime import WhisperSettingsContract
-from yt_live_kit.ui.state import set_active_job_id
+from yt_live_kit.ui.state import session_state_mapping, set_active_job_id
 
 _BUSY_MESSAGE = "他の処理が実行中です。完了までお待ちください。"
 _TIMESTAMP_FORMAT_ERROR = "時刻は HH:MM:SS の形式で入力してください。"
@@ -82,12 +83,31 @@ def _whisper_stage_for_status(status: str) -> str:
     return "Whisper"
 
 
+class _WhisperProgressPayload(TypedDict):
+    """jobs の message 欄へ載せる whisper 進捗 snapshot の固定 shape。
+
+    ``range_index`` / ``range_total`` を int として持たせることで、呼び出し側
+    が表示のたびに object から数値へ変換し直す必要をなくす。
+    """
+
+    schema: str
+    job_id: str
+    stage: str
+    status: str
+    range_index: int
+    range_total: int
+    current_range: dict[str, str] | None
+    cache_hit: object
+    retryable: object
+    diagnostic: object
+
+
 def _whisper_progress_payload(
     progress: object,
     segments: Sequence[HighlightSegment],
     *,
     stage: str,
-) -> dict[str, object]:
+) -> _WhisperProgressPayload:
     """WhisperProgress を jobs の既存 message 欄へ渡す表示用 snapshot にする."""
     try:
         range_index = int(getattr(progress, "range_index"))
@@ -129,8 +149,8 @@ def _report_whisper_progress(
         stage=stage,
         message=S9_WHISPER_PROGRESS_PREFIX
         + json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
-        current=int(payload["range_index"]),
-        total=int(payload["range_total"]),
+        current=payload["range_index"],
+        total=payload["range_total"],
     )
 
 
@@ -162,12 +182,12 @@ def _whisper_error_payload(
         )
         for event in progress_events
     ]
-    retryable = any(bool(item.get("retryable")) for item in ranges)
+    retryable = any(bool(item["retryable"]) for item in ranges)
     return {
         "schema": "s9-whisper-error-v1",
         "code": code,
         "job_id": job_id,
-        "range_index": ranges[-1].get("range_index") if ranges else None,
+        "range_index": ranges[-1]["range_index"] if ranges else None,
         "range_total": len(segments),
         "ranges": ranges,
         "retryable": retryable,
@@ -1035,7 +1055,7 @@ def _render_plan(
         document,
         video_id,
         parent_identity,
-        st.session_state,
+        session_state_mapping(),
     )
     cues, transcript_notice = load_transcript_cues_for_document(
         video_id,
@@ -1110,7 +1130,7 @@ def _render_plan(
     segments, parse_errors = collect_edited_segments(
         document,
         video_id,
-        st.session_state,
+        session_state_mapping(),
         parent_identity=parent_identity,
     )
     validation = validate_short_cut_selection(segments, parent=option.candidate)

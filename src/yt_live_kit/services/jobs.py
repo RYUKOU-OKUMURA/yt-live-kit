@@ -16,7 +16,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Iterator, Literal
+from typing import Any, Final, Iterator, Literal
 
 from yt_live_kit.config import Settings, get_settings
 from yt_live_kit.services.ai_prompt import AiPromptError
@@ -60,11 +60,11 @@ _JOB_LOCK_STATE = threading.local()
 _ACTIVE_WORKERS_LOCK = threading.Lock()
 _ACTIVE_WORKERS: set[tuple[str, str]] = set()
 
-_CURRENT_MISSING = "missing"
-_CURRENT_VALID = "valid"
-_CURRENT_CORRUPT = "corrupt"
-_CURRENT_TARGET_MISSING = "target_missing"
 _CurrentPointerStatus = Literal["missing", "valid", "corrupt", "target_missing"]
+_CURRENT_MISSING: Final[_CurrentPointerStatus] = "missing"
+_CURRENT_VALID: Final[_CurrentPointerStatus] = "valid"
+_CURRENT_CORRUPT: Final[_CurrentPointerStatus] = "corrupt"
+_CURRENT_TARGET_MISSING: Final[_CurrentPointerStatus] = "target_missing"
 _JOB_STATE_FILENAME = re.compile(r"^[A-Za-z0-9_-]+\.json$")
 
 _KNOWN_ERRORS = (
@@ -141,8 +141,7 @@ class JobState:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> JobState:
-        job_id = data.get("job_id")
-        _validate_job_id(job_id)
+        job_id = _validate_job_id(data.get("job_id"))
         video_id = data.get("video_id")
         if video_id is not None:
             _validate_video_id(video_id)
@@ -359,13 +358,19 @@ def _write_current(
     _atomic_write_text(path, payload)
 
 
-def _validate_job_id(job_id: str) -> None:
+def _validate_job_id(job_id: object) -> str:
+    """ジョブ ID として安全な str を返す。不正なら ValueError を送出する。
+
+    ``safe_identifier`` が非 str を弾くため、永続 payload 由来の ``object`` を
+    そのまま渡してよい。戻り値を使うと呼び出し側で str へ narrowing できる。
+    """
     try:
-        safe_identifier(job_id, "ジョブ ID")
+        validated = safe_identifier(job_id, "ジョブ ID")
     except PathConfinementError as exc:
         raise ValueError(str(exc)) from exc
-    if job_id == "current":
+    if validated == "current":
         raise ValueError("予約されたジョブ ID は使用できません。")
+    return validated
 
 
 def _validate_video_id(video_id: object) -> str:

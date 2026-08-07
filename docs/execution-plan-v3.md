@@ -2668,7 +2668,26 @@ S9 初版で実装するのは、既存 YouTube `video_id` の良好な VTT を�
 
 **実機ブラウザ確認（2026-08-07・完了）:** 隔離 `YTLK_DATA_DIR` に破損 `line_*.json` を置いて Streamlit を起動し、Playwright で確認。ショート作業で例外なく復旧導線が 1 つだけ出ること、退避を実行するとライン UI が工程 1 へ復帰すること、破損ファイルが `abandoned_*.json` へ退避され active pointer が消えることを確認した。console error 0 件。
 
-**残メモ:** mypy 94 errors の解消と CI 配線は後続。
+**追修正 F-18a（2026-08-07・完了）:** F-18 で設定だけ入れて CI 未実行だった mypy を **94 errors → 0** にし、`.github/workflows/ci.yml` へ必須ステップとして配線した。`# type: ignore` / `disable_error_code` による一括抑止は使わず、None ガード・Literal narrowing・TypedDict・型注釈の修正で解消した（既存の不要な `type: ignore` 2 件はむしろ削除）。方針は `pyproject.toml` の `[tool.mypy]` にコメントとして固定した。
+
+94 件の内訳と判定:
+
+| 分類 | 件数 | 判定 |
+|---|---|---|
+| Optional の narrowing 不足（ytdlp / transcript_artifact / channel / upload_queue / shorts_queue / state / jobs / shorts_line） | 17 | **すべて型注釈のみ。**ガードは実在し、実行時に None は到達しない |
+| `str` → `Literal` の narrowing（shorts_queue / youtube_api / upload_queue / video_detail / jobs） | 31 | 型注釈のみ。`QueueSource` / `QueueMode` / `PollClassification` を UI 層まで通した |
+| `**dict[str, object]` の kwargs 展開（shorts_line / shorts_queue / description） | 12 | 型注釈のみ。`_ArtifactLineageKwargs` / `_WhisperProgressPayload` TypedDict を導入し、`start_job` は名前付き引数を型検査させる形へ分離 |
+| `SessionStateProxy` を純粋ヘルパーへ渡す箇所 | 6 | 型注釈のみ。`SessionStateProxy` は `MutableMapping[str \| int, Any]` 宣言で key 型が不変なため、`ui/state.session_state_mapping()` に集約 |
+| `int()` / `float()` へ `object` を渡す箇所 | 6 | **1 件が実バグ**（下記）。残りは TypedDict 化と検証付きヘルパーで解消 |
+| その他（tuple/list、lambda 推論、attr-defined、`Literal[定数]`、unused-ignore） | 22 | 型注釈のみ |
+
+**実バグ 1 件（修正 + 回帰テスト済み）:** `ui/views/intake.py` の `_render_batch_summary` が、永続 JSON 由来の件数欄を `int(summary.get("failed", 0) or 0)` で直接変換していた。`read_batch_summary` は壊れた JSON をそのまま `dict[str, object]` で返すため、件数欄が `"abc"` や `[1, 2]` だと未捕捉の ValueError / TypeError で取り込みページのサマリー表示ごと落ちる。`_coerce_summary_count` を追加し、解釈できない値は 0 件として扱うようにした。回帰テストは `tests/test_ui_intake_page.py` に 11 件追加（型別 parametrize 10 件 + 描画が例外を出さないこと 1 件）。
+
+**潜在的な危険 1 件（構造修正のみ）:** `ui/components/shorts_line.py` の `render_shorts_line` で、復旧用 callback が `state` を捕捉するが、同関数の後段で `state` が射影結果へ再代入される。現状は callback が再代入前に return するため実害はないが、mypy が `LineState | None` へ型を広げるのは正当な指摘であり、再代入しない別名 `line_state` へ束縛して捕捉するようにした。
+
+回帰: `uv run pytest -q` → **1901 passed / 2 skipped**（baseline 1890 + 追加 11）。`uv run ruff check` → pass。`uv run mypy src` → **0 errors**（CI と同じ Python 3.11 でも確認済み）。
+
+**実機ブラウザ確認（2026-08-07・完了）:** production `data/` は触らず、隔離した `YTLK_DATA_DIR`（rsync 複製 + 永続 path の書き換え）で Streamlit を起動し、Playwright で UI 変更の全経路を確認した。ライブラリ / 取り込み / 素材候補 / ショート作成 / テロップ編集 / 短尺刻み / ハイライト / まとめて生成の各画面で、`session_state_mapping()` の 6 箇所すべてが実値を返すこと（新着 47 本の URL 収集、ハイライト 1 区間 / 合計 12 分、短尺刻みの時刻編集が合計 51.0 秒へ再計算）、`_candidate_lineage` の保存済み分岐が 2 つの fingerprint を表示すること、`partial(_open_video, path)` へ変えたダウンロードが元ファイルと byte 一致すること、F-19 復旧 UI の retry / 終了ダイアログが例外なく動くことを確認した。console error 0 件、サーバ側 traceback 0 件。
 
 ---
 
@@ -2676,6 +2695,7 @@ S9 初版で実装するのは、既存 YouTube `video_id` の良好な VTT を�
 
 | 日付 | 内容 |
 |------|------|
+| 2026-08-07 | **CR-F18 の残作業を完了。** mypy を 94 errors → 0 にし、CI（`.github/workflows/ci.yml`）へ必須ステップとして配線した。`# type: ignore` / `disable_error_code` による一括抑止は使わず、None ガード・Literal narrowing・TypedDict 導入・型注釈修正で解消した。94 件を分類判定した結果、**実バグは 1 件**（`_render_batch_summary` が壊れた永続 JSON の件数欄で未捕捉例外を出しサマリー表示ごと落ちる）で、修正と回帰テスト 11 件を追加した。ほかに実害はないが正当な指摘 1 件（復旧 callback が再代入される `state` を捕捉）を構造修正した。残る 92 件は型注釈のみの問題と判定した。回帰 **1901 passed / 2 skipped**、ruff pass、mypy 0（CI と同じ Python 3.11 でも確認）。UI 変更は隔離 `YTLK_DATA_DIR` + Playwright で全経路を実機確認し、console error / サーバ traceback ともに 0 件 |
 | 2026-08-06 | **S9-6 のフェーズ判定を Go とし、S9 フェーズと M16 を完了した。** 修正後経路で作り直した 2 本の完成ショートをユーザーが実 UI で確認し（`preview_confirmed_fingerprint` は両方とも output fingerprint と一致）、CER 相対改善 78.694％、固有名詞 exact match の非悪化、cue error の改善、失効・cache・fallback・scope guard、production 15 evidence file の 15/15 不変を確認した。S9-6-1〜S9-6-6 と Done 条件 4 件、AC-30 / AC-35 / AC-37 を `[x]` にした。**AC-40 は `[ ]` のまま残す**。AC-40 の 11 項目は T1-1〜T1-5 の内容であり、T1-1 が No-Go / fallback-only、T1-2 以降が未着手のため実体として満たされていない。これに伴い、T1 成功を前提にしていた S9-6-5・S9-6 Done 条件 4 番目・`requirements-v3.md` の「AC-40 の完了タイミング」の 3 か所を改訂し、AC-40 の更新条件へ「T1 の実体成立」を明示した。cue 粒度（16 秒区間が 1 cue で行は比例配分）は S9 の範囲外・T1 の担当として未解決のまま記録した。 |
 | 2026-08-05 | **T1-1 を完了（No-Go / fallback-only）。** 波形付きローカル review UI で human gold 63/64 行を入力し、`t1-fallback-008` は対象発話不在の fail-closed 記録とした。bounded whisper-cli を 8 invocation 以内で実行（hash 全一致、peak memory 付き証跡）、current / segment_snap / token_alignment の 3 候補を同一 fixture・同一 policy で A/B 測定した。token_alignment は pooled median 370 ms / p90 1640 ms で全群 gate FAIL、事後緩和なしで No-Go とし、T1-2 以降は着手しない。gold 45/63 行の 1000 ms 単位入力という測定限界と、gold 精度改善後の再測定には別承認が必要である旨を報告書に記録した。証跡: `docs/benchmarks/t1-1-report.md` / `t1-1-report.json` / `t1-1-timing-inputs.json` / `t1-1-human-gold-packet.json` |
 | 2026-08-05 | **U9（UI 視覚刷新）を計画。** R2 完了により残るのは視覚レイヤーのみと確認し、実行計画に未定義だったフェーズを追加した。Streamlit 1.60 のネイティブテーマ 23 オプションを使い切る案 A+ を第 1 弾、限定 CSS 注入の案 B を A+ 適用後の残差実測まで保留、カスタムコンポーネントの案 C は不採用と決めた。AppTest による視覚回帰スモークを第 2 弾の前提として追加し、テロップ編集器の刷新は T1-4 へ合流させて U9 に含めない。R2 §5 の安全境界を全項目継承し、`st.tabs` への単純置換禁止を不変条件として明記した。調査根拠は `docs/ui-visual-refresh-plan-2026-08-05.md` に分離した。 |

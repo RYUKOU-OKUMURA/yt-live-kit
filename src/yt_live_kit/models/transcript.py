@@ -12,12 +12,15 @@ import math
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Any, Literal, Mapping
+from typing import Any, Final, Literal, Mapping
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION: Final = 1
+# mypy は Literal[...] の引数に変数を書けないため、型は別名で明示する。
+# 値と型の両方を一箇所で持ち、schema version を上げるときは 2 行を同時に直す。
+TranscriptSchemaVersion = Literal[1]
 FINGERPRINT_PATTERN = r"^[0-9a-f]{64}$"
 
 
@@ -166,7 +169,7 @@ class TranscriptArtifact(_StrictFrozenModel):
     それ自体は JSON 値として検証されるため、Path / bytes / 任意 object は保存できない。
     """
 
-    schema_version: Literal[SCHEMA_VERSION] = SCHEMA_VERSION
+    schema_version: TranscriptSchemaVersion = SCHEMA_VERSION
     source_kind: TranscriptSourceKind
     video_id: str = Field(min_length=1, pattern=r"^[A-Za-z0-9_-]+$")
     source_ref: str = Field(min_length=1)
@@ -377,7 +380,7 @@ class TranscriptArtifact(_StrictFrozenModel):
 class TranscriptArtifactRef(_StrictFrozenModel):
     """downstream が resolver を再実行せず保持する immutable reference。"""
 
-    schema_version: Literal[SCHEMA_VERSION] = SCHEMA_VERSION
+    schema_version: TranscriptSchemaVersion = SCHEMA_VERSION
     video_id: str = Field(min_length=1, pattern=r"^[A-Za-z0-9_-]+$")
     artifact_fingerprint: str = Field(pattern=FINGERPRINT_PATTERN)
     source_kind: TranscriptSourceKind

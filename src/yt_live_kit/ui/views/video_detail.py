@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal, Mapping, NamedTuple
+from typing import TYPE_CHECKING, Literal, Mapping, NamedTuple, Sequence
 
 import streamlit as st
 
 from yt_live_kit.config import Settings, get_settings
-from yt_live_kit.models.clips import ClipCandidate
+from yt_live_kit.models.clips import ClipCandidate, ClipCandidatesLineage
 from yt_live_kit.models.highlights import HighlightSegment
 from yt_live_kit.services.chapter_validator import validate_chapters
 from yt_live_kit.services.clips import load_candidates_file
@@ -81,6 +81,7 @@ from yt_live_kit.ui.views.highlights import render_highlights_section
 from yt_live_kit.ui.views.shorts import render_shorts_section
 from yt_live_kit.ui.view_models.video_detail import (
     CandidateKey,
+    CandidateSource,
     CandidateTransfer,
     DetailSummary,
     Workspace,
@@ -762,7 +763,11 @@ def _valid_transfer_candidates(
     """全 workspace 描画前に引き継ぎを再検証し、stale 状態を破棄する."""
     valid: list[CandidateKey] = []
     invalidated = False
-    for source, candidates in (("clips", clips), ("highlights", highlights)):
+    source_groups: tuple[tuple[CandidateSource, Sequence[ClipCandidate | HighlightSegment]], ...] = (
+        ("clips", clips),
+        ("highlights", highlights),
+    )
+    for source, candidates in source_groups:
         transfer = _load_transfer(video_id, source)
         if transfer is None:
             continue
@@ -923,13 +928,15 @@ def _load_material_candidate_fingerprints(
     }
 
 
-def _candidate_lineage(video_id: str, settings: Settings) -> object | None:
+def _candidate_lineage(video_id: str, settings: Settings) -> ClipCandidatesLineage | None:
     """保存済み候補ファイルの lineage を安全に読み出す."""
     try:
         document = load_candidates_file(video_id, settings)
     except (OSError, UnicodeError, TypeError, ValueError):
         return None
-    return getattr(document, "lineage", None)
+    if document is None:
+        return None
+    return document.lineage
 
 
 def _candidate_provenance_text(

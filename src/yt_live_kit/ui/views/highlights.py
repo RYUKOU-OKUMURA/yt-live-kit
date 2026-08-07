@@ -13,7 +13,7 @@ from yt_live_kit.services.clips import load_candidates_file
 from yt_live_kit.services.highlights import HighlightsError, load_segments_file
 from yt_live_kit.services.jobs import JobBusyError, is_busy, start_job
 from yt_live_kit.services.pipeline import PipelineResult, regenerate
-from yt_live_kit.ui.state import set_active_job_id
+from yt_live_kit.ui.state import session_state_mapping, set_active_job_id
 
 _BUSY_MESSAGE = "他の処理が実行中です。完了までお待ちください。"
 _BUILD_DURATION_NOTE = (
@@ -372,7 +372,7 @@ def render_highlights_section(result: PipelineResult) -> None:
             selected = collect_selected_segments(
                 segments,
                 result.video_id,
-                st.session_state,
+                session_state_mapping(),
             )
             st.markdown(format_selection_summary(len(selected), sum_duration_sec(selected)))
 

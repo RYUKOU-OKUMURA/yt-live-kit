@@ -20,6 +20,7 @@ from typing import Any
 
 from yt_live_kit.config import Settings
 from yt_live_kit.models.upload import (
+    PollClassification,
     UploadChannel,
     UploadContentSnapshot,
     UploadResult,
@@ -355,7 +356,7 @@ def _is_retryable(exc: BaseException) -> bool:
     try:
         from googleapiclient.errors import HttpError
     except ImportError:  # pragma: no cover - dependency is part of the project
-        HttpError = ()  # type: ignore[assignment]
+        HttpError = ()
     if isinstance(exc, HttpError):
         return getattr(exc.resp, "status", None) in _RETRYABLE_HTTP_STATUSES
     from httplib2 import HttpLib2Error
@@ -488,6 +489,7 @@ def poll_processing_status(
     for index in range(30):
         status, details = _fetch_upload_status(youtube, video_id)
         processing = details.get("processingStatus")
+        classification: PollClassification
         if processing == "succeeded":
             classification = "processing_succeeded"
         elif processing in {"failed", "terminated"}:
@@ -518,7 +520,7 @@ def poll_processing_status(
 def classify_publication_status(
     *, status: dict[str, Any], processing_details: dict[str, Any],
     publish_at: datetime, observed_at: datetime, processing_succeeded: bool,
-) -> tuple[str, str | None]:
+) -> tuple[PollClassification, str | None]:
     """private lock の具体的判定表を適用する."""
     privacy = status.get("privacyStatus")
     processing = processing_details.get("processingStatus")

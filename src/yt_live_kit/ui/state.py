@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import MutableMapping
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, cast
 
 import streamlit as st
 
@@ -32,6 +33,18 @@ MAX_GLOBAL_JOB_ERROR_NOTIFICATIONS = 3
 MAX_UNREAD_JOB_ERROR_NOTIFICATIONS = 3
 MAX_PIPELINE_COMPLETION_NOTIFICATIONS = 3
 JOB_ERROR_HISTORY_LIMIT = MAX_VIDEO_JOB_ERROR_NOTIFICATIONS
+
+
+def session_state_mapping() -> MutableMapping[str, object]:
+    """``st.session_state`` を str キーの MutableMapping として渡すための入口。
+
+    Streamlit の ``SessionStateProxy`` は ``MutableMapping[str | int, Any]``
+    として宣言されており、key 型が不変なため純粋ヘルパーの
+    ``MutableMapping[str, object]`` へそのままは渡せない。本アプリは
+    session state に str キーしか使わないため、その事実の表明をこの 1 箇所
+    に集約する。返すのは proxy 本体なので、書き込みはそのまま反映される。
+    """
+    return cast(MutableMapping[str, object], st.session_state)
 
 
 @dataclass(frozen=True, slots=True)
@@ -126,7 +139,12 @@ class PipelineCompletionNotification:
         job_id = data.get("job_id")
         kind = data.get("kind")
         title = data.get("title")
-        if not all(isinstance(value, str) for value in (video_id, job_id, kind, title)):
+        if (
+            not isinstance(video_id, str)
+            or not isinstance(job_id, str)
+            or not isinstance(kind, str)
+            or not isinstance(title, str)
+        ):
             raise ValueError("完了通知の形式が正しくありません")
         return cls(video_id, job_id, kind, title, completed_at)
 

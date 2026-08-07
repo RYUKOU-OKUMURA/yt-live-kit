@@ -1119,18 +1119,22 @@ class TranscriptArtifactStore:
             settings_or_video_id = settings
         if video_id_or_settings is None or settings_or_video_id is None:
             raise TypeError("TranscriptArtifactStore には video_id と settings が必要です。")
+        # 引数の順序は (video_id, settings) と (settings, video_id) の両方を許す。
+        # keyword 引数の変数を再利用せず、解決後の値を別名で持って narrowing を保つ。
+        resolved_video_id: object
+        resolved_settings: Settings | Path | str
         if isinstance(video_id_or_settings, str):
-            video_id = video_id_or_settings
-            settings = settings_or_video_id
+            resolved_video_id = video_id_or_settings
+            resolved_settings = settings_or_video_id
         else:
-            settings = video_id_or_settings
-            video_id = settings_or_video_id
-        if isinstance(settings, Settings):
-            data_dir = settings.data_dir
+            resolved_settings = video_id_or_settings
+            resolved_video_id = settings_or_video_id
+        if isinstance(resolved_settings, Settings):
+            data_dir: Path = resolved_settings.data_dir
         else:
-            data_dir = Path(settings)
+            data_dir = Path(resolved_settings)
         try:
-            self.video_id = safe_video_identifier(video_id, "動画 ID")
+            self.video_id = safe_video_identifier(resolved_video_id, "動画 ID")
         except PathConfinementError as exc:
             raise TranscriptCacheError(str(exc)) from exc
         self.data_dir = Path(os.path.abspath(data_dir))
