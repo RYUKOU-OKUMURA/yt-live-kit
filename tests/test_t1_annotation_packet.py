@@ -16,6 +16,7 @@ from benchmarks.t1.annotation_packet import (
     KNOWN_ARTIFACT_HOLDOUT_TUPLE_IDS,
     KNOWN_MULTI_LOW_CONFIDENCE_ROW_IDS,
     MANUAL_SPLIT_BOUNDARIES,
+    PRODUCTION_DATA_ROOT,
     create_packet,
     load_manifest,
     manifest_fingerprint,
@@ -37,6 +38,14 @@ from benchmarks.t1.annotation_packet import (
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST_PATH = ROOT / "benchmarks" / "t1" / "manifest.json"
 RESULT_PATH = ROOT / "docs" / "benchmarks" / "t1-1-result.json"
+
+# production データ（data/ 配下、gitignore 対象）が存在しない環境（CI 等）では、
+# manifest / result の check_sources=True 検証が production ファイルの不在で必ず失敗する。
+# その環境では実行不能なテストとして明示的に skip する。
+_requires_production_data = pytest.mark.skipif(
+    not Path(PRODUCTION_DATA_ROOT).is_dir(),
+    reason="production データ（gitignore 対象の data/ 配下）が無い環境では実行できません。",
+)
 
 
 def _span_duration(span: dict) -> int:
@@ -164,6 +173,7 @@ def test_manifest_requires_fixed_low_confidence_rows_and_manual_source_populatio
         validate_manifest(broken)
 
 
+@_requires_production_data
 def test_manifest_sources_and_provenance_are_checked_read_only() -> None:
     manifest = load_manifest(MANIFEST_PATH)
     result = validate_manifest(manifest, check_sources=True)
@@ -471,6 +481,7 @@ def test_play_invalid_receipt_does_not_write_packet(tmp_path: Path, monkeypatch:
         assert packet_path.read_bytes() == before
 
 
+@_requires_production_data
 def test_play_replay_never_overwrites_existing_receipt_wav(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     manifest = load_manifest(MANIFEST_PATH)
     row = manifest["rows"][0]
@@ -561,6 +572,7 @@ def test_play_replay_never_overwrites_existing_receipt_wav(tmp_path: Path, monke
     validate_packet(updated_packet, manifest, packet_path=packet_path)
 
 
+@_requires_production_data
 def test_result_identity_and_post_measurement_rehash_contract_are_fixed() -> None:
     manifest = load_manifest(MANIFEST_PATH)
     result = json.loads(RESULT_PATH.read_text(encoding="utf-8"))
@@ -721,6 +733,7 @@ def test_result_rejects_production_root_mismatch_parent_path_and_live_hash_drift
         )
 
 
+@_requires_production_data
 def test_validate_result_rehashes_manifest_baseline_before_exact_result_validation() -> None:
     manifest = load_manifest(MANIFEST_PATH)
     result = json.loads(RESULT_PATH.read_text(encoding="utf-8"))
@@ -734,6 +747,7 @@ def test_validate_result_rehashes_manifest_baseline_before_exact_result_validati
         validate_result(tampered_result, tampered)
 
 
+@_requires_production_data
 def test_pre_measurement_result_is_exact_and_cannot_be_promoted() -> None:
     manifest = load_manifest(MANIFEST_PATH)
     result = json.loads(RESULT_PATH.read_text(encoding="utf-8"))
@@ -1205,6 +1219,7 @@ def test_source_mp4_hash_is_rechecked_immediately_before_subprocess(monkeypatch,
     assert labels == ["play source", "source MP4 before subprocess"]
 
 
+@_requires_production_data
 def test_packet_path_and_parent_symlinks_fail_closed_and_regular_path_validates(tmp_path: Path) -> None:
     manifest = load_manifest(MANIFEST_PATH)
     packet = create_packet(manifest)
@@ -1286,6 +1301,7 @@ def test_packet_path_and_parent_symlinks_fail_closed_and_regular_path_validates(
     ) == 0
 
 
+@_requires_production_data
 def test_cli_tempfile_create_play_noop_validate_roundtrip(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

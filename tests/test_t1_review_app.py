@@ -25,6 +25,14 @@ ROOT = Path(__file__).resolve().parents[1]
 MANIFEST_PATH = ROOT / "benchmarks" / "t1" / "manifest.json"
 APP_PATH = ROOT / "benchmarks" / "t1" / "review_app.py"
 
+# production データ（data/ 配下、gitignore 対象）が存在しない環境（CI 等）では、
+# manifest / packet の check_sources 検証が production ファイルの不在で必ず失敗する。
+# その環境では実行不能なテストとして明示的に skip する。
+_requires_production_data = pytest.mark.skipif(
+    not Path(packet_tool.PRODUCTION_DATA_ROOT).is_dir(),
+    reason="production データ（gitignore 対象の data/ 配下）が無い環境では実行できません。",
+)
+
 
 def _write_test_wav(path: Path, duration_ms: int) -> dict[str, int | str]:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -57,6 +65,7 @@ def test_next_unfinished_row_index_prefers_rows_after_current() -> None:
     assert next_unfinished_row_index(packet, 3) == 1
 
 
+@_requires_production_data
 def test_load_review_session_skips_whisper_runtime_model_check(tmp_path: Path) -> None:
     packet_path = tmp_path / "human-gold.json"
     session = load_review_session(MANIFEST_PATH, packet_path)
@@ -69,6 +78,7 @@ def test_review_app_uses_the_fixed_default_packet_contract(monkeypatch: pytest.M
     assert configured_packet_path() == Path("/tmp/yt-live-kit-t1-1-human-gold.json")
 
 
+@_requires_production_data
 def test_review_helpers_prepare_and_commit_preserve_packet_contract(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -113,6 +123,7 @@ def test_review_helpers_prepare_and_commit_preserve_packet_contract(
     assert existing is not None and existing.is_existing is True
 
 
+@_requires_production_data
 def test_review_helper_rejects_onset_outside_playback_window_without_packet_write(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -146,6 +157,7 @@ def test_review_helper_rejects_onset_outside_playback_window_without_packet_writ
     assert packet_path.read_bytes() == original_bytes
 
 
+@_requires_production_data
 def test_review_helpers_auto_prepare_default_window(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -166,6 +178,7 @@ def test_review_helpers_auto_prepare_default_window(
     assert prepared.receipt["played_duration_ms"] == expected_duration
 
 
+@_requires_production_data
 def test_review_app_initial_render_is_local_and_blind(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     packet_path = tmp_path / "app-test-human-gold.json"
     monkeypatch.setenv("T1_REVIEW_PACKET_PATH", str(packet_path))
@@ -193,6 +206,7 @@ def test_review_app_initial_render_is_local_and_blind(monkeypatch: pytest.Monkey
     assert packet_path.is_file()
 
 
+@_requires_production_data
 def test_review_app_save_gate_requires_listening_and_keeps_packet_bytes(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

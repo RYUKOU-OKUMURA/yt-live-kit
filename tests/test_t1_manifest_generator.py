@@ -8,12 +8,24 @@ import sys
 
 import pytest
 
-from benchmarks.t1.annotation_packet import load_manifest, manifest_fingerprint
+from benchmarks.t1.annotation_packet import (
+    PRODUCTION_DATA_ROOT,
+    load_manifest,
+    manifest_fingerprint,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST_PATH = ROOT / "benchmarks" / "t1" / "manifest.json"
 GENERATOR_PATH = ROOT / "benchmarks" / "t1" / "generate_manifest_v35.py"
+
+# production データ（data/ 配下、gitignore 対象）が存在しない環境（CI 等）では、
+# generator が validate_manifest(check_sources=True) / b5d ASS evidence を検証する際に
+# production ファイルの不在で必ず失敗する。その環境では実行不能なテストとして明示的に skip する。
+_requires_production_data = pytest.mark.skipif(
+    not Path(PRODUCTION_DATA_ROOT).is_dir(),
+    reason="production データ（gitignore 対象の data/ 配下）が無い環境では実行できません。",
+)
 
 
 def _copy_previous(tmp_path: Path) -> Path:
@@ -48,6 +60,7 @@ def _run_generator(previous: Path, output: Path, test_root: Path | None = None) 
     return subprocess.run(command, cwd=ROOT, text=True, capture_output=True)
 
 
+@_requires_production_data
 def test_generator_is_idempotent_from_current_canonical_manifest(tmp_path: Path) -> None:
     manifest = load_manifest(MANIFEST_PATH, check_sources=True)
     assert manifest["manifest_revision"] == "corrected_pre_measurement_freeze_v3_7"
@@ -59,6 +72,7 @@ def test_generator_is_idempotent_from_current_canonical_manifest(tmp_path: Path)
     assert json.loads(output.read_text(encoding="utf-8")) == manifest
 
 
+@_requires_production_data
 def test_generator_reproduces_v37_from_committed_d94_v35_predecessor(tmp_path: Path) -> None:
     previous = _copy_d94_previous(tmp_path)
     output = tmp_path / "generated-from-d94.json"
@@ -70,6 +84,7 @@ def test_generator_reproduces_v37_from_committed_d94_v35_predecessor(tmp_path: P
     assert len(candidate["rows"]) == 64
 
 
+@_requires_production_data
 def test_generator_validates_previous_source_hash_before_production_read(tmp_path: Path) -> None:
     manifest = load_manifest(MANIFEST_PATH)
     broken = copy.deepcopy(manifest)

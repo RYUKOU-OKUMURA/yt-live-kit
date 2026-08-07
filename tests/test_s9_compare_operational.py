@@ -33,6 +33,7 @@ from benchmarks.s9_benchmark import (
     manifest_fingerprint,
     parse_vtt_file,
 )
+from benchmarks.t1.annotation_packet import PRODUCTION_DATA_ROOT
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -43,6 +44,14 @@ REPORT_PATH = ROOT / "docs/benchmarks/s9-1-report.json"
 PACKET_PATH = ROOT / "docs/benchmarks/s9-1-human-audit.md"
 PROTOCOL_PATH = ROOT / "docs/benchmarks/s9-1-protocol.md"
 PARITY_FIXTURE_PATH = ROOT / "tests/fixtures/s9_vtt_parity.vtt"
+
+# production データ（data/ 配下、gitignore 対象）が存在しない環境（CI 等）では、
+# production の固定保護対象ファイルを参照する検証が必ず失敗する。
+# その環境では実行不能なテストとして明示的に skip する。
+_requires_production_data = pytest.mark.skipif(
+    not Path(PRODUCTION_DATA_ROOT).is_dir(),
+    reason="production データ（gitignore 対象の data/ 配下）が無い環境では実行できません。",
+)
 
 
 def _minimal_raw_report(*, model_name: str = "ggml-large-v3-turbo-q5_0", run_kind: str = "cold") -> dict:
@@ -398,6 +407,7 @@ def test_gate_validator_rejects_legacy_or_ambiguous_gold_contract(mutation) -> N
         _validate_evaluation_gate_contract(contract, expected_decision_go=True)
 
 
+@_requires_production_data
 def test_production_scope_is_fixture_14_plus_protected_1() -> None:
     manifest = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
     scope = _derive_production_scope(manifest)
