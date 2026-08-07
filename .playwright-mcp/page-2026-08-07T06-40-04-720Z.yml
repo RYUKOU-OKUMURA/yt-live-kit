@@ -1,0 +1,59 @@
+- generic [ref=e2]:
+  - generic [ref=e7]:
+    - button "keyboard_double_arrow_left" [ref=e10] [cursor=pointer]
+    - list [ref=e14]:
+      - listitem [ref=e15]:
+        - link "video_library ライブラリ" [ref=e17] [cursor=pointer]:
+          - /url: http://127.0.0.1:8501/
+          - generic [ref=e18]: video_library
+          - paragraph [ref=e23]: ライブラリ
+      - listitem [ref=e24]:
+        - link "input 取り込み" [active] [ref=e26] [cursor=pointer]:
+          - /url: http://127.0.0.1:8501/intake
+          - generic [ref=e27]: input
+          - paragraph [ref=e32]: 取り込み
+      - listitem [ref=e33]:
+        - link "settings 設定" [ref=e35] [cursor=pointer]:
+          - /url: http://127.0.0.1:8501/settings
+          - generic [ref=e36]: settings
+          - paragraph [ref=e41]: 設定
+    - generic [ref=e45]:
+      - heading "yt-live-kit" [level=3] [ref=e50]
+      - paragraph [ref=e55]: v0.3.0
+      - separator [ref=e60]
+      - paragraph [ref=e65]:
+        - strong [ref=e66]: 作成中のショート
+      - paragraph [ref=e71]: まだ開始していません
+      - paragraph [ref=e76]: ◉ 1 素材選定 ← 今
+      - paragraph [ref=e81]: │
+      - paragraph [ref=e86]: 🔒 2 区間決定
+      - paragraph [ref=e91]: │
+      - paragraph [ref=e96]: 🔒 3 テロップ確認
+      - paragraph [ref=e101]: │
+      - paragraph [ref=e106]: 🔒 4 生成
+      - paragraph [ref=e111]: │
+      - paragraph [ref=e116]: 🔒 5 最終確認
+      - paragraph [ref=e121]: │
+      - paragraph [ref=e126]: 🔒 6 予約
+      - paragraph [ref=e131]: ── 次にやること ──
+      - paragraph [ref=e136]: 素材を選び、区間を決める
+      - paragraph [ref=e141]: 本日 1／3 ・ 要対応 0 件
+  - generic [ref=e3]:
+    - banner [ref=e144]:
+      - generic [ref=e147]:
+        - button "Deploy" [ref=e149] [cursor=pointer]
+        - button "Main menu" [ref=e153] [cursor=pointer]
+    - generic [ref=e157]:
+      - paragraph [ref=e162]: 登録チャンネルの未処理の新着を選び、チャプターと切り抜き候補の生成を開始できます。
+      - heading "未処理の新着" [level=3] [ref=e167]:
+        - text: 未処理の新着
+        - generic [ref=e168]:
+          - link "Link to heading":
+            - /url: "#adad7662"
+      - status [ref=e171]:
+        - paragraph [ref=e175]: チャンネルの既定ハンドルが未設定です。設定ページで保存すると、ここに新着が表示されます。
+      - group [ref=e178]:
+        - generic "keyboard_arrow_right URL を直接入力する（例外ルート）" [ref=e179] [cursor=pointer]:
+          - generic [ref=e180]:
+            - generic [ref=e181]: keyboard_arrow_right
+            - paragraph [ref=e185]: URL を直接入力する（例外ルート）
