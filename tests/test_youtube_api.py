@@ -194,6 +194,82 @@ class TestGetCredentialsTokenPermissions:
         assert stat.S_IMODE(token_path.parent.stat().st_mode) == 0o700
 
 
+class TestGetCredentialsRefreshError:
+    def test_refresh_error_falls_through_to_reauth_flow(self, tmp_path: Path) -> None:
+        from google.auth.exceptions import RefreshError
+
+        secret = tmp_path / "_config" / "client_secret.json"
+        secret.parent.mkdir(parents=True)
+        secret.write_text("{}", encoding="utf-8")
+        settings = Settings(data_dir=tmp_path, youtube_client_secret=secret)
+
+        token_path = tmp_path / "_config" / "youtube_token.json"
+        token_path.write_text("{}", encoding="utf-8")
+
+        expired_creds = MagicMock()
+        expired_creds.valid = False
+        expired_creds.expired = True
+        expired_creds.refresh_token = "refresh"
+        expired_creds.refresh.side_effect = RefreshError(
+            "invalid_grant: Token has been expired or revoked."
+        )
+
+        new_creds = MagicMock()
+        new_creds.to_json.return_value = '{"reauthenticated": true}'
+        flow = MagicMock()
+        flow.run_local_server.return_value = new_creds
+
+        with (
+            patch(
+                "google.oauth2.credentials.Credentials.from_authorized_user_file",
+                return_value=expired_creds,
+            ),
+            patch("google.auth.transport.requests.Request"),
+            patch(
+                "google_auth_oauthlib.flow.InstalledAppFlow.from_client_secrets_file",
+                return_value=flow,
+            ) as from_client_secrets_file,
+        ):
+            result = youtube_api.get_credentials(settings)
+
+        expired_creds.refresh.assert_called_once()
+        from_client_secrets_file.assert_called_once_with(str(secret), youtube_api.SCOPES)
+        flow.run_local_server.assert_called_once_with(port=0)
+        assert result is new_creds
+        assert token_path.read_text(encoding="utf-8") == '{"reauthenticated": true}'
+
+    def test_refresh_error_without_client_secret_raises_youtube_api_error(
+        self, tmp_path: Path
+    ) -> None:
+        from google.auth.exceptions import RefreshError
+
+        settings = Settings(
+            data_dir=tmp_path,
+            youtube_client_secret=tmp_path / "missing_client_secret.json",
+        )
+        token_path = tmp_path / "_config" / "youtube_token.json"
+        token_path.parent.mkdir(parents=True)
+        token_path.write_text("{}", encoding="utf-8")
+
+        expired_creds = MagicMock()
+        expired_creds.valid = False
+        expired_creds.expired = True
+        expired_creds.refresh_token = "refresh"
+        expired_creds.refresh.side_effect = RefreshError(
+            "invalid_grant: Token has been expired or revoked."
+        )
+
+        with (
+            patch(
+                "google.oauth2.credentials.Credentials.from_authorized_user_file",
+                return_value=expired_creds,
+            ),
+            patch("google.auth.transport.requests.Request"),
+        ):
+            with pytest.raises(youtube_api.YouTubeAPIError, match="失効"):
+                youtube_api.get_credentials(settings)
+
+
 class TestFetchVideoSnippet:
     def test_returns_snippet_of_first_item(self) -> None:
         settings = MagicMock()

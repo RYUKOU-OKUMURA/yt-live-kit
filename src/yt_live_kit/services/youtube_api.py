@@ -98,7 +98,8 @@ def _http_error_to_message(exc: Exception) -> str:
 
 
 def get_credentials(settings: Settings) -> Any:
-    """OAuth 認証情報を取得する。未認証の場合はブラウザで同意フローを実行する."""
+    """OAuth 認証情報を取得する。未認証・refresh 失効時はブラウザで同意フローを実行する."""
+    from google.auth.exceptions import RefreshError
     from google.auth.transport.requests import Request
     from google.oauth2.credentials import Credentials
     from google_auth_oauthlib.flow import InstalledAppFlow
@@ -109,14 +110,21 @@ def get_credentials(settings: Settings) -> Any:
         if creds and creds.valid:
             return creds
         if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-            _save_token(settings, creds.to_json())
-            return creds
+            try:
+                creds.refresh(Request())
+            except RefreshError:
+                # refresh token が失効している（例: OAuth 同意画面が「テスト」公開
+                # ステータスで 7 日失効）。下の再同意フローへフォールスルーする。
+                pass
+            else:
+                _save_token(settings, creds.to_json())
+                return creds
 
     if not is_configured(settings):
         raise YouTubeAPIError(
             "OAuth クライアントシークレットが見つかりません"
             f"（{settings.youtube_client_secret}）。"
+            "認証情報が失効して再同意が必要な場合も、再同意にはこのファイルが必要です。"
             "README の「概要欄への反映」節のセットアップ手順に従って配置してください。"
         )
 
