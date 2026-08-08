@@ -892,7 +892,7 @@ def _render_upload_schedule_editor(
         "予約時刻",
         value=local_initial.timetz().replace(tzinfo=None),
         key=f"upload_publish_time_{job_id}_{item_id}",
-        step=60,
+        step=1800,
         disabled=disabled,
         persist_state="session",
     )

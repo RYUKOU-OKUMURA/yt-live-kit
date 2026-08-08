@@ -858,7 +858,7 @@ def test_schedule_editor_uses_native_date_time_and_job_item_unique_keys() -> Non
         "upload_publish_time_job-1_clip-1",
         "upload_publish_time_job-1_clip-2",
     ]
-    assert all(item.kwargs["step"] == 60 for item in time_input.call_args_list)
+    assert all(item.kwargs["step"] == 1800 for item in time_input.call_args_list)
 
 
 @pytest.mark.parametrize(
